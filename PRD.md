@@ -358,7 +358,9 @@ per-task IDs.
 **M5 — Async Pipeline Hardening (full S3-event-driven architecture)**
 - Replace M2-M4's simplified path with SQS intake + Step Functions +
   `waitForTaskToken` + S3 result write + S3-event persistence Lambda, per
-  Section 10.
+  Section 10. SQS intake (`POST /api/analyses` creates `Analysis(PENDING)`
+  then enqueues, 202 immediately) done; Step Functions/Fargate/S3-event
+  persistence still pending.
 - Verify: triggering analysis returns 202 without blocking; result JSON
   appears at the documented S3 key; Postgres `Analysis` reaches `COMPLETED`
   purely from the S3-event Lambda; malformed LLM output yields `FAILED` with

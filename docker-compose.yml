@@ -48,6 +48,17 @@ services:
       exit 0
       "
 
+  # SQS-compatible queue for local dev, standing in for AWS SQS (see PRD
+  # Section 4/10). ElasticMQ is a single-purpose emulator, same rationale as
+  # MinIO above for S3.
+  elasticmq:
+    image: softwaremill/elasticmq:1.6.7
+    restart: unless-stopped
+    ports:
+      - "9324:9324"
+    volumes:
+      - ./elasticmq.conf:/opt/elasticmq.conf:ro
+
 volumes:
   postgres-data:
   minio-data:
