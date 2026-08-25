@@ -22,12 +22,18 @@ import json
 from datetime import UTC, datetime
 
 from py_db.models import Analysis, Analysisstatus
+from py_db.pipeline_events import record_pipeline_event
 from py_db.session import make_engine, make_session_factory
+from py_db.structured_logging import get_logger, log_stage_event
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .analysis_result import AnalysisResult
 from .s3_client import S3_BUCKET, analysis_result_key, make_s3_client
+
+logger = get_logger(__name__)
+
+STAGE = "persist"
 
 ANALYSIS_RESULTS_PREFIX = "analysis-results/"
 
@@ -66,6 +72,9 @@ async def persist_analysis_result(
     if analysis is None:
         raise PersistResultError(f"Analysis {analysis_id} not found")
 
+    log_stage_event(logger, stage=STAGE, status="STARTED", analysis_id=analysis_id)
+    await record_pipeline_event(session, stage=STAGE, status="STARTED", analysis_id=analysis_id)
+
     s3 = s3_client or make_s3_client()
     resolved_key = key or analysis.s3ResultKey or analysis_result_key(analysis_id)
 
@@ -78,6 +87,12 @@ async def persist_analysis_result(
         analysis.status = Analysisstatus.FAILED
         analysis.errorMessage = message
         await session.commit()
+        log_stage_event(
+            logger, stage=STAGE, status="FAILED", analysis_id=analysis_id, message=message
+        )
+        await record_pipeline_event(
+            session, stage=STAGE, status="FAILED", message=message, analysis_id=analysis_id
+        )
         raise PersistResultError(message) from exc
 
     analysis.resultJSON = result.model_dump(mode="json")
@@ -86,6 +101,9 @@ async def persist_analysis_result(
     analysis.errorMessage = None
     analysis.completedAt = _now()
     await session.commit()
+
+    log_stage_event(logger, stage=STAGE, status="SUCCEEDED", analysis_id=analysis_id)
+    await record_pipeline_event(session, stage=STAGE, status="SUCCEEDED", analysis_id=analysis_id)
     return analysis
 
 

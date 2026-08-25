@@ -166,6 +166,7 @@ model IngestionJob {
 
   user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   jobOffers IngestionJobOffer[]
+  pipelineEvents PipelineEvent[]
 
   @@index([userId])
 }
@@ -252,8 +253,29 @@ model Analysis {
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   jobOffer  JobOffer  @relation(fields: [jobOfferId], references: [id], onDelete: Cascade)
   cvVersion CVVersion @relation(fields: [cvVersionId], references: [id], onDelete: Cascade)
+  pipelineEvents PipelineEvent[]
 
   @@index([userId])
   @@index([jobOfferId])
   @@index([cvVersionId])
+}
+
+// Observability/debug trail across the ingestion + analysis pipelines. See
+// PRD Section 6 / M6-T3. Not user-scoped access-control — purely additive
+// logging, so a missing analysisId/ingestionJobId pair (e.g. a Fargate step
+// running with only one of the two in context) is expected, not an error.
+model PipelineEvent {
+  id             String   @id @default(cuid())
+  analysisId     String?
+  ingestionJobId String?
+  stage          String
+  status         String
+  message        String?
+  createdAt      DateTime @default(now())
+
+  analysis     Analysis?     @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  ingestionJob IngestionJob? @relation(fields: [ingestionJobId], references: [id], onDelete: Cascade)
+
+  @@index([analysisId])
+  @@index([ingestionJobId])
 }

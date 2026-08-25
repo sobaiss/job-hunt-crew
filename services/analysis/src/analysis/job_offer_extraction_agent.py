@@ -10,11 +10,17 @@ import json
 from datetime import UTC, datetime
 
 from py_db.models import JobOffer, Jobofferextractionstatus
+from py_db.pipeline_events import record_pipeline_event
+from py_db.structured_logging import get_logger, log_stage_event
 from pydantic import BaseModel, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .llm_provider import LLMProvider, get_llm_provider
 from .s3_client import S3_BUCKET, make_s3_client
+
+logger = get_logger(__name__)
+
+STAGE = "extract"
 
 MAX_ATTEMPTS = 3
 MAX_HTML_CHARS = 20000
@@ -62,13 +68,18 @@ async def extract_job_offer(
     job_offer_id: str,
     *,
     llm_provider: LLMProvider | None = None,
+    analysis_id: str | None = None,
+    ingestion_job_id: str | None = None,
 ) -> JobOffer:
     """Structures JobOffer.rawContentKey's HTML into JobOffer.structuredData
     via the configured LLM provider, transitioning
     extractionStatus SCRAPED -> EXTRACTING -> READY. On repeated malformed/
     failed LLM output (up to MAX_ATTEMPTS), transitions to FAILED with
     errorMessage set instead (PRD 8.3 step 5: bounded retries, no unbounded
-    retry loop).
+    retry loop). `analysis_id`/`ingestion_job_id` are optional context (this
+    runs from both the AnalysisWorkflow's EnsureOfferExtracted step and the
+    ingestion fan-out) used only to tag the PipelineEvent/log rows this
+    emits (M6-T3).
     """
     job_offer = await session.get(JobOffer, job_offer_id)
     if job_offer is None:
@@ -77,6 +88,23 @@ async def extract_job_offer(
         raise ExtractionError(
             f"JobOffer {job_offer_id} has no rawContentKey; must be scraped first"
         )
+
+    log_stage_event(
+        logger,
+        stage=STAGE,
+        status="STARTED",
+        job_offer_id=job_offer_id,
+        analysis_id=analysis_id,
+        ingestion_job_id=ingestion_job_id,
+    )
+    await record_pipeline_event(
+        session,
+        stage=STAGE,
+        status="STARTED",
+        message=f"job_offer_id={job_offer_id}",
+        analysis_id=analysis_id,
+        ingestion_job_id=ingestion_job_id,
+    )
 
     job_offer.extractionStatus = Jobofferextractionstatus.EXTRACTING
     job_offer.updatedAt = _now()
@@ -102,10 +130,43 @@ async def extract_job_offer(
         job_offer.errorMessage = None
         job_offer.updatedAt = _now()
         await session.commit()
+        log_stage_event(
+            logger,
+            stage=STAGE,
+            status="SUCCEEDED",
+            job_offer_id=job_offer_id,
+            analysis_id=analysis_id,
+            ingestion_job_id=ingestion_job_id,
+        )
+        await record_pipeline_event(
+            session,
+            stage=STAGE,
+            status="SUCCEEDED",
+            message=f"job_offer_id={job_offer_id}",
+            analysis_id=analysis_id,
+            ingestion_job_id=ingestion_job_id,
+        )
         return job_offer
 
     job_offer.extractionStatus = Jobofferextractionstatus.FAILED
     job_offer.errorMessage = f"Extraction failed after {MAX_ATTEMPTS} attempts: {last_error}"
     job_offer.updatedAt = _now()
     await session.commit()
+    log_stage_event(
+        logger,
+        stage=STAGE,
+        status="FAILED",
+        job_offer_id=job_offer_id,
+        analysis_id=analysis_id,
+        ingestion_job_id=ingestion_job_id,
+        message=job_offer.errorMessage,
+    )
+    await record_pipeline_event(
+        session,
+        stage=STAGE,
+        status="FAILED",
+        message=f"job_offer_id={job_offer_id}: {job_offer.errorMessage}",
+        analysis_id=analysis_id,
+        ingestion_job_id=ingestion_job_id,
+    )
     raise ExtractionError(job_offer.errorMessage)

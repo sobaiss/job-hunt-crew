@@ -47,7 +47,7 @@ async def ensure_cv_parsed(
         raise HandlerError(f"CVVersion {analysis.cvVersionId} not found")
 
     if cv_version.parseStatus != Cvparsestatus.PARSED:
-        await extract_cv(session, analysis.cvVersionId, llm_provider=llm_provider)
+        await extract_cv(session, analysis.cvVersionId, llm_provider=llm_provider, analysis_id=analysis_id)
 
 
 async def ensure_offer_extracted(
@@ -65,7 +65,9 @@ async def ensure_offer_extracted(
         raise HandlerError(f"JobOffer {analysis.jobOfferId} not found")
 
     if job_offer.extractionStatus != Jobofferextractionstatus.READY:
-        await extract_job_offer(session, analysis.jobOfferId, llm_provider=llm_provider)
+        await extract_job_offer(
+            session, analysis.jobOfferId, llm_provider=llm_provider, analysis_id=analysis_id
+        )
 
 
 def ensure_cv_parsed_handler(event: dict, context=None) -> dict:

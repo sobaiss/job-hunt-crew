@@ -257,6 +257,7 @@ class IngestionJob(Base):
 
     User_: Mapped['User'] = relationship('User', back_populates='IngestionJob')
     IngestionJobOffer: Mapped[list['IngestionJobOffer']] = relationship('IngestionJobOffer', back_populates='IngestionJob_')
+    PipelineEvent: Mapped[list['PipelineEvent']] = relationship('PipelineEvent', back_populates='IngestionJob_')
 
 
 class Session(Base):
@@ -304,6 +305,7 @@ class Analysis(Base):
     CVVersion_: Mapped['CVVersion'] = relationship('CVVersion', back_populates='Analysis')
     JobOffer_: Mapped['JobOffer'] = relationship('JobOffer', back_populates='Analysis')
     User_: Mapped['User'] = relationship('User', back_populates='Analysis')
+    PipelineEvent: Mapped[list['PipelineEvent']] = relationship('PipelineEvent', back_populates='Analysis_')
 
 
 class IngestionJobOffer(Base):
@@ -323,3 +325,25 @@ class IngestionJobOffer(Base):
 
     IngestionJob_: Mapped['IngestionJob'] = relationship('IngestionJob', back_populates='IngestionJobOffer')
     JobOffer_: Mapped['JobOffer'] = relationship('JobOffer', back_populates='IngestionJobOffer')
+
+
+class PipelineEvent(Base):
+    __tablename__ = 'PipelineEvent'
+    __table_args__ = (
+        ForeignKeyConstraint(['analysisId'], ['Analysis.id'], ondelete='CASCADE', onupdate='CASCADE', name='PipelineEvent_analysisId_fkey'),
+        ForeignKeyConstraint(['ingestionJobId'], ['IngestionJob.id'], ondelete='CASCADE', onupdate='CASCADE', name='PipelineEvent_ingestionJobId_fkey'),
+        PrimaryKeyConstraint('id', name='PipelineEvent_pkey'),
+        Index('PipelineEvent_analysisId_idx', 'analysisId'),
+        Index('PipelineEvent_ingestionJobId_idx', 'ingestionJobId')
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    stage: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    createdAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False, server_default=text('CURRENT_TIMESTAMP'))
+    analysisId: Mapped[Optional[str]] = mapped_column(Text)
+    ingestionJobId: Mapped[Optional[str]] = mapped_column(Text)
+    message: Mapped[Optional[str]] = mapped_column(Text)
+
+    Analysis_: Mapped[Optional['Analysis']] = relationship('Analysis', back_populates='PipelineEvent')
+    IngestionJob_: Mapped[Optional['IngestionJob']] = relationship('IngestionJob', back_populates='PipelineEvent')

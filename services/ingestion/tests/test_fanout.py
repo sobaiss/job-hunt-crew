@@ -8,7 +8,7 @@ import respx
 from analysis.llm_provider import LLMProvider
 from botocore.client import Config
 from httpx import Response
-from py_db.models import IngestionJob, IngestionJobOffer, JobOffer, Ingestionjobstatus, Ingestionmode, Jobofferextractionstatus, Joboffersourcesite, User
+from py_db.models import IngestionJob, IngestionJobOffer, JobOffer, PipelineEvent, Ingestionjobstatus, Ingestionmode, Jobofferextractionstatus, Joboffersourcesite, User
 from py_db.session import make_engine, make_session_factory
 from sqlalchemy import select
 
@@ -286,6 +286,18 @@ async def test_link_and_process_offers_produces_five_linked_ready_job_offers():
             offers = (await session.scalars(select(JobOffer).where(JobOffer.sourceUrl.in_(urls)))).all()
             for offer in offers:
                 await session.delete(offer)
+            # PipelineEvent.ingestionJobId (M6-T3) has ON DELETE CASCADE at
+            # the DB level, but SQLAlchemy's default relationship handling
+            # nulls rather than deletes orphaned children when the parent
+            # is removed via the ORM — so delete these explicitly first,
+            # rather than relying on the DB-level cascade.
+            events = (
+                await session.scalars(
+                    select(PipelineEvent).where(PipelineEvent.ingestionJobId == ingestion_job_id)
+                )
+            ).all()
+            for event in events:
+                await session.delete(event)
             job = await session.get(IngestionJob, ingestion_job_id)
             if job is not None:
                 await session.delete(job)
@@ -370,6 +382,17 @@ async def test_process_job_offer_continues_past_scrape_failure_without_raising()
         assert provider.calls == 0
     finally:
         async with session_factory() as session:
+            # process_job_offer, called here with no ingestion_job_id, tags
+            # its scrape-stage PipelineEvent rows (M6-T3) only via
+            # job_offer_id embedded in the message — no FK to
+            # cascade-delete them, so clean up explicitly.
+            events = (
+                await session.scalars(
+                    select(PipelineEvent).where(PipelineEvent.message.contains(job_offer_id))
+                )
+            ).all()
+            for event in events:
+                await session.delete(event)
             job_offer = await session.get(JobOffer, job_offer_id)
             if job_offer is not None:
                 await session.delete(job_offer)
@@ -442,6 +465,18 @@ async def test_link_and_process_offers_rolls_up_partially_completed_with_one_for
             offers = (await session.scalars(select(JobOffer).where(JobOffer.sourceUrl.in_(urls)))).all()
             for offer in offers:
                 await session.delete(offer)
+            # PipelineEvent.ingestionJobId (M6-T3) has ON DELETE CASCADE at
+            # the DB level, but SQLAlchemy's default relationship handling
+            # nulls rather than deletes orphaned children when the parent
+            # is removed via the ORM — so delete these explicitly first,
+            # rather than relying on the DB-level cascade.
+            events = (
+                await session.scalars(
+                    select(PipelineEvent).where(PipelineEvent.ingestionJobId == ingestion_job_id)
+                )
+            ).all()
+            for event in events:
+                await session.delete(event)
             job = await session.get(IngestionJob, ingestion_job_id)
             if job is not None:
                 await session.delete(job)

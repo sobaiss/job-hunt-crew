@@ -13,12 +13,18 @@ from datetime import UTC, datetime
 
 from docx import Document
 from py_db.models import CVVersion, Cvfiletype, Cvparsestatus
+from py_db.pipeline_events import record_pipeline_event
+from py_db.structured_logging import get_logger, log_stage_event
 from pydantic import BaseModel, ValidationError
 from pypdf import PdfReader
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .llm_provider import LLMProvider, get_llm_provider
 from .s3_client import S3_BUCKET, make_s3_client
+
+logger = get_logger(__name__)
+
+STAGE = "extract"
 
 MAX_ATTEMPTS = 3
 MAX_TEXT_CHARS = 20000
@@ -92,16 +98,31 @@ async def extract_cv(
     cv_version_id: str,
     *,
     llm_provider: LLMProvider | None = None,
+    analysis_id: str | None = None,
 ) -> CVVersion:
     """Structures CVVersion.fileKey's file (PDF or DOCX) into
     CVVersion.structuredData via the configured LLM provider, transitioning
     parseStatus PENDING -> PARSING -> PARSED. On repeated malformed/failed
     LLM output (up to MAX_ATTEMPTS), transitions to FAILED instead (mirrors
-    JobOfferExtractionAgent's bounded-retry design, M2-T4).
+    JobOfferExtractionAgent's bounded-retry design, M2-T4). `analysis_id` is
+    optional context (this runs from the AnalysisWorkflow's EnsureCVParsed
+    step, or standalone on upload) used only to tag the PipelineEvent/log
+    rows this emits (M6-T3).
     """
     cv_version = await session.get(CVVersion, cv_version_id)
     if cv_version is None:
         raise CVExtractionError(f"CVVersion {cv_version_id} not found")
+
+    log_stage_event(
+        logger, stage=STAGE, status="STARTED", cv_version_id=cv_version_id, analysis_id=analysis_id
+    )
+    await record_pipeline_event(
+        session,
+        stage=STAGE,
+        status="STARTED",
+        message=f"cv_version_id={cv_version_id}",
+        analysis_id=analysis_id,
+    )
 
     cv_version.parseStatus = Cvparsestatus.PARSING
     cv_version.updatedAt = _now()
@@ -128,11 +149,33 @@ async def extract_cv(
         cv_version.parseStatus = Cvparsestatus.PARSED
         cv_version.updatedAt = _now()
         await session.commit()
+        log_stage_event(
+            logger, stage=STAGE, status="SUCCEEDED", cv_version_id=cv_version_id, analysis_id=analysis_id
+        )
+        await record_pipeline_event(
+            session,
+            stage=STAGE,
+            status="SUCCEEDED",
+            message=f"cv_version_id={cv_version_id}",
+            analysis_id=analysis_id,
+        )
         return cv_version
 
     cv_version.parseStatus = Cvparsestatus.FAILED
     cv_version.updatedAt = _now()
     await session.commit()
-    raise CVExtractionError(
+    error_message = (
         f"CV extraction failed for {cv_version_id} after {MAX_ATTEMPTS} attempts: {last_error}"
     )
+    log_stage_event(
+        logger,
+        stage=STAGE,
+        status="FAILED",
+        cv_version_id=cv_version_id,
+        analysis_id=analysis_id,
+        message=error_message,
+    )
+    await record_pipeline_event(
+        session, stage=STAGE, status="FAILED", message=error_message, analysis_id=analysis_id
+    )
+    raise CVExtractionError(error_message)

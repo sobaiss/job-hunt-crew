@@ -5,8 +5,9 @@ from datetime import UTC, datetime
 import boto3
 import pytest
 from botocore.client import Config
-from py_db.models import JobOffer, Jobofferextractionstatus, Joboffersourcesite
+from py_db.models import JobOffer, Jobofferextractionstatus, Joboffersourcesite, PipelineEvent
 from py_db.session import make_engine, make_session_factory
+from sqlalchemy import select
 
 from analysis.job_offer_extraction_agent import (
     MAX_ATTEMPTS,
@@ -15,6 +16,21 @@ from analysis.job_offer_extraction_agent import (
 )
 from analysis.llm_provider import LLMProvider
 from analysis.s3_client import S3_BUCKET
+
+
+async def _delete_pipeline_events(session_factory, job_offer_id: str) -> None:
+    # extract_job_offer, called here with no analysis_id/ingestion_job_id,
+    # tags its PipelineEvent rows (M6-T3) only via job_offer_id embedded in
+    # the message — no FK to cascade-delete them, so clean up explicitly.
+    async with session_factory() as session:
+        events = (
+            await session.scalars(
+                select(PipelineEvent).where(PipelineEvent.message.contains(job_offer_id))
+            )
+        ).all()
+        for event in events:
+            await session.delete(event)
+        await session.commit()
 
 FIXTURE_HTML = "<html><body><h1>Senior Backend Engineer</h1><p>5 years Python required.</p></body></html>"
 VALID_LLM_OUTPUT = json.dumps(
@@ -92,6 +108,7 @@ async def test_extract_job_offer_structures_content_and_sets_ready():
         assert provider.calls == 1
     finally:
         s3.delete_object(Bucket=S3_BUCKET, Key=raw_content_key)
+        await _delete_pipeline_events(session_factory, job_offer_id)
         async with session_factory() as session:
             job_offer = await session.get(JobOffer, job_offer_id)
             if job_offer is not None:
@@ -126,6 +143,7 @@ async def test_extract_job_offer_marks_failed_after_bounded_retries_on_malformed
         assert provider.calls == MAX_ATTEMPTS
     finally:
         s3.delete_object(Bucket=S3_BUCKET, Key=raw_content_key)
+        await _delete_pipeline_events(session_factory, job_offer_id)
         async with session_factory() as session:
             job_offer = await session.get(JobOffer, job_offer_id)
             if job_offer is not None:
@@ -153,6 +171,7 @@ async def test_extract_job_offer_succeeds_on_retry_after_one_malformed_attempt()
         assert provider.calls == 2
     finally:
         s3.delete_object(Bucket=S3_BUCKET, Key=raw_content_key)
+        await _delete_pipeline_events(session_factory, job_offer_id)
         async with session_factory() as session:
             job_offer = await session.get(JobOffer, job_offer_id)
             if job_offer is not None:

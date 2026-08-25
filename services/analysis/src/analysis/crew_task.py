@@ -38,6 +38,8 @@ from py_db.models import (
     JobOffer,
     Jobofferextractionstatus,
 )
+from py_db.pipeline_events import record_pipeline_event
+from py_db.structured_logging import get_logger, log_stage_event
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .analysis_result import AnalysisResult
@@ -46,6 +48,10 @@ from .llm_provider import LLMProvider, get_llm_provider
 from .recommendation_writer_agent import RecommendationWriterError, run_recommendation_writer
 from .s3_client import S3_BUCKET, analysis_result_key, make_s3_client
 from .state_machine import make_sfn_client
+
+logger = get_logger(__name__)
+
+STAGE = "crew"
 
 
 class CrewTaskError(Exception):
@@ -77,6 +83,9 @@ async def run_crew_task(
     if analysis is None:
         raise CrewTaskError(f"Analysis {analysis_id} not found")
 
+    log_stage_event(logger, stage=STAGE, status="STARTED", analysis_id=analysis_id)
+    await record_pipeline_event(session, stage=STAGE, status="STARTED", analysis_id=analysis_id)
+
     analysis.status = Analysisstatus.RUNNING_CREW
     analysis.startedAt = _now()
     await session.commit()
@@ -89,6 +98,12 @@ async def run_crew_task(
         analysis.status = Analysisstatus.FAILED
         analysis.errorMessage = message
         await session.commit()
+        log_stage_event(
+            logger, stage=STAGE, status="FAILED", analysis_id=analysis_id, message=message
+        )
+        await record_pipeline_event(
+            session, stage=STAGE, status="FAILED", message=message, analysis_id=analysis_id
+        )
         if task_token and sfn is not None:
             sfn.send_task_failure(taskToken=task_token, error="CrewTaskError", cause=message)
 
@@ -150,6 +165,9 @@ async def run_crew_task(
     analysis.s3ResultKey = key
     analysis.errorMessage = None
     await session.commit()
+
+    log_stage_event(logger, stage=STAGE, status="SUCCEEDED", analysis_id=analysis_id, s3_result_key=key)
+    await record_pipeline_event(session, stage=STAGE, status="SUCCEEDED", analysis_id=analysis_id)
 
     if task_token and sfn is not None:
         sfn.send_task_success(

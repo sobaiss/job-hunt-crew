@@ -15,9 +15,11 @@ from py_db.models import (
     JobOffer,
     Jobofferextractionstatus,
     Joboffersourcesite,
+    PipelineEvent,
     User,
 )
 from py_db.session import make_engine, make_session_factory
+from sqlalchemy import select
 
 from analysis.crew_task import run_crew_task
 from analysis.llm_provider import LLMProvider
@@ -152,6 +154,14 @@ async def _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, a
 
 async def _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id):
     async with session_factory() as session:
+        # PipelineEvent.analysisId (M6-T3) has ON DELETE CASCADE at the DB
+        # level, but SQLAlchemy's default relationship handling nulls
+        # rather than deletes orphaned children when the parent is removed
+        # via the ORM — so delete these explicitly first, same as any other
+        # FK'd row, rather than relying on the DB-level cascade.
+        events = (await session.scalars(select(PipelineEvent).where(PipelineEvent.analysisId == analysis_id))).all()
+        for event in events:
+            await session.delete(event)
         for model, row_id in (
             (Analysis, analysis_id),
             (CVVersion, cv_version_id),
@@ -220,6 +230,20 @@ async def test_analysis_workflow_reaches_completed_purely_from_s3_event_lambda()
             assert reloaded.status == Analysisstatus.COMPLETED
             assert reloaded.matchScore == 82
             assert reloaded.errorMessage is None
+
+        # M6-T3: both the "crew" and "persist" pipeline stages recorded a
+        # PipelineEvent row for this Analysis (STARTED and SUCCEEDED).
+        async with session_factory() as session:
+            events = (
+                await session.scalars(
+                    select(PipelineEvent).where(PipelineEvent.analysisId == analysis_id)
+                )
+            ).all()
+        stages_seen = {event.stage for event in events}
+        assert {"crew", "persist"} <= stages_seen
+        for stage in ("crew", "persist"):
+            statuses = {event.status for event in events if event.stage == stage}
+            assert statuses == {"STARTED", "SUCCEEDED"}
     finally:
         s3.delete_object(Bucket=S3_BUCKET, Key=key)
         await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)

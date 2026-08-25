@@ -379,8 +379,12 @@ per-task IDs.
   authenticated user, plus `/analyses` list UI); compare one `JobOffer`
   against 2+ `CVVersion`s side by side (✅ done: `GET /api/analyses?jobOfferId=`
   filter + `/analyses/compare/:jobOfferId` side-by-side UI, linked from both
-  the dashboard and the analysis detail page); structured logging; enforce
-  `INGESTION_MAX_OFFERS` and a per-user daily analysis cap.
+  the dashboard and the analysis detail page); structured logging (✅ done:
+  `PipelineEvent` Prisma model + migration, `py_db.pipeline_events`/
+  `py_db.structured_logging` shared writers, wired into scrape/extract
+  (job offer + CV)/crew/persist) + `PipelineEvent` table writes at each
+  pipeline stage (✅ done); enforce `INGESTION_MAX_OFFERS` and a per-user
+  daily analysis cap.
 - Verify: side-by-side comparison renders 2 distinct `resultJSON`s for the
   same offer; exceeding a low test-configured daily cap returns a clear
   server-enforced error.

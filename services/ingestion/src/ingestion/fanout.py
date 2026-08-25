@@ -92,6 +92,7 @@ async def process_job_offer(
     *,
     http_client: httpx.AsyncClient | None = None,
     llm_provider: LLMProvider | None = None,
+    ingestion_job_id: str | None = None,
 ) -> JobOffer:
     """Runs the Mode 1 pipeline (M2-T2 scrape, M2-T4 extraction) for a single
     linked JobOffer. A no-op for an offer that's already reached a terminal
@@ -102,18 +103,23 @@ async def process_job_offer(
     applies here too. Scrape/extraction failures are caught (both steps
     already record FAILED + errorMessage on the row themselves) so one
     offer's failure doesn't abort the fan-out for the rest — aggregating
-    per-job scraped/failed counts is M3-T5's scope.
+    per-job scraped/failed counts is M3-T5's scope. `ingestion_job_id` tags
+    the scrape/extract PipelineEvent/log rows emitted along the way (M6-T3).
     """
     if job_offer.extractionStatus in (Jobofferextractionstatus.READY, Jobofferextractionstatus.FAILED):
         return job_offer
 
     try:
-        await scrape_job_offer(session, job_offer.id, http_client=http_client)
+        await scrape_job_offer(
+            session, job_offer.id, http_client=http_client, ingestion_job_id=ingestion_job_id
+        )
     except ScrapeError:
         return await session.get(JobOffer, job_offer.id)
 
     try:
-        await extract_job_offer(session, job_offer.id, llm_provider=llm_provider)
+        await extract_job_offer(
+            session, job_offer.id, llm_provider=llm_provider, ingestion_job_id=ingestion_job_id
+        )
     except ExtractionError:
         pass
 
@@ -135,7 +141,13 @@ async def link_and_process_offers(
     """
     job_offers = await link_discovered_offers(session, ingestion_job, urls)
     processed = [
-        await process_job_offer(session, job_offer, http_client=http_client, llm_provider=llm_provider)
+        await process_job_offer(
+            session,
+            job_offer,
+            http_client=http_client,
+            llm_provider=llm_provider,
+            ingestion_job_id=ingestion_job.id,
+        )
         for job_offer in job_offers
     ]
     await update_ingestion_job_aggregate(session, ingestion_job.id)

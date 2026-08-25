@@ -6,11 +6,27 @@ import pytest
 import respx
 from botocore.client import Config
 from httpx import Response
-from py_db.models import JobOffer, Jobofferextractionstatus, Joboffersourcesite
+from py_db.models import JobOffer, Jobofferextractionstatus, Joboffersourcesite, PipelineEvent
 from py_db.session import make_engine, make_session_factory
+from sqlalchemy import select
 
 from ingestion.s3_client import S3_BUCKET, raw_scrape_key
 from ingestion.scrape import scrape_job_offer
+
+
+async def _delete_pipeline_events(session_factory, job_offer_id: str) -> None:
+    # scrape_job_offer, called here with no ingestion_job_id, tags its
+    # PipelineEvent rows (M6-T3) only via job_offer_id embedded in the
+    # message — no FK to cascade-delete them, so clean up explicitly.
+    async with session_factory() as session:
+        events = (
+            await session.scalars(
+                select(PipelineEvent).where(PipelineEvent.message.contains(job_offer_id))
+            )
+        ).all()
+        for event in events:
+            await session.delete(event)
+        await session.commit()
 
 FIXTURE_URL = "https://example.com/jobs/fixture-123"
 FIXTURE_HTML = "<html><body><h1>Senior Backend Engineer</h1></body></html>"
@@ -76,6 +92,7 @@ async def test_scrape_job_offer_stores_html_and_transitions_status():
             s3.delete_object(Bucket=S3_BUCKET, Key=raw_scrape_key(job_offer_id))
         except Exception:
             pass
+        await _delete_pipeline_events(session_factory, job_offer_id)
         async with session_factory() as session:
             job_offer = await session.get(JobOffer, job_offer_id)
             if job_offer is not None:
@@ -114,6 +131,7 @@ async def test_scrape_job_offer_marks_failed_on_fetch_error():
             assert job_offer.extractionStatus == Jobofferextractionstatus.FAILED
             assert job_offer.errorMessage
     finally:
+        await _delete_pipeline_events(session_factory, job_offer_id)
         async with session_factory() as session:
             job_offer = await session.get(JobOffer, job_offer_id)
             if job_offer is not None:

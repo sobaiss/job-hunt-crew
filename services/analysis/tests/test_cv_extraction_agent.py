@@ -7,8 +7,9 @@ import boto3
 import pytest
 from botocore.client import Config
 from docx import Document
-from py_db.models import CVVersion, Cvfiletype, Cvparsestatus, User
+from py_db.models import CVVersion, Cvfiletype, Cvparsestatus, PipelineEvent, User
 from py_db.session import make_engine, make_session_factory
+from sqlalchemy import select
 
 from analysis.cv_extraction_agent import (
     MAX_ATTEMPTS,
@@ -132,6 +133,16 @@ async def _make_pending_cv_version(session_factory, user_id, cv_version_id, file
 async def _cleanup(engine, session_factory, s3, file_key, user_id, cv_version_id):
     s3.delete_object(Bucket=S3_BUCKET, Key=file_key)
     async with session_factory() as session:
+        # extract_cv, called here with no analysis_id, tags its
+        # PipelineEvent rows (M6-T3) only via cv_version_id embedded in the
+        # message — no FK to cascade-delete them, so clean up explicitly.
+        events = (
+            await session.scalars(
+                select(PipelineEvent).where(PipelineEvent.message.contains(cv_version_id))
+            )
+        ).all()
+        for event in events:
+            await session.delete(event)
         cv_version = await session.get(CVVersion, cv_version_id)
         if cv_version is not None:
             await session.delete(cv_version)

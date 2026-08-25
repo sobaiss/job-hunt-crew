@@ -13,6 +13,7 @@ from py_db.models import (
     Ingestionjobstatus,
     Ingestionmode,
     JobOffer,
+    PipelineEvent,
     SiteConfig,
     Siteconfigantibotrisklevel,
     Siteconfigintegrationtype,
@@ -145,6 +146,17 @@ async def _cleanup(session_factory, *, user_id, ingestion_job_id, source_urls=()
             offers = (await session.scalars(select(JobOffer).where(JobOffer.sourceUrl.in_(source_urls)))).all()
             for offer in offers:
                 await session.delete(offer)
+
+        # PipelineEvent.ingestionJobId (M6-T3) has ON DELETE CASCADE at the
+        # DB level, but SQLAlchemy's default relationship handling nulls
+        # rather than deletes orphaned children when the parent is removed
+        # via the ORM — so delete these explicitly first, rather than
+        # relying on the DB-level cascade.
+        events = (
+            await session.scalars(select(PipelineEvent).where(PipelineEvent.ingestionJobId == ingestion_job_id))
+        ).all()
+        for event in events:
+            await session.delete(event)
 
         job = await session.get(IngestionJob, ingestion_job_id)
         if job is not None:
