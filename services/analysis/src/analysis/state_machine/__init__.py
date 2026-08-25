@@ -28,6 +28,9 @@ DEFAULT_ENSURE_OFFER_EXTRACTED_ARN = (
 DEFAULT_RUN_COMPARISON_CREW_ARN = (
     "arn:aws:lambda:us-east-1:123456789012:function:run-comparison-crew"
 )
+DEFAULT_MARK_ANALYSIS_FAILED_ARN = (
+    "arn:aws:lambda:us-east-1:123456789012:function:mark-analysis-failed"
+)
 
 
 def render_definition(
@@ -35,6 +38,7 @@ def render_definition(
     ensure_cv_parsed_arn: str | None = None,
     ensure_offer_extracted_arn: str | None = None,
     run_comparison_crew_arn: str | None = None,
+    mark_analysis_failed_arn: str | None = None,
 ) -> str:
     """Renders analysis_workflow.asl.json with the 3 task Lambdas' ARNs
     substituted in, returning the ASL definition as a JSON string (the shape
@@ -66,6 +70,13 @@ def render_definition(
             run_comparison_crew_arn
             or os.environ.get(
                 "RUN_COMPARISON_CREW_FUNCTION_ARN", DEFAULT_RUN_COMPARISON_CREW_ARN
+            ),
+        )
+        .replace(
+            "__MARK_ANALYSIS_FAILED_FUNCTION_ARN__",
+            mark_analysis_failed_arn
+            or os.environ.get(
+                "MARK_ANALYSIS_FAILED_FUNCTION_ARN", DEFAULT_MARK_ANALYSIS_FAILED_ARN
             ),
         )
     )

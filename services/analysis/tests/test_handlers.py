@@ -19,6 +19,7 @@ from analysis.handlers import (
     HandlerError,
     ensure_cv_parsed,
     ensure_offer_extracted,
+    mark_analysis_failed,
     run_comparison_crew_handler,
 )
 from analysis.llm_provider import LLMProvider
@@ -242,6 +243,124 @@ async def test_ensure_cv_parsed_raises_when_analysis_missing():
                 await ensure_cv_parsed(session, "does-not-exist")
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_mark_analysis_failed_sets_terminal_status_from_plain_cause():
+    # M5-T5: the Catch target's error shape when Cause is already a plain
+    # message (e.g. crew_task's own SendTaskFailure `cause=`).
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id, job_offer_id, cv_version_id, analysis_id = (
+        f"test-user-{uuid.uuid4()}",
+        f"test-offer-{uuid.uuid4()}",
+        f"test-cv-{uuid.uuid4()}",
+        f"test-analysis-{uuid.uuid4()}",
+    )
+    await _make_fixture(
+        session_factory,
+        user_id,
+        job_offer_id,
+        cv_version_id,
+        analysis_id,
+        cv_parse_status=Cvparsestatus.PENDING,
+        offer_extraction_status=Jobofferextractionstatus.SCRAPED,
+    )
+    try:
+        async with session_factory() as session:
+            await mark_analysis_failed(
+                session,
+                analysis_id,
+                {"Error": "CrewTaskError", "Cause": "CVVersion is not PARSED with structuredData"},
+            )
+
+        async with session_factory() as session:
+            reloaded = await session.get(Analysis, analysis_id)
+            assert reloaded.status == Analysisstatus.FAILED
+            assert reloaded.errorMessage == "CVVersion is not PARSED with structuredData"
+    finally:
+        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+
+
+@pytest.mark.asyncio
+async def test_mark_analysis_failed_unwraps_json_lambda_error_cause():
+    # M5-T5: the Catch target's error shape for a raised exception inside
+    # ensure_cv_parsed_handler/ensure_offer_extracted_handler — AWS Lambda
+    # (and lambda_shim, standing in for it locally) reports handler errors
+    # as a JSON-encoded {"errorMessage": ..., "errorType": ...} body, which
+    # Step Functions surfaces verbatim as the Catch's string Cause.
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id, job_offer_id, cv_version_id, analysis_id = (
+        f"test-user-{uuid.uuid4()}",
+        f"test-offer-{uuid.uuid4()}",
+        f"test-cv-{uuid.uuid4()}",
+        f"test-analysis-{uuid.uuid4()}",
+    )
+    await _make_fixture(
+        session_factory,
+        user_id,
+        job_offer_id,
+        cv_version_id,
+        analysis_id,
+        cv_parse_status=Cvparsestatus.PENDING,
+        offer_extraction_status=Jobofferextractionstatus.SCRAPED,
+    )
+    try:
+        async with session_factory() as session:
+            await mark_analysis_failed(
+                session,
+                analysis_id,
+                {
+                    "Error": "CVExtractionError",
+                    "Cause": '{"errorMessage": "bounded retries exhausted", "errorType": "CVExtractionError"}',
+                },
+            )
+
+        async with session_factory() as session:
+            reloaded = await session.get(Analysis, analysis_id)
+            assert reloaded.status == Analysisstatus.FAILED
+            assert reloaded.errorMessage == "bounded retries exhausted"
+    finally:
+        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+
+
+@pytest.mark.asyncio
+async def test_mark_analysis_failed_does_not_clobber_an_already_failed_analysis():
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id, job_offer_id, cv_version_id, analysis_id = (
+        f"test-user-{uuid.uuid4()}",
+        f"test-offer-{uuid.uuid4()}",
+        f"test-cv-{uuid.uuid4()}",
+        f"test-analysis-{uuid.uuid4()}",
+    )
+    await _make_fixture(
+        session_factory,
+        user_id,
+        job_offer_id,
+        cv_version_id,
+        analysis_id,
+        cv_parse_status=Cvparsestatus.PENDING,
+        offer_extraction_status=Jobofferextractionstatus.SCRAPED,
+    )
+    try:
+        async with session_factory() as session:
+            analysis = await session.get(Analysis, analysis_id)
+            analysis.status = Analysisstatus.FAILED
+            analysis.errorMessage = "original, more specific reason"
+            await session.commit()
+
+        async with session_factory() as session:
+            await mark_analysis_failed(
+                session, analysis_id, {"Error": "States.ALL", "Cause": "generic catch-all cause"}
+            )
+
+        async with session_factory() as session:
+            reloaded = await session.get(Analysis, analysis_id)
+            assert reloaded.errorMessage == "original, more specific reason"
+    finally:
+        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
 
 
 def test_run_comparison_crew_handler_returns_immediately_without_waiting_on_the_crew():

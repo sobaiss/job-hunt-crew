@@ -36,6 +36,7 @@ from py_db.models import (
 from py_db.session import make_engine, make_session_factory
 
 import analysis.crew_task as crew_task
+import analysis.handlers as handlers
 from analysis.intake_handler import start_analysis_workflow
 from analysis.lambda_shim import make_server
 from analysis.llm_provider import LLMProvider
@@ -275,4 +276,66 @@ async def test_analysis_workflow_execution_completes_via_run_comparison_crew(
             assert reloaded.s3ResultKey == key
     finally:
         s3.delete_object(Bucket=S3_BUCKET, Key=key)
+        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+
+
+@pytest.mark.asyncio
+async def test_analysis_workflow_retries_then_fails_via_mark_analysis_failed(
+    state_machine_arn, monkeypatch
+):
+    """M5-T5: a persistent EnsureCVParsed failure is retried by Step
+    Functions itself (3x, base 2s exponential backoff) then caught and
+    routed to MarkAnalysisFailed, so the real execution reaches FAILED and
+    Analysis.status reaches FAILED with a non-empty errorMessage rather than
+    being left stuck QUEUED/RUNNING_CREW.
+    """
+    call_count = {"n": 0}
+
+    async def _always_raise(session, analysis_id, *, llm_provider=None):
+        call_count["n"] += 1
+        raise RuntimeError("forced EnsureCVParsed failure for M5-T5")
+
+    monkeypatch.setattr(handlers, "ensure_cv_parsed", _always_raise)
+
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id, job_offer_id, cv_version_id, analysis_id = (
+        f"test-user-{uuid.uuid4()}",
+        f"test-offer-{uuid.uuid4()}",
+        f"test-cv-{uuid.uuid4()}",
+        f"test-analysis-{uuid.uuid4()}",
+    )
+    await _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+
+    try:
+        sfn_client = make_sfn_client()
+        async with session_factory() as session:
+            execution_arn = await start_analysis_workflow(
+                session, analysis_id, sfn_client=sfn_client, state_machine_arn=state_machine_arn
+            )
+
+        deadline = time.monotonic() + 45
+        description = sfn_client.describe_execution(executionArn=execution_arn)
+        while description["status"] == "RUNNING" and time.monotonic() < deadline:
+            time.sleep(0.5)
+            description = sfn_client.describe_execution(executionArn=execution_arn)
+        # The execution itself reaches SUCCEEDED, not FAILED: a Catch that
+        # routes to a state which then completes without its own error (here,
+        # MarkAnalysisFailed successfully recording the failure) is, by Step
+        # Functions' own semantics, a gracefully-handled execution — the
+        # thing this task's Catch wiring must guarantee is Analysis.status,
+        # asserted below, not the execution's outcome.
+        assert description["status"] == "SUCCEEDED"
+
+        # Step Functions' own Retry (MaxAttempts=3, i.e. 3 retries *after*
+        # the initial attempt = 4 invocations total) ran the Task 4 times
+        # before its Catch routed to MarkAnalysisFailed.
+        assert call_count["n"] == 4
+
+        async with session_factory() as session:
+            reloaded = await session.get(Analysis, analysis_id)
+            assert reloaded.status == Analysisstatus.FAILED
+            assert reloaded.errorMessage
+            assert "forced EnsureCVParsed failure" in reloaded.errorMessage
+    finally:
         await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)

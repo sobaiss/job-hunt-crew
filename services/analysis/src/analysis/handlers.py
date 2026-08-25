@@ -7,9 +7,17 @@ via the state machine's `$.analysisId` path (analysis_workflow.asl.json).
 """
 
 import asyncio
+import json
 import threading
 
-from py_db.models import Analysis, CVVersion, Cvparsestatus, JobOffer, Jobofferextractionstatus
+from py_db.models import (
+    Analysis,
+    Analysisstatus,
+    CVVersion,
+    Cvparsestatus,
+    JobOffer,
+    Jobofferextractionstatus,
+)
 from py_db.session import make_engine, make_session_factory
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -85,6 +93,68 @@ def ensure_offer_extracted_handler(event: dict, context=None) -> dict:
         try:
             async with session_factory() as session:
                 await ensure_offer_extracted(session, analysis_id)
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_run())
+    return {"analysisId": analysis_id}
+
+
+def _error_message_from_catch(error: dict) -> str:
+    """PRD Section 10 step 10: every Catch block's error output is
+    `{"Error": "<name>", "Cause": "<string>"}` (Step Functions' standard
+    shape). `Cause` is either a plain string (e.g. crew_task's own
+    SendTaskFailure `cause=`, already a clear message) or a JSON-encoded
+    Lambda function-error payload (`{"errorMessage": ..., "errorType": ...}`,
+    what a raised exception in ensure_cv_parsed_handler/
+    ensure_offer_extracted_handler surfaces as, since AWS Lambda — and
+    lambda_shim, standing in for it locally — reports handler errors that
+    way). Unwrap the JSON case so errorMessage always carries the underlying
+    reason, not a JSON blob.
+    """
+    cause = error.get("Cause") or ""
+    try:
+        parsed = json.loads(cause)
+    except (json.JSONDecodeError, TypeError):
+        parsed = None
+    if isinstance(parsed, dict) and parsed.get("errorMessage"):
+        return str(parsed["errorMessage"])
+    if cause:
+        return cause
+    return error.get("Error") or "AnalysisWorkflow step failed"
+
+
+async def mark_analysis_failed(session: AsyncSession, analysis_id: str, error: dict) -> None:
+    """PRD Section 10 step 10: the Catch target for every state in
+    AnalysisWorkflow, guaranteeing that a step failure — after its Retry is
+    exhausted — always lands the Analysis in a terminal FAILED status with a
+    non-empty errorMessage, never leaving it stuck PENDING/QUEUED/RUNNING_CREW.
+    A no-op if the Analysis already reached FAILED by some other path (e.g.
+    crew_task's own SendTaskFailure branch already set a specific message
+    before this Catch fires) so this never clobbers a more specific reason.
+    """
+    analysis = await session.get(Analysis, analysis_id)
+    if analysis is None:
+        raise HandlerError(f"Analysis {analysis_id} not found")
+
+    if analysis.status == Analysisstatus.FAILED:
+        return
+
+    analysis.status = Analysisstatus.FAILED
+    analysis.errorMessage = _error_message_from_catch(error)
+    await session.commit()
+
+
+def mark_analysis_failed_handler(event: dict, context=None) -> dict:
+    analysis_id = event["analysisId"]
+    error = event.get("error") or {}
+
+    async def _run() -> None:
+        engine = make_engine()
+        session_factory = make_session_factory(engine)
+        try:
+            async with session_factory() as session:
+                await mark_analysis_failed(session, analysis_id, error)
         finally:
             await engine.dispose()
 

@@ -1,22 +1,52 @@
 {
-  "Comment": "AnalysisWorkflow (PRD Section 10 steps 3-7): EnsureCVParsed -> EnsureOfferExtracted -> RunComparisonCrew (waitForTaskToken). Deployment-time Lambda ARNs are substituted into the __..._FUNCTION_ARN__ placeholders by analysis.state_machine.render_definition (plain string replacement, not Python's string.Template, since this file's JSONPaths already use Step Functions' own $/$$ syntax).",
+  "Comment": "AnalysisWorkflow (PRD Section 10 steps 3-7, 10): EnsureCVParsed -> EnsureOfferExtracted -> RunComparisonCrew (waitForTaskToken), each with a Retry (3x, base 2s, backoff rate 2.0) and a Catch routing to MarkAnalysisFailed so no step failure leaves the Analysis stuck in a non-terminal state. Deployment-time Lambda ARNs are substituted into the __..._FUNCTION_ARN__ placeholders by analysis.state_machine.render_definition (plain string replacement, not Python's string.Template, since this file's JSONPaths already use Step Functions' own $/$$ syntax).",
   "StartAt": "EnsureCVParsed",
   "States": {
     "EnsureCVParsed": {
       "Type": "Task",
       "Comment": "PRD Section 10 step 4: checks CVVersion.parseStatus; if not PARSED, runs CVExtractionAgent.",
       "Resource": "__ENSURE_CV_PARSED_FUNCTION_ARN__",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "MarkAnalysisFailed"
+        }
+      ],
       "Next": "EnsureOfferExtracted"
     },
     "EnsureOfferExtracted": {
       "Type": "Task",
       "Comment": "PRD Section 10 step 5: checks JobOffer.extractionStatus; if not READY, runs JobOfferExtractionAgent.",
       "Resource": "__ENSURE_OFFER_EXTRACTED_FUNCTION_ARN__",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "MarkAnalysisFailed"
+        }
+      ],
       "Next": "RunComparisonCrew"
     },
     "RunComparisonCrew": {
       "Type": "Task",
-      "Comment": "PRD Section 10 step 6: Fargate task runs the CrewAI crew and calls SendTaskSuccess/SendTaskFailure with this task's token (Fargate launch itself is M5-T3).",
+      "Comment": "PRD Section 10 step 6: Fargate task runs the CrewAI crew and calls SendTaskSuccess/SendTaskFailure with this task's token (Fargate launch itself is M5-T3). run_crew_task already marks Analysis FAILED with a specific errorMessage before calling SendTaskFailure; this Retry/Catch additionally covers a launch-time failure that never reaches that point (e.g. the Lambda invocation itself erroring before the background task starts).",
       "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
       "Parameters": {
         "FunctionName": "__RUN_COMPARISON_CREW_FUNCTION_ARN__",
@@ -24,6 +54,31 @@
           "analysisId.$": "$.analysisId",
           "taskToken.$": "$$.Task.Token"
         }
+      },
+      "Retry": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.error",
+          "Next": "MarkAnalysisFailed"
+        }
+      ],
+      "End": true
+    },
+    "MarkAnalysisFailed": {
+      "Type": "Task",
+      "Comment": "PRD Section 10 step 10: any step failure, after exhausting its Retry, lands here so the Analysis is guaranteed a terminal FAILED status + errorMessage rather than being left stuck in a non-terminal state.",
+      "Resource": "__MARK_ANALYSIS_FAILED_FUNCTION_ARN__",
+      "Parameters": {
+        "analysisId.$": "$.analysisId",
+        "error.$": "$.error"
       },
       "End": true
     }

@@ -16,6 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from .handlers import (
     ensure_cv_parsed_handler,
     ensure_offer_extracted_handler,
+    mark_analysis_failed_handler,
     run_comparison_crew_handler,
 )
 
@@ -23,6 +24,7 @@ HANDLERS_BY_FUNCTION_NAME = {
     "ensure-cv-parsed": ensure_cv_parsed_handler,
     "ensure-offer-extracted": ensure_offer_extracted_handler,
     "run-comparison-crew": run_comparison_crew_handler,
+    "mark-analysis-failed": mark_analysis_failed_handler,
 }
 
 DEFAULT_PORT = 9099
@@ -45,7 +47,18 @@ class _InvokeRequestHandler(BaseHTTPRequestHandler):
         try:
             result = handler(payload)
         except Exception as exc:  # noqa: BLE001 - Lambda's contract reports handler errors as a 200 body, not a 5xx
-            self._respond(200, {"errorMessage": str(exc), "errorType": type(exc).__name__})
+            # Real Lambda (and Step Functions' interpretation of it) only
+            # treats a 200 response as a *function error* — vs. a normal
+            # successful payload that merely happens to look like one — when
+            # the `X-Amz-Function-Error` header is present; without it, Step
+            # Functions Local passes this error body through as if it were
+            # this state's real output, so no Retry/Catch ever fires (the
+            # bug M5-T5's retry-then-fail test caught: EnsureCVParsed
+            # "succeeded" with an error-shaped payload as output instead of
+            # failing the Task state at all).
+            self._respond(
+                200, {"errorMessage": str(exc), "errorType": type(exc).__name__}, function_error=True
+            )
             return
 
         self._respond(200, result)
@@ -70,11 +83,13 @@ class _InvokeRequestHandler(BaseHTTPRequestHandler):
         content_length = int(self.headers.get("Content-Length", 0))
         return self.rfile.read(content_length)
 
-    def _respond(self, status: int, body: dict) -> None:
+    def _respond(self, status: int, body: dict, *, function_error: bool = False) -> None:
         data = json.dumps(body).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
+        if function_error:
+            self.send_header("X-Amz-Function-Error", "Unhandled")
         self.end_headers()
         self.wfile.write(data)
 

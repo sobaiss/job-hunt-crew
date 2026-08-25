@@ -363,9 +363,9 @@ per-task IDs.
   (EnsureCVParsed -> EnsureOfferExtracted -> RunComparisonCrew
   waitForTaskToken) done; Fargate task (runs the crew, writes validated JSON
   to S3, calls SendTaskSuccess) done; S3-event persistence (PersistResultLambda,
-  the sole writer of terminal Analysis state) done; remaining M5 hardening
-  (Catch/retry wiring, malformed-output-specific tests, frontend polling)
-  still pending.
+  the sole writer of terminal Analysis state) done; Step Functions Catch/retry
+  wiring (3x exponential backoff, MarkAnalysisFailed) done; remaining M5
+  hardening (malformed-output-specific tests, frontend polling) still pending.
 - Verify: triggering analysis returns 202 without blocking; result JSON
   appears at the documented S3 key; Postgres `Analysis` reaches `COMPLETED`
   purely from the S3-event Lambda; malformed LLM output yields `FAILED` with
