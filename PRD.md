@@ -325,7 +325,7 @@ per-task IDs.
 - Verify: `pnpm install` exits 0; `pnpm --filter web dev` serves 200 on `/`;
   `pnpm prisma migrate dev` succeeds against docker Postgres.
 
-**M1 — Auth + CV Upload/Versioning**
+**M1 — Auth + CV Upload/Versioning** ✅ COMPLETE
 - NextAuth (Email/Google/LinkedIn) + `CVVersion` model + S3 presigned upload +
   CV list UI.
 - Verify: sign-in via Email provider works in dev; uploading a 2nd CV creates

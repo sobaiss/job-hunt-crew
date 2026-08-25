@@ -14,6 +14,20 @@ const UPLOAD_URL_EXPIRY_SECONDS = 300;
 // PRD Section 13 default: CV max size 10MB.
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 
+export async function GET() {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const cvVersions = await prisma.cVVersion.findMany({
+    where: { userId: session.user.id },
+    orderBy: { createdAt: "desc" },
+  });
+
+  return NextResponse.json({ cvVersions });
+}
+
 export async function POST(request: Request) {
   const session = await auth();
   if (!session?.user?.id) {
