@@ -1,7 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
+
+const POLL_INTERVAL_MS = 3000;
+const SOFT_TIMEOUT_MS = 2 * 60 * 1000;
+const TERMINAL_STATUSES = new Set(["COMPLETED", "FAILED"]);
 
 type MatchedSkill = { skill: string; evidence: string };
 type MissingSkill = { skill: string; importance: "required" | "nice_to_have" };
@@ -37,6 +41,8 @@ export default function AnalysisDetailPage() {
   const params = useParams<{ id: string }>();
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [timedOut, setTimedOut] = useState(false);
+  const startedAtRef = useRef<number | null>(null);
 
   const loadAnalysis = useCallback(async () => {
     try {
@@ -48,14 +54,39 @@ export default function AnalysisDetailPage() {
       const { analysis } = await response.json();
       setAnalysis(analysis);
       setError(null);
+      return analysis as Analysis;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load analysis");
+      return null;
     }
   }, [params.id]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadAnalysis();
+    startedAtRef.current = Date.now();
+    let cancelled = false;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
+    const tick = async () => {
+      const result = await loadAnalysis();
+      if (cancelled) return;
+
+      if (result && TERMINAL_STATUSES.has(result.status)) {
+        if (intervalId) clearInterval(intervalId);
+        return;
+      }
+
+      if (startedAtRef.current !== null && Date.now() - startedAtRef.current >= SOFT_TIMEOUT_MS) {
+        setTimedOut(true);
+      }
+    };
+
+    tick();
+    intervalId = setInterval(tick, POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      if (intervalId) clearInterval(intervalId);
+    };
   }, [loadAnalysis]);
 
   if (error) {
@@ -89,6 +120,12 @@ export default function AnalysisDetailPage() {
 
       {analysis.status === "FAILED" && (
         <p className="text-sm text-red-600">{analysis.errorMessage ?? "Analysis failed."}</p>
+      )}
+
+      {timedOut && !TERMINAL_STATUSES.has(analysis.status) && (
+        <p className="text-sm text-amber-600">
+          This is taking longer than expected (over 2 minutes). Still checking for a result…
+        </p>
       )}
 
       {!result ? (

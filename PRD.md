@@ -355,7 +355,7 @@ per-task IDs.
   saved fixture HTML (live scraping success is explicitly NOT a CI-required
   acceptance criterion, per anti-bot risk in Section 14).
 
-**M5 — Async Pipeline Hardening (full S3-event-driven architecture)**
+**M5 — Async Pipeline Hardening (full S3-event-driven architecture)** ✅ COMPLETE
 - Replace M2-M4's simplified path with SQS intake + Step Functions +
   `waitForTaskToken` + S3 result write + S3-event persistence Lambda, per
   Section 10. SQS intake (`POST /api/analyses` creates `Analysis(PENDING)`
@@ -367,7 +367,8 @@ per-task IDs.
   wiring (3x exponential backoff, MarkAnalysisFailed) done; malformed-LLM-output
   handling (Pydantic validation gate before both the S3 write and the Postgres
   persist, each independently yielding Analysis.status=FAILED with no partial
-  write) done; remaining M5 hardening (frontend polling) still pending.
+  write) done; frontend polling (GET /api/analyses/:id every 3s, stops on
+  terminal state, 2-minute soft-timeout warning) done.
 - Verify: triggering analysis returns 202 without blocking; result JSON
   appears at the documented S3 key; Postgres `Analysis` reaches `COMPLETED`
   purely from the S3-event Lambda; malformed LLM output yields `FAILED` with
