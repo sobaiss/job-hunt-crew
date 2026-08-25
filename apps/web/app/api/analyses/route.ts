@@ -4,6 +4,25 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { sqs, ANALYSIS_INTAKE_QUEUE_URL } from "@/lib/sqs";
 
+// PRD Section 9 (GET /api/analyses) / M6-T1: list the current user's
+// analyses for the dashboard (status, score, offer title/company),
+// newest first. Scoped by userId — Analysis is a user-owned access-control
+// boundary per PRD Section 6, same pattern as GET /api/cv-versions.
+export async function GET() {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const analyses = await prisma.analysis.findMany({
+    where: { userId: session.user.id },
+    include: { jobOffer: true, cvVersion: true },
+    orderBy: { requestedAt: "desc" },
+  });
+
+  return NextResponse.json({ analyses });
+}
+
 // PRD Section 9 (POST /api/analyses) / Section 10 steps 1-2: create the
 // Analysis row and enqueue immediately, returning 202 without waiting on the
 // crew run. The SQS-triggered Step Functions workflow that consumes this
