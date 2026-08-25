@@ -8,7 +8,7 @@
 ## Milestone M0 - Monorepo Bootstrap
 - [x] M0-T1: Init pnpm workspace + Turborepo config (pnpm-workspace.yaml, turbo.json)
       Verify: `pnpm install` exits 0
-- [ ] M0-T2: Next.js (App Router, TypeScript) skeleton at apps/web
+- [x] M0-T2: Next.js (App Router, TypeScript) skeleton at apps/web
       Verify: `pnpm --filter web dev` serves HTTP 200 on /
 - [ ] M0-T3: packages/prisma with schema.prisma containing only NextAuth models (User, Account, Session, VerificationToken)
       Verify: `pnpm prisma validate` succeeds
@@ -20,6 +20,7 @@
       Verify: workflow file is valid YAML and runs on a test push
 
 2026-08-25 04:02 — M0-T1 — DONE — pnpm-workspace.yaml (apps/*, packages/*) + root package.json (turbo devDependency, packageManager pinned to pnpm@11.23.0 via corepack) + turbo.json (build/dev/lint/typecheck tasks) + .gitignore added; `pnpm install` (via `corepack pnpm install`) exited 0, generated pnpm-lock.yaml, re-run confirmed "Already up to date" / exit 0.
+2026-08-25 04:10 — M0-T2 — DONE — Scaffolded apps/web via create-next-app (App Router, TypeScript, Tailwind, ESLint), stripped the generator's standalone lockfile/node_modules and linked it into the root pnpm workspace (`pnpm install` exit 0, approved unrs-resolver build script). `pnpm --filter web dev` started Turbopack dev server in ~250ms; `curl http://localhost:3000/` returned HTTP_STATUS:200, log confirmed `GET / 200`.
 
 ## Milestone M1 - Auth + CV Upload/Versioning
 - [ ] M1-T1: NextAuth.js wired with Email, Google, LinkedIn providers
