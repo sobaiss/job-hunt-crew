@@ -15,6 +15,12 @@ const emailServer = process.env.EMAIL_SERVER || { jsonTransport: true as const }
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(prisma),
   session: { strategy: "database" },
+  callbacks: {
+    session({ session, user }) {
+      session.user.id = user.id;
+      return session;
+    },
+  },
   providers: [
     Google,
     LinkedIn,
