@@ -20,3 +20,7 @@ def make_s3_client():
 
 def raw_scrape_key(job_offer_id: str) -> str:
     return f"raw-scrapes/{job_offer_id}.html"
+
+
+def analysis_result_key(analysis_id: str) -> str:
+    return f"analysis-results/{analysis_id}.json"

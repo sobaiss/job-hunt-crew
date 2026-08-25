@@ -7,11 +7,13 @@ via the state machine's `$.analysisId` path (analysis_workflow.asl.json).
 """
 
 import asyncio
+import threading
 
 from py_db.models import Analysis, CVVersion, Cvparsestatus, JobOffer, Jobofferextractionstatus
 from py_db.session import make_engine, make_session_factory
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .crew_task import run_crew_task
 from .cv_extraction_agent import extract_cv
 from .job_offer_extraction_agent import extract_job_offer
 from .llm_provider import LLMProvider
@@ -92,11 +94,40 @@ def ensure_offer_extracted_handler(event: dict, context=None) -> dict:
 
 def run_comparison_crew_handler(event: dict, context=None) -> dict:
     """PRD Section 10 step 6's entrypoint for the `waitForTaskToken` Task.
-    Its job is to hand `event["taskToken"]` off to the Fargate task that
-    actually runs the CrewAI crew (SendTaskSuccess/Failure is called by that
-    task, not this Lambda) — launching Fargate is M5-T3's explicit scope, so
-    this is deliberately a stub for now. The state machine's RunComparisonCrew
-    Task does not exit on this handler's return; it stays RUNNING until a
-    SendTaskSuccess/SendTaskFailure call arrives for the given token.
+    In a real deployment this Lambda's only job is to launch a Fargate task
+    (`ecs:RunTask`) carrying `event["taskToken"]`, then return immediately —
+    the Fargate task itself runs the crew and calls SendTaskSuccess/Failure
+    once it's done, independently of and after this Lambda invocation has
+    already returned (provisioning that launch is deployment/infra, out of
+    this PRD's scope). Locally/in tests, with no real ECS to launch against,
+    this handler starts M5-T3's `run_crew_task` logic on a background thread
+    and returns right away, the same "run the real logic against a local
+    stand-in" pattern `lambda_shim` uses for the other two handlers in this
+    module — and, per Step Functions' `waitForTaskToken` contract, calling
+    SendTaskSuccess/Failure only after this invocation's own response has
+    already been sent (a synchronous call from within this handler is
+    reliably ignored by Step Functions Local, unlike real AWS).
     """
-    return {"analysisId": event["analysisId"], "received": True}
+    analysis_id = event["analysisId"]
+    task_token = event.get("taskToken")
+
+    def _run_in_background() -> None:
+        async def _run() -> None:
+            engine = make_engine()
+            session_factory = make_session_factory(engine)
+            try:
+                async with session_factory() as session:
+                    await run_crew_task(session, analysis_id, task_token=task_token)
+            finally:
+                await engine.dispose()
+
+        try:
+            asyncio.run(_run())
+        except Exception:
+            # run_crew_task already transitions Analysis to FAILED and calls
+            # SendTaskFailure before raising; nothing left to report here,
+            # and this thread has no caller to propagate the exception to.
+            pass
+
+    threading.Thread(target=_run_in_background, daemon=True).start()
+    return {"analysisId": analysis_id, "launched": True}

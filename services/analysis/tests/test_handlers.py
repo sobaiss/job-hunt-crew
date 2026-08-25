@@ -244,6 +244,14 @@ async def test_ensure_cv_parsed_raises_when_analysis_missing():
         await engine.dispose()
 
 
-def test_run_comparison_crew_handler_returns_analysis_id_and_ack():
+def test_run_comparison_crew_handler_returns_immediately_without_waiting_on_the_crew():
+    # M5-T3: this handler's own contract is to launch the crew task (a
+    # background thread standing in for a real Fargate launch, see
+    # crew_task.py's docstring) and return right away — it must not block on
+    # the crew actually finishing. A nonexistent analysisId is enough to
+    # prove this: if the handler waited on the background work, it would
+    # surface CrewTaskError (Analysis not found) instead of returning
+    # cleanly. The crew's own success/failure behavior (run_crew_task) is
+    # covered by test_crew_task.py and test_workflow_e2e.py.
     result = run_comparison_crew_handler({"analysisId": "abc", "taskToken": "tok"})
-    assert result == {"analysisId": "abc", "received": True}
+    assert result == {"analysisId": "abc", "launched": True}

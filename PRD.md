@@ -361,7 +361,8 @@ per-task IDs.
   Section 10. SQS intake (`POST /api/analyses` creates `Analysis(PENDING)`
   then enqueues, 202 immediately) done; AnalysisWorkflow state machine
   (EnsureCVParsed -> EnsureOfferExtracted -> RunComparisonCrew
-  waitForTaskToken) done; Fargate/S3-event persistence still pending.
+  waitForTaskToken) done; Fargate task (runs the crew, writes validated JSON
+  to S3, calls SendTaskSuccess) done; S3-event persistence still pending.
 - Verify: triggering analysis returns 202 without blocking; result JSON
   appears at the documented S3 key; Postgres `Analysis` reaches `COMPLETED`
   purely from the S3-event Lambda; malformed LLM output yields `FAILED` with
