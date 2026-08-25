@@ -8,14 +8,18 @@ import { sqs, ANALYSIS_INTAKE_QUEUE_URL } from "@/lib/sqs";
 // analyses for the dashboard (status, score, offer title/company),
 // newest first. Scoped by userId — Analysis is a user-owned access-control
 // boundary per PRD Section 6, same pattern as GET /api/cv-versions.
-export async function GET() {
+// M6-T2: an optional ?jobOfferId= filters down to that offer's analyses,
+// feeding the side-by-side comparison view (PRD Section 8.7/9).
+export async function GET(request: Request) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const jobOfferId = new URL(request.url).searchParams.get("jobOfferId") ?? undefined;
+
   const analyses = await prisma.analysis.findMany({
-    where: { userId: session.user.id },
+    where: { userId: session.user.id, ...(jobOfferId ? { jobOfferId } : {}) },
     include: { jobOffer: true, cvVersion: true },
     orderBy: { requestedAt: "desc" },
   });

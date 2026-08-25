@@ -8,7 +8,7 @@ type Analysis = {
   status: "PENDING" | "QUEUED" | "RUNNING_CREW" | "AWAITING_RESULT" | "PERSISTING" | "COMPLETED" | "FAILED";
   matchScore: number | null;
   requestedAt: string;
-  jobOffer: { title: string | null; company: string | null };
+  jobOffer: { id: string; title: string | null; company: string | null };
   cvVersion: { label: string };
 };
 
@@ -78,6 +78,12 @@ export default function AnalysesDashboardPage() {
                     {analysis.status}
                   </span>
                 </div>
+              </Link>
+              <Link
+                href={`/analyses/compare/${analysis.jobOffer.id}`}
+                className="text-xs text-blue-600 hover:underline"
+              >
+                Compare with other CVs
               </Link>
             </li>
           ))}

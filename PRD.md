@@ -377,7 +377,9 @@ per-task IDs.
 **M6 — Dashboard, Multi-CV Comparison, Observability, Guardrails**
 - Dashboard listing all analyses (✅ done: `GET /api/analyses`, scoped to the
   authenticated user, plus `/analyses` list UI); compare one `JobOffer`
-  against 2+ `CVVersion`s side by side; structured logging; enforce
+  against 2+ `CVVersion`s side by side (✅ done: `GET /api/analyses?jobOfferId=`
+  filter + `/analyses/compare/:jobOfferId` side-by-side UI, linked from both
+  the dashboard and the analysis detail page); structured logging; enforce
   `INGESTION_MAX_OFFERS` and a per-user daily analysis cap.
 - Verify: side-by-side comparison renders 2 distinct `resultJSON`s for the
   same offer; exceeding a low test-configured daily cap returns a clear

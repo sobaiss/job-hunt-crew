@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 
 const POLL_INTERVAL_MS = 3000;
@@ -33,7 +34,7 @@ type Analysis = {
   matchScore: number | null;
   resultJSON: AnalysisResult | null;
   errorMessage: string | null;
-  jobOffer: { title: string | null; company: string | null };
+  jobOffer: { id: string; title: string | null; company: string | null };
   cvVersion: { label: string };
 };
 
@@ -116,6 +117,12 @@ export default function AnalysisDetailPage() {
         <p className="text-sm text-zinc-500">
           vs. {analysis.cvVersion.label} · Status: {analysis.status}
         </p>
+        <Link
+          href={`/analyses/compare/${analysis.jobOffer.id}`}
+          className="text-sm text-blue-600 hover:underline"
+        >
+          Compare with other CVs
+        </Link>
       </div>
 
       {analysis.status === "FAILED" && (
