@@ -59,6 +59,22 @@ services:
     volumes:
       - ./elasticmq.conf:/opt/elasticmq.conf:ro
 
+  # Step Functions-compatible state machine engine for local dev, standing
+  # in for AWS Step Functions (see PRD Section 4/10). LAMBDA_ENDPOINT points
+  # Task states at services/analysis's lambda_shim.py, the local stand-in
+  # for the 3 real AnalysisWorkflow Lambda functions (M5-T2) — run it via
+  # `uv run --package analysis python -m analysis.lambda_shim` before
+  # starting an execution.
+  stepfunctions-local:
+    image: amazon/aws-stepfunctions-local:2.0.0
+    restart: unless-stopped
+    ports:
+      - "8083:8083"
+    environment:
+      LAMBDA_ENDPOINT: http://host.docker.internal:9099
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
 volumes:
   postgres-data:
   minio-data:
