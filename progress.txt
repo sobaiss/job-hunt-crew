@@ -1,0 +1,102 @@
+# job-hunt-crew — Progress Log
+# See PRD.md Section 0 for how to use this file.
+# One checklist block per milestone, one line per task. On completion, check the
+# box and append a dated log line below the relevant block:
+#   YYYY-MM-DD HH:MM — <task-id> — DONE — <verification output summary>
+# On failure, append a dated log line describing the failure and leave the box unchecked.
+
+## Milestone M0 - Monorepo Bootstrap
+- [ ] M0-T1: Init pnpm workspace + Turborepo config (pnpm-workspace.yaml, turbo.json)
+      Verify: `pnpm install` exits 0
+- [ ] M0-T2: Next.js (App Router, TypeScript) skeleton at apps/web
+      Verify: `pnpm --filter web dev` serves HTTP 200 on /
+- [ ] M0-T3: packages/prisma with schema.prisma containing only NextAuth models (User, Account, Session, VerificationToken)
+      Verify: `pnpm prisma validate` succeeds
+- [ ] M0-T4: docker-compose Postgres service for local dev
+      Verify: `docker compose up -d postgres && pnpm prisma migrate dev` succeeds against it
+- [ ] M0-T5: uv workspace root (pyproject.toml) for Python services
+      Verify: `uv sync` exits 0
+- [ ] M0-T6: GitHub Actions CI skeleton (lint + typecheck on push)
+      Verify: workflow file is valid YAML and runs on a test push
+
+## Milestone M1 - Auth + CV Upload/Versioning
+- [ ] M1-T1: NextAuth.js wired with Email, Google, LinkedIn providers
+      Verify: sign-in via Email provider works in dev (magic link flow completes, session created)
+- [ ] M1-T2: CVVersion Prisma model (id, userId, label, fileKey, fileName, fileType, fileSizeBytes, isDefault, parseStatus, structuredData, structuredDataVer, timestamps) + migration
+      Verify: `pnpm prisma migrate dev` applies cleanly
+- [ ] M1-T3: S3 presigned upload endpoint + client upload flow for CVVersion
+      Verify: uploading a file creates the S3 object at cvs/{userId}/{cvVersionId}/{filename}
+- [ ] M1-T4: Reject non-PDF/DOCX uploads and files >10MB before any S3 write
+      Verify: uploading a .txt file or an 11MB PDF returns a clear 4xx error, no S3 object created
+- [ ] M1-T5: CV list UI + set-default toggle (exactly one CVVersion per user has isDefault=true)
+      Verify: uploading a 2nd CV creates a 2nd row without overwriting the 1st; toggling default unsets the previous default
+
+## Milestone M2 - Mode 1 Ingestion + Basic Analysis (simplified pipeline)
+- [ ] M2-T1: JobOffer + IngestionJob Prisma models + migration (per PRD Section 6)
+      Verify: `pnpm prisma migrate dev` applies cleanly
+- [ ] M2-T2: Single-URL scrape step (generic content extractor) stores raw HTML at raw-scrapes/{jobOfferId}.html, sets extractionStatus=SCRAPED
+      Verify: given a fixture URL, S3 object exists at the documented key and status transitions PENDING->SCRAPING->SCRAPED
+- [ ] M2-T3: LLM provider abstraction (Claude + OpenAI) behind a single interface, selected via LLM_PROVIDER env var
+      Verify: unit test swaps LLM_PROVIDER=anthropic/openai and both paths call the correct SDK client
+- [ ] M2-T4: JobOfferExtractionAgent (CrewAI) structures scraped content into JobOffer.structuredData
+      Verify: given fixture HTML, extractionStatus=READY and structuredData contains description/requirements fields
+- [ ] M2-T5: CVExtractionAgent (CrewAI) structures a CVVersion file into structuredData
+      Verify: given a fixture PDF, parseStatus=PARSED and structuredData contains skills/experience/education
+- [ ] M2-T6: ComparisonAnalysisAgent + RecommendationWriterAgent produce the Section 8.6 JSON schema (Pydantic-validated) for a fixture (JobOffer, CVVersion) pair
+      Verify: Analysis.status=COMPLETED, resultJSON validates against the Section 8.6 schema
+- [ ] M2-T7: Analysis detail UI renders match_score, matched_skills, missing_skills, strengths, weaknesses, improvement_suggestions
+      Verify: manual/e2e check — all 5 categories + score visible for the fixture analysis
+
+## Milestone M3 - Mode 2 Ingestion (Listing URL)
+- [ ] M3-T1: Listing-page fetch with pagination cap (default 3 pages)
+      Verify: given a fixture paginated listing, exactly 3 pages are fetched, no more
+- [ ] M3-T2: Generic "repeated card" heuristic extracts candidate offer URLs from a listing page
+      Verify: given a fixture listing page with 5 offer links, exactly 5 URLs are extracted
+- [ ] M3-T3: URL dedup + cap at IngestionJob.maxOffers (default 25)
+      Verify: given 30 discovered URLs, only 25 IngestionJobOffer rows are created
+- [ ] M3-T4: Fan-out — create/link JobOffer per retained URL (reusing global dedup by sourceUrl), run Mode 1 pipeline (M2-T2..T4) per offer
+      Verify: fixture listing page with 5 links produces exactly 5 linked JobOffer rows
+- [ ] M3-T5: IngestionJob aggregate counts (discoveredCount/scrapedCount/failedCount) and status rollup (COMPLETED only when all children terminal, else PARTIALLY_COMPLETED)
+      Verify: fixture run with 1 forced failure among 5 offers yields status=PARTIALLY_COMPLETED, failedCount=1
+- [ ] M3-T6: Ingestion progress UI ("N/M processed")
+      Verify: manual/e2e check — progress indicator updates as offers complete
+
+## Milestone M4 - Mode 3 Ingestion (Preconfigured Site + Filters) + SiteConfig adapters
+- [ ] M4-T1: SiteConfig Prisma model + migration + seed rows for LinkedIn, Indeed, France Travail, Welcome to the Jungle, Glassdoor
+      Verify: `pnpm prisma db seed` creates 5 enabled SiteConfig rows
+- [ ] M4-T2: Site picker + filter form UI (keywords, location, postedWithin, contractType, remote, experienceLevel)
+      Verify: manual/e2e check — form submits a well-formed IngestionJob (mode=SITE_SEARCH)
+- [ ] M4-T3: URL/query builder from SiteConfig.searchUrlTemplate + filterParamMapping
+      Verify: unit test — given filters + a SiteConfig fixture, builder output matches expected URL/query string
+- [ ] M4-T4: France Travail OFFICIAL_API integration (francetravail.io)
+      Verify: given valid filters, API call returns >=1 offer end-to-end in a live or recorded-fixture test
+- [ ] M4-T5: HTML_SCRAPE adapters (selectors) for LinkedIn, Indeed, Glassdoor, Welcome to the Jungle
+      Verify: each adapter passes unit tests against its saved fixture HTML (live scraping success is NOT a CI-required criterion, see PRD Section 14)
+- [ ] M4-T6: Per-site failure handling — IngestionJob set to FAILED/PARTIALLY_COMPLETED with errorMessage, never a silent zero-result return
+      Verify: fixture-forced adapter failure produces a non-empty errorMessage on the IngestionJob
+
+## Milestone M5 - Async Pipeline Hardening (full S3-event-driven architecture)
+- [ ] M5-T1: SQS analysis-intake queue; POST /api/analyses creates Analysis(status=PENDING) then enqueues, returns 202 immediately
+      Verify: request completes in <200ms without waiting on the crew run; SQS message received with analysisId
+- [ ] M5-T2: Step Functions AnalysisWorkflow state machine: EnsureCVParsed -> EnsureOfferExtracted -> RunComparisonCrew (waitForTaskToken)
+      Verify: state machine execution reaches RunComparisonCrew state and Analysis.stepFunctionExecutionArn is recorded
+- [ ] M5-T3: Fargate task runs the CrewAI crew (M2-T6 agents), writes validated JSON to s3://{bucket}/analysis-results/{analysisId}.json, calls SendTaskSuccess
+      Verify: given a queued Analysis, the S3 object appears at the documented key
+- [ ] M5-T4: S3 ObjectCreated event on analysis-results/ triggers PersistResultLambda; validates + upserts resultJSON/matchScore via SQLAlchemy, sets status=COMPLETED
+      Verify: Postgres Analysis reaches COMPLETED purely from the S3-event Lambda (synchronous fallback path disabled in this test)
+- [ ] M5-T5: Step Functions Catch blocks set status=FAILED + errorMessage; retries with exponential backoff (3x, base 2s)
+      Verify: fixture-forced crew failure results in Analysis.status=FAILED with a non-empty errorMessage, never a stuck PENDING/RUNNING state
+- [ ] M5-T6: Malformed LLM output handling — Pydantic validation failure before S3 write and before Postgres persist both yield status=FAILED
+      Verify: fixture malformed JSON triggers FAILED, no partial resultJSON written
+- [ ] M5-T7: Frontend polling GET /api/analyses/:id every 3s, stops on terminal state or after a 2-minute soft-timeout warning
+      Verify: manual/e2e check — UI stops polling on COMPLETED/FAILED and shows a timeout warning after 2 minutes if still pending
+
+## Milestone M6 - Dashboard, Multi-CV Comparison, Observability, Guardrails
+- [ ] M6-T1: Analyses list dashboard (status, score, offer title/company) via GET /api/analyses
+      Verify: manual/e2e check — dashboard lists all of the current user's analyses, none from other users
+- [ ] M6-T2: Side-by-side comparison view — same JobOffer against 2+ CVVersions via GET /api/analyses?jobOfferId=
+      Verify: comparison view renders 2 distinct resultJSON payloads for the same offer
+- [ ] M6-T3: Structured logging across Lambda/Fargate steps + PipelineEvent table writes at each pipeline stage
+      Verify: a full pipeline run produces a PipelineEvent row per stage (scrape, extract, crew, persist)
+- [ ] M6-T4: Enforce INGESTION_MAX_OFFERS and a per-user daily analysis cap (configurable)
+      Verify: exceeding a low test-configured daily cap returns a clear server-enforced 4xx error, no Analysis row created beyond the cap
