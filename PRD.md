@@ -346,8 +346,8 @@ per-task IDs.
 
 **M4 — Mode 3 Ingestion (Preconfigured Site + Filters) + SiteConfig adapters**
 - Seed `SiteConfig` for all 5 sites (✅ model + migration + seed done); site
-  picker + filter form UI (✅ done); URL/API construction from filters; France
-  Travail via official API.
+  picker + filter form UI (✅ done); URL/API construction from filters (✅ done);
+  France Travail via official API (✅ done).
 - Verify: France Travail filters produce a valid API call returning >=1 offer
   end-to-end; LinkedIn/Indeed/Glassdoor/WTTJ adapters pass unit tests against
   saved fixture HTML (live scraping success is explicitly NOT a CI-required
