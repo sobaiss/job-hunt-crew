@@ -332,7 +332,7 @@ per-task IDs.
   a 2nd row without overwriting the 1st; non-PDF/DOCX upload rejected with a
   clear error; S3 object exists at the documented key.
 
-**M2 — Mode 1 Ingestion + Basic Analysis (simplified pipeline)**
+**M2 — Mode 1 Ingestion + Basic Analysis (simplified pipeline)** ✅ COMPLETE
 - Single-URL scrape + extraction + a CrewAI comparison call against a fixture
   HTML page (deterministic, no live scrape dependency in tests).
 - Verify: given the fixture URL, `Analysis.status=COMPLETED` with `resultJSON`
