@@ -12,7 +12,13 @@ from py_db.models import IngestionJob, IngestionJobOffer, JobOffer, Ingestionjob
 from py_db.session import make_engine, make_session_factory
 from sqlalchemy import select
 
-from ingestion.fanout import dedupe_and_cap_urls, link_and_process_offers, link_discovered_offers, process_job_offer
+from ingestion.fanout import (
+    dedupe_and_cap_urls,
+    link_and_process_offers,
+    link_discovered_offers,
+    process_job_offer,
+    update_ingestion_job_aggregate,
+)
 from ingestion.s3_client import S3_BUCKET, raw_scrape_key
 
 FIXTURE_HTML = "<html><body><h1>Senior Backend Engineer</h1></body></html>"
@@ -368,4 +374,145 @@ async def test_process_job_offer_continues_past_scrape_failure_without_raising()
             if job_offer is not None:
                 await session.delete(job_offer)
                 await session.commit()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_link_and_process_offers_rolls_up_partially_completed_with_one_forced_failure():
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id = f"test-user-{uuid.uuid4()}"
+    ingestion_job_id = f"test-job-{uuid.uuid4()}"
+    urls = [f"https://example.com/jobs/{uuid.uuid4()}" for _ in range(5)]
+    failing_url = urls[2]
+    s3 = _s3_client()
+    processed: list[JobOffer] = []
+
+    async with session_factory() as session:
+        session.add(User(id=user_id, updatedAt=datetime.now(UTC).replace(tzinfo=None)))
+        session.add(
+            IngestionJob(
+                id=ingestion_job_id,
+                userId=user_id,
+                mode=Ingestionmode.LISTING_URL,
+                maxOffers=25,
+                status=Ingestionjobstatus.RUNNING,
+                updatedAt=datetime.now(UTC).replace(tzinfo=None),
+            )
+        )
+        await session.commit()
+
+    try:
+        with respx.mock(assert_all_called=True) as mock:
+            for url in urls:
+                if url == failing_url:
+                    mock.get(url).mock(return_value=Response(404))
+                else:
+                    mock.get(url).mock(return_value=Response(200, text=FIXTURE_HTML))
+
+            async with session_factory() as session:
+                ingestion_job = await session.get(IngestionJob, ingestion_job_id)
+                provider = StubLLMProvider()
+                processed = await link_and_process_offers(session, ingestion_job, urls, llm_provider=provider)
+
+        # M3-T5 verify: fixture run with 1 forced failure among 5 offers
+        # yields status=PARTIALLY_COMPLETED, failedCount=1.
+        async with session_factory() as session:
+            ingestion_job = await session.get(IngestionJob, ingestion_job_id)
+            assert ingestion_job.discoveredCount == 5
+            assert ingestion_job.scrapedCount == 4
+            assert ingestion_job.failedCount == 1
+            assert ingestion_job.status == Ingestionjobstatus.PARTIALLY_COMPLETED
+    finally:
+        for job_offer in processed:
+            try:
+                s3.delete_object(Bucket=S3_BUCKET, Key=raw_scrape_key(job_offer.id))
+            except Exception:
+                pass
+        async with session_factory() as session:
+            links = (
+                await session.scalars(
+                    select(IngestionJobOffer).where(IngestionJobOffer.ingestionJobId == ingestion_job_id)
+                )
+            ).all()
+            for link in links:
+                await session.delete(link)
+            await session.commit()
+
+            offers = (await session.scalars(select(JobOffer).where(JobOffer.sourceUrl.in_(urls)))).all()
+            for offer in offers:
+                await session.delete(offer)
+            job = await session.get(IngestionJob, ingestion_job_id)
+            if job is not None:
+                await session.delete(job)
+            user = await session.get(User, user_id)
+            if user is not None:
+                await session.delete(user)
+            await session.commit()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_update_ingestion_job_aggregate_completed_when_all_ready():
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id = f"test-user-{uuid.uuid4()}"
+    ingestion_job_id = f"test-job-{uuid.uuid4()}"
+    job_offer_id = f"test-{uuid.uuid4()}"
+    url = f"https://example.com/jobs/{uuid.uuid4()}"
+
+    async with session_factory() as session:
+        session.add(User(id=user_id, updatedAt=datetime.now(UTC).replace(tzinfo=None)))
+        session.add(
+            IngestionJob(
+                id=ingestion_job_id,
+                userId=user_id,
+                mode=Ingestionmode.LISTING_URL,
+                maxOffers=25,
+                status=Ingestionjobstatus.RUNNING,
+                updatedAt=datetime.now(UTC).replace(tzinfo=None),
+            )
+        )
+        session.add(
+            JobOffer(
+                id=job_offer_id,
+                sourceUrl=url,
+                sourceSite=Joboffersourcesite.OTHER,
+                extractionStatus=Jobofferextractionstatus.READY,
+                structuredData={"description": "ready", "requirements": []},
+                updatedAt=datetime.now(UTC).replace(tzinfo=None),
+            )
+        )
+        session.add(IngestionJobOffer(id=f"link-{uuid.uuid4()}", ingestionJobId=ingestion_job_id, jobOfferId=job_offer_id))
+        await session.commit()
+
+    try:
+        async with session_factory() as session:
+            ingestion_job = await update_ingestion_job_aggregate(session, ingestion_job_id)
+
+        assert ingestion_job.discoveredCount == 1
+        assert ingestion_job.scrapedCount == 1
+        assert ingestion_job.failedCount == 0
+        assert ingestion_job.status == Ingestionjobstatus.COMPLETED
+    finally:
+        async with session_factory() as session:
+            links = (
+                await session.scalars(
+                    select(IngestionJobOffer).where(IngestionJobOffer.ingestionJobId == ingestion_job_id)
+                )
+            ).all()
+            for link in links:
+                await session.delete(link)
+            await session.commit()
+
+            offer = await session.get(JobOffer, job_offer_id)
+            if offer is not None:
+                await session.delete(offer)
+            job = await session.get(IngestionJob, ingestion_job_id)
+            if job is not None:
+                await session.delete(job)
+            user = await session.get(User, user_id)
+            if user is not None:
+                await session.delete(user)
+            await session.commit()
         await engine.dispose()

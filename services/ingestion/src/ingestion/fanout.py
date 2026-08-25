@@ -4,7 +4,14 @@ from datetime import UTC, datetime
 import httpx
 from analysis.job_offer_extraction_agent import ExtractionError, extract_job_offer
 from analysis.llm_provider import LLMProvider
-from py_db.models import IngestionJob, IngestionJobOffer, JobOffer, Jobofferextractionstatus, Joboffersourcesite
+from py_db.models import (
+    IngestionJob,
+    IngestionJobOffer,
+    Ingestionjobstatus,
+    JobOffer,
+    Jobofferextractionstatus,
+    Joboffersourcesite,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -123,10 +130,55 @@ async def link_and_process_offers(
 ) -> list[JobOffer]:
     """PRD Section 8.4 step 4: for each retained URL, creates/links a
     JobOffer (via `link_discovered_offers`, M3-T3) and runs the Mode 1
-    pipeline (M2-T2..T4) per offer.
+    pipeline (M2-T2..T4) per offer, then rolls up the IngestionJob's
+    aggregate counts/status (M3-T5, PRD Section 8.4 step 5).
     """
     job_offers = await link_discovered_offers(session, ingestion_job, urls)
-    return [
+    processed = [
         await process_job_offer(session, job_offer, http_client=http_client, llm_provider=llm_provider)
         for job_offer in job_offers
     ]
+    await update_ingestion_job_aggregate(session, ingestion_job.id)
+    return processed
+
+
+async def update_ingestion_job_aggregate(session: AsyncSession, ingestion_job_id: str) -> IngestionJob:
+    """PRD Section 8.4 step 5: recomputes `discoveredCount`/`scrapedCount`/
+    `failedCount` from the JobOffers currently linked to `ingestion_job_id`
+    and rolls up `status`:
+      - any linked offer still short of a terminal extractionStatus -> RUNNING
+      - all terminal, none FAILED -> COMPLETED
+      - all terminal, some (not all) FAILED -> PARTIALLY_COMPLETED
+      - all terminal, all FAILED -> FAILED
+    """
+    linked_offers = (
+        await session.scalars(
+            select(JobOffer)
+            .join(IngestionJobOffer, IngestionJobOffer.jobOfferId == JobOffer.id)
+            .where(IngestionJobOffer.ingestionJobId == ingestion_job_id)
+        )
+    ).all()
+
+    discovered_count = len(linked_offers)
+    scraped_count = sum(1 for offer in linked_offers if offer.extractionStatus == Jobofferextractionstatus.READY)
+    failed_count = sum(1 for offer in linked_offers if offer.extractionStatus == Jobofferextractionstatus.FAILED)
+    terminal_count = scraped_count + failed_count
+
+    if discovered_count == 0 or terminal_count < discovered_count:
+        status = Ingestionjobstatus.RUNNING
+    elif failed_count == 0:
+        status = Ingestionjobstatus.COMPLETED
+    elif failed_count == discovered_count:
+        status = Ingestionjobstatus.FAILED
+    else:
+        status = Ingestionjobstatus.PARTIALLY_COMPLETED
+
+    ingestion_job = await session.get(IngestionJob, ingestion_job_id)
+    ingestion_job.discoveredCount = discovered_count
+    ingestion_job.scrapedCount = scraped_count
+    ingestion_job.failedCount = failed_count
+    ingestion_job.status = status
+    ingestion_job.updatedAt = _now()
+    await session.commit()
+    await session.refresh(ingestion_job)
+    return ingestion_job
