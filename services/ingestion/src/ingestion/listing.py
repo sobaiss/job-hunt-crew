@@ -22,6 +22,41 @@ def _find_next_page_url(html: str, page_url: str) -> str | None:
     return urljoin(page_url, next_link["href"])
 
 
+def extract_offer_urls(html: str, page_url: str) -> list[str]:
+    """Generic "repeated card" heuristic (PRD 8.4 step 2 fallback path, used
+    when no SiteConfig selector matches the domain — SiteConfig itself
+    doesn't exist until M4). Listing pages are typically a list of similarly
+    structured "card" elements, each carrying one link to the offer's detail
+    page; those cards' anchors usually share a common CSS class. Groups every
+    `<a href>` on the page by its own (tag, sorted class list) signature,
+    picks the largest group with at least 2 members (a lone link — nav,
+    footer, logo — isn't a repeated card), and returns that group's hrefs
+    resolved to absolute URLs against `page_url`, in document order, with
+    duplicates removed. Documented as lower accuracy than a SiteConfig
+    selector (PRD 8.4 step 2); returns an empty list if no repeated pattern
+    is found rather than guessing.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    groups: dict[tuple[str, ...], list[str]] = {}
+    for anchor in soup.find_all("a", href=True):
+        classes = tuple(sorted(anchor.get("class") or []))
+        groups.setdefault(classes, []).append(anchor["href"])
+
+    candidate_groups = [hrefs for hrefs in groups.values() if len(hrefs) >= 2]
+    if not candidate_groups:
+        return []
+    largest_group = max(candidate_groups, key=len)
+
+    seen: set[str] = set()
+    urls: list[str] = []
+    for href in largest_group:
+        absolute_url = urljoin(page_url, href)
+        if absolute_url not in seen:
+            seen.add(absolute_url)
+            urls.append(absolute_url)
+    return urls
+
+
 async def fetch_listing_pages(
     start_url: str,
     *,

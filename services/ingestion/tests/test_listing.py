@@ -2,7 +2,7 @@ import pytest
 import respx
 from httpx import Response
 
-from ingestion.listing import fetch_listing_pages
+from ingestion.listing import extract_offer_urls, fetch_listing_pages
 
 BASE = "https://example.com/jobs"
 
@@ -57,3 +57,63 @@ async def test_fetch_listing_pages_respects_custom_max_pages():
 
         assert len(pages) == 1
         assert mock.calls.call_count == 1
+
+
+def _card_listing_html(offer_paths: list[str]) -> str:
+    cards = "".join(
+        f'<div class="job-card"><a class="job-card-link" href="{path}">Title {i}</a></div>'
+        for i, path in enumerate(offer_paths)
+    )
+    return (
+        "<html><body>"
+        '<nav><a class="nav-link" href="/about">About</a>'
+        '<a class="nav-link" href="/contact">Contact</a></nav>'
+        f"<div class='results'>{cards}</div>"
+        '<footer><a href="/terms">Terms</a></footer>'
+        "</body></html>"
+    )
+
+
+def test_extract_offer_urls_finds_five_offer_links():
+    html = _card_listing_html([f"/jobs/{i}" for i in range(5)])
+
+    urls = extract_offer_urls(html, BASE)
+
+    assert urls == [f"https://example.com/jobs/{i}" for i in range(5)]
+
+
+def test_extract_offer_urls_ignores_lone_nav_and_footer_links():
+    html = _card_listing_html(["/jobs/1", "/jobs/2", "/jobs/3"])
+
+    urls = extract_offer_urls(html, BASE)
+
+    assert "https://example.com/about" not in urls
+    assert "https://example.com/contact" not in urls
+    assert "https://example.com/terms" not in urls
+    assert urls == [
+        "https://example.com/jobs/1",
+        "https://example.com/jobs/2",
+        "https://example.com/jobs/3",
+    ]
+
+
+def test_extract_offer_urls_dedupes_and_resolves_relative_urls():
+    html = (
+        "<html><body>"
+        '<div><a class="job-card-link" href="/jobs/1">A</a></div>'
+        '<div><a class="job-card-link" href="/jobs/2">B</a></div>'
+        '<div><a class="job-card-link" href="/jobs/1">A again</a></div>'
+        "</body></html>"
+    )
+
+    urls = extract_offer_urls(html, BASE)
+
+    assert urls == ["https://example.com/jobs/1", "https://example.com/jobs/2"]
+
+
+def test_extract_offer_urls_returns_empty_list_when_no_repeated_pattern():
+    html = '<html><body><a href="/only-link">Solo</a></body></html>'
+
+    urls = extract_offer_urls(html, BASE)
+
+    assert urls == []
