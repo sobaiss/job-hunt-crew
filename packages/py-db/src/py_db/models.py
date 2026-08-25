@@ -10,6 +10,16 @@ class Base(DeclarativeBase):
     pass
 
 
+class Analysisstatus(str, enum.Enum):
+    PENDING = 'PENDING'
+    QUEUED = 'QUEUED'
+    RUNNING_CREW = 'RUNNING_CREW'
+    AWAITING_RESULT = 'AWAITING_RESULT'
+    PERSISTING = 'PERSISTING'
+    COMPLETED = 'COMPLETED'
+    FAILED = 'FAILED'
+
+
 class Cvfiletype(str, enum.Enum):
     PDF = 'PDF'
     DOCX = 'DOCX'
@@ -75,6 +85,7 @@ class JobOffer(Base):
     structuredData: Mapped[Optional[dict]] = mapped_column(JSONB)
     errorMessage: Mapped[Optional[str]] = mapped_column(Text)
 
+    Analysis: Mapped[list['Analysis']] = relationship('Analysis', back_populates='JobOffer_')
     IngestionJobOffer: Mapped[list['IngestionJobOffer']] = relationship('IngestionJobOffer', back_populates='JobOffer_')
 
 
@@ -97,6 +108,7 @@ class User(Base):
     CVVersion: Mapped[list['CVVersion']] = relationship('CVVersion', back_populates='User_')
     IngestionJob: Mapped[list['IngestionJob']] = relationship('IngestionJob', back_populates='User_')
     Session: Mapped[list['Session']] = relationship('Session', back_populates='User_')
+    Analysis: Mapped[list['Analysis']] = relationship('Analysis', back_populates='User_')
 
 
 t_VerificationToken = Table(
@@ -172,6 +184,7 @@ class CVVersion(Base):
     structuredDataVer: Mapped[Optional[int]] = mapped_column(Integer)
 
     User_: Mapped['User'] = relationship('User', back_populates='CVVersion')
+    Analysis: Mapped[list['Analysis']] = relationship('Analysis', back_populates='CVVersion_')
 
 
 class IngestionJob(Base):
@@ -215,6 +228,37 @@ class Session(Base):
     expires: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False)
 
     User_: Mapped['User'] = relationship('User', back_populates='Session')
+
+
+class Analysis(Base):
+    __tablename__ = 'Analysis'
+    __table_args__ = (
+        ForeignKeyConstraint(['cvVersionId'], ['CVVersion.id'], ondelete='CASCADE', onupdate='CASCADE', name='Analysis_cvVersionId_fkey'),
+        ForeignKeyConstraint(['jobOfferId'], ['JobOffer.id'], ondelete='CASCADE', onupdate='CASCADE', name='Analysis_jobOfferId_fkey'),
+        ForeignKeyConstraint(['userId'], ['User.id'], ondelete='CASCADE', onupdate='CASCADE', name='Analysis_userId_fkey'),
+        PrimaryKeyConstraint('id', name='Analysis_pkey'),
+        Index('Analysis_cvVersionId_idx', 'cvVersionId'),
+        Index('Analysis_jobOfferId_idx', 'jobOfferId'),
+        Index('Analysis_userId_idx', 'userId')
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    userId: Mapped[str] = mapped_column(Text, nullable=False)
+    jobOfferId: Mapped[str] = mapped_column(Text, nullable=False)
+    cvVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[Analysisstatus] = mapped_column(Enum(Analysisstatus, values_callable=lambda cls: [member.value for member in cls], name='AnalysisStatus'), nullable=False, server_default=text('\'PENDING\'::"AnalysisStatus"'))
+    requestedAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False, server_default=text('CURRENT_TIMESTAMP'))
+    s3ResultKey: Mapped[Optional[str]] = mapped_column(Text)
+    matchScore: Mapped[Optional[int]] = mapped_column(Integer)
+    resultJSON: Mapped[Optional[dict]] = mapped_column(JSONB)
+    errorMessage: Mapped[Optional[str]] = mapped_column(Text)
+    stepFunctionExecutionArn: Mapped[Optional[str]] = mapped_column(Text)
+    startedAt: Mapped[Optional[datetime.datetime]] = mapped_column(TIMESTAMP(precision=3))
+    completedAt: Mapped[Optional[datetime.datetime]] = mapped_column(TIMESTAMP(precision=3))
+
+    CVVersion_: Mapped['CVVersion'] = relationship('CVVersion', back_populates='Analysis')
+    JobOffer_: Mapped['JobOffer'] = relationship('JobOffer', back_populates='Analysis')
+    User_: Mapped['User'] = relationship('User', back_populates='Analysis')
 
 
 class IngestionJobOffer(Base):

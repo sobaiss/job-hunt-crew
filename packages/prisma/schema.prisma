@@ -23,6 +23,7 @@ model User {
   sessions      Session[]
   cvVersions    CVVersion[]
   ingestionJobs IngestionJob[]
+  analyses      Analysis[]
 }
 
 model Account {
@@ -88,7 +89,8 @@ model CVVersion {
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  analyses Analysis[]
 
   @@index([userId])
 }
@@ -113,21 +115,22 @@ enum JobOfferExtractionStatus {
 
 // Globally deduplicated by sourceUrl — not user-owned. See PRD Section 6.
 model JobOffer {
-  id                String                    @id @default(cuid())
-  sourceUrl         String                    @unique
-  sourceSite        JobOfferSourceSite
-  title             String?
-  company           String?
-  location          String?
-  postedAt          DateTime?
-  rawContentKey     String?
-  structuredData    Json?
-  extractionStatus  JobOfferExtractionStatus  @default(PENDING)
-  errorMessage      String?
-  createdAt         DateTime                  @default(now())
-  updatedAt         DateTime                  @updatedAt
+  id               String                   @id @default(cuid())
+  sourceUrl        String                   @unique
+  sourceSite       JobOfferSourceSite
+  title            String?
+  company          String?
+  location         String?
+  postedAt         DateTime?
+  rawContentKey    String?
+  structuredData   Json?
+  extractionStatus JobOfferExtractionStatus @default(PENDING)
+  errorMessage     String?
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
 
   ingestionJobOffers IngestionJobOffer[]
+  analyses           Analysis[]
 }
 
 enum IngestionMode {
@@ -146,20 +149,20 @@ enum IngestionJobStatus {
 
 // User-scoped access-control boundary. See PRD Section 6.
 model IngestionJob {
-  id              String              @id @default(cuid())
+  id              String             @id @default(cuid())
   userId          String
   mode            IngestionMode
   inputUrl        String?
   siteConfigId    String?
   filters         Json?
-  maxOffers       Int                 @default(25)
-  status          IngestionJobStatus  @default(PENDING)
-  discoveredCount Int                 @default(0)
-  scrapedCount    Int                 @default(0)
-  failedCount     Int                 @default(0)
+  maxOffers       Int                @default(25)
+  status          IngestionJobStatus @default(PENDING)
+  discoveredCount Int                @default(0)
+  scrapedCount    Int                @default(0)
+  failedCount     Int                @default(0)
   errorMessage    String?
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
 
   user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   jobOffers IngestionJobOffer[]
@@ -178,4 +181,39 @@ model IngestionJobOffer {
 
   @@unique([ingestionJobId, jobOfferId])
   @@index([jobOfferId])
+}
+
+enum AnalysisStatus {
+  PENDING
+  QUEUED
+  RUNNING_CREW
+  AWAITING_RESULT
+  PERSISTING
+  COMPLETED
+  FAILED
+}
+
+// User-scoped access-control boundary. See PRD Section 6 / 8.6.
+model Analysis {
+  id                       String         @id @default(cuid())
+  userId                   String
+  jobOfferId               String
+  cvVersionId              String
+  status                   AnalysisStatus @default(PENDING)
+  s3ResultKey              String?
+  matchScore               Int?
+  resultJSON               Json?
+  errorMessage             String?
+  stepFunctionExecutionArn String?
+  requestedAt              DateTime       @default(now())
+  startedAt                DateTime?
+  completedAt              DateTime?
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobOffer  JobOffer  @relation(fields: [jobOfferId], references: [id], onDelete: Cascade)
+  cvVersion CVVersion @relation(fields: [cvVersionId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([jobOfferId])
+  @@index([cvVersionId])
 }
