@@ -338,7 +338,7 @@ per-task IDs.
 - Verify: given the fixture URL, `Analysis.status=COMPLETED` with `resultJSON`
   matching the Section 8.6 schema; UI renders all 5 categories + score.
 
-**M3 — Mode 2 Ingestion (Listing URL)**
+**M3 — Mode 2 Ingestion (Listing URL)** ✅ COMPLETE
 - Listing extraction (generic heuristic + cap), fan-out to N `JobOffer`s
   reusing M2's pipeline, `IngestionJob` aggregate status.
 - Verify: fixture listing page with 5 links produces exactly 5 linked
