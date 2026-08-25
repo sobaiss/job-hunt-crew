@@ -64,6 +64,25 @@ class Joboffersourcesite(str, enum.Enum):
     OTHER = 'OTHER'
 
 
+class Siteconfigantibotrisklevel(str, enum.Enum):
+    LOW = 'LOW'
+    MEDIUM = 'MEDIUM'
+    HIGH = 'HIGH'
+
+
+class Siteconfigintegrationtype(str, enum.Enum):
+    HTML_SCRAPE = 'HTML_SCRAPE'
+    OFFICIAL_API = 'OFFICIAL_API'
+
+
+class Siteconfigsitekey(str, enum.Enum):
+    LINKEDIN = 'LINKEDIN'
+    INDEED = 'INDEED'
+    FRANCE_TRAVAIL = 'FRANCE_TRAVAIL'
+    WTTJ = 'WTTJ'
+    GLASSDOOR = 'GLASSDOOR'
+
+
 class JobOffer(Base):
     __tablename__ = 'JobOffer'
     __table_args__ = (
@@ -87,6 +106,32 @@ class JobOffer(Base):
 
     Analysis: Mapped[list['Analysis']] = relationship('Analysis', back_populates='JobOffer_')
     IngestionJobOffer: Mapped[list['IngestionJobOffer']] = relationship('IngestionJobOffer', back_populates='JobOffer_')
+
+
+class SiteConfig(Base):
+    __tablename__ = 'SiteConfig'
+    __table_args__ = (
+        PrimaryKeyConstraint('id', name='SiteConfig_pkey'),
+        Index('SiteConfig_siteKey_key', 'siteKey', unique=True)
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    siteKey: Mapped[Siteconfigsitekey] = mapped_column(Enum(Siteconfigsitekey, values_callable=lambda cls: [member.value for member in cls], name='SiteConfigSiteKey'), nullable=False)
+    displayName: Mapped[str] = mapped_column(Text, nullable=False)
+    baseUrl: Mapped[str] = mapped_column(Text, nullable=False)
+    integrationType: Mapped[Siteconfigintegrationtype] = mapped_column(Enum(Siteconfigintegrationtype, values_callable=lambda cls: [member.value for member in cls], name='SiteConfigIntegrationType'), nullable=False)
+    requiresJsRendering: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text('false'))
+    antiBotRiskLevel: Mapped[Siteconfigantibotrisklevel] = mapped_column(Enum(Siteconfigantibotrisklevel, values_callable=lambda cls: [member.value for member in cls], name='SiteConfigAntiBotRiskLevel'), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text('true'))
+    createdAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False, server_default=text('CURRENT_TIMESTAMP'))
+    updatedAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False)
+    searchUrlTemplate: Mapped[Optional[str]] = mapped_column(Text)
+    filterParamMapping: Mapped[Optional[dict]] = mapped_column(JSONB)
+    listItemSelector: Mapped[Optional[str]] = mapped_column(Text)
+    offerLinkSelector: Mapped[Optional[str]] = mapped_column(Text)
+    offerTitleSelector: Mapped[Optional[str]] = mapped_column(Text)
+    apiBaseUrl: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
 
 
 class User(Base):

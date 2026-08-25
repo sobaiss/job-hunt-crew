@@ -345,8 +345,8 @@ per-task IDs.
   `JobOffer` rows; UI shows "N/5 processed".
 
 **M4 — Mode 3 Ingestion (Preconfigured Site + Filters) + SiteConfig adapters**
-- Seed `SiteConfig` for all 5 sites; URL/API construction from filters;
-  France Travail via official API.
+- Seed `SiteConfig` for all 5 sites (✅ model + migration + seed done); URL/API
+  construction from filters; France Travail via official API.
 - Verify: France Travail filters produce a valid API call returning >=1 offer
   end-to-end; LinkedIn/Indeed/Glassdoor/WTTJ adapters pass unit tests against
   saved fixture HTML (live scraping success is explicitly NOT a CI-required

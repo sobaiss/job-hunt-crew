@@ -183,6 +183,46 @@ model IngestionJobOffer {
   @@index([jobOfferId])
 }
 
+enum SiteConfigSiteKey {
+  LINKEDIN
+  INDEED
+  FRANCE_TRAVAIL
+  WTTJ
+  GLASSDOOR
+}
+
+enum SiteConfigIntegrationType {
+  HTML_SCRAPE
+  OFFICIAL_API
+}
+
+enum SiteConfigAntiBotRiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+// Data-driven per-site adapter config, seeded for the 5 sites. See PRD Section 6 / 8.5.
+model SiteConfig {
+  id                  String                     @id @default(cuid())
+  siteKey             SiteConfigSiteKey          @unique
+  displayName         String
+  baseUrl             String
+  searchUrlTemplate   String?
+  filterParamMapping  Json?
+  listItemSelector    String?
+  offerLinkSelector   String?
+  offerTitleSelector  String?
+  integrationType     SiteConfigIntegrationType
+  apiBaseUrl          String?
+  requiresJsRendering Boolean                    @default(false)
+  antiBotRiskLevel    SiteConfigAntiBotRiskLevel
+  enabled             Boolean                    @default(true)
+  notes               String?
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
+}
+
 enum AnalysisStatus {
   PENDING
   QUEUED
