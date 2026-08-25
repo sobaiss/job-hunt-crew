@@ -6,7 +6,7 @@
 # On failure, append a dated log line describing the failure and leave the box unchecked.
 
 ## Milestone M0 - Monorepo Bootstrap
-- [ ] M0-T1: Init pnpm workspace + Turborepo config (pnpm-workspace.yaml, turbo.json)
+- [x] M0-T1: Init pnpm workspace + Turborepo config (pnpm-workspace.yaml, turbo.json)
       Verify: `pnpm install` exits 0
 - [ ] M0-T2: Next.js (App Router, TypeScript) skeleton at apps/web
       Verify: `pnpm --filter web dev` serves HTTP 200 on /
@@ -18,6 +18,8 @@
       Verify: `uv sync` exits 0
 - [ ] M0-T6: GitHub Actions CI skeleton (lint + typecheck on push)
       Verify: workflow file is valid YAML and runs on a test push
+
+2026-08-25 04:02 — M0-T1 — DONE — pnpm-workspace.yaml (apps/*, packages/*) + root package.json (turbo devDependency, packageManager pinned to pnpm@11.23.0 via corepack) + turbo.json (build/dev/lint/typecheck tasks) + .gitignore added; `pnpm install` (via `corepack pnpm install`) exited 0, generated pnpm-lock.yaml, re-run confirmed "Already up to date" / exit 0.
 
 ## Milestone M1 - Auth + CV Upload/Versioning
 - [ ] M1-T1: NextAuth.js wired with Email, Google, LinkedIn providers
