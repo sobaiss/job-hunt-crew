@@ -164,20 +164,24 @@ async def update_ingestion_job_aggregate(session: AsyncSession, ingestion_job_id
     failed_count = sum(1 for offer in linked_offers if offer.extractionStatus == Jobofferextractionstatus.FAILED)
     terminal_count = scraped_count + failed_count
 
+    error_message: str | None = None
     if discovered_count == 0 or terminal_count < discovered_count:
         status = Ingestionjobstatus.RUNNING
     elif failed_count == 0:
         status = Ingestionjobstatus.COMPLETED
     elif failed_count == discovered_count:
         status = Ingestionjobstatus.FAILED
+        error_message = f"All {discovered_count} discovered offers failed to scrape/extract"
     else:
         status = Ingestionjobstatus.PARTIALLY_COMPLETED
+        error_message = f"{failed_count} of {discovered_count} discovered offers failed to scrape/extract"
 
     ingestion_job = await session.get(IngestionJob, ingestion_job_id)
     ingestion_job.discoveredCount = discovered_count
     ingestion_job.scrapedCount = scraped_count
     ingestion_job.failedCount = failed_count
     ingestion_job.status = status
+    ingestion_job.errorMessage = error_message
     ingestion_job.updatedAt = _now()
     await session.commit()
     await session.refresh(ingestion_job)

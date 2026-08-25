@@ -242,6 +242,62 @@ async def test_ingest_france_travail_offers_creates_ready_job_offers_end_to_end(
 
 
 @pytest.mark.asyncio
+async def test_ingest_france_travail_offers_marks_ingestion_job_failed_on_api_error(monkeypatch):
+    """PRD Section 8.5 step 5: "per-site failure ... marks the IngestionJob
+    FAILED/PARTIALLY_COMPLETED with a clear errorMessage — never a silent
+    zero-result return." A search/auth failure must not raise past this
+    function leaving the IngestionJob stuck at its prior status.
+    """
+    monkeypatch.delenv("FRANCE_TRAVAIL_CLIENT_ID", raising=False)
+    monkeypatch.delenv("FRANCE_TRAVAIL_CLIENT_SECRET", raising=False)
+
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id = f"test-user-{uuid.uuid4()}"
+    ingestion_job_id = f"test-job-{uuid.uuid4()}"
+    site_config = _france_travail_site_config()
+
+    async with session_factory() as session:
+        session.add(User(id=user_id, updatedAt=_now()))
+        session.add(
+            IngestionJob(
+                id=ingestion_job_id,
+                userId=user_id,
+                mode=Ingestionmode.SITE_SEARCH,
+                siteConfigId=site_config.id,
+                maxOffers=25,
+                status=Ingestionjobstatus.RUNNING,
+                updatedAt=_now(),
+            )
+        )
+        await session.commit()
+
+    try:
+        async with session_factory() as session:
+            ingestion_job = await session.get(IngestionJob, ingestion_job_id)
+            job_offers = await ingest_france_travail_offers(
+                session, ingestion_job, site_config, {"keywords": "python"}
+            )
+
+        assert job_offers == []
+
+        async with session_factory() as session:
+            ingestion_job = await session.get(IngestionJob, ingestion_job_id)
+            assert ingestion_job.status == Ingestionjobstatus.FAILED
+            assert ingestion_job.errorMessage
+    finally:
+        async with session_factory() as session:
+            job = await session.get(IngestionJob, ingestion_job_id)
+            if job is not None:
+                await session.delete(job)
+            user = await session.get(User, user_id)
+            if user is not None:
+                await session.delete(user)
+            await session.commit()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_ingest_france_travail_offers_reuses_globally_deduplicated_job_offer(monkeypatch):
     monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_ID", "test-client-id")
     monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_SECRET", "test-client-secret")

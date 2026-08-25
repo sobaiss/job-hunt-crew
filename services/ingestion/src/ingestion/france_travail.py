@@ -17,6 +17,7 @@ import httpx
 from py_db.models import (
     IngestionJob,
     IngestionJobOffer,
+    Ingestionjobstatus,
     JobOffer,
     Jobofferextractionstatus,
     Joboffersourcesite,
@@ -145,8 +146,21 @@ async def ingest_france_travail_offers(
     (M3-T3) and reuses any existing globally-deduplicated JobOffer by
     sourceUrl (PRD Section 6). Rolls up the IngestionJob's aggregate counts
     (M3-T5) afterward.
+
+    A search/auth failure (PRD Section 8.5 step 5: "per-site failure ...
+    marks the IngestionJob FAILED/PARTIALLY_COMPLETED with a clear
+    errorMessage — never a silent zero-result return") marks the
+    IngestionJob FAILED with a non-empty errorMessage instead of raising
+    past the caller and leaving it stuck at whatever status it had.
     """
-    offers_raw = await search_offers(site_config, filters, http_client=http_client)
+    try:
+        offers_raw = await search_offers(site_config, filters, http_client=http_client)
+    except FranceTravailApiError as exc:
+        ingestion_job.status = Ingestionjobstatus.FAILED
+        ingestion_job.errorMessage = str(exc)
+        ingestion_job.updatedAt = _now()
+        await session.commit()
+        return []
 
     by_url: dict[str, dict] = {}
     for offre in offers_raw:
