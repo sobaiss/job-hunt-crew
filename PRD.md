@@ -374,7 +374,7 @@ per-task IDs.
   purely from the S3-event Lambda; malformed LLM output yields `FAILED` with
   `errorMessage`, never a stuck state.
 
-**M6 — Dashboard, Multi-CV Comparison, Observability, Guardrails**
+**M6 — Dashboard, Multi-CV Comparison, Observability, Guardrails** ✅ COMPLETE
 - Dashboard listing all analyses (✅ done: `GET /api/analyses`, scoped to the
   authenticated user, plus `/analyses` list UI); compare one `JobOffer`
   against 2+ `CVVersion`s side by side (✅ done: `GET /api/analyses?jobOfferId=`
@@ -384,7 +384,11 @@ per-task IDs.
   `py_db.structured_logging` shared writers, wired into scrape/extract
   (job offer + CV)/crew/persist) + `PipelineEvent` table writes at each
   pipeline stage (✅ done); enforce `INGESTION_MAX_OFFERS` and a per-user
-  daily analysis cap.
+  daily analysis cap (✅ done: `POST /api/ingestion-jobs` reads
+  `INGESTION_MAX_OFFERS` (default 25) instead of a hardcoded constant;
+  `POST /api/analyses` counts the caller's Analysis rows requested since UTC
+  midnight and returns 429 once `DAILY_ANALYSIS_CAP` (default 50) is reached,
+  before creating a row).
 - Verify: side-by-side comparison renders 2 distinct `resultJSON`s for the
   same offer; exceeding a low test-configured daily cap returns a clear
   server-enforced error.

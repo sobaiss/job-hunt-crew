@@ -4,6 +4,17 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { sqs, ANALYSIS_INTAKE_QUEUE_URL } from "@/lib/sqs";
 
+// PRD Section 11: "per-user daily analysis cap (configurable)", a cost-control
+// guardrail (M6-T4). Configurable via env var, default chosen generously for
+// MVP per PRD Section 13's assumption pattern (exact limits need business
+// confirmation post-MVP, same open point as INGESTION_MAX_OFFERS).
+const DEFAULT_DAILY_ANALYSIS_CAP = 50;
+const DAILY_ANALYSIS_CAP = (() => {
+  const raw = process.env.DAILY_ANALYSIS_CAP;
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_DAILY_ANALYSIS_CAP;
+})();
+
 // PRD Section 9 (GET /api/analyses) / M6-T1: list the current user's
 // analyses for the dashboard (status, score, offer title/company),
 // newest first. Scoped by userId — Analysis is a user-owned access-control
@@ -57,6 +68,18 @@ export async function POST(request: Request) {
   }
   if (!cvVersion || cvVersion.userId !== userId) {
     return NextResponse.json({ error: "Unknown cvVersionId" }, { status: 400 });
+  }
+
+  const startOfToday = new Date();
+  startOfToday.setUTCHours(0, 0, 0, 0);
+  const analysesRequestedToday = await prisma.analysis.count({
+    where: { userId, requestedAt: { gte: startOfToday } },
+  });
+  if (analysesRequestedToday >= DAILY_ANALYSIS_CAP) {
+    return NextResponse.json(
+      { error: `Daily analysis limit of ${DAILY_ANALYSIS_CAP} reached. Try again tomorrow.` },
+      { status: 429 },
+    );
   }
 
   const analysis = await prisma.analysis.create({

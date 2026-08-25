@@ -6,8 +6,14 @@ import { prisma } from "@/lib/prisma";
 const POSTED_WITHIN_VALUES = ["24h", "7d", "14d", "30d", "any"] as const;
 const REMOTE_VALUES = ["onsite", "hybrid", "remote"] as const;
 
-// PRD Section 13 default.
+// PRD Section 11/13: `INGESTION_MAX_OFFERS` default 25, configurable via env
+// var so the cap can be adjusted without a code change (cost control).
 const DEFAULT_MAX_OFFERS = 25;
+const INGESTION_MAX_OFFERS = (() => {
+  const raw = process.env.INGESTION_MAX_OFFERS;
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_OFFERS;
+})();
 
 function optionalString(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -73,7 +79,7 @@ export async function POST(request: Request) {
       mode: "SITE_SEARCH",
       siteConfigId,
       filters,
-      maxOffers: DEFAULT_MAX_OFFERS,
+      maxOffers: INGESTION_MAX_OFFERS,
       status: "PENDING",
     },
   });
