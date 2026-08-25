@@ -5,15 +5,14 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { cvFileKey, s3, S3_BUCKET } from "@/lib/s3";
 
-// M1-T4 hardens this with a strict allow-list + a 10MB size cap and rejects
-// before any S3 write. For now this mapping is the minimum needed to satisfy
-// the required, non-nullable CVFileType field.
 const CONTENT_TYPE_TO_FILE_TYPE: Record<string, "PDF" | "DOCX"> = {
   "application/pdf": "PDF",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "DOCX",
 };
 
 const UPLOAD_URL_EXPIRY_SECONDS = 300;
+// PRD Section 13 default: CV max size 10MB.
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 
 export async function POST(request: Request) {
   const session = await auth();
@@ -41,6 +40,12 @@ export async function POST(request: Request) {
   if (!fileType) {
     return NextResponse.json(
       { error: "Unsupported file type; only PDF and DOCX are supported" },
+      { status: 400 },
+    );
+  }
+  if (fileSizeBytes > MAX_FILE_SIZE_BYTES) {
+    return NextResponse.json(
+      { error: `File too large; max size is ${MAX_FILE_SIZE_BYTES / (1024 * 1024)}MB` },
       { status: 400 },
     );
   }
