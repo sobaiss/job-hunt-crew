@@ -254,6 +254,53 @@ async def test_run_crew_task_fails_and_reports_task_failure_on_malformed_output(
 
 
 @pytest.mark.asyncio
+async def test_run_crew_task_fails_and_reports_task_failure_on_malformed_recommendation_output():
+    # Distinct failure path from the comparison-stage malformed-output test
+    # above: comparison succeeds (so AnalysisResult's other fields are ready)
+    # but the second agent's output never validates. Confirms the Pydantic
+    # validation gate applies to the whole pipeline, not just its first step.
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id = f"test-{uuid.uuid4()}"
+    job_offer_id = f"test-{uuid.uuid4()}"
+    cv_version_id = f"test-{uuid.uuid4()}"
+    analysis_id = f"test-{uuid.uuid4()}"
+
+    await _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+    provider = StubLLMProvider([VALID_COMPARISON_OUTPUT, "not valid json"])
+    sfn = StubSfnClient()
+    s3 = _s3_client()
+    key = analysis_result_key(analysis_id)
+
+    try:
+        async with session_factory() as session:
+            with pytest.raises(CrewTaskError):
+                await run_crew_task(
+                    session,
+                    analysis_id,
+                    llm_provider=provider,
+                    s3_client=s3,
+                    sfn_client=sfn,
+                    task_token="test-task-token",
+                )
+
+        async with session_factory() as session:
+            reloaded = await session.get(Analysis, analysis_id)
+            assert reloaded.status == Analysisstatus.FAILED
+            assert reloaded.errorMessage
+            assert reloaded.s3ResultKey is None
+            assert reloaded.resultJSON is None
+
+        assert sfn.successes == []
+        assert len(sfn.failures) == 1
+
+        with pytest.raises(s3.exceptions.NoSuchKey):
+            s3.get_object(Bucket=S3_BUCKET, Key=key)
+    finally:
+        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+
+
+@pytest.mark.asyncio
 async def test_run_crew_task_fails_when_cv_not_parsed_without_calling_llm():
     engine = make_engine()
     session_factory = make_session_factory(engine)

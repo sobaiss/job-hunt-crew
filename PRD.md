@@ -364,8 +364,10 @@ per-task IDs.
   waitForTaskToken) done; Fargate task (runs the crew, writes validated JSON
   to S3, calls SendTaskSuccess) done; S3-event persistence (PersistResultLambda,
   the sole writer of terminal Analysis state) done; Step Functions Catch/retry
-  wiring (3x exponential backoff, MarkAnalysisFailed) done; remaining M5
-  hardening (malformed-output-specific tests, frontend polling) still pending.
+  wiring (3x exponential backoff, MarkAnalysisFailed) done; malformed-LLM-output
+  handling (Pydantic validation gate before both the S3 write and the Postgres
+  persist, each independently yielding Analysis.status=FAILED with no partial
+  write) done; remaining M5 hardening (frontend polling) still pending.
 - Verify: triggering analysis returns 202 without blocking; result JSON
   appears at the documented S3 key; Postgres `Analysis` reaches `COMPLETED`
   purely from the S3-event Lambda; malformed LLM output yields `FAILED` with
