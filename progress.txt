@@ -10,7 +10,7 @@
       Verify: `pnpm install` exits 0
 - [x] M0-T2: Next.js (App Router, TypeScript) skeleton at apps/web
       Verify: `pnpm --filter web dev` serves HTTP 200 on /
-- [ ] M0-T3: packages/prisma with schema.prisma containing only NextAuth models (User, Account, Session, VerificationToken)
+- [x] M0-T3: packages/prisma with schema.prisma containing only NextAuth models (User, Account, Session, VerificationToken)
       Verify: `pnpm prisma validate` succeeds
 - [ ] M0-T4: docker-compose Postgres service for local dev
       Verify: `docker compose up -d postgres && pnpm prisma migrate dev` succeeds against it
@@ -21,6 +21,7 @@
 
 2026-08-25 04:02 — M0-T1 — DONE — pnpm-workspace.yaml (apps/*, packages/*) + root package.json (turbo devDependency, packageManager pinned to pnpm@11.23.0 via corepack) + turbo.json (build/dev/lint/typecheck tasks) + .gitignore added; `pnpm install` (via `corepack pnpm install`) exited 0, generated pnpm-lock.yaml, re-run confirmed "Already up to date" / exit 0.
 2026-08-25 04:10 — M0-T2 — DONE — Scaffolded apps/web via create-next-app (App Router, TypeScript, Tailwind, ESLint), stripped the generator's standalone lockfile/node_modules and linked it into the root pnpm workspace (`pnpm install` exit 0, approved unrs-resolver build script). `pnpm --filter web dev` started Turbopack dev server in ~250ms; `curl http://localhost:3000/` returned HTTP_STATUS:200, log confirmed `GET / 200`.
+2026-08-25 05:05 — M0-T3 — DONE — Added packages/prisma (@job-hunt-crew/prisma) with schema.prisma containing only the NextAuth Prisma-adapter models (User, Account, Session, VerificationToken; provider postgresql, url via DATABASE_URL). package.json declares prisma/@prisma/client and a `validate` script; committed .env.example (local .env is gitignored, matches root .gitignore's `.env` pattern) with a placeholder local DATABASE_URL for the upcoming M0-T4 docker-compose Postgres. Note: system corepack's pinned pnpm@11.23.0 shim is currently broken in this sandbox (`ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING` even via `corepack pnpm -v`); worked around by installing pnpm@9.15.9 globally via `sudo npm install -g pnpm@9` — root `pnpm install` then succeeded. Verify: `pnpm --filter @job-hunt-crew/prisma exec prisma validate` -> "The schema at schema.prisma is valid". Workspace-wide `pnpm turbo run typecheck lint` still passes (2/2 tasks, web package only; prisma package has no lint/typecheck script).
 
 ## Milestone M1 - Auth + CV Upload/Versioning
 - [ ] M1-T1: NextAuth.js wired with Email, Google, LinkedIn providers
