@@ -1,0 +1,11 @@
+[tool.uv.workspace]
+members = ["services/*", "packages/py-db"]
+
+[tool.uv]
+package = false
+
+[project]
+name = "job-hunt-crew"
+version = "0.0.0"
+requires-python = ">=3.11"
+dependencies = []
