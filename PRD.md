@@ -468,8 +468,8 @@ per-task IDs.
   `X-Internal-Api-Secret`, enforced on every route except `/healthz`) added
   (T3). Phase 2 underway: `/internal/users/upsert` (idempotent by email) and
   `/internal/auth/verification-tokens[/consume]` (single-use, backed by
-  py-db) added to `services/api` (T4); rewriting `apps/web/auth.ts` to JWT
-  sessions against these endpoints (T5) and the OAuth regression check (T6)
+  py-db) added to `services/api` (T4); `apps/web/auth.ts` rewritten to JWT
+  sessions backed by these endpoints (T5) — the OAuth regression check (T6)
   still pending.
 - Verify: full M1→M6 user journey passes end-to-end through the fully
   migrated path; `apps/web` has no runtime `@prisma/client`/`@aws-sdk/*`
