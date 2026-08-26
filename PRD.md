@@ -486,8 +486,14 @@ per-task IDs.
   and single-isDefault transaction verbatim, plus a new `services/api` S3
   client for the presigned-upload flow (the `api` docker-compose service now
   has S3_* env vars pointed at the `minio` container, previously missing
-  since no route needed S3 before this task); the Next.js routes are not yet
-  swapped (that's T10).
+  since no route needed S3 before this task); `apps/web/app/api/cv-versions/route.ts`
+  and `[id]/route.ts` (T10) swapped to thin proxies via the same `proxyToApi`
+  helper, Prisma/`@aws-sdk/*` imports and all validation/S3-presign/transaction
+  logic removed from `apps/web` for this domain (now owned entirely by
+  `services/api`); also corrected the `api` docker-compose service's
+  `S3_ENDPOINT` to the browser-reachable `http://localhost:9000` (presigned
+  URLs are signed with this host baked in, so the docker-network hostname
+  `minio` doesn't work for the browser's subsequent PUT).
 - Verify: full M1→M6 user journey passes end-to-end through the fully
   migrated path; `apps/web` has no runtime `@prisma/client`/`@aws-sdk/*`
   dependency; stopping the `api` service mid-flow produces a clear

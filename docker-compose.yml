@@ -88,7 +88,12 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/job_hunt_crew
       INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-dev-internal-api-secret}
-      S3_ENDPOINT: http://minio:9000
+      # boto3's generate_presigned_url performs no network I/O — it only signs
+      # the URL with this value baked in as the host. Must be the *browser*-
+      # reachable MinIO address (matching apps/web's pre-M7 S3_ENDPOINT), not
+      # the docker-network hostname `minio`, or the browser's PUT to the
+      # presigned URL can't resolve it.
+      S3_ENDPOINT: http://localhost:9000
       S3_REGION: us-east-1
       S3_BUCKET: job-hunt-crew
       S3_FORCE_PATH_STYLE: "true"
