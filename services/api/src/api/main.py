@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from py_db.session import make_engine, make_session_factory
 
 from .internal import router as internal_router
+from .v1 import router as v1_router
 
 
 @asynccontextmanager
@@ -23,6 +24,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="job-hunt-crew api", lifespan=lifespan)
 app.include_router(internal_router)
+app.include_router(v1_router)
 
 INTERNAL_API_SECRET_HEADER = "x-internal-api-secret"
 
