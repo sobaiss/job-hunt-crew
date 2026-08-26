@@ -466,7 +466,11 @@ per-task IDs.
   `api` service (port 8000, depends on Postgres healthy) added (T2);
   shared-secret auth dependency (`INTERNAL_API_SECRET` via
   `X-Internal-Api-Secret`, enforced on every route except `/healthz`) added
-  (T3). Phase 2 (auth/session strategy) still pending.
+  (T3). Phase 2 underway: `/internal/users/upsert` (idempotent by email) and
+  `/internal/auth/verification-tokens[/consume]` (single-use, backed by
+  py-db) added to `services/api` (T4); rewriting `apps/web/auth.ts` to JWT
+  sessions against these endpoints (T5) and the OAuth regression check (T6)
+  still pending.
 - Verify: full M1→M6 user journey passes end-to-end through the fully
   migrated path; `apps/web` has no runtime `@prisma/client`/`@aws-sdk/*`
   dependency; stopping the `api` service mid-flow produces a clear

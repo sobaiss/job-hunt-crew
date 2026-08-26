@@ -108,6 +108,7 @@ source = { editable = "services/api" }
 dependencies = [
     { name = "fastapi" },
     { name = "py-db" },
+    { name = "pydantic" },
     { name = "uvicorn" },
 ]
 
@@ -121,6 +122,7 @@ dev = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "py-db", editable = "packages/py-db" },
+    { name = "pydantic", specifier = ">=2.0" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]
 
