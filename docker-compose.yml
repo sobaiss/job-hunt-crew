@@ -87,6 +87,7 @@ services:
       - "8000:8000"
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/job_hunt_crew
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-dev-internal-api-secret}
     depends_on:
       postgres:
         condition: service_healthy

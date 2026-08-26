@@ -461,11 +461,12 @@ per-task IDs.
   `@prisma/client`/`@aws-sdk/*` from `apps/web`, adding Python CI) happens
   only once every route is swapped. External route paths and the async
   pipeline (Section 10) do not change. Full T1-T18 task breakdown with
-  per-task verification commands lives in `progress.txt`. Phase 1 in
-  progress: `services/api` scaffolded with `GET /healthz` (T1 done);
-  Dockerfile + a compose `api` service (port 8000, depends on Postgres
-  healthy) added (T2 done); shared-secret auth dependency (T3) still
-  pending.
+  per-task verification commands lives in `progress.txt`. Phase 1 done:
+  `services/api` scaffolded with `GET /healthz` (T1); Dockerfile + a compose
+  `api` service (port 8000, depends on Postgres healthy) added (T2);
+  shared-secret auth dependency (`INTERNAL_API_SECRET` via
+  `X-Internal-Api-Secret`, enforced on every route except `/healthz`) added
+  (T3). Phase 2 (auth/session strategy) still pending.
 - Verify: full M1→M6 user journey passes end-to-end through the fully
   migrated path; `apps/web` has no runtime `@prisma/client`/`@aws-sdk/*`
   dependency; stopping the `api` service mid-flow produces a clear
