@@ -469,8 +469,13 @@ per-task IDs.
   (T3). Phase 2 underway: `/internal/users/upsert` (idempotent by email) and
   `/internal/auth/verification-tokens[/consume]` (single-use, backed by
   py-db) added to `services/api` (T4); `apps/web/auth.ts` rewritten to JWT
-  sessions backed by these endpoints (T5) — the OAuth regression check (T6)
-  still pending.
+  sessions backed by these endpoints (T5); the OAuth regression check (T6)
+  confirmed Google/LinkedIn sign-in produces a session with `user.id` set
+  and a matching Postgres `User` row (matched by email), with no `Session`
+  row created, holding JWT strategy for OAuth too — verified via a temporary
+  mock OAuth provider exercising the same code path Google/LinkedIn use,
+  since no live OAuth credentials are available in this environment. Phase 3
+  (CRUD domain migration, T7-T14) is next.
 - Verify: full M1→M6 user journey passes end-to-end through the fully
   migrated path; `apps/web` has no runtime `@prisma/client`/`@aws-sdk/*`
   dependency; stopping the `api` service mid-flow produces a clear
