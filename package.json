@@ -2,7 +2,7 @@
   "name": "job-hunt-crew",
   "private": true,
   "engines": {
-    "node": ">=20"
+    "node": ">=22.13"
   },
   "packageManager": "pnpm@11.23.0",
   "scripts": {
