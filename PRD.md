@@ -477,7 +477,10 @@ per-task IDs.
   since no live OAuth credentials are available in this environment. Phase 3
   (CRUD domain migration, T7-T14) underway: `GET /v1/site-configs` (T7)
   added to `services/api`, mirroring the current Next.js route's
-  `{siteConfigs: [...]}` shape (enabled-only, ordered by displayName).
+  `{siteConfigs: [...]}` shape (enabled-only, ordered by displayName);
+  `apps/web/app/api/site-configs/route.ts` (T8) swapped to a thin proxy
+  (via a new shared `proxyToApi` helper in `apps/web/lib/internal-api.ts`)
+  forwarding to T7's endpoint, Prisma import removed from this route.
 - Verify: full M1→M6 user journey passes end-to-end through the fully
   migrated path; `apps/web` has no runtime `@prisma/client`/`@aws-sdk/*`
   dependency; stopping the `api` service mid-flow produces a clear

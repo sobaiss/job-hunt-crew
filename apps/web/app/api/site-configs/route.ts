@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { prisma } from "@/lib/prisma";
+import { proxyToApi } from "@/lib/internal-api";
 
 export async function GET() {
   const session = await auth();
@@ -8,10 +8,5 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const siteConfigs = await prisma.siteConfig.findMany({
-    where: { enabled: true },
-    orderBy: { displayName: "asc" },
-  });
-
-  return NextResponse.json({ siteConfigs });
+  return proxyToApi("/v1/site-configs");
 }
