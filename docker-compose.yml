@@ -75,6 +75,22 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  # services/api (FastAPI): sole owner of Postgres/S3/SQS per PRD Section 7,
+  # called only by apps/web's BFF proxy (M7). Built from the repo root so uv
+  # can resolve the workspace (see services/api/Dockerfile).
+  api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/job_hunt_crew
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   postgres-data:
   minio-data:
