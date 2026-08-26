@@ -516,7 +516,11 @@ per-task IDs.
   `?jobOfferId=` query string through; `prisma`/`@aws-sdk/client-sqs`
   imports and all daily-cap/ownership/enqueue logic removed from `apps/web`
   for this domain — Phase 3 (all 4 CRUD domains: site-configs, cv-versions,
-  ingestion-jobs, analyses) is now complete.
+  ingestion-jobs, analyses) is now complete. Phase 4 (cleanup) underway:
+  `apps/web/lib/{prisma,s3,sqs}.ts` deleted and `@prisma/client`,
+  `@auth/prisma-adapter`, `@aws-sdk/client-s3`, `@aws-sdk/client-sqs`,
+  `@aws-sdk/s3-request-presigner` removed from `apps/web/package.json` (T15)
+  — `apps/web` now has zero runtime `@prisma/client`/`@aws-sdk/*` references.
 - Verify: full M1→M6 user journey passes end-to-end through the fully
   migrated path; `apps/web` has no runtime `@prisma/client`/`@aws-sdk/*`
   dependency; stopping the `api` service mid-flow produces a clear
