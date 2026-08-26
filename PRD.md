@@ -521,6 +521,9 @@ per-task IDs.
   `@auth/prisma-adapter`, `@aws-sdk/client-s3`, `@aws-sdk/client-sqs`,
   `@aws-sdk/s3-request-presigner` removed from `apps/web/package.json` (T15)
   — `apps/web` now has zero runtime `@prisma/client`/`@aws-sdk/*` references.
+  A `python-tests` CI job was added (T16) covering the three previously
+  ungated Python services (`services/api`, `services/ingestion`,
+  `services/analysis`).
 - Verify: full M1→M6 user journey passes end-to-end through the fully
   migrated path; `apps/web` has no runtime `@prisma/client`/`@aws-sdk/*`
   dependency; stopping the `api` service mid-flow produces a clear

@@ -31,3 +31,50 @@ jobs:
 
       - name: Typecheck
         run: pnpm run typecheck
+
+  python-tests:
+    name: Python Tests (services/api, ingestion, analysis)
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/job_hunt_crew?schema=public
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Start Postgres/MinIO/ElasticMQ
+        run: docker compose up -d postgres minio minio-createbucket elasticmq --wait
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply Prisma migrations
+        run: pnpm --filter @job-hunt-crew/prisma exec prisma migrate deploy
+
+      - name: Seed SiteConfig rows
+        run: pnpm --filter @job-hunt-crew/prisma exec prisma db seed
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: uv sync
+
+      - name: Run services/api tests
+        run: uv run --package api pytest services/api/tests -q
+
+      - name: Run services/ingestion tests
+        run: uv run --package ingestion pytest services/ingestion/tests -q
+
+      - name: Run services/analysis tests
+        run: uv run --package analysis pytest services/analysis/tests -q
