@@ -1,0 +1,26 @@
+[project]
+name = "api"
+version = "0.0.0"
+description = "Unified Python backend (FastAPI): sole owner of Postgres/S3/SQS, called only by apps/web's BFF proxy."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "py-db",
+]
+
+[tool.uv.sources]
+py-db = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/api"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.27",
+]

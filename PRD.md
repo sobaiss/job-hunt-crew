@@ -67,9 +67,12 @@ or industry, wants fast objective feedback on fit before applying.
 | Frontend | Next.js (App Router), TypeScript | User-specified |
 | Frontend hosting | AWS — OpenNext on Lambda+CloudFront, or Fargate | User-specified mono-cloud preference |
 | Auth | NextAuth.js (Auth.js): Email, Google, LinkedIn providers | User-specified |
-| Schema source of truth | Prisma (schema + migrations), used directly by Next.js | User-specified |
+| Session strategy | NextAuth JWT (no DB adapter, no Prisma at runtime); `services/api`'s Postgres `User` table is the source of truth, kept in sync via an upsert call on sign-in (see M7) | Frontend must not touch Postgres directly — backend is the sole DB owner |
+| Schema source of truth | Prisma (schema + migrations) — schema/migration tooling only; `apps/web` has no runtime dependency on `@prisma/client` post-M7 | User-specified; amended by M7 (frontend/backend separation) |
 | Python DB access | SQLAlchemy (async, asyncpg); models regenerated from the live Postgres schema (via `sqlacodegen`) after every Prisma migration — never a second independent migration source | Avoids dual-schema drift, explicit user requirement |
 | Backend language | Python 3.11+ | User-specified |
+| Backend API framework | FastAPI (`services/api`) | Matches the existing async SQLAlchemy (`py-db`) + Pydantic-first validation already used in `services/analysis` |
+| Backend API deployment | AWS Lambda + API Gateway (HTTP API) | Consistent with the existing Lambda-for-short-steps pattern (Fargate is reserved specifically for the CrewAI run's >15-min ceiling, which doesn't apply to CRUD/presign/poll). Needs an RDS Proxy (or equivalent pooler) in front of Postgres to avoid Lambda-concurrency connection exhaustion — a follow-on infra decision, not resolved by this PRD |
 | AI orchestration | CrewAI multi-agent crew (extraction, comparison, recommendation agents) | User-specified; repo name confirms intent |
 | LLM provider | Abstracted provider interface supporting both Anthropic Claude and OpenAI, selected via env var (`LLM_PROVIDER=anthropic\|openai`), model id also via env var | User-specified: configurable/both |
 | Compute orchestration | AWS Step Functions (`waitForTaskToken` pattern for the crew step) coordinating Lambda; Fargate task for the crew run itself (exceeds Lambda's 15-min ceiling) | Matches user's async trigger → S3 → persist description |
@@ -85,8 +88,12 @@ or industry, wants fast objective feedback on fit before applying.
 ```
 job-hunt-crew/
 ├── apps/
-│   └── web/                       # Next.js (App Router), NextAuth, Prisma client usage
+│   └── web/                       # Next.js (App Router), NextAuth (JWT) — pure UI + thin BFF
+│   │                                #   proxy to services/api, no runtime Prisma/S3/SQS (see M7)
 ├── services/
+│   ├── api/                        # Python (FastAPI): CRUD (CV/ingestion/analyses/site-configs),
+│   │                                #   S3 presign, SQS enqueue, auth upsert/token endpoints — sole
+│   │                                #   owner of Postgres/S3/SQS, called only by apps/web's BFF proxy (see M7)
 │   ├── ingestion/                 # Python: scrapers, Mode 1/2/3 adapters, Lambda handlers
 │   ├── analysis/                  # Python: CrewAI crew/agents/tasks, Fargate task entrypoint
 │   └── persistence/                # Python: S3-event Lambda handlers -> Postgres via SQLAlchemy
@@ -162,16 +169,38 @@ boundary — every query must filter by the authenticated `userId`.
 
 ## 7. System Architecture (narrative)
 
-Next.js frontend is the sole entry point for the candidate. It talks to its own
-API routes (BFF), which read/write via Prisma for synchronous data (CVs,
-offers, ingestion job status, analysis status) and enqueue async work via SQS.
+Next.js frontend is the sole entry point for the candidate, and handles user
+interaction only — it holds no direct connection to Postgres, S3, or SQS.
+Its own API routes (`app/api/*`) remain in place as a thin BFF proxy layer:
+each route validates the caller's session and forwards the request to
+`services/api` (FastAPI), which is the sole owner of Postgres/S3/SQS for all
+synchronous data (CVs, offers, ingestion job status, analysis status) and
+enqueues async work via SQS. `services/api` is called only from `apps/web`'s
+server-side route handlers, authenticated via a shared internal secret plus
+the caller's `userId` (see Section 14 — this is an MVP header-trust boundary,
+not independent request-signature verification).
+
+Auth is a partial exception, by necessity: NextAuth.js still runs inside
+`apps/web` because it owns the OAuth/magic-link handshake and the session
+cookie, which are inherently frontend-adjacent concerns. It runs in JWT mode
+(no database adapter) — on every successful sign-in it calls `services/api`'s
+`/internal/users/upsert` to get back the canonical `userId`, which is embedded
+in the JWT; the Email (magic-link) provider's verification tokens are minted
+and consumed via `/internal/auth/verification-tokens[/consume]` on the same
+backend, so no Postgres table is ever read or written directly from `apps/web`.
+
 Python services run as Lambda (short steps) and Fargate (the CrewAI crew run,
 which can exceed Lambda's timeout), orchestrated by AWS Step Functions using the
 `waitForTaskToken` pattern so the state machine waits for the crew without
 holding a Lambda open. Crew output is validated and written to S3; an S3
 `ObjectCreated` event triggers the sole writer of terminal state
 (`PersistResultLambda`), which persists to Postgres via SQLAlchemy. The frontend
-polls analysis status until terminal.
+polls analysis status (via the BFF proxy → `services/api`) until terminal.
+
+This BFF-proxy/backend split is the target state introduced by Milestone M7
+(Section 12); M0-M6 shipped with `apps/web`'s route handlers talking to
+Prisma/S3/SQS directly, which M7 migrates away from without changing any
+externally-visible route path or the async pipeline described above.
 
 ## 8. Functional Requirements
 
@@ -260,7 +289,14 @@ write, and again before Postgres persistence — malformed payload →
   strengths/weaknesses, suggestions) + score.
 - Side-by-side comparison of one `JobOffer` against 2+ `CVVersion`s.
 
-## 9. API Surface (Next.js API routes, BFF)
+## 9. API Surface
+
+### 9.1 Next.js BFF routes (`apps/web/app/api/*`)
+
+Paths are unchanged from the MVP; post-M7 each is a thin proxy — validates the
+session, forwards to the matching `services/api` endpoint below with the
+internal shared secret + `userId`, passes the response through. No
+Prisma/S3/SQS access, no business logic.
 
 - `POST /api/cv-versions` — create + presigned upload URL
 - `GET /api/cv-versions` — list current user's CVs
@@ -271,6 +307,25 @@ write, and again before Postgres persistence — malformed payload →
 - `POST /api/analyses` — request analysis for (jobOfferId, cvVersionId) → 202 + id
 - `GET /api/analyses/:id` — poll status/result
 - `GET /api/analyses?jobOfferId=` — list analyses for side-by-side comparison
+- `/api/auth/[...nextauth]` — NextAuth handshake (JWT strategy; see Section 4, 7)
+
+### 9.2 `services/api` surface (FastAPI, internal — not internet-facing)
+
+Sole owner of Postgres/S3/SQS. Called only by the BFF routes above (`/v1/*`)
+and by `apps/web/auth.ts` during sign-in (`/internal/*`).
+
+- `GET/POST /v1/cv-versions`, `PATCH /v1/cv-versions/{id}` — mirrors 9.1;
+  presigned upload URL is minted here via `boto3` (browser still PUTs the
+  file bytes directly to S3, unchanged from the MVP)
+- `GET/POST /v1/ingestion-jobs`, `GET /v1/ingestion-jobs/{id}`
+- `GET /v1/site-configs`
+- `GET/POST /v1/analyses`, `GET /v1/analyses/{id}`
+- `POST /internal/users/upsert` — `{email, name?, image?}` → `{userId}`,
+  called once per NextAuth sign-in
+- `POST /internal/auth/verification-tokens` /
+  `POST /internal/auth/verification-tokens/consume` — backs the Email
+  (magic-link) provider's `Adapter.createVerificationToken`/`useVerificationToken`,
+  single-use (second consume of the same token is rejected)
 
 ## 10. Async Pipeline — End-to-End Sequence
 
@@ -393,6 +448,26 @@ per-task IDs.
   same offer; exceeding a low test-configured daily cap returns a clear
   server-enforced error.
 
+**M7 — Extract Unified Python Backend (`services/api`)**
+- Migrates M0-M6's shipped code from Next.js BFF routes owning Prisma/S3/SQS
+  directly to the target architecture in Section 7: a new `services/api`
+  (FastAPI) becomes the sole owner of Postgres/S3/SQS; `apps/web`'s
+  `app/api/*` routes keep their exact paths but become thin session-validating
+  proxies (Section 9.1/9.2). Auth moves NextAuth to JWT sessions (no Prisma
+  adapter), backed by new `/internal/users/upsert` and verification-token
+  endpoints on `services/api`. Migration is additive-first and
+  domain-by-domain (site-configs → cv-versions → ingestion-jobs → analyses)
+  so the shipped system stays working at every checkpoint; cleanup (dropping
+  `@prisma/client`/`@aws-sdk/*` from `apps/web`, adding Python CI) happens
+  only once every route is swapped. External route paths and the async
+  pipeline (Section 10) do not change. Full T1-T18 task breakdown with
+  per-task verification commands lives in `progress.txt`.
+- Verify: full M1→M6 user journey passes end-to-end through the fully
+  migrated path; `apps/web` has no runtime `@prisma/client`/`@aws-sdk/*`
+  dependency; stopping the `api` service mid-flow produces a clear
+  upstream-unavailable error from the BFF, not a hang; cross-user isolation
+  still holds against the new endpoints.
+
 ## 13. Assumptions (defaults chosen on the user's behalf, changeable)
 
 - CV formats: PDF + DOCX only; scanned/image PDFs (needing OCR) out of scope.
@@ -431,6 +506,23 @@ per-task IDs.
 - **Cost risk:** uncapped listing/site-search ingestion could trigger many LLM
   calls; mitigated by `INGESTION_MAX_OFFERS` and a per-user daily analysis cap
   (M6), exact limits need business confirmation post-MVP.
+- **Header-trust boundary (M7):** `apps/web`'s BFF proxy authenticates to
+  `services/api` via a shared secret (`INTERNAL_API_SECRET`) plus a
+  `userId` header, not independent verification of a signed request —
+  NextAuth v5's default JWT is an encrypted JWE, non-trivial to verify from
+  Python. Tenant isolation therefore rests on network-layer access control
+  (`services/api` must not be reachable except from `apps/web`'s server-side
+  code), not application-layer signature verification. Accepted as an MVP
+  tradeoff; independently verifying a signed JWT is the documented post-MVP
+  hardening path.
+- **Session invalidation regression (M7):** moving from NextAuth's DB-backed
+  sessions to JWT means a session can no longer be revoked server-side
+  on demand; mitigated by a short `maxAge` (15-60 min, vs. NextAuth's 30-day
+  default) rather than unbounded validity.
+- **Extra network hop (M7):** every CRUD call — including the 3s analysis
+  status poll (Section 10, step 11) — now crosses `apps/web` → `services/api`
+  instead of hitting Prisma in-process. Accepted as a permanent cost of the
+  frontend/backend separation, not a reason to reconsider it.
 
 ## 15. Out of Scope
 
