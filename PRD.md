@@ -480,7 +480,14 @@ per-task IDs.
   `{siteConfigs: [...]}` shape (enabled-only, ordered by displayName);
   `apps/web/app/api/site-configs/route.ts` (T8) swapped to a thin proxy
   (via a new shared `proxyToApi` helper in `apps/web/lib/internal-api.ts`)
-  forwarding to T7's endpoint, Prisma import removed from this route.
+  forwarding to T7's endpoint, Prisma import removed from this route. Phase 3
+  continues: `GET/POST /v1/cv-versions` + `PATCH /v1/cv-versions/{id}` (T9)
+  added to `services/api`, porting the PDF/DOCX allow-list, 10MB size cap,
+  and single-isDefault transaction verbatim, plus a new `services/api` S3
+  client for the presigned-upload flow (the `api` docker-compose service now
+  has S3_* env vars pointed at the `minio` container, previously missing
+  since no route needed S3 before this task); the Next.js routes are not yet
+  swapped (that's T10).
 - Verify: full M1→M6 user journey passes end-to-end through the fully
   migrated path; `apps/web` has no runtime `@prisma/client`/`@aws-sdk/*`
   dependency; stopping the `api` service mid-flow produces a clear
