@@ -511,6 +511,12 @@ per-task IDs.
   `analysis-intake` queue, via a new `services/api` SQS client mirroring the
   S3 client's per-service-duplication precedent) verbatim from the current
   Next.js routes, including the `jobOffer`/`cvVersion` nested include shape.
+  `apps/web/app/api/analyses/route.ts` and `[id]/route.ts` (T14) swapped to
+  thin proxies via the same `proxyToApi` helper, forwarding the list route's
+  `?jobOfferId=` query string through; `prisma`/`@aws-sdk/client-sqs`
+  imports and all daily-cap/ownership/enqueue logic removed from `apps/web`
+  for this domain — Phase 3 (all 4 CRUD domains: site-configs, cv-versions,
+  ingestion-jobs, analyses) is now complete.
 - Verify: full M1→M6 user journey passes end-to-end through the fully
   migrated path; `apps/web` has no runtime `@prisma/client`/`@aws-sdk/*`
   dependency; stopping the `api` service mid-flow produces a clear
