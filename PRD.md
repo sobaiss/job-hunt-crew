@@ -493,7 +493,13 @@ per-task IDs.
   `services/api`); also corrected the `api` docker-compose service's
   `S3_ENDPOINT` to the browser-reachable `http://localhost:9000` (presigned
   URLs are signed with this host baked in, so the docker-network hostname
-  `minio` doesn't work for the browser's subsequent PUT).
+  `minio` doesn't work for the browser's subsequent PUT). Phase 3 continues:
+  `POST /v1/ingestion-jobs` + `GET /v1/ingestion-jobs/{id}` (T11) added to
+  `services/api`, porting the mode/site-config/filter validation and the
+  `INGESTION_MAX_OFFERS` default (25, env-overridable) verbatim from the
+  current Next.js route, including its pre-existing gap (POST only creates
+  the row; no scraping/extraction is triggered) — preserved as-is per this
+  task's scope, not a regression introduced here.
 - Verify: full M1→M6 user journey passes end-to-end through the fully
   migrated path; `apps/web` has no runtime `@prisma/client`/`@aws-sdk/*`
   dependency; stopping the `api` service mid-flow produces a clear
