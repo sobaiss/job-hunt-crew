@@ -523,7 +523,12 @@ per-task IDs.
   — `apps/web` now has zero runtime `@prisma/client`/`@aws-sdk/*` references.
   A `python-tests` CI job was added (T16) covering the three previously
   ungated Python services (`services/api`, `services/ingestion`,
-  `services/analysis`).
+  `services/analysis`). The Turborepo build graph was confirmed still green
+  against the pruned `apps/web/package.json` (T17): `pnpm install` exits 0;
+  `pnpm run build`'s default Turbopack path hits a pre-existing sandbox-local
+  filesystem-race panic (flagged repeatedly since M2-T7, unrelated to this
+  dependency pruning), so the build graph itself was confirmed via
+  `next build --webpack`, which compiles all 11 routes cleanly.
 - Verify: full M1→M6 user journey passes end-to-end through the fully
   migrated path; `apps/web` has no runtime `@prisma/client`/`@aws-sdk/*`
   dependency; stopping the `api` service mid-flow produces a clear
