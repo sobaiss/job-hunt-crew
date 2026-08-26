@@ -406,6 +406,10 @@ class IngestionJobDetailResponse(IngestionJobResponse):
     jobOffers: list[IngestionJobOfferResponse]
 
 
+class GetIngestionJobResponse(BaseModel):
+    ingestionJob: IngestionJobDetailResponse
+
+
 def _ingestion_job_detail_response(row: IngestionJob) -> IngestionJobDetailResponse:
     return IngestionJobDetailResponse(
         **_ingestion_job_response(row).model_dump(),
@@ -491,12 +495,12 @@ async def create_ingestion_job(
     return CreateIngestionJobResponse(ingestionJob=_ingestion_job_response(ingestion_job))
 
 
-@router.get("/ingestion-jobs/{ingestion_job_id}", response_model=IngestionJobDetailResponse)
+@router.get("/ingestion-jobs/{ingestion_job_id}", response_model=GetIngestionJobResponse)
 async def get_ingestion_job(
     ingestion_job_id: str,
     user_id: str = Depends(require_user_id),
     session: AsyncSession = Depends(get_session),
-) -> IngestionJobDetailResponse:
+) -> GetIngestionJobResponse:
     stmt = (
         select(IngestionJob)
         .options(selectinload(IngestionJob.IngestionJobOffer).selectinload(IngestionJobOffer.JobOffer_))
@@ -506,4 +510,4 @@ async def get_ingestion_job(
     if ingestion_job is None or ingestion_job.userId != user_id:
         raise HTTPException(status_code=404, detail="Not found")
 
-    return _ingestion_job_detail_response(ingestion_job)
+    return GetIngestionJobResponse(ingestionJob=_ingestion_job_detail_response(ingestion_job))

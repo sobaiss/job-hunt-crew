@@ -499,7 +499,13 @@ per-task IDs.
   `INGESTION_MAX_OFFERS` default (25, env-overridable) verbatim from the
   current Next.js route, including its pre-existing gap (POST only creates
   the row; no scraping/extraction is triggered) — preserved as-is per this
-  task's scope, not a regression introduced here.
+  task's scope, not a regression introduced here. `apps/web/app/api/ingestion-jobs/route.ts`
+  and `[id]/route.ts` (T12) swapped to thin proxies via the same `proxyToApi`
+  helper, Prisma import and all validation logic removed from `apps/web` for
+  this domain; while wiring this up, corrected a latent T11 bug where
+  `GET /v1/ingestion-jobs/{id}` returned its payload unwrapped instead of
+  under an `{"ingestionJob": ...}` envelope (the shape both the pre-migration
+  route and the status-page UI require).
 - Verify: full M1→M6 user journey passes end-to-end through the fully
   migrated path; `apps/web` has no runtime `@prisma/client`/`@aws-sdk/*`
   dependency; stopping the `api` service mid-flow produces a clear

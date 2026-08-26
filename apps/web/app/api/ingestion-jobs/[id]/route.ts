@@ -1,26 +1,15 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { prisma } from "@/lib/prisma";
+import { proxyToApi } from "@/lib/internal-api";
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const userId = session.user.id;
   const { id } = await params;
 
-  const ingestionJob = await prisma.ingestionJob.findUnique({
-    where: { id },
-    include: {
-      jobOffers: {
-        include: { jobOffer: true },
-      },
-    },
+  return proxyToApi(`/v1/ingestion-jobs/${id}`, {
+    headers: { "X-User-Id": session.user.id },
   });
-  if (!ingestionJob || ingestionJob.userId !== userId) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-
-  return NextResponse.json({ ingestionJob });
 }

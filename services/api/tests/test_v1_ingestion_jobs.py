@@ -207,7 +207,7 @@ def test_get_ingestion_job_returns_job_offers_and_enforces_ownership(user_id, si
 
         get_response = client.get(f"/v1/ingestion-jobs/{created['id']}", headers=_headers(user_id))
         assert get_response.status_code == 200
-        body = get_response.json()
+        body = get_response.json()["ingestionJob"]
         assert body["id"] == created["id"]
         assert body["jobOffers"] == []
 
