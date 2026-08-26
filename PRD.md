@@ -448,7 +448,7 @@ per-task IDs.
   same offer; exceeding a low test-configured daily cap returns a clear
   server-enforced error.
 
-**M7 — Extract Unified Python Backend (`services/api`)**
+**M7 — Extract Unified Python Backend (`services/api`)** ✅ COMPLETE
 - Migrates M0-M6's shipped code from Next.js BFF routes owning Prisma/S3/SQS
   directly to the target architecture in Section 7: a new `services/api`
   (FastAPI) becomes the sole owner of Postgres/S3/SQS; `apps/web`'s
@@ -528,7 +528,20 @@ per-task IDs.
   `pnpm run build`'s default Turbopack path hits a pre-existing sandbox-local
   filesystem-race panic (flagged repeatedly since M2-T7, unrelated to this
   dependency pruning), so the build graph itself was confirmed via
-  `next build --webpack`, which compiles all 11 routes cleanly.
+  `next build --webpack`, which compiles all 11 routes cleanly. Phase 5
+  (final whole-system verification, T18) done: full stack up
+  (docker-compose + `next dev --webpack`), the complete M1→M6 journey
+  walked end-to-end through the fully-migrated BFF-proxy path with two
+  real magic-link-authenticated users — CV upload to the documented S3
+  key, an analysis request driven through the real async pipeline
+  (Step Functions Local + the lambda shim + a stubbed LLM provider,
+  matching this repo's standing no-live-LLM-dependency convention) to
+  `Analysis.status=COMPLETED` with a Section 8.6-conformant `resultJSON`,
+  confirmed via `GET /api/analyses/:id`; cross-user isolation re-verified
+  against every migrated endpoint (no leakage via cv-versions/analyses);
+  stopping the `api` container mid-flow produced an immediate, clear
+  `502 {"error":"Upstream service unavailable"}` (not a hang or bare 500),
+  with clean recovery on restart. All M0-M7 milestones are now complete.
 - Verify: full M1→M6 user journey passes end-to-end through the fully
   migrated path; `apps/web` has no runtime `@prisma/client`/`@aws-sdk/*`
   dependency; stopping the `api` service mid-flow produces a clear
