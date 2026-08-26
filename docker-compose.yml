@@ -99,11 +99,21 @@ services:
       S3_FORCE_PATH_STYLE: "true"
       S3_ACCESS_KEY_ID: minioadmin
       S3_SECRET_ACCESS_KEY: minioadmin
+      # ElasticMQ, same rationale as S3_ENDPOINT above: the container reaches
+      # it via the docker-network hostname (unlike S3's presigned URLs, SQS
+      # calls are made directly by this service, never by the browser).
+      SQS_ENDPOINT: http://elasticmq:9324
+      SQS_REGION: us-east-1
+      SQS_ANALYSIS_INTAKE_QUEUE_URL: http://elasticmq:9324/000000000000/analysis-intake
+      SQS_ACCESS_KEY_ID: x
+      SQS_SECRET_ACCESS_KEY: x
     depends_on:
       postgres:
         condition: service_healthy
       minio:
         condition: service_healthy
+      elasticmq:
+        condition: service_started
 
 volumes:
   postgres-data:

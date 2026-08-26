@@ -1,3 +1,4 @@
+import json
 import math
 import os
 import uuid
@@ -6,6 +7,8 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from py_db.models import (
+    Analysis,
+    Analysisstatus,
     CVVersion,
     Cvfiletype,
     IngestionJob,
@@ -16,12 +19,13 @@ from py_db.models import (
     SiteConfig,
 )
 from pydantic import BaseModel
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from .db import get_session
 from .s3_client import S3_BUCKET, cv_file_key, make_s3_client
+from .sqs_client import ANALYSIS_INTAKE_QUEUE_URL, make_sqs_client
 
 router = APIRouter(prefix="/v1")
 
@@ -511,3 +515,167 @@ async def get_ingestion_job(
         raise HTTPException(status_code=404, detail="Not found")
 
     return GetIngestionJobResponse(ingestionJob=_ingestion_job_detail_response(ingestion_job))
+
+
+# --- Analyses (M7-T13) ---
+# Ports apps/web/app/api/analyses/{route.ts,[id]/route.ts}'s daily-cap check
+# and SQS enqueue verbatim (PRD Section 9.2, Section 10 steps 1-2, 11).
+
+DEFAULT_DAILY_ANALYSIS_CAP = 50
+
+
+def _daily_analysis_cap() -> int:
+    raw = os.environ.get("DAILY_ANALYSIS_CAP")
+    try:
+        parsed = int(raw) if raw else None
+    except ValueError:
+        parsed = None
+    return parsed if parsed is not None and parsed > 0 else DEFAULT_DAILY_ANALYSIS_CAP
+
+
+def _start_of_today() -> datetime:
+    return datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
+
+
+class AnalysisResponse(BaseModel):
+    id: str
+    userId: str
+    jobOfferId: str
+    cvVersionId: str
+    status: str
+    s3ResultKey: str | None
+    matchScore: int | None
+    resultJSON: dict[str, Any] | None
+    errorMessage: str | None
+    stepFunctionExecutionArn: str | None
+    requestedAt: datetime
+    startedAt: datetime | None
+    completedAt: datetime | None
+    jobOffer: JobOfferResponse
+    cvVersion: CVVersionResponse
+
+
+def _analysis_response(row: Analysis) -> AnalysisResponse:
+    return AnalysisResponse(
+        id=row.id,
+        userId=row.userId,
+        jobOfferId=row.jobOfferId,
+        cvVersionId=row.cvVersionId,
+        status=row.status.value,
+        s3ResultKey=row.s3ResultKey,
+        matchScore=row.matchScore,
+        resultJSON=row.resultJSON,
+        errorMessage=row.errorMessage,
+        stepFunctionExecutionArn=row.stepFunctionExecutionArn,
+        requestedAt=row.requestedAt,
+        startedAt=row.startedAt,
+        completedAt=row.completedAt,
+        jobOffer=_job_offer_response(row.JobOffer_),
+        cvVersion=_cv_version_response(row.CVVersion_),
+    )
+
+
+class AnalysisListResponse(BaseModel):
+    analyses: list[AnalysisResponse]
+
+
+@router.get("/analyses", response_model=AnalysisListResponse)
+async def list_analyses(
+    jobOfferId: str | None = None,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> AnalysisListResponse:
+    stmt = (
+        select(Analysis)
+        .options(selectinload(Analysis.JobOffer_), selectinload(Analysis.CVVersion_))
+        .where(Analysis.userId == user_id)
+        .order_by(Analysis.requestedAt.desc())
+    )
+    if jobOfferId:
+        stmt = stmt.where(Analysis.jobOfferId == jobOfferId)
+    rows = (await session.scalars(stmt)).all()
+    return AnalysisListResponse(analyses=[_analysis_response(row) for row in rows])
+
+
+class CreateAnalysisRequest(BaseModel):
+    jobOfferId: Any = None
+    cvVersionId: Any = None
+
+
+class CreateAnalysisResponse(BaseModel):
+    analysisId: str
+
+
+@router.post("/analyses", response_model=CreateAnalysisResponse, status_code=202)
+async def create_analysis(
+    req: CreateAnalysisRequest,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> CreateAnalysisResponse:
+    job_offer_id = req.jobOfferId if isinstance(req.jobOfferId, str) else None
+    cv_version_id = req.cvVersionId if isinstance(req.cvVersionId, str) else None
+    if not job_offer_id or not cv_version_id:
+        raise HTTPException(status_code=400, detail="jobOfferId and cvVersionId are required")
+
+    # JobOffer is globally deduplicated (not user-owned, PRD Section 6), so
+    # only existence is checked; CVVersion is user-scoped and must belong to
+    # the caller.
+    job_offer = await session.get(JobOffer, job_offer_id)
+    if job_offer is None:
+        raise HTTPException(status_code=400, detail="Unknown jobOfferId")
+
+    cv_version = await session.get(CVVersion, cv_version_id)
+    if cv_version is None or cv_version.userId != user_id:
+        raise HTTPException(status_code=400, detail="Unknown cvVersionId")
+
+    daily_cap = _daily_analysis_cap()
+    analyses_requested_today = await session.scalar(
+        select(func.count())
+        .select_from(Analysis)
+        .where(Analysis.userId == user_id, Analysis.requestedAt >= _start_of_today())
+    )
+    if (analyses_requested_today or 0) >= daily_cap:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Daily analysis limit of {daily_cap} reached. Try again tomorrow.",
+        )
+
+    analysis = Analysis(
+        id=str(uuid.uuid4()),
+        userId=user_id,
+        jobOfferId=job_offer_id,
+        cvVersionId=cv_version_id,
+        status=Analysisstatus.PENDING,
+    )
+    session.add(analysis)
+    await session.commit()
+
+    sqs = make_sqs_client()
+    sqs.send_message(
+        QueueUrl=ANALYSIS_INTAKE_QUEUE_URL,
+        MessageBody=json.dumps({"analysisId": analysis.id}),
+    )
+
+    return CreateAnalysisResponse(analysisId=analysis.id)
+
+
+class GetAnalysisResponse(BaseModel):
+    analysis: AnalysisResponse
+
+
+@router.get("/analyses/{analysis_id}", response_model=GetAnalysisResponse)
+async def get_analysis(
+    analysis_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> GetAnalysisResponse:
+    stmt = (
+        select(Analysis)
+        .options(selectinload(Analysis.JobOffer_), selectinload(Analysis.CVVersion_))
+        .where(Analysis.id == analysis_id)
+    )
+    analysis = (await session.scalars(stmt)).first()
+    if analysis is None or analysis.userId != user_id:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    return GetAnalysisResponse(analysis=_analysis_response(analysis))

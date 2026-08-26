@@ -505,7 +505,12 @@ per-task IDs.
   this domain; while wiring this up, corrected a latent T11 bug where
   `GET /v1/ingestion-jobs/{id}` returned its payload unwrapped instead of
   under an `{"ingestionJob": ...}` envelope (the shape both the pre-migration
-  route and the status-page UI require).
+  route and the status-page UI require). Phase 3 continues: `GET/POST /v1/analyses`
+  + `GET /v1/analyses/{id}` (T13) added to `services/api`, porting the
+  per-user daily analysis cap check and the SQS enqueue (to the existing
+  `analysis-intake` queue, via a new `services/api` SQS client mirroring the
+  S3 client's per-service-duplication precedent) verbatim from the current
+  Next.js routes, including the `jobOffer`/`cvVersion` nested include shape.
 - Verify: full M1→M6 user journey passes end-to-end through the fully
   migrated path; `apps/web` has no runtime `@prisma/client`/`@aws-sdk/*`
   dependency; stopping the `api` service mid-flow produces a clear
