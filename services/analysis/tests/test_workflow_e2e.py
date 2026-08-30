@@ -176,7 +176,15 @@ async def _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id
 def _wait_for_state_entered(client, execution_arn, state_name, *, timeout=15):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        history = client.get_execution_history(executionArn=execution_arn)
+        # StartExecution's response can briefly precede Step Functions
+        # Local's own registration of the execution (~tens of ms observed),
+        # so GetExecutionHistory right after starting it can 404 rather than
+        # return an empty history — treat that as "not ready yet" too.
+        try:
+            history = client.get_execution_history(executionArn=execution_arn)
+        except client.exceptions.ExecutionDoesNotExist:
+            time.sleep(0.5)
+            continue
         for event in history["events"]:
             details = event.get("stateEnteredEventDetails")
             if event["type"] == "TaskStateEntered" and details and details["name"] == state_name:
@@ -223,6 +231,21 @@ async def test_analysis_workflow_execution_reaches_run_comparison_crew(state_mac
             e["stateEnteredEventDetails"]["name"] for e in events if e["type"] == "TaskStateEntered"
         ]
         assert entered_states == ["EnsureCVParsed", "EnsureOfferExtracted", "RunComparisonCrew"]
+
+        # Wait for the execution to actually finish (crew_task's own retry
+        # on the malformed LLM output, then Catch -> MarkAnalysisFailed)
+        # before tearing down its fixtures below. lambda_shim_server and
+        # state_machine_arn are module-scoped, shared with the other tests
+        # in this file — leaving this execution running in the background
+        # past this test's return let its later invocations land on
+        # whatever `handlers`/`crew_task` monkeypatches a *subsequent* test
+        # had installed, corrupting that test's own call counts.
+        deadline = time.monotonic() + 45
+        description = sfn_client.describe_execution(executionArn=execution_arn)
+        while description["status"] == "RUNNING" and time.monotonic() < deadline:
+            time.sleep(0.5)
+            description = sfn_client.describe_execution(executionArn=execution_arn)
+        assert description["status"] == "SUCCEEDED"
     finally:
         await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
 
