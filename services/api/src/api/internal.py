@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .db import get_session
 
-router = APIRouter(prefix="/internal")
+router = APIRouter(prefix="/internal", include_in_schema=False)
 
 
 def _now() -> datetime:

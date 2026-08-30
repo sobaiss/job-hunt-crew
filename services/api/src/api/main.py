@@ -27,11 +27,19 @@ app.include_router(internal_router)
 app.include_router(v1_router)
 
 INTERNAL_API_SECRET_HEADER = "x-internal-api-secret"
+# Only these three paths (FastAPI's auto-generated docs) are ever exempt from
+# the secret check, and only when ENVIRONMENT=development — unset/anything
+# else stays locked down, so a misconfigured deploy fails closed rather than
+# open.
+DOCS_PATHS = {"/docs", "/redoc", "/openapi.json"}
 
 
 @app.middleware("http")
 async def enforce_internal_api_secret(request: Request, call_next):
     if request.url.path == "/healthz":
+        return await call_next(request)
+
+    if request.url.path in DOCS_PATHS and os.environ.get("ENVIRONMENT") == "development":
         return await call_next(request)
 
     expected = os.environ.get("INTERNAL_API_SECRET")
