@@ -1,94 +1,131 @@
 "use client";
 
-import { use, useCallback, useEffect, useState } from "react";
+import { useParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 
-type IngestionJobStatus = "PENDING" | "RUNNING" | "PARTIALLY_COMPLETED" | "COMPLETED" | "FAILED";
+import {
+  useIngestionJob,
+  type IngestionJobStatus,
+} from "@/hooks/use-ingestion-jobs";
+import { useEnumLabel } from "@/lib/enum-labels";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 
-type JobOfferSummary = {
-  id: string;
-  title: string | null;
-  company: string | null;
-  extractionStatus: string;
-};
+function badgeVariant(
+  status: IngestionJobStatus,
+): "secondary" | "success" | "destructive" | "warning" {
+  if (status === "COMPLETED") return "success";
+  if (status === "FAILED") return "destructive";
+  if (status === "PENDING") return "secondary";
+  return "warning";
+}
 
-type IngestionJob = {
-  id: string;
-  mode: string;
-  status: IngestionJobStatus;
-  discoveredCount: number;
-  scrapedCount: number;
-  failedCount: number;
-  errorMessage: string | null;
-  jobOffers: { jobOffer: JobOfferSummary }[];
-};
+export default function IngestionJobPage() {
+  const params = useParams<{ id: string }>();
+  const t = useTranslations("ingestion");
+  const statusLabel = useEnumLabel("ingestionStatus");
+  const { data: job, isPending, isError } = useIngestionJob(params.id);
 
-const TERMINAL_STATUSES: IngestionJobStatus[] = ["PARTIALLY_COMPLETED", "COMPLETED", "FAILED"];
-const POLL_INTERVAL_MS = 2000;
-
-export default function IngestionJobPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
-  const [ingestionJob, setIngestionJob] = useState<IngestionJob | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      const response = await fetch(`/api/ingestion-jobs/${id}`);
-      if (!response.ok) {
-        throw new Error(`Request failed with ${response.status}`);
-      }
-      const { ingestionJob } = await response.json();
-      setIngestionJob(ingestionJob);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load ingestion job");
-    }
-  }, [id]);
-
-  useEffect(() => {
-    // Fetching from the server on mount; not derivable from props/state.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    load();
-  }, [load]);
-
-  useEffect(() => {
-    if (!ingestionJob || TERMINAL_STATUSES.includes(ingestionJob.status)) {
-      return;
-    }
-    const timer = setInterval(load, POLL_INTERVAL_MS);
-    return () => clearInterval(timer);
-  }, [ingestionJob, load]);
-
-  if (error) {
-    return <p role="alert">{error}</p>;
+  if (isPending) {
+    return (
+      <main className="mx-auto w-full max-w-2xl p-8">
+        <div
+          role="status"
+          aria-label={t("detail.loading")}
+          className="flex flex-col gap-4"
+        >
+          <Skeleton className="h-8 w-2/3" />
+          <Skeleton className="h-24 w-full" />
+        </div>
+      </main>
+    );
   }
 
-  if (!ingestionJob) {
-    return <p>Loading…</p>;
+  if (isError || !job) {
+    return (
+      <main className="mx-auto w-full max-w-2xl p-8">
+        <p role="alert" className="text-sm text-destructive">
+          {t("detail.loadError")}
+        </p>
+      </main>
+    );
   }
 
-  const processed = ingestionJob.scrapedCount + ingestionJob.failedCount;
-  const total = ingestionJob.discoveredCount;
+  const stats: { key: "discovered" | "scraped" | "failedCount"; value: number }[] =
+    [
+      { key: "discovered", value: job.discoveredCount },
+      { key: "scraped", value: job.scrapedCount },
+      { key: "failedCount", value: job.failedCount },
+    ];
 
   return (
-    <main>
-      <h1>Ingestion Job</h1>
-      <p>
-        Status: <strong>{ingestionJob.status}</strong>
-      </p>
-      <p data-testid="ingestion-progress">
-        {processed}/{total} processed
-      </p>
-      <p>
-        Scraped: {ingestionJob.scrapedCount} · Failed: {ingestionJob.failedCount}
-      </p>
-      {ingestionJob.errorMessage && <p role="alert">{ingestionJob.errorMessage}</p>}
-      <ul>
-        {ingestionJob.jobOffers.map(({ jobOffer }) => (
-          <li key={jobOffer.id}>
-            {jobOffer.title ?? jobOffer.id} — {jobOffer.extractionStatus}
-          </li>
+    <main className="mx-auto flex w-full max-w-2xl flex-col gap-8 p-8">
+      <div className="flex flex-col gap-2">
+        <h1 className="font-serif text-2xl font-semibold">
+          {t("detail.heading")}
+        </h1>
+        <Badge variant={badgeVariant(job.status)} className="self-start">
+          {statusLabel(job.status)}
+        </Badge>
+      </div>
+
+      {job.status === "PENDING" && (
+        <p role="status" className="text-sm text-muted">
+          {t("detail.waiting")}
+        </p>
+      )}
+
+      {job.status === "RUNNING" && (
+        <p className="text-sm text-muted">{t("detail.running")}</p>
+      )}
+
+      {job.status === "FAILED" && (
+        <div
+          role="alert"
+          className="flex flex-col gap-1 rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive"
+        >
+          <p>{t("detail.failed")}</p>
+          {job.errorMessage && <p>{job.errorMessage}</p>}
+        </div>
+      )}
+
+      <dl className="grid grid-cols-3 gap-3">
+        {stats.map(({ key, value }) => (
+          <Card key={key} className="py-0">
+            <CardContent className="flex flex-col gap-1 py-4">
+              <dt className="text-xs text-muted">{t(`detail.${key}`)}</dt>
+              <dd className="text-2xl font-semibold tabular-nums">{value}</dd>
+            </CardContent>
+          </Card>
         ))}
-      </ul>
+      </dl>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="font-serif text-xl font-semibold">
+          {t("detail.offersHeading")}
+        </h2>
+        {job.jobOffers.length === 0 ? (
+          <p className="text-sm text-muted">{t("detail.offersEmpty")}</p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {job.jobOffers.map(({ jobOffer }) => (
+              <li key={jobOffer.id}>
+                <Card className="py-0">
+                  <CardContent className="flex items-center justify-between gap-4 py-3">
+                    <span className="truncate text-sm">
+                      {jobOffer.title ?? jobOffer.id}
+                    </span>
+                    <span className="shrink-0 text-xs text-muted">
+                      {jobOffer.extractionStatus}
+                    </span>
+                  </CardContent>
+                </Card>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </main>
   );
 }

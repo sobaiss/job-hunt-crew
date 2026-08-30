@@ -105,6 +105,54 @@
       "setDefaultSuccess": "Default CV version updated."
     }
   },
+  "ingestion": {
+    "new": {
+      "heading": "Search a job site",
+      "subtitle": "Pick a site and optional filters, then start an ingestion run.",
+      "siteLabel": "Site",
+      "sitePlaceholder": "Select a site",
+      "siteLoading": "Loading job sites",
+      "siteLoadError": "We couldn't load the job sites. Please try again.",
+      "keywordsLabel": "Keywords",
+      "locationLabel": "Location",
+      "postedWithinLabel": "Posted within",
+      "contractTypeLabel": "Contract type",
+      "remoteLabel": "Remote policy",
+      "remoteAny": "Any",
+      "experienceLevelLabel": "Experience level",
+      "submit": "Start ingestion",
+      "submitting": "Starting…",
+      "siteRequired": "Choose a site to search.",
+      "error": "We couldn't start that ingestion. Please try again.",
+      "success": "Ingestion job started.",
+      "viewJob": "View progress"
+    },
+    "postedWithin": {
+      "24h": "Last 24 hours",
+      "7d": "Last 7 days",
+      "14d": "Last 14 days",
+      "30d": "Last 30 days",
+      "any": "Any time"
+    },
+    "remote": {
+      "onsite": "On-site",
+      "hybrid": "Hybrid",
+      "remote": "Remote"
+    },
+    "detail": {
+      "heading": "Ingestion job",
+      "loading": "Loading this ingestion job",
+      "loadError": "We couldn't load this ingestion job. Please try again.",
+      "waiting": "This ingestion job is waiting to start. It hasn't been picked up yet — this page updates itself.",
+      "running": "This ingestion job is running — this page updates itself.",
+      "failed": "This ingestion job failed.",
+      "discovered": "Discovered",
+      "scraped": "Scraped",
+      "failedCount": "Failed",
+      "offersHeading": "Job offers",
+      "offersEmpty": "No job offers discovered yet."
+    }
+  },
   "enum": {
     "analysisStatus": {
       "PENDING": "Pending",
@@ -118,6 +166,7 @@
     "ingestionStatus": {
       "PENDING": "Waiting to start",
       "RUNNING": "Running",
+      "PARTIALLY_COMPLETED": "Partially completed",
       "COMPLETED": "Completed",
       "FAILED": "Failed"
     },
