@@ -89,7 +89,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Start Postgres/MinIO/ElasticMQ
-        run: docker compose up -d postgres minio minio-createbucket elasticmq --wait
+        run: docker compose up -d postgres minio elasticmq --wait
+
+      - name: Create MinIO bucket
+        run: docker compose up minio-createbucket
 
       - name: Enable Corepack
         run: corepack enable
