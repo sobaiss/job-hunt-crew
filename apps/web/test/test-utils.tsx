@@ -1,15 +1,71 @@
-import type { ReactElement } from "react";
-import { render, type RenderOptions, type RenderResult } from "@testing-library/react";
+import type { ReactElement, ReactNode } from "react";
+import {
+  render,
+  type RenderOptions,
+  type RenderResult,
+} from "@testing-library/react";
+import { SessionProvider } from "next-auth/react";
+import { ThemeProvider } from "next-themes";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { NextIntlClientProvider } from "next-intl";
+import type { Session } from "next-auth";
 
-// The shared entry point for component/integration tests. For now it is a thin
-// pass-through over RTL `render`; later foundation tickets grow it to supply the
-// theme, i18n, Session and QueryClient providers (with a settable fake Session
-// and Locale) so page tests get the full context in one call.
+import type { Locale } from "@/i18n/locale";
+import enMessages from "@/messages/en.json";
+import frMessages from "@/messages/fr.json";
+
+const MESSAGES: Record<Locale, typeof enMessages> = {
+  en: enMessages,
+  fr: frMessages,
+};
+
+// The shared entry point for component/integration tests. It mounts the same
+// provider stack as `components/providers.tsx` (Session + i18n + theme +
+// QueryClient) so page tests get the full context in one call. `session`,
+// `theme` and `locale` are settable per test.
+type ProviderOptions = {
+  session?: Session | null;
+  theme?: string;
+  locale?: Locale;
+};
+
 export function renderWithProviders(
   ui: ReactElement,
-  options?: Omit<RenderOptions, "wrapper">,
+  {
+    session = null,
+    theme = "light",
+    locale = "en",
+    ...options
+  }: Omit<RenderOptions, "wrapper"> & ProviderOptions = {},
 ): RenderResult {
-  return render(ui, options);
+  // A fresh client per render: no retries (so error states surface immediately)
+  // and no cross-test cache bleed.
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, gcTime: 0 },
+      mutations: { retry: false },
+    },
+  });
+
+  function Wrapper({ children }: { children: ReactNode }) {
+    return (
+      <SessionProvider session={session}>
+        <NextIntlClientProvider
+          locale={locale}
+          messages={MESSAGES[locale]}
+          timeZone="UTC"
+        >
+          <ThemeProvider attribute="class" defaultTheme={theme} enableSystem>
+            <QueryClientProvider client={queryClient}>
+              {children}
+            </QueryClientProvider>
+          </ThemeProvider>
+        </NextIntlClientProvider>
+      </SessionProvider>
+    );
+  }
+
+  return render(ui, { wrapper: Wrapper, ...options });
 }
 
 export * from "@testing-library/react";

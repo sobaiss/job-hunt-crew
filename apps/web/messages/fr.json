@@ -1,0 +1,180 @@
+{
+  "app": {
+    "name": "Job Hunt Crew"
+  },
+  "landing": {
+    "tagline": "Comparez votre CV à de vraies offres d'emploi et sachez exactement où vous en êtes.",
+    "description": "Job Hunt Crew lit une offre d'emploi et l'un de vos CV, puis affiche les compétences qui correspondent, les manques et ce qu'il faut changer avant de postuler.",
+    "signIn": "Se connecter"
+  },
+  "signIn": {
+    "title": "Connexion",
+    "subtitle": "Connectez-vous pour analyser votre CV face aux offres d'emploi.",
+    "google": "Continuer avec Google",
+    "linkedin": "Continuer avec LinkedIn",
+    "divider": "ou",
+    "emailLabel": "Adresse e-mail",
+    "emailPlaceholder": "vous@exemple.com",
+    "magicLink": "M'envoyer un lien de connexion",
+    "sending": "Envoi…",
+    "sentTitle": "Consultez votre boîte de réception",
+    "sentBody": "Nous avons envoyé un lien de connexion à {email}. Suivez-le pour terminer la connexion.",
+    "error": "Une erreur est survenue lors de la connexion. Veuillez réessayer."
+  },
+  "nav": {
+    "dashboard": "Tableau de bord",
+    "cvVersions": "Versions de CV",
+    "newIngestion": "Nouvelle collecte",
+    "openMenu": "Ouvrir le menu"
+  },
+  "userMenu": {
+    "label": "Menu du compte",
+    "theme": "Thème",
+    "language": "Langue",
+    "signOut": "Se déconnecter"
+  },
+  "theme": {
+    "label": "Changer de thème",
+    "light": "Clair",
+    "dark": "Sombre",
+    "system": "Système"
+  },
+  "locale": {
+    "label": "Langue",
+    "en": "Anglais",
+    "fr": "Français"
+  },
+  "analyses": {
+    "title": "Vos analyses",
+    "loading": "Chargement de vos analyses",
+    "empty": "Aucune analyse demandée pour l'instant.",
+    "loadError": "Impossible de charger vos analyses. Veuillez réessayer.",
+    "jobOfferFallback": "Offre d'emploi",
+    "vsCv": "vs. {label}",
+    "compareLink": "Comparer avec d'autres CV",
+    "detail": {
+      "loading": "Chargement de cette analyse",
+      "loadError": "Impossible de charger cette analyse. Veuillez réessayer.",
+      "running": "Cette analyse est toujours en cours — cette page se met à jour toute seule.",
+      "failed": "Cette analyse a échoué.",
+      "noResult": "Pas encore de résultat.",
+      "none": "Aucune.",
+      "matchScore": "Score de correspondance",
+      "matchedSkills": "Compétences correspondantes",
+      "missingSkills": "Compétences manquantes",
+      "strengths": "Points forts",
+      "weaknesses": "Points faibles",
+      "suggestions": "Suggestions d'amélioration",
+      "summary": "Résumé"
+    },
+    "compare": {
+      "loading": "Chargement de la comparaison",
+      "loadError": "Impossible de charger cette comparaison. Veuillez réessayer.",
+      "empty": "Aucune analyse trouvée pour cette offre d'emploi.",
+      "count": "Comparaison de {count} versions de CV",
+      "singleNotice": "Une seule version de CV a été analysée pour cette offre — demandez une analyse avec une autre version de CV pour comparer.",
+      "noResult": "Pas encore de résultat."
+    }
+  },
+  "cvVersions": {
+    "title": "Versions de CV",
+    "form": {
+      "heading": "Téléverser une version de CV",
+      "labelLabel": "Libellé",
+      "labelPlaceholder": "Ingénieur logiciel — Fintech",
+      "fileLabel": "Fichier",
+      "fileHint": "PDF ou DOCX, jusqu'à 10 Mo.",
+      "submit": "Téléverser",
+      "uploading": "Téléversement…",
+      "labelRequired": "Donnez un libellé à cette version de CV.",
+      "fileRequired": "Choisissez un fichier PDF ou DOCX.",
+      "fileType": "Seuls les fichiers PDF et DOCX sont pris en charge.",
+      "fileTooLarge": "Ce fichier dépasse la limite de 10 Mo.",
+      "success": "Version de CV téléversée.",
+      "error": "Le téléversement a échoué. Veuillez réessayer."
+    },
+    "list": {
+      "heading": "Vos versions de CV",
+      "loading": "Chargement de vos versions de CV",
+      "loadError": "Impossible de charger vos versions de CV. Veuillez réessayer.",
+      "empty": "Aucune version de CV téléversée pour l'instant.",
+      "default": "Par défaut",
+      "setDefault": "Définir par défaut",
+      "settingDefault": "Application…",
+      "setDefaultError": "Impossible de définir cette version par défaut. Veuillez réessayer.",
+      "setDefaultSuccess": "Version de CV par défaut mise à jour."
+    }
+  },
+  "ingestion": {
+    "new": {
+      "heading": "Rechercher sur un site d'emploi",
+      "subtitle": "Choisissez un site et des filtres facultatifs, puis lancez une ingestion.",
+      "siteLabel": "Site",
+      "sitePlaceholder": "Sélectionnez un site",
+      "siteLoading": "Chargement des sites d'emploi",
+      "siteLoadError": "Impossible de charger les sites d'emploi. Veuillez réessayer.",
+      "keywordsLabel": "Mots-clés",
+      "locationLabel": "Lieu",
+      "postedWithinLabel": "Publié depuis",
+      "contractTypeLabel": "Type de contrat",
+      "remoteLabel": "Politique de télétravail",
+      "remoteAny": "Indifférent",
+      "experienceLevelLabel": "Niveau d'expérience",
+      "submit": "Lancer l'ingestion",
+      "submitting": "Démarrage…",
+      "siteRequired": "Choisissez un site à explorer.",
+      "error": "Impossible de lancer cette ingestion. Veuillez réessayer.",
+      "success": "Ingestion démarrée.",
+      "viewJob": "Voir la progression"
+    },
+    "postedWithin": {
+      "24h": "Dernières 24 heures",
+      "7d": "7 derniers jours",
+      "14d": "14 derniers jours",
+      "30d": "30 derniers jours",
+      "any": "N'importe quand"
+    },
+    "remote": {
+      "onsite": "Sur site",
+      "hybrid": "Hybride",
+      "remote": "Télétravail"
+    },
+    "detail": {
+      "heading": "Ingestion",
+      "loading": "Chargement de cette ingestion",
+      "loadError": "Impossible de charger cette ingestion. Veuillez réessayer.",
+      "waiting": "Cette ingestion est en attente de démarrage. Elle n'a pas encore été prise en charge — cette page se met à jour automatiquement.",
+      "running": "Cette ingestion est en cours — cette page se met à jour automatiquement.",
+      "failed": "Cette ingestion a échoué.",
+      "discovered": "Découvertes",
+      "scraped": "Extraites",
+      "failedCount": "Échecs",
+      "offersHeading": "Offres d'emploi",
+      "offersEmpty": "Aucune offre découverte pour l'instant."
+    }
+  },
+  "enum": {
+    "analysisStatus": {
+      "PENDING": "En attente",
+      "QUEUED": "En file d'attente",
+      "RUNNING_CREW": "En cours",
+      "AWAITING_RESULT": "En attente du résultat",
+      "PERSISTING": "Enregistrement",
+      "COMPLETED": "Terminée",
+      "FAILED": "Échouée"
+    },
+    "ingestionStatus": {
+      "PENDING": "En attente de démarrage",
+      "RUNNING": "En cours",
+      "PARTIALLY_COMPLETED": "Partiellement terminée",
+      "COMPLETED": "Terminée",
+      "FAILED": "Échouée"
+    },
+    "cvParseStatus": {
+      "PENDING": "En attente",
+      "PARSING": "Analyse en cours",
+      "PARSED": "Analysé",
+      "FAILED": "Échoué"
+    }
+  }
+}

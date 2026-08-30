@@ -1,0 +1,180 @@
+{
+  "app": {
+    "name": "Job Hunt Crew"
+  },
+  "landing": {
+    "tagline": "Match your CV against real job offers and see exactly where you stand.",
+    "description": "Job Hunt Crew reads a job posting and one of your CVs, then shows the matched skills, the gaps, and what to change before you apply.",
+    "signIn": "Sign in"
+  },
+  "signIn": {
+    "title": "Sign in",
+    "subtitle": "Sign in to analyse your CV against job offers.",
+    "google": "Continue with Google",
+    "linkedin": "Continue with LinkedIn",
+    "divider": "or",
+    "emailLabel": "Email address",
+    "emailPlaceholder": "you@example.com",
+    "magicLink": "Email me a sign-in link",
+    "sending": "Sending…",
+    "sentTitle": "Check your inbox",
+    "sentBody": "We sent a sign-in link to {email}. Follow it to finish signing in.",
+    "error": "Something went wrong while signing in. Please try again."
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "cvVersions": "CV versions",
+    "newIngestion": "New ingestion",
+    "openMenu": "Open menu"
+  },
+  "userMenu": {
+    "label": "Account menu",
+    "theme": "Theme",
+    "language": "Language",
+    "signOut": "Sign out"
+  },
+  "theme": {
+    "label": "Change theme",
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System"
+  },
+  "locale": {
+    "label": "Language",
+    "en": "English",
+    "fr": "French"
+  },
+  "analyses": {
+    "title": "Your analyses",
+    "loading": "Loading your analyses",
+    "empty": "No analyses requested yet.",
+    "loadError": "We couldn't load your analyses. Please try again.",
+    "jobOfferFallback": "Job offer",
+    "vsCv": "vs. {label}",
+    "compareLink": "Compare with other CVs",
+    "detail": {
+      "loading": "Loading this analysis",
+      "loadError": "We couldn't load this analysis. Please try again.",
+      "running": "This analysis is still running — this page updates itself.",
+      "failed": "This analysis failed.",
+      "noResult": "No result yet.",
+      "none": "None.",
+      "matchScore": "Match score",
+      "matchedSkills": "Matched skills",
+      "missingSkills": "Missing skills",
+      "strengths": "Strengths",
+      "weaknesses": "Weaknesses",
+      "suggestions": "Improvement suggestions",
+      "summary": "Summary"
+    },
+    "compare": {
+      "loading": "Loading the comparison",
+      "loadError": "We couldn't load this comparison. Please try again.",
+      "empty": "No analyses found for this job offer.",
+      "count": "Comparing {count} CV versions",
+      "singleNotice": "Only one CV version has been analysed for this offer — request an analysis against another CV version to compare.",
+      "noResult": "No result yet."
+    }
+  },
+  "cvVersions": {
+    "title": "CV versions",
+    "form": {
+      "heading": "Upload a CV version",
+      "labelLabel": "Label",
+      "labelPlaceholder": "Software Engineer — Fintech",
+      "fileLabel": "File",
+      "fileHint": "PDF or DOCX, up to 10 MB.",
+      "submit": "Upload",
+      "uploading": "Uploading…",
+      "labelRequired": "Give this CV version a label.",
+      "fileRequired": "Choose a PDF or DOCX file.",
+      "fileType": "Only PDF and DOCX files are supported.",
+      "fileTooLarge": "That file is larger than the 10 MB limit.",
+      "success": "CV version uploaded.",
+      "error": "The upload failed. Please try again."
+    },
+    "list": {
+      "heading": "Your CV versions",
+      "loading": "Loading your CV versions",
+      "loadError": "We couldn't load your CV versions. Please try again.",
+      "empty": "No CV versions uploaded yet.",
+      "default": "Default",
+      "setDefault": "Set as default",
+      "settingDefault": "Setting…",
+      "setDefaultError": "We couldn't set that as your default. Please try again.",
+      "setDefaultSuccess": "Default CV version updated."
+    }
+  },
+  "ingestion": {
+    "new": {
+      "heading": "Search a job site",
+      "subtitle": "Pick a site and optional filters, then start an ingestion run.",
+      "siteLabel": "Site",
+      "sitePlaceholder": "Select a site",
+      "siteLoading": "Loading job sites",
+      "siteLoadError": "We couldn't load the job sites. Please try again.",
+      "keywordsLabel": "Keywords",
+      "locationLabel": "Location",
+      "postedWithinLabel": "Posted within",
+      "contractTypeLabel": "Contract type",
+      "remoteLabel": "Remote policy",
+      "remoteAny": "Any",
+      "experienceLevelLabel": "Experience level",
+      "submit": "Start ingestion",
+      "submitting": "Starting…",
+      "siteRequired": "Choose a site to search.",
+      "error": "We couldn't start that ingestion. Please try again.",
+      "success": "Ingestion job started.",
+      "viewJob": "View progress"
+    },
+    "postedWithin": {
+      "24h": "Last 24 hours",
+      "7d": "Last 7 days",
+      "14d": "Last 14 days",
+      "30d": "Last 30 days",
+      "any": "Any time"
+    },
+    "remote": {
+      "onsite": "On-site",
+      "hybrid": "Hybrid",
+      "remote": "Remote"
+    },
+    "detail": {
+      "heading": "Ingestion job",
+      "loading": "Loading this ingestion job",
+      "loadError": "We couldn't load this ingestion job. Please try again.",
+      "waiting": "This ingestion job is waiting to start. It hasn't been picked up yet — this page updates itself.",
+      "running": "This ingestion job is running — this page updates itself.",
+      "failed": "This ingestion job failed.",
+      "discovered": "Discovered",
+      "scraped": "Scraped",
+      "failedCount": "Failed",
+      "offersHeading": "Job offers",
+      "offersEmpty": "No job offers discovered yet."
+    }
+  },
+  "enum": {
+    "analysisStatus": {
+      "PENDING": "Pending",
+      "QUEUED": "Queued",
+      "RUNNING_CREW": "Running",
+      "AWAITING_RESULT": "Awaiting result",
+      "PERSISTING": "Saving",
+      "COMPLETED": "Completed",
+      "FAILED": "Failed"
+    },
+    "ingestionStatus": {
+      "PENDING": "Waiting to start",
+      "RUNNING": "Running",
+      "PARTIALLY_COMPLETED": "Partially completed",
+      "COMPLETED": "Completed",
+      "FAILED": "Failed"
+    },
+    "cvParseStatus": {
+      "PENDING": "Pending",
+      "PARSING": "Parsing",
+      "PARSED": "Parsed",
+      "FAILED": "Failed"
+    }
+  }
+}
