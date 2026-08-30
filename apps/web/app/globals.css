@@ -1,7 +1,8 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
-/* Dark mode is driven by a `dark` class on <html> (next-themes, wired in a later
-   ticket), not the OS media query — so the palette can be user-overridden. */
+/* Dark mode is driven by a `dark` class on <html> (next-themes), not the OS
+   media query — so the palette can be user-overridden. */
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* claude.ai-flavoured palette: warm "paper" light, warm near-black dark, one
@@ -19,6 +20,8 @@
   --success: #3f7d4e;
   --warning: #b7791f;
   --danger: #c0392b;
+
+  --radius: 0.625rem;
 }
 
 .dark {
@@ -46,6 +49,34 @@
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
+
+  /* shadcn/ui primitives address a wider semantic vocabulary than the six
+     claude.ai palette tokens. Rather than re-introduce shadcn's own raw
+     colours, alias its names onto the palette: `card`/`secondary` -> panel,
+     `popover` -> paper background, `primary` -> the coral accent, `input`/
+     `ring` -> border/accent, `destructive` -> the danger status colour.
+     NOTE: shadcn's stock components use `bg-accent` for subtle hover/highlight
+     surfaces; that would paint them coral here, so the affected primitives
+     (button ghost/outline, dropdown-menu, select, sheet/dialog close) use
+     `bg-panel` for hover instead — see those files. */
+  --color-card: var(--panel);
+  --color-card-foreground: var(--foreground);
+  --color-popover: var(--background);
+  --color-popover-foreground: var(--foreground);
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--accent-foreground);
+  --color-secondary: var(--panel);
+  --color-secondary-foreground: var(--foreground);
+  --color-muted-foreground: var(--muted);
+  --color-input: var(--border);
+  --color-ring: var(--accent);
+  --color-destructive: var(--danger);
+  --color-destructive-foreground: #ffffff;
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
 
   --font-sans: var(--font-inter);
   --font-serif: var(--font-source-serif);
