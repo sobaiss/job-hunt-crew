@@ -1,26 +1,59 @@
 @import "tailwindcss";
 
+/* Dark mode is driven by a `dark` class on <html> (next-themes, wired in a later
+   ticket), not the OS media query — so the palette can be user-overridden. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* claude.ai-flavoured palette: warm "paper" light, warm near-black dark, one
+   coral accent shared by both. Values are approximate targets, not a contract. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #faf9f5;
+  --panel: #f0eee6;
+  --foreground: #1f1e1d;
+  --muted: #6b6a63;
+  --accent: #d97757;
+  --accent-foreground: #ffffff;
+  --border: #e5e2d9;
+
+  /* Analysis / IngestionJob status semantics, legible on paper. */
+  --success: #3f7d4e;
+  --warning: #b7791f;
+  --danger: #c0392b;
+}
+
+.dark {
+  --background: #262624;
+  --panel: #30302e;
+  --foreground: #f5f4ee;
+  --muted: #a6a49a;
+  --accent: #d97757;
+  --accent-foreground: #ffffff;
+  --border: #3e3e3b;
+
+  --success: #6bbf7b;
+  --warning: #e0a458;
+  --danger: #e57373;
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-panel: var(--panel);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --font-sans: var(--font-inter);
+  --font-serif: var(--font-source-serif);
+  --font-mono: var(--font-geist-mono);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
 }

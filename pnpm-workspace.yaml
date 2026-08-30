@@ -6,3 +6,7 @@ allowBuilds:
   "@prisma/client": true
   "@prisma/engines": true
   prisma: true
+  # msw's postinstall only copies the browser mockServiceWorker.js into a
+  # public dir; tests here use msw/node (Vitest) and page.route (Playwright),
+  # so the browser worker is never needed.
+  msw: false
