@@ -94,8 +94,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Start Postgres/MinIO/ElasticMQ
-        run: docker compose up -d postgres minio elasticmq --wait
+      - name: Start Postgres/MinIO/ElasticMQ/StepFunctions
+        run: docker compose up -d postgres minio elasticmq stepfunctions-local --wait
 
       - name: Create MinIO bucket
         run: docker compose up minio-createbucket
