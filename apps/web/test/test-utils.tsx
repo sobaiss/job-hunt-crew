@@ -50,7 +50,11 @@ export function renderWithProviders(
   function Wrapper({ children }: { children: ReactNode }) {
     return (
       <SessionProvider session={session}>
-        <NextIntlClientProvider locale={locale} messages={MESSAGES[locale]}>
+        <NextIntlClientProvider
+          locale={locale}
+          messages={MESSAGES[locale]}
+          timeZone="UTC"
+        >
           <ThemeProvider attribute="class" defaultTheme={theme} enableSystem>
             <QueryClientProvider client={queryClient}>
               {children}

@@ -47,7 +47,13 @@ export function Providers({
 
   return (
     <SessionProvider>
-      <NextIntlClientProvider locale={locale} messages={messages}>
+      {/* `timeZone` mirrors i18n/request.ts so client-rendered translations
+          don't fall back (and warn); nothing renders zone-sensitive dates yet. */}
+      <NextIntlClientProvider
+        locale={locale}
+        messages={messages}
+        timeZone="UTC"
+      >
         <ThemeProvider
           attribute="class"
           defaultTheme="system"

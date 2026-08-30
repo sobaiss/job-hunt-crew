@@ -16,6 +16,10 @@ export default getRequestConfig(async () => {
 
   return {
     locale,
+    // A fixed zone keeps server and client markup identical (next-intl warns
+    // otherwise). Nothing renders zone-sensitive dates today; revisit if a
+    // page needs the candidate's local time.
+    timeZone: "UTC",
     messages: (await import(`../messages/${locale}.json`)).default,
   };
 });

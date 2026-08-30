@@ -2,6 +2,25 @@
   "app": {
     "name": "Job Hunt Crew"
   },
+  "landing": {
+    "tagline": "Match your CV against real job offers and see exactly where you stand.",
+    "description": "Job Hunt Crew reads a job posting and one of your CVs, then shows the matched skills, the gaps, and what to change before you apply.",
+    "signIn": "Sign in"
+  },
+  "signIn": {
+    "title": "Sign in",
+    "subtitle": "Sign in to analyse your CV against job offers.",
+    "google": "Continue with Google",
+    "linkedin": "Continue with LinkedIn",
+    "divider": "or",
+    "emailLabel": "Email address",
+    "emailPlaceholder": "you@example.com",
+    "magicLink": "Email me a sign-in link",
+    "sending": "Sending…",
+    "sentTitle": "Check your inbox",
+    "sentBody": "We sent a sign-in link to {email}. Follow it to finish signing in.",
+    "error": "Something went wrong while signing in. Please try again."
+  },
   "nav": {
     "dashboard": "Dashboard",
     "cvVersions": "CV versions",

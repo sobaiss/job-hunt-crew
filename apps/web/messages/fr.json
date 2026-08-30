@@ -2,6 +2,25 @@
   "app": {
     "name": "Job Hunt Crew"
   },
+  "landing": {
+    "tagline": "Comparez votre CV à de vraies offres d'emploi et sachez exactement où vous en êtes.",
+    "description": "Job Hunt Crew lit une offre d'emploi et l'un de vos CV, puis affiche les compétences qui correspondent, les manques et ce qu'il faut changer avant de postuler.",
+    "signIn": "Se connecter"
+  },
+  "signIn": {
+    "title": "Connexion",
+    "subtitle": "Connectez-vous pour analyser votre CV face aux offres d'emploi.",
+    "google": "Continuer avec Google",
+    "linkedin": "Continuer avec LinkedIn",
+    "divider": "ou",
+    "emailLabel": "Adresse e-mail",
+    "emailPlaceholder": "vous@exemple.com",
+    "magicLink": "M'envoyer un lien de connexion",
+    "sending": "Envoi…",
+    "sentTitle": "Consultez votre boîte de réception",
+    "sentBody": "Nous avons envoyé un lien de connexion à {email}. Suivez-le pour terminer la connexion.",
+    "error": "Une erreur est survenue lors de la connexion. Veuillez réessayer."
+  },
   "nav": {
     "dashboard": "Tableau de bord",
     "cvVersions": "Versions de CV",
