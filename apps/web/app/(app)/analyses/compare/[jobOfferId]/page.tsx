@@ -1,176 +1,113 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 
-type MatchedSkill = { skill: string; evidence: string };
-type MissingSkill = { skill: string; importance: "required" | "nice_to_have" };
-type ImprovementSuggestion = {
-  area: string;
-  suggestion: string;
-  priority: "high" | "medium" | "low";
-};
+import { useAnalyses, type AnalysisStatus } from "@/hooks/use-analyses";
+import { useEnumLabel } from "@/lib/enum-labels";
+import { AnalysisResultView } from "@/components/analysis-result";
+import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 
-type AnalysisResult = {
-  match_score: number;
-  matched_skills: MatchedSkill[];
-  missing_skills: MissingSkill[];
-  strengths: string[];
-  weaknesses: string[];
-  improvement_suggestions: ImprovementSuggestion[];
-  summary: string;
-};
-
-type Analysis = {
-  id: string;
-  status: "PENDING" | "QUEUED" | "RUNNING_CREW" | "AWAITING_RESULT" | "PERSISTING" | "COMPLETED" | "FAILED";
-  matchScore: number | null;
-  resultJSON: AnalysisResult | null;
-  jobOffer: { title: string | null; company: string | null };
-  cvVersion: { label: string };
-};
+function badgeVariant(
+  status: AnalysisStatus,
+): "secondary" | "success" | "destructive" | "warning" {
+  if (status === "COMPLETED") return "success";
+  if (status === "FAILED") return "destructive";
+  if (status === "PENDING" || status === "QUEUED") return "secondary";
+  return "warning";
+}
 
 export default function CompareAnalysesPage() {
   const params = useParams<{ jobOfferId: string }>();
-  const [analyses, setAnalyses] = useState<Analysis[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const t = useTranslations("analyses");
+  const statusLabel = useEnumLabel("analysisStatus");
+  const {
+    data: analyses,
+    isPending,
+    isError,
+  } = useAnalyses({ jobOfferId: params.jobOfferId });
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const response = await fetch(`/api/analyses?jobOfferId=${params.jobOfferId}`);
-        if (!response.ok) {
-          throw new Error(`Request failed with ${response.status}`);
-        }
-        const { analyses } = await response.json();
-        setAnalyses(analyses);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load analyses");
-      }
-    })();
-  }, [params.jobOfferId]);
-
-  if (error) {
+  if (isPending) {
     return (
-      <div className="mx-auto max-w-2xl p-16">
-        <p className="text-sm text-red-600">{error}</p>
-      </div>
+      <main className="mx-auto w-full max-w-6xl p-8">
+        <div
+          role="status"
+          aria-label={t("compare.loading")}
+          className="flex gap-6"
+        >
+          <Skeleton className="h-96 w-80" />
+          <Skeleton className="h-96 w-80" />
+        </div>
+      </main>
     );
   }
 
-  if (!analyses) {
+  if (isError || !analyses) {
     return (
-      <div className="mx-auto max-w-2xl p-16">
-        <p className="text-sm text-zinc-500">Loading…</p>
-      </div>
+      <main className="mx-auto w-full max-w-6xl p-8">
+        <p role="alert" className="text-sm text-destructive">
+          {t("compare.loadError")}
+        </p>
+      </main>
     );
   }
 
   if (analyses.length === 0) {
     return (
-      <div className="mx-auto max-w-2xl p-16">
-        <p className="text-sm text-zinc-500">No analyses found for this job offer.</p>
-      </div>
+      <main className="mx-auto w-full max-w-6xl p-8">
+        <p className="text-sm text-muted">{t("compare.empty")}</p>
+      </main>
     );
   }
 
   const offer = analyses[0].jobOffer;
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-6 p-16">
-      <div>
-        <h1 className="text-2xl font-semibold">
-          {offer.title ?? "Job offer"} {offer.company ? `— ${offer.company}` : ""}
+    <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-8">
+      <div className="flex flex-col gap-1">
+        <h1 className="font-serif text-2xl font-semibold">
+          {offer.title ?? t("jobOfferFallback")}
         </h1>
-        <p className="text-sm text-zinc-500">Comparing {analyses.length} CV version(s)</p>
+        {offer.company && (
+          <p className="text-sm text-muted">{offer.company}</p>
+        )}
+        <p className="text-sm text-muted">
+          {t("compare.count", { count: analyses.length })}
+        </p>
       </div>
 
       {analyses.length < 2 && (
-        <p className="text-sm text-amber-600">
-          Only one analysis exists for this offer — request an analysis against another CV version to compare.
-        </p>
+        <p className="text-sm text-warning">{t("compare.singleNotice")}</p>
       )}
 
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-        {analyses.map((analysis) => {
-          const result = analysis.resultJSON;
-          return (
-            <div key={analysis.id} className="flex flex-col gap-4 rounded border border-zinc-300 p-4">
-              <div>
-                <h2 className="font-semibold">{analysis.cvVersion.label}</h2>
-                <p className="text-xs text-zinc-500">Status: {analysis.status}</p>
-              </div>
-
-              {!result ? (
-                <p className="text-sm text-zinc-500">No result yet.</p>
-              ) : (
-                <>
-                  <div>
-                    <h3 className="text-sm font-semibold text-zinc-500">Match score</h3>
-                    <p className="text-2xl font-bold">{result.match_score}</p>
-                  </div>
-
-                  <div>
-                    <h3 className="text-sm font-semibold text-zinc-500">Matched skills</h3>
-                    <ul className="flex flex-col gap-1">
-                      {result.matched_skills.map((item, i) => (
-                        <li key={i} className="text-sm">
-                          {item.skill}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  <div>
-                    <h3 className="text-sm font-semibold text-zinc-500">Missing skills</h3>
-                    <ul className="flex flex-col gap-1">
-                      {result.missing_skills.map((item, i) => (
-                        <li key={i} className="text-sm">
-                          {item.skill} ({item.importance})
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  <div>
-                    <h3 className="text-sm font-semibold text-zinc-500">Strengths</h3>
-                    <ul className="list-inside list-disc text-sm">
-                      {result.strengths.map((item, i) => (
-                        <li key={i}>{item}</li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  <div>
-                    <h3 className="text-sm font-semibold text-zinc-500">Weaknesses</h3>
-                    <ul className="list-inside list-disc text-sm">
-                      {result.weaknesses.map((item, i) => (
-                        <li key={i}>{item}</li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  <div>
-                    <h3 className="text-sm font-semibold text-zinc-500">Suggestions</h3>
-                    <ul className="flex flex-col gap-1">
-                      {result.improvement_suggestions.map((item, i) => (
-                        <li key={i} className="text-sm">
-                          <span className="font-medium">[{item.priority}]</span> {item.area}: {item.suggestion}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  <div>
-                    <h3 className="text-sm font-semibold text-zinc-500">Summary</h3>
-                    <p className="text-sm">{result.summary}</p>
-                  </div>
-                </>
-              )}
+      <div className="flex gap-6 overflow-x-auto pb-2">
+        {analyses.map((analysis) => (
+          <Card
+            key={analysis.id}
+            className="w-80 shrink-0 gap-6 p-6"
+          >
+            <div className="flex flex-col gap-2">
+              <h2 className="font-serif text-lg font-semibold">
+                {analysis.cvVersion.label}
+              </h2>
+              <Badge
+                variant={badgeVariant(analysis.status)}
+                className="self-start"
+              >
+                {statusLabel(analysis.status)}
+              </Badge>
             </div>
-          );
-        })}
+
+            {analysis.resultJSON ? (
+              <AnalysisResultView result={analysis.resultJSON} />
+            ) : (
+              <p className="text-sm text-muted">{t("compare.noResult")}</p>
+            )}
+          </Card>
+        ))}
       </div>
-    </div>
+    </main>
   );
 }

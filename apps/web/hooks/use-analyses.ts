@@ -67,6 +67,11 @@ export type AnalysisDetail = AnalysisSummary & {
 /**
  * The analyses list. Pass `jobOfferId` to scope it to one JobOffer (used by the
  * Side-by-side comparison in ticket #10).
+ *
+ * The `/v1/analyses` list endpoint serialises each row with the same shape as
+ * the detail endpoint (`resultJSON` and `errorMessage` included), so the list
+ * items are `AnalysisDetail`. The Dashboard only reads the summary fields; the
+ * comparison view reads `resultJSON` per column.
  */
 export function useAnalyses(params?: { jobOfferId?: string }) {
   const jobOfferId = params?.jobOfferId;
@@ -76,8 +81,7 @@ export function useAnalyses(params?: { jobOfferId?: string }) {
 
   return useQuery({
     queryKey: ["analyses", jobOfferId ?? null],
-    queryFn: () =>
-      bff.get<{ analyses: AnalysisSummary[] }>(`/analyses${search}`),
+    queryFn: () => bff.get<{ analyses: AnalysisDetail[] }>(`/analyses${search}`),
     select: (data) => data.analyses,
   });
 }

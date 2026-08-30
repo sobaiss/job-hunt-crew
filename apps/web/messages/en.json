@@ -66,6 +66,14 @@
       "weaknesses": "Weaknesses",
       "suggestions": "Improvement suggestions",
       "summary": "Summary"
+    },
+    "compare": {
+      "loading": "Loading the comparison",
+      "loadError": "We couldn't load this comparison. Please try again.",
+      "empty": "No analyses found for this job offer.",
+      "count": "Comparing {count} CV versions",
+      "singleNotice": "Only one CV version has been analysed for this offer — request an analysis against another CV version to compare.",
+      "noResult": "No result yet."
     }
   },
   "enum": {
