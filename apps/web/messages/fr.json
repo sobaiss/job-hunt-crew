@@ -24,7 +24,8 @@
   "nav": {
     "dashboard": "Tableau de bord",
     "cvVersions": "Versions de CV",
-    "newIngestion": "Nouvelle collecte"
+    "newIngestion": "Nouvelle collecte",
+    "openMenu": "Ouvrir le menu"
   },
   "userMenu": {
     "label": "Menu du compte",

@@ -24,7 +24,8 @@
   "nav": {
     "dashboard": "Dashboard",
     "cvVersions": "CV versions",
-    "newIngestion": "New ingestion"
+    "newIngestion": "New ingestion",
+    "openMenu": "Open menu"
   },
   "userMenu": {
     "label": "Account menu",
