@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter, Source_Serif_4, Geist_Mono } from "next/font/google";
+import { getLocale, getMessages } from "next-intl/server";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 
@@ -30,15 +31,22 @@ export const metadata: Metadata = {
     "Match your CV against real job offers and see exactly where you stand.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  // Resolved from i18n/request.ts (cookie -> Accept-Language -> `en`). `<html
+  // lang>` must match so assistive tech and the browser treat the page right.
+  const locale = await getLocale();
+  const messages = await getMessages();
+
   return (
     <html
-      lang="en"
+      lang={locale}
       suppressHydrationWarning
       className={`${inter.variable} ${sourceSerif.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <Providers>{children}</Providers>
+        <Providers locale={locale} messages={messages}>
+          {children}
+        </Providers>
       </body>
     </html>
   );

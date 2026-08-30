@@ -4,8 +4,11 @@ import * as React from "react";
 import { SessionProvider } from "next-auth/react";
 import { ThemeProvider } from "next-themes";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { NextIntlClientProvider, type AbstractIntlMessages } from "next-intl";
 
 import { Toaster } from "@/components/ui/sonner";
+import { defaultLocale } from "@/i18n/locale";
+import enMessages from "@/messages/en.json";
 
 /**
  * The single client provider stack, mounted once in the root layout.
@@ -17,10 +20,19 @@ import { Toaster } from "@/components/ui/sonner";
  *   `suppressHydrationWarning` is already on `<html>` in layout.tsx).
  * - `QueryClientProvider` — one `QueryClient` per browser session, created lazily
  *   so it survives Fast Refresh but is never shared across requests on the server.
- *
- * The next-intl provider joins this stack in ticket #6.
+ * - `NextIntlClientProvider` — `locale` / `messages` are resolved on the server
+ *   in `app/layout.tsx` and passed in. They default to `en` so the component is
+ *   still usable on its own (tests, Storybook-style mounts).
  */
-export function Providers({ children }: { children: React.ReactNode }) {
+export function Providers({
+  children,
+  locale = defaultLocale,
+  messages = enMessages,
+}: {
+  children: React.ReactNode;
+  locale?: string;
+  messages?: AbstractIntlMessages;
+}) {
   const [queryClient] = React.useState(
     () =>
       new QueryClient({
@@ -35,17 +47,19 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <SessionProvider>
-      <ThemeProvider
-        attribute="class"
-        defaultTheme="system"
-        enableSystem
-        disableTransitionOnChange
-      >
-        <QueryClientProvider client={queryClient}>
-          {children}
-          <Toaster />
-        </QueryClientProvider>
-      </ThemeProvider>
+      <NextIntlClientProvider locale={locale} messages={messages}>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
+          <QueryClientProvider client={queryClient}>
+            {children}
+            <Toaster />
+          </QueryClientProvider>
+        </ThemeProvider>
+      </NextIntlClientProvider>
     </SessionProvider>
   );
 }

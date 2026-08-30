@@ -47,11 +47,18 @@ beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {
   cleanup();
   server.resetHandlers();
-  // next-themes persists to localStorage and mutates <html>; reset both so
-  // theme tests don't leak into each other.
+  // next-themes persists to localStorage and mutates <html>; the LocaleSwitch
+  // writes a cookie and sets <html lang>. Reset all of it so tests don't leak.
   window.localStorage.clear();
   document.documentElement.className = "";
   document.documentElement.style.colorScheme = "";
+  document.documentElement.removeAttribute("lang");
+  for (const pair of document.cookie.split(";")) {
+    const name = pair.split("=")[0]?.trim();
+    if (name) {
+      document.cookie = `${name}=;path=/;max-age=0`;
+    }
+  }
 });
 
 afterAll(() => server.close());

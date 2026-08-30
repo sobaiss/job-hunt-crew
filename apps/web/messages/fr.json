@@ -1,0 +1,44 @@
+{
+  "app": {
+    "name": "Job Hunt Crew"
+  },
+  "nav": {
+    "dashboard": "Tableau de bord",
+    "cvVersions": "Versions de CV",
+    "newIngestion": "Nouvelle collecte"
+  },
+  "userMenu": {
+    "label": "Menu du compte",
+    "theme": "Thème",
+    "language": "Langue",
+    "signOut": "Se déconnecter"
+  },
+  "theme": {
+    "label": "Changer de thème",
+    "light": "Clair",
+    "dark": "Sombre",
+    "system": "Système"
+  },
+  "locale": {
+    "label": "Langue",
+    "en": "Anglais",
+    "fr": "Français"
+  },
+  "enum": {
+    "analysisStatus": {
+      "PENDING": "En attente",
+      "QUEUED": "En file d'attente",
+      "RUNNING_CREW": "En cours",
+      "AWAITING_RESULT": "En attente du résultat",
+      "PERSISTING": "Enregistrement",
+      "COMPLETED": "Terminée",
+      "FAILED": "Échouée"
+    },
+    "ingestionStatus": {
+      "PENDING": "En attente de démarrage",
+      "RUNNING": "En cours",
+      "COMPLETED": "Terminée",
+      "FAILED": "Échouée"
+    }
+  }
+}

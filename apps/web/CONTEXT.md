@@ -19,3 +19,7 @@ _Avoid_: Verification email, passwordless login
 **Side-by-side comparison**:
 The view listing every Analysis requested for one JobOffer across different CVVersions, so a candidate can compare their fit CV-by-CV.
 _Avoid_: Compare page (that's the route, this is what it shows)
+
+**Locale**:
+The active UI language, `en` or `fr`. Resolved per request in `i18n/request.ts` — the `NEXT_LOCALE` cookie first, then the `Accept-Language` header, then `en`. There is no locale segment in the URL; `<html lang>` reflects it and the `LocaleSwitch` control changes it.
+_Avoid_: Language (fine in prose, but the resolved value is the Locale), i18n (that's the mechanism)

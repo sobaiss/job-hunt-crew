@@ -10,3 +10,8 @@ allowBuilds:
   # public dir; tests here use msw/node (Vitest) and page.route (Playwright),
   # so the browser worker is never needed.
   msw: false
+  # Pulled in transitively via next-intl. Neither is needed here: next bundles
+  # its own swc, and nothing watches files outside `next dev` (which uses its
+  # own watcher). Skip their native postinstall builds.
+  '@parcel/watcher': false
+  '@swc/core': false
