@@ -1,94 +1,101 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 
-type Analysis = {
-  id: string;
-  status: "PENDING" | "QUEUED" | "RUNNING_CREW" | "AWAITING_RESULT" | "PERSISTING" | "COMPLETED" | "FAILED";
-  matchScore: number | null;
-  requestedAt: string;
-  jobOffer: { id: string; title: string | null; company: string | null };
-  cvVersion: { label: string };
-};
+import {
+  useAnalyses,
+  type AnalysisStatus,
+} from "@/hooks/use-analyses";
+import { useEnumLabel } from "@/lib/enum-labels";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 
-const STATUS_STYLES: Record<Analysis["status"], string> = {
-  PENDING: "bg-zinc-100 text-zinc-700",
-  QUEUED: "bg-zinc-100 text-zinc-700",
-  RUNNING_CREW: "bg-amber-100 text-amber-700",
-  AWAITING_RESULT: "bg-amber-100 text-amber-700",
-  PERSISTING: "bg-amber-100 text-amber-700",
-  COMPLETED: "bg-green-100 text-green-700",
-  FAILED: "bg-red-100 text-red-700",
-};
+function badgeVariant(
+  status: AnalysisStatus,
+): "secondary" | "success" | "destructive" | "warning" {
+  if (status === "COMPLETED") return "success";
+  if (status === "FAILED") return "destructive";
+  if (status === "PENDING" || status === "QUEUED") return "secondary";
+  return "warning";
+}
 
 export default function AnalysesDashboardPage() {
-  const [analyses, setAnalyses] = useState<Analysis[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const response = await fetch("/api/analyses");
-        if (!response.ok) {
-          throw new Error(`Request failed with ${response.status}`);
-        }
-        const { analyses } = await response.json();
-        setAnalyses(analyses);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load analyses");
-      }
-    })();
-  }, []);
+  const t = useTranslations("analyses");
+  const statusLabel = useEnumLabel("analysisStatus");
+  const { data: analyses, isPending, isError } = useAnalyses();
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-6 p-16">
-      <h1 className="text-2xl font-semibold">Your analyses</h1>
+    <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-8">
+      <h1 className="font-serif text-2xl font-semibold">{t("title")}</h1>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {isPending && (
+        <div
+          role="status"
+          aria-label={t("loading")}
+          className="flex flex-col gap-3"
+        >
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} className="h-20 w-full" />
+          ))}
+        </div>
+      )}
 
-      {!error && !analyses && <p className="text-sm text-zinc-500">Loading…</p>}
+      {isError && (
+        <p role="alert" className="text-sm text-destructive">
+          {t("loadError")}
+        </p>
+      )}
 
       {analyses && analyses.length === 0 && (
-        <p className="text-sm text-zinc-500">No analyses requested yet.</p>
+        <p className="text-sm text-muted">{t("empty")}</p>
       )}
 
       {analyses && analyses.length > 0 && (
         <ul className="flex flex-col gap-3">
           {analyses.map((analysis) => (
-            <li key={analysis.id}>
-              <Link
-                href={`/analyses/${analysis.id}`}
-                className="flex items-center justify-between gap-4 rounded border border-zinc-300 px-3 py-2 hover:bg-zinc-50"
-              >
-                <div className="flex min-w-0 flex-col">
-                  <span className="truncate font-medium">
-                    {analysis.jobOffer.title ?? "Job offer"}
-                    {analysis.jobOffer.company ? ` — ${analysis.jobOffer.company}` : ""}
-                  </span>
-                  <span className="text-xs text-zinc-500">vs. {analysis.cvVersion.label}</span>
-                </div>
-                <div className="flex shrink-0 items-center gap-3">
-                  {analysis.matchScore !== null && (
-                    <span className="text-sm font-semibold">{analysis.matchScore}</span>
-                  )}
-                  <span
-                    className={`rounded px-2 py-1 text-xs font-medium ${STATUS_STYLES[analysis.status]}`}
+            <li key={analysis.id} className="flex flex-col gap-1">
+              <Card className="py-0 transition-colors hover:bg-panel">
+                <CardContent className="flex items-center justify-between gap-4 py-4">
+                  <Link
+                    href={`/analyses/${analysis.id}`}
+                    className="flex min-w-0 flex-col"
                   >
-                    {analysis.status}
-                  </span>
-                </div>
-              </Link>
+                    <span className="truncate font-medium">
+                      {analysis.jobOffer.title ?? t("jobOfferFallback")}
+                    </span>
+                    {analysis.jobOffer.company && (
+                      <span className="truncate text-sm text-muted">
+                        {analysis.jobOffer.company}
+                      </span>
+                    )}
+                    <span className="text-xs text-muted">
+                      {t("vsCv", { label: analysis.cvVersion.label })}
+                    </span>
+                  </Link>
+                  <div className="flex shrink-0 items-center gap-3">
+                    {analysis.matchScore !== null && (
+                      <span className="text-lg font-semibold tabular-nums">
+                        {analysis.matchScore}
+                      </span>
+                    )}
+                    <Badge variant={badgeVariant(analysis.status)}>
+                      {statusLabel(analysis.status)}
+                    </Badge>
+                  </div>
+                </CardContent>
+              </Card>
               <Link
                 href={`/analyses/compare/${analysis.jobOffer.id}`}
-                className="text-xs text-blue-600 hover:underline"
+                className="text-xs text-accent hover:underline"
               >
-                Compare with other CVs
+                {t("compareLink")}
               </Link>
             </li>
           ))}
         </ul>
       )}
-    </div>
+    </main>
   );
 }

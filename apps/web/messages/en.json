@@ -44,6 +44,30 @@
     "en": "English",
     "fr": "French"
   },
+  "analyses": {
+    "title": "Your analyses",
+    "loading": "Loading your analyses",
+    "empty": "No analyses requested yet.",
+    "loadError": "We couldn't load your analyses. Please try again.",
+    "jobOfferFallback": "Job offer",
+    "vsCv": "vs. {label}",
+    "compareLink": "Compare with other CVs",
+    "detail": {
+      "loading": "Loading this analysis",
+      "loadError": "We couldn't load this analysis. Please try again.",
+      "running": "This analysis is still running — this page updates itself.",
+      "failed": "This analysis failed.",
+      "noResult": "No result yet.",
+      "none": "None.",
+      "matchScore": "Match score",
+      "matchedSkills": "Matched skills",
+      "missingSkills": "Missing skills",
+      "strengths": "Strengths",
+      "weaknesses": "Weaknesses",
+      "suggestions": "Improvement suggestions",
+      "summary": "Summary"
+    }
+  },
   "enum": {
     "analysisStatus": {
       "PENDING": "Pending",

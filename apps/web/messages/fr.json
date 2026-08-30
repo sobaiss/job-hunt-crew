@@ -44,6 +44,30 @@
     "en": "Anglais",
     "fr": "Français"
   },
+  "analyses": {
+    "title": "Vos analyses",
+    "loading": "Chargement de vos analyses",
+    "empty": "Aucune analyse demandée pour l'instant.",
+    "loadError": "Impossible de charger vos analyses. Veuillez réessayer.",
+    "jobOfferFallback": "Offre d'emploi",
+    "vsCv": "vs. {label}",
+    "compareLink": "Comparer avec d'autres CV",
+    "detail": {
+      "loading": "Chargement de cette analyse",
+      "loadError": "Impossible de charger cette analyse. Veuillez réessayer.",
+      "running": "Cette analyse est toujours en cours — cette page se met à jour toute seule.",
+      "failed": "Cette analyse a échoué.",
+      "noResult": "Pas encore de résultat.",
+      "none": "Aucune.",
+      "matchScore": "Score de correspondance",
+      "matchedSkills": "Compétences correspondantes",
+      "missingSkills": "Compétences manquantes",
+      "strengths": "Points forts",
+      "weaknesses": "Points faibles",
+      "suggestions": "Suggestions d'amélioration",
+      "summary": "Résumé"
+    }
+  },
   "enum": {
     "analysisStatus": {
       "PENDING": "En attente",
