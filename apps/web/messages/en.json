@@ -76,6 +76,35 @@
       "noResult": "No result yet."
     }
   },
+  "cvVersions": {
+    "title": "CV versions",
+    "form": {
+      "heading": "Upload a CV version",
+      "labelLabel": "Label",
+      "labelPlaceholder": "Software Engineer — Fintech",
+      "fileLabel": "File",
+      "fileHint": "PDF or DOCX, up to 10 MB.",
+      "submit": "Upload",
+      "uploading": "Uploading…",
+      "labelRequired": "Give this CV version a label.",
+      "fileRequired": "Choose a PDF or DOCX file.",
+      "fileType": "Only PDF and DOCX files are supported.",
+      "fileTooLarge": "That file is larger than the 10 MB limit.",
+      "success": "CV version uploaded.",
+      "error": "The upload failed. Please try again."
+    },
+    "list": {
+      "heading": "Your CV versions",
+      "loading": "Loading your CV versions",
+      "loadError": "We couldn't load your CV versions. Please try again.",
+      "empty": "No CV versions uploaded yet.",
+      "default": "Default",
+      "setDefault": "Set as default",
+      "settingDefault": "Setting…",
+      "setDefaultError": "We couldn't set that as your default. Please try again.",
+      "setDefaultSuccess": "Default CV version updated."
+    }
+  },
   "enum": {
     "analysisStatus": {
       "PENDING": "Pending",
@@ -90,6 +119,12 @@
       "PENDING": "Waiting to start",
       "RUNNING": "Running",
       "COMPLETED": "Completed",
+      "FAILED": "Failed"
+    },
+    "cvParseStatus": {
+      "PENDING": "Pending",
+      "PARSING": "Parsing",
+      "PARSED": "Parsed",
       "FAILED": "Failed"
     }
   }

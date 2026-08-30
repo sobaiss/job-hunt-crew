@@ -76,6 +76,35 @@
       "noResult": "Pas encore de résultat."
     }
   },
+  "cvVersions": {
+    "title": "Versions de CV",
+    "form": {
+      "heading": "Téléverser une version de CV",
+      "labelLabel": "Libellé",
+      "labelPlaceholder": "Ingénieur logiciel — Fintech",
+      "fileLabel": "Fichier",
+      "fileHint": "PDF ou DOCX, jusqu'à 10 Mo.",
+      "submit": "Téléverser",
+      "uploading": "Téléversement…",
+      "labelRequired": "Donnez un libellé à cette version de CV.",
+      "fileRequired": "Choisissez un fichier PDF ou DOCX.",
+      "fileType": "Seuls les fichiers PDF et DOCX sont pris en charge.",
+      "fileTooLarge": "Ce fichier dépasse la limite de 10 Mo.",
+      "success": "Version de CV téléversée.",
+      "error": "Le téléversement a échoué. Veuillez réessayer."
+    },
+    "list": {
+      "heading": "Vos versions de CV",
+      "loading": "Chargement de vos versions de CV",
+      "loadError": "Impossible de charger vos versions de CV. Veuillez réessayer.",
+      "empty": "Aucune version de CV téléversée pour l'instant.",
+      "default": "Par défaut",
+      "setDefault": "Définir par défaut",
+      "settingDefault": "Application…",
+      "setDefaultError": "Impossible de définir cette version par défaut. Veuillez réessayer.",
+      "setDefaultSuccess": "Version de CV par défaut mise à jour."
+    }
+  },
   "enum": {
     "analysisStatus": {
       "PENDING": "En attente",
@@ -91,6 +120,12 @@
       "RUNNING": "En cours",
       "COMPLETED": "Terminée",
       "FAILED": "Échouée"
+    },
+    "cvParseStatus": {
+      "PENDING": "En attente",
+      "PARSING": "Analyse en cours",
+      "PARSED": "Analysé",
+      "FAILED": "Échoué"
     }
   }
 }
