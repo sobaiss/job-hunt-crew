@@ -15,13 +15,19 @@ import openai
 DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5"
 DEFAULT_OPENAI_MODEL = "gpt-4o"
 
+# Response cap used when a caller does not ask for a specific one.
+DEFAULT_MAX_TOKENS = 4096
+
 
 class LLMProvider(ABC):
     """Single interface every supported LLM backend implements."""
 
     @abstractmethod
-    def generate(self, *, system: str, prompt: str) -> str:
-        """Run one prompt through the configured model and return the text response."""
+    def generate(self, *, system: str, prompt: str, max_tokens: int | None = None) -> str:
+        """Run one prompt through the configured model and return the text
+        response. `max_tokens` overrides the provider's default response cap —
+        used by the CV Conversion normalisation pass, whose faithful Markdown
+        output of a multi-page CV runs longer than the shared default."""
 
 
 class AnthropicProvider(LLMProvider):
@@ -29,10 +35,10 @@ class AnthropicProvider(LLMProvider):
         self.model = model or os.environ.get("LLM_MODEL") or DEFAULT_ANTHROPIC_MODEL
         self.client = client or anthropic.Anthropic()
 
-    def generate(self, *, system: str, prompt: str) -> str:
+    def generate(self, *, system: str, prompt: str, max_tokens: int | None = None) -> str:
         response = self.client.messages.create(
             model=self.model,
-            max_tokens=4096,
+            max_tokens=max_tokens or DEFAULT_MAX_TOKENS,
             system=system,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -44,13 +50,15 @@ class OpenAIProvider(LLMProvider):
         self.model = model or os.environ.get("LLM_MODEL") or DEFAULT_OPENAI_MODEL
         self.client = client or openai.OpenAI()
 
-    def generate(self, *, system: str, prompt: str) -> str:
+    def generate(self, *, system: str, prompt: str, max_tokens: int | None = None) -> str:
+        optional = {"max_tokens": max_tokens} if max_tokens is not None else {}
         response = self.client.chat.completions.create(
             model=self.model,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
             ],
+            **optional,
         )
         return response.choices[0].message.content
 

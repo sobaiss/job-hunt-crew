@@ -380,3 +380,53 @@ async def test_analysis_workflow_retries_then_fails_via_mark_analysis_failed(
             assert "forced EnsureCVParsed failure" in reloaded.errorMessage
     finally:
         await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+
+
+@pytest.mark.asyncio
+async def test_analysis_workflow_fails_terminally_when_cv_conversion_fails(
+    state_machine_arn, monkeypatch
+):
+    """Issue #17: a Conversion failure inside the workflow (EnsureCVConverted,
+    the StartAt state) must land the Analysis in a terminal FAILED status with a
+    message — Step Functions retries it, then its Catch routes to
+    MarkAnalysisFailed, exactly like the EnsureCVParsed case above."""
+    call_count = {"n": 0}
+
+    async def _always_raise(session, analysis_id, *, llm_provider=None):
+        call_count["n"] += 1
+        raise RuntimeError("forced EnsureCVConverted failure for issue #17")
+
+    monkeypatch.setattr(handlers, "ensure_cv_converted", _always_raise)
+
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id, job_offer_id, cv_version_id, analysis_id = (
+        f"test-user-{uuid.uuid4()}",
+        f"test-offer-{uuid.uuid4()}",
+        f"test-cv-{uuid.uuid4()}",
+        f"test-analysis-{uuid.uuid4()}",
+    )
+    await _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+
+    try:
+        sfn_client = make_sfn_client()
+        async with session_factory() as session:
+            execution_arn = await start_analysis_workflow(
+                session, analysis_id, sfn_client=sfn_client, state_machine_arn=state_machine_arn
+            )
+
+        deadline = time.monotonic() + 45
+        description = sfn_client.describe_execution(executionArn=execution_arn)
+        while description["status"] == "RUNNING" and time.monotonic() < deadline:
+            time.sleep(0.5)
+            description = sfn_client.describe_execution(executionArn=execution_arn)
+        assert description["status"] == "SUCCEEDED"
+        assert call_count["n"] == 4
+
+        async with session_factory() as session:
+            reloaded = await session.get(Analysis, analysis_id)
+            assert reloaded.status == Analysisstatus.FAILED
+            assert reloaded.errorMessage
+            assert "forced EnsureCVConverted failure" in reloaded.errorMessage
+    finally:
+        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
