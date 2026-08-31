@@ -17,12 +17,15 @@ Per source format:
   branch produces the Markdown.
 """
 
+import asyncio
 import io
+import json
 from datetime import UTC, datetime
 
 import mammoth
 from py_db.models import CVVersion, Cvconversionstatus, Cvfiletype
 from py_db.pipeline_events import record_pipeline_event
+from py_db.session import make_engine, make_session_factory
 from py_db.structured_logging import get_logger, log_stage_event
 from pypdf import PdfReader
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -271,3 +274,35 @@ async def _normalise_to_markdown(
         f"normalisation attempts: {last_error}",
         analysis_id,
     )
+
+
+def handle_cv_conversion(event: dict, context=None) -> None:
+    """SQS event-source-mapping Lambda entrypoint for the manual "Convert to
+    Markdown" trigger (issue #19). `event["Records"]` is a batch of
+    `cv-conversion` messages, each with a JSON body `{"cvVersionId": "..."}`
+    (per services/api's POST /v1/cv-versions/{id}/convert). Runs the same
+    `convert_cv` the AnalysisWorkflow's EnsureCVConverted step uses, so the two
+    paths cannot drift. A Conversion failure is already persisted as
+    `conversionStatus = FAILED` on the row by `convert_cv`, so it is swallowed
+    here rather than left to redeliver as a poison message; the next record is
+    still processed.
+    """
+
+    async def _run() -> None:
+        engine = make_engine()
+        session_factory = make_session_factory(engine)
+        try:
+            async with session_factory() as session:
+                for record in event["Records"]:
+                    body = json.loads(record["body"])
+                    try:
+                        await convert_cv(session, body["cvVersionId"])
+                    except CVConversionError:
+                        logger.exception(
+                            "cv_conversion_failed for cv_version_id=%s",
+                            body.get("cvVersionId"),
+                        )
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_run())

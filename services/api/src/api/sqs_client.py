@@ -11,6 +11,13 @@ ANALYSIS_INTAKE_QUEUE_URL = os.environ.get(
     "SQS_ANALYSIS_INTAKE_QUEUE_URL", "http://localhost:9324/000000000000/analysis-intake"
 )
 
+# The manual "Convert to Markdown" trigger (POST /v1/cv-versions/{id}/convert)
+# enqueues here; services/analysis's handle_cv_conversion consumer drains it and
+# runs the same convert_cv the AnalysisWorkflow prerequisite uses.
+CV_CONVERSION_QUEUE_URL = os.environ.get(
+    "SQS_CV_CONVERSION_QUEUE_URL", "http://localhost:9324/000000000000/cv-conversion"
+)
+
 
 def make_sqs_client():
     return boto3.client(

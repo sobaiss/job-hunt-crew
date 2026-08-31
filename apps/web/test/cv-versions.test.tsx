@@ -18,6 +18,7 @@ function cvVersion(overrides: Record<string, unknown> = {}) {
     isDefault: false,
     parseStatus: "PARSED",
     conversionStatus: "CONVERTED",
+    conversionError: null,
     createdAt: "2026-08-01T00:00:00.000Z",
     updatedAt: "2026-08-01T00:00:00.000Z",
     ...overrides,
@@ -213,6 +214,71 @@ describe("CvVersionsPage — list", () => {
     await waitFor(() =>
       expect(screen.queryByText(/Staff Engineer since 2019/)).toBeNull(),
     );
+  });
+
+  it("triggers a Conversion via POST /api/cv-versions/:id/convert", async () => {
+    let convertCalls = 0;
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: [cvVersion({ conversionStatus: "PENDING" })],
+        }),
+      ),
+      http.post("/api/cv-versions/cv1/convert", () => {
+        convertCalls += 1;
+        return HttpResponse.json(
+          { conversionStatus: "PENDING" },
+          { status: 202 },
+        );
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Convert to Markdown" }),
+    );
+
+    await waitFor(() => expect(convertCalls).toBe(1));
+  });
+
+  it("labels the button 'Reconvert' once converted and disables it while CONVERTING", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: [
+            cvVersion({ id: "cvA", conversionStatus: "CONVERTED" }),
+            cvVersion({ id: "cvB", conversionStatus: "CONVERTING" }),
+          ],
+        }),
+      ),
+    );
+    renderWithProviders(<CvVersionsPage />);
+
+    expect(
+      await screen.findByRole("button", { name: "Reconvert" }),
+    ).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Converting…" })).toBeDisabled();
+  });
+
+  it("surfaces conversionError text on a FAILED row", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: [
+            cvVersion({
+              conversionStatus: "FAILED",
+              conversionError: "no extractable text — is this a scanned PDF?",
+            }),
+          ],
+        }),
+      ),
+    );
+    renderWithProviders(<CvVersionsPage />);
+
+    expect(
+      await screen.findByText(/no extractable text — is this a scanned PDF\?/),
+    ).toBeInTheDocument();
   });
 
   it("shows an error state when the list fails to load", async () => {

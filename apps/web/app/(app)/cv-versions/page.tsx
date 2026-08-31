@@ -10,10 +10,12 @@ import {
   useCvVersions,
   useCvVersionMarkdown,
   useCreateCvVersion,
+  useConvertCvVersion,
   useSetDefaultCvVersion,
   ACCEPTED_CV_CONTENT_TYPES,
   MAX_CV_SIZE_BYTES,
   type CvParseStatus,
+  type CvConversionStatus,
 } from "@/hooks/use-cv-versions";
 import { useEnumLabel } from "@/lib/enum-labels";
 import { Badge } from "@/components/ui/badge";
@@ -55,6 +57,15 @@ function parseBadgeVariant(
   return "secondary";
 }
 
+function conversionBadgeVariant(
+  status: CvConversionStatus,
+): "secondary" | "success" | "destructive" | "warning" {
+  if (status === "CONVERTED") return "success";
+  if (status === "FAILED") return "destructive";
+  if (status === "CONVERTING") return "warning";
+  return "secondary";
+}
+
 /**
  * Read-only panel showing the raw Markdown rendition of one CV version. The
  * query is only mounted (and only fetches) while the panel is open, so the
@@ -92,9 +103,11 @@ function CvMarkdownPreview({ id }: { id: string }) {
 export default function CvVersionsPage() {
   const t = useTranslations("cvVersions");
   const parseStatusLabel = useEnumLabel("cvParseStatus");
+  const conversionStatusLabel = useEnumLabel("cvConversionStatus");
 
   const list = useCvVersions();
   const create = useCreateCvVersion();
+  const convert = useConvertCvVersion();
   const setDefault = useSetDefaultCvVersion();
   const [openMarkdownId, setOpenMarkdownId] = useState<string | null>(null);
 
@@ -231,6 +244,11 @@ export default function CvVersionsPage() {
             {t("list.setDefaultSuccess")}
           </p>
         )}
+        {convert.isError && (
+          <p role="alert" className="text-sm text-destructive">
+            {t("list.convertError")}
+          </p>
+        )}
 
         {list.data && list.data.length > 0 && (
           <ul className="flex flex-col gap-3">
@@ -249,6 +267,11 @@ export default function CvVersionsPage() {
                         <Badge variant={parseBadgeVariant(cv.parseStatus)}>
                           {parseStatusLabel(cv.parseStatus)}
                         </Badge>
+                        <Badge
+                          variant={conversionBadgeVariant(cv.conversionStatus)}
+                        >
+                          {conversionStatusLabel(cv.conversionStatus)}
+                        </Badge>
                         <Button
                           type="button"
                           size="sm"
@@ -263,6 +286,26 @@ export default function CvVersionsPage() {
                             ? t("list.hideMarkdown")
                             : t("list.viewMarkdown")}
                         </Button>
+                        {(() => {
+                          const busy =
+                            cv.conversionStatus === "CONVERTING" ||
+                            (convert.isPending && convert.variables === cv.id);
+                          return (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => convert.mutate(cv.id)}
+                              disabled={busy}
+                            >
+                              {busy
+                                ? t("list.converting")
+                                : cv.conversionStatus === "CONVERTED"
+                                  ? t("list.reconvert")
+                                  : t("list.convert")}
+                            </Button>
+                          );
+                        })()}
                         {cv.isDefault ? (
                           <Badge variant="outline">{t("list.default")}</Badge>
                         ) : (
@@ -284,6 +327,15 @@ export default function CvVersionsPage() {
                         )}
                       </div>
                     </div>
+                    {cv.conversionStatus === "FAILED" && (
+                      <p
+                        role="alert"
+                        className="mt-2 text-sm text-destructive"
+                      >
+                        {t("list.conversionFailed")}
+                        {cv.conversionError ? ` ${cv.conversionError}` : ""}
+                      </p>
+                    )}
                     {openMarkdownId === cv.id && (
                       <CvMarkdownPreview id={cv.id} />
                     )}

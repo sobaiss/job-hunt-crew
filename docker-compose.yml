@@ -108,6 +108,7 @@ services:
       SQS_ENDPOINT: http://elasticmq:9324
       SQS_REGION: us-east-1
       SQS_ANALYSIS_INTAKE_QUEUE_URL: http://elasticmq:9324/000000000000/analysis-intake
+      SQS_CV_CONVERSION_QUEUE_URL: http://elasticmq:9324/000000000000/cv-conversion
       SQS_ACCESS_KEY_ID: x
       SQS_SECRET_ACCESS_KEY: x
     depends_on:
