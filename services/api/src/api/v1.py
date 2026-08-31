@@ -26,7 +26,12 @@ from sqlalchemy.orm import selectinload
 
 from .db import get_session
 from .s3_client import S3_BUCKET, cv_file_key, make_s3_client
-from .sqs_client import ANALYSIS_INTAKE_QUEUE_URL, CV_CONVERSION_QUEUE_URL, make_sqs_client
+from .sqs_client import (
+    ANALYSIS_INTAKE_QUEUE_URL,
+    CV_CONVERSION_QUEUE_URL,
+    INGESTION_INTAKE_QUEUE_URL,
+    make_sqs_client,
+)
 
 router = APIRouter(prefix="/v1")
 
@@ -383,15 +388,16 @@ async def convert_cv_version(
     return ConvertCVVersionResponse(conversionStatus=existing.conversionStatus.value)
 
 
-# --- Ingestion jobs (M7-T11) ---
+# --- Ingestion jobs (M7-T11, matching flow #27) ---
 # Ports apps/web/app/api/ingestion-jobs/{route.ts,[id]/route.ts}'s mode/filter
-# validation and INGESTION_MAX_OFFERS default verbatim (PRD Section 8.5, 11/13).
-# Only Mode 3 (SITE_SEARCH) has a trigger endpoint today; per M7-T11, this port
-# preserves the pre-existing gap as-is — it only creates the IngestionJob row,
-# it does not wire in scraping/extraction.
+# validation and INGESTION_MAX_OFFERS default (PRD Section 8.5, 11/13). Both
+# SINGLE_URL and SITE_SEARCH now carry a caller-owned CONVERTED cvVersionId and,
+# on success, enqueue `{"ingestionJobId": id}` on the ingestion-intake queue for
+# the worker (#27) to run the pipeline and create the Analysis.
 
 POSTED_WITHIN_VALUES = ("24h", "7d", "14d", "30d", "any")
 REMOTE_VALUES = ("onsite", "hybrid", "remote")
+INGESTION_MODES = ("SINGLE_URL", "SITE_SEARCH")
 
 DEFAULT_MAX_OFFERS = 25
 
@@ -403,6 +409,21 @@ def _ingestion_max_offers() -> int:
     except ValueError:
         parsed = None
     return parsed if parsed is not None and parsed > 0 else DEFAULT_MAX_OFFERS
+
+
+def _clamp_max_offers(value: Any) -> int:
+    """SITE_SEARCH's maxOffers, taken from the request when a finite number is
+    given and clamped to 1..INGESTION_MAX_OFFERS; defaults to the ceiling when
+    absent or unparseable. SINGLE_URL always forces maxOffers = 1.
+    """
+    ceiling = _ingestion_max_offers()
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int | float)
+        or not math.isfinite(value)
+    ):
+        return ceiling
+    return max(1, min(int(value), ceiling))
 
 
 def _optional_string(value: Any) -> str | None:
@@ -452,6 +473,7 @@ class IngestionJobResponse(BaseModel):
     mode: str
     inputUrl: str | None
     siteConfigId: str | None
+    cvVersionId: str | None
     filters: dict[str, Any] | None
     maxOffers: int
     status: str
@@ -470,6 +492,7 @@ def _ingestion_job_response(row: IngestionJob) -> IngestionJobResponse:
         mode=row.mode.value,
         inputUrl=row.inputUrl,
         siteConfigId=row.siteConfigId,
+        cvVersionId=row.cvVersionId,
         filters=row.filters,
         maxOffers=row.maxOffers,
         status=row.status.value,
@@ -516,8 +539,11 @@ def _ingestion_job_detail_response(row: IngestionJob) -> IngestionJobDetailRespo
 
 class CreateIngestionJobRequest(BaseModel):
     mode: Any = None
+    inputUrl: Any = None
     siteConfigId: Any = None
+    cvVersionId: Any = None
     filters: dict[str, Any] | None = None
+    maxOffers: Any = None
 
 
 class CreateIngestionJobResponse(BaseModel):
@@ -530,55 +556,87 @@ async def create_ingestion_job(
     user_id: str = Depends(require_user_id),
     session: AsyncSession = Depends(get_session),
 ) -> CreateIngestionJobResponse:
-    if req.mode != "SITE_SEARCH":
-        raise HTTPException(status_code=400, detail="mode must be SITE_SEARCH")
+    if req.mode not in INGESTION_MODES:
+        raise HTTPException(status_code=400, detail="mode must be SINGLE_URL or SITE_SEARCH")
 
-    site_config_id = _optional_string(req.siteConfigId)
-    if not site_config_id:
-        raise HTTPException(status_code=400, detail="siteConfigId is required")
+    input_url: str | None = None
+    site_config_id: str | None = None
+    filters: dict[str, Any] | None = None
+    max_offers = 1
 
-    site_config = await session.get(SiteConfig, site_config_id)
-    if site_config is None or not site_config.enabled:
-        raise HTTPException(status_code=400, detail="Unknown or disabled siteConfigId")
+    if req.mode == "SINGLE_URL":
+        input_url = _optional_string(req.inputUrl)
+        if not input_url:
+            raise HTTPException(status_code=400, detail="inputUrl is required for SINGLE_URL")
+    else:
+        site_config_id = _optional_string(req.siteConfigId)
+        if not site_config_id:
+            raise HTTPException(status_code=400, detail="siteConfigId is required")
 
-    filters_in = req.filters or {}
+        site_config = await session.get(SiteConfig, site_config_id)
+        if site_config is None or not site_config.enabled:
+            raise HTTPException(status_code=400, detail="Unknown or disabled siteConfigId")
 
-    posted_within = _optional_string(filters_in.get("postedWithin"))
-    if posted_within is not None and posted_within not in POSTED_WITHIN_VALUES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"filters.postedWithin must be one of: {', '.join(POSTED_WITHIN_VALUES)}",
-        )
+        filters_in = req.filters or {}
 
-    remote = _optional_string(filters_in.get("remote"))
-    if remote is not None and remote not in REMOTE_VALUES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"filters.remote must be one of: {', '.join(REMOTE_VALUES)}",
-        )
+        posted_within = _optional_string(filters_in.get("postedWithin"))
+        if posted_within is not None and posted_within not in POSTED_WITHIN_VALUES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"filters.postedWithin must be one of: {', '.join(POSTED_WITHIN_VALUES)}",
+            )
 
-    filters = {
-        "keywords": _optional_string(filters_in.get("keywords")),
-        "location": _optional_string(filters_in.get("location")),
-        "postedWithin": posted_within,
-        "contractType": _optional_string(filters_in.get("contractType")),
-        "remote": remote,
-        "experienceLevel": _optional_string(filters_in.get("experienceLevel")),
-    }
+        remote = _optional_string(filters_in.get("remote"))
+        if remote is not None and remote not in REMOTE_VALUES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"filters.remote must be one of: {', '.join(REMOTE_VALUES)}",
+            )
+
+        filters = {
+            "keywords": _optional_string(filters_in.get("keywords")),
+            "location": _optional_string(filters_in.get("location")),
+            "postedWithin": posted_within,
+            "contractType": _optional_string(filters_in.get("contractType")),
+            "remote": remote,
+            "experienceLevel": _optional_string(filters_in.get("experienceLevel")),
+        }
+        max_offers = _clamp_max_offers(req.maxOffers)
+
+    # cvVersionId is required for both modes: it must reference a CV the caller
+    # owns whose Conversion has succeeded, since the worker matches against its
+    # Markdown rendition (PRD Section 8.6; only CONVERTED CVs are selectable).
+    cv_version_id = _optional_string(req.cvVersionId)
+    if not cv_version_id:
+        raise HTTPException(status_code=400, detail="cvVersionId is required")
+
+    cv_version = await session.get(CVVersion, cv_version_id)
+    if cv_version is None or cv_version.userId != user_id:
+        raise HTTPException(status_code=400, detail="Unknown cvVersionId")
+    if cv_version.conversionStatus != Cvconversionstatus.CONVERTED:
+        raise HTTPException(status_code=400, detail="cvVersionId must reference a CONVERTED CV")
 
     ingestion_job = IngestionJob(
         id=str(uuid.uuid4()),
         userId=user_id,
-        mode=Ingestionmode.SITE_SEARCH,
+        mode=Ingestionmode(req.mode),
+        inputUrl=input_url,
         siteConfigId=site_config_id,
+        cvVersionId=cv_version_id,
         filters=filters,
-        maxOffers=_ingestion_max_offers(),
+        maxOffers=max_offers,
         status=Ingestionjobstatus.PENDING,
         updatedAt=_now(),
     )
     session.add(ingestion_job)
     await session.commit()
     await session.refresh(ingestion_job)
+
+    sqs = make_sqs_client()
+    sqs.send_message(
+        QueueUrl=INGESTION_INTAKE_QUEUE_URL,
+        MessageBody=json.dumps({"ingestionJobId": ingestion_job.id}),
+    )
 
     return CreateIngestionJobResponse(ingestionJob=_ingestion_job_response(ingestion_job))
 
@@ -666,6 +724,7 @@ class AnalysisListResponse(BaseModel):
 @router.get("/analyses", response_model=AnalysisListResponse)
 async def list_analyses(
     jobOfferId: str | None = None,
+    ingestionJobId: str | None = None,
     user_id: str = Depends(require_user_id),
     session: AsyncSession = Depends(get_session),
 ) -> AnalysisListResponse:
@@ -677,6 +736,8 @@ async def list_analyses(
     )
     if jobOfferId:
         stmt = stmt.where(Analysis.jobOfferId == jobOfferId)
+    if ingestionJobId:
+        stmt = stmt.where(Analysis.ingestionJobId == ingestionJobId)
     rows = (await session.scalars(stmt)).all()
     return AnalysisListResponse(analyses=[_analysis_response(row) for row in rows])
 
