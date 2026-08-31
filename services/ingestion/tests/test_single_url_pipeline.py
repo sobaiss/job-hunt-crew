@@ -25,9 +25,17 @@ from py_db.session import make_engine, make_session_factory
 from sqlalchemy import select
 
 from ingestion.s3_client import S3_BUCKET, raw_scrape_key
-from ingestion.single_url_pipeline import run_single_url_ingestion
+from ingestion.single_url_pipeline import LISTING_PAGE_ERROR_MESSAGE, run_single_url_ingestion
 
 FIXTURE_OFFER_HTML = "<html><body><h1>Senior Backend Engineer</h1></body></html>"
+FIXTURE_LISTING_HTML = (
+    "<html><body><h1>Python jobs</h1><div class='results'>"
+    + "".join(
+        f'<div class="job-card"><a class="job-card-link" href="/jobs/{i}">Role {i}</a></div>'
+        for i in range(12)
+    )
+    + "</div></body></html>"
+)
 VALID_LLM_OUTPUT = json.dumps(
     {
         "description": "Senior Backend Engineer role.",
@@ -288,6 +296,43 @@ async def test_run_single_url_ingestion_retries_previously_failed_offer():
             offer = await session.scalar(select(JobOffer).where(JobOffer.sourceUrl == source_url))
             assert offer.extractionStatus == Jobofferextractionstatus.READY
             assert offer.errorMessage is None
+    finally:
+        await _cleanup(
+            session_factory,
+            user_id=user_id,
+            ingestion_job_id=ingestion_job_id,
+            source_urls=[source_url],
+        )
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_run_single_url_ingestion_detects_listing_page_and_fails_job():
+    """PRD Section 8.3 / issue #31: a pasted search-results page is detected
+    as a listing and fails the IngestionJob with a distinguishable
+    errorMessage, distinct from a generic fetch/extract failure, and no
+    extraction (LLM call) is attempted."""
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    source_url = f"https://jobs.example.com/search/{uuid.uuid4()}"
+    user_id, ingestion_job_id = await _seed_job(session_factory, input_url=source_url)
+    stub = StubLLMProvider()
+
+    try:
+        with respx.mock:
+            respx.mock.get(source_url).mock(return_value=Response(200, text=FIXTURE_LISTING_HTML))
+
+            async with session_factory() as session:
+                ingestion_job = await session.get(IngestionJob, ingestion_job_id)
+                result = await run_single_url_ingestion(session, ingestion_job, llm_provider=stub)
+
+        assert result.status == Ingestionjobstatus.FAILED
+        assert result.errorMessage == LISTING_PAGE_ERROR_MESSAGE
+        assert stub.calls == 0
+
+        async with session_factory() as session:
+            offer = await session.scalar(select(JobOffer).where(JobOffer.sourceUrl == source_url))
+            assert offer.extractionStatus == Jobofferextractionstatus.FAILED
     finally:
         await _cleanup(
             session_factory,

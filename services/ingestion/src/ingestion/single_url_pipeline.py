@@ -6,9 +6,14 @@ pipeline against it (reusing it untouched if it already reached `READY`,
 retrying it if it previously `FAILED`), link it to the job and roll up the
 job's aggregate counts/status.
 
+If the fetched page looks like a job listing / search-results page rather
+than a single offer, the job is failed with `LISTING_PAGE_ERROR_MESSAGE` — a
+distinguishable reason the "Analyse one offer" screen maps to a "looks like a
+listing" redirect (issue #31), distinct from a generic fetch/extract failure.
+
 The end-of-fan-out Analysis-creation step (one `Analysis` per `READY`
-`JobOffer`, `analysis-intake` enqueue, daily-cap handling) and listing-page
-detection are the remaining halves of #27 and are not done here.
+`JobOffer`, `analysis-intake` enqueue, daily-cap handling) lives in
+`analysis_fanout.py`, not here.
 """
 
 import uuid
@@ -16,6 +21,7 @@ from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 import httpx
+from analysis.job_offer_extraction_agent import ExtractionError, extract_job_offer
 from analysis.llm_provider import LLMProvider
 from py_db.models import (
     IngestionJob,
@@ -30,7 +36,18 @@ from py_db.models import (
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .fanout import process_job_offer, update_ingestion_job_aggregate
+from .fanout import update_ingestion_job_aggregate
+from .listing import looks_like_listing
+from .s3_client import S3_BUCKET, make_s3_client
+from .scrape import ScrapeError, scrape_job_offer
+
+# Distinguishable `IngestionJob.errorMessage` for a SINGLE_URL request whose
+# page turned out to be a listing (issue #31). The machine-readable prefix
+# lets the web layer tell it apart from a generic scrape/extract failure.
+LISTING_PAGE_ERROR_MESSAGE = (
+    "LISTING_PAGE_DETECTED: the fetched page looks like a job listing / "
+    "search-results page, not a single offer"
+)
 
 # SiteConfig.siteKey -> JobOffer.sourceSite. Every HTML_SCRAPE / OFFICIAL_API
 # site we seed has a matching sourceSite; anything else falls back to OTHER.
@@ -80,6 +97,11 @@ async def _fail(session: AsyncSession, ingestion_job: IngestionJob, message: str
     return ingestion_job
 
 
+def _read_scraped_html(raw_content_key: str) -> str:
+    obj = make_s3_client().get_object(Bucket=S3_BUCKET, Key=raw_content_key)
+    return obj["Body"].read().decode("utf-8")
+
+
 async def run_single_url_ingestion(
     session: AsyncSession,
     ingestion_job: IngestionJob,
@@ -89,10 +111,14 @@ async def run_single_url_ingestion(
 ) -> IngestionJob:
     """PRD Section 8.3. Get-or-creates the `JobOffer` for
     `ingestion_job.inputUrl` (deduped globally by `sourceUrl`), links it to
-    the job, runs the Mode 1 pipeline against it via `process_job_offer`
-    (a no-op for an already-`READY` offer, a retry for a previously-`FAILED`
-    one) and rolls up the job's `discoveredCount` / `scrapedCount` /
-    `failedCount` / `status` through `update_ingestion_job_aggregate`.
+    the job, runs the Mode 1 scrape + extraction against it (a no-op for an
+    already-`READY` offer, a retry for a previously-`FAILED` one) and rolls up
+    the job's `discoveredCount` / `scrapedCount` / `failedCount` / `status`
+    through `update_ingestion_job_aggregate`.
+
+    Between scrape and extraction the fetched HTML is checked with
+    `looks_like_listing`: a pasted search-results / listing page fails the
+    job with `LISTING_PAGE_ERROR_MESSAGE` (issue #31) and is never extracted.
     """
     url = (ingestion_job.inputUrl or "").strip()
     if not url:
@@ -134,12 +160,32 @@ async def run_single_url_ingestion(
         )
     await session.commit()
 
-    await process_job_offer(
-        session,
-        job_offer,
-        http_client=http_client,
-        llm_provider=llm_provider,
-        ingestion_job_id=ingestion_job.id,
-    )
+    # Already-terminal offer (a prior ingestion left it READY): reuse it
+    # untouched, exactly as `process_job_offer` would (PRD Section 6 dedup).
+    if job_offer.extractionStatus != Jobofferextractionstatus.READY:
+        try:
+            await scrape_job_offer(
+                session, job_offer.id, http_client=http_client, ingestion_job_id=ingestion_job.id
+            )
+        except ScrapeError:
+            await update_ingestion_job_aggregate(session, ingestion_job.id)
+            return await session.get(IngestionJob, ingestion_job.id)
+
+        job_offer = await session.get(JobOffer, job_offer.id)
+        if looks_like_listing(_read_scraped_html(job_offer.rawContentKey), job_offer.sourceUrl):
+            job_offer.extractionStatus = Jobofferextractionstatus.FAILED
+            job_offer.errorMessage = LISTING_PAGE_ERROR_MESSAGE
+            job_offer.updatedAt = _now()
+            await session.commit()
+            await update_ingestion_job_aggregate(session, ingestion_job.id)
+            return await _fail(session, ingestion_job, LISTING_PAGE_ERROR_MESSAGE)
+
+        try:
+            await extract_job_offer(
+                session, job_offer.id, llm_provider=llm_provider, ingestion_job_id=ingestion_job.id
+            )
+        except ExtractionError:
+            pass
+
     await update_ingestion_job_aggregate(session, ingestion_job.id)
     return await session.get(IngestionJob, ingestion_job.id)
