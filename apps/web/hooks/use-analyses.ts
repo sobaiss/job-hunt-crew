@@ -66,23 +66,40 @@ export type AnalysisDetail = AnalysisSummary & {
 
 /**
  * The analyses list. Pass `jobOfferId` to scope it to one JobOffer (used by the
- * Side-by-side comparison in ticket #10).
+ * Side-by-side comparison in ticket #10), or `ingestionJobId` to scope it to
+ * one IngestionJob's Analysis batch (used by the "Analyse one offer" waiting
+ * state and, later, the Batch result view).
+ *
+ * When `ingestionJobId` is set the query polls every
+ * {@link ANALYSIS_POLL_INTERVAL_MS} until at least one Analysis exists, then
+ * stops — the caller is waiting for the ingestion worker to create it.
  *
  * The `/v1/analyses` list endpoint serialises each row with the same shape as
  * the detail endpoint (`resultJSON` and `errorMessage` included), so the list
  * items are `AnalysisDetail`. The Dashboard only reads the summary fields; the
  * comparison view reads `resultJSON` per column.
  */
-export function useAnalyses(params?: { jobOfferId?: string }) {
+export function useAnalyses(params?: {
+  jobOfferId?: string;
+  ingestionJobId?: string;
+}) {
   const jobOfferId = params?.jobOfferId;
-  const search = jobOfferId
-    ? `?jobOfferId=${encodeURIComponent(jobOfferId)}`
-    : "";
+  const ingestionJobId = params?.ingestionJobId;
+
+  const query = new URLSearchParams();
+  if (jobOfferId) query.set("jobOfferId", jobOfferId);
+  if (ingestionJobId) query.set("ingestionJobId", ingestionJobId);
+  const search = query.toString() ? `?${query.toString()}` : "";
 
   return useQuery({
-    queryKey: ["analyses", jobOfferId ?? null],
+    queryKey: ["analyses", jobOfferId ?? null, ingestionJobId ?? null],
     queryFn: () => bff.get<{ analyses: AnalysisDetail[] }>(`/analyses${search}`),
     select: (data) => data.analyses,
+    refetchInterval: (q) => {
+      if (!ingestionJobId) return false;
+      const analyses = q.state.data?.analyses;
+      return analyses && analyses.length > 0 ? false : ANALYSIS_POLL_INTERVAL_MS;
+    },
   });
 }
 

@@ -24,7 +24,7 @@
   "nav": {
     "dashboard": "Tableau de bord",
     "cvVersions": "Versions de CV",
-    "newIngestion": "Nouvelle collecte",
+    "newAnalysis": "Nouvelle analyse",
     "openMenu": "Ouvrir le menu"
   },
   "userMenu": {
@@ -75,6 +75,30 @@
       "singleNotice": "Une seule version de CV a été analysée pour cette offre — demandez une analyse avec une autre version de CV pour comparer.",
       "noResult": "Pas encore de résultat."
     }
+  },
+  "cvPicker": {
+    "label": "Version de CV",
+    "placeholder": "Sélectionnez une version de CV",
+    "loading": "Chargement de vos versions de CV",
+    "loadError": "Impossible de charger vos versions de CV. Veuillez réessayer.",
+    "noneConverted": "Aucune de vos versions de CV n'a encore été convertie.",
+    "manageLink": "Importer un CV"
+  },
+  "analyseOne": {
+    "heading": "Analyser une offre",
+    "subtitle": "Collez l'URL d'une offre d'emploi et choisissez le CV à comparer.",
+    "urlLabel": "URL de l'offre d'emploi",
+    "urlPlaceholder": "https://…",
+    "urlRequired": "Collez l'URL de l'offre d'emploi.",
+    "urlInvalid": "Saisissez une URL valide.",
+    "submit": "Analyser cette offre",
+    "submitting": "Démarrage…",
+    "error": "Impossible de lancer cette analyse. Veuillez réessayer.",
+    "waitingHeading": "Analyse de cette offre",
+    "step1": "Récupération de l'offre",
+    "step2": "Analyse de votre correspondance",
+    "failed": "Impossible de récupérer ou de lire cette offre d'emploi.",
+    "retry": "Réessayer"
   },
   "cvVersions": {
     "title": "Versions de CV",

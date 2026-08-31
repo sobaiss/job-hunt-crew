@@ -40,9 +40,9 @@ describe("AppHeader", () => {
       "href",
       "/cv-versions",
     );
-    expect(screen.getByRole("link", { name: "New ingestion" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "New analysis" })).toHaveAttribute(
       "href",
-      "/ingestion-jobs/new",
+      "/analyses/new",
     );
   });
 
@@ -79,8 +79,8 @@ describe("AppHeader", () => {
 
     const dialog = await screen.findByRole("dialog");
     expect(
-      within(dialog).getByRole("link", { name: "New ingestion" }),
-    ).toHaveAttribute("href", "/ingestion-jobs/new");
+      within(dialog).getByRole("link", { name: "New analysis" }),
+    ).toHaveAttribute("href", "/analyses/new");
 
     await user.keyboard("{Escape}");
     await waitFor(() =>

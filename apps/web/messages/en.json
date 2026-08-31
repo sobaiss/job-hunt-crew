@@ -24,7 +24,7 @@
   "nav": {
     "dashboard": "Dashboard",
     "cvVersions": "CV versions",
-    "newIngestion": "New ingestion",
+    "newAnalysis": "New analysis",
     "openMenu": "Open menu"
   },
   "userMenu": {
@@ -75,6 +75,30 @@
       "singleNotice": "Only one CV version has been analysed for this offer — request an analysis against another CV version to compare.",
       "noResult": "No result yet."
     }
+  },
+  "cvPicker": {
+    "label": "CV version",
+    "placeholder": "Select a CV version",
+    "loading": "Loading your CV versions",
+    "loadError": "We couldn't load your CV versions. Please try again.",
+    "noneConverted": "None of your CV versions have been converted yet.",
+    "manageLink": "Import a CV"
+  },
+  "analyseOne": {
+    "heading": "Analyse one offer",
+    "subtitle": "Paste a job offer URL and pick which CV to match it against.",
+    "urlLabel": "Job offer URL",
+    "urlPlaceholder": "https://…",
+    "urlRequired": "Paste the URL of the job offer.",
+    "urlInvalid": "Enter a valid URL.",
+    "submit": "Analyse this offer",
+    "submitting": "Starting…",
+    "error": "We couldn't start that analysis. Please try again.",
+    "waitingHeading": "Analysing this offer",
+    "step1": "Fetching the offer",
+    "step2": "Analysing your match",
+    "failed": "We couldn't fetch or read that job offer.",
+    "retry": "Try again"
   },
   "cvVersions": {
     "title": "CV versions",

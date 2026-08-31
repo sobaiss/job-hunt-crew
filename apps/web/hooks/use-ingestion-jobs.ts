@@ -104,3 +104,26 @@ export function useCreateIngestionJob() {
       }),
   });
 }
+
+/**
+ * Create a SINGLE_URL IngestionJob from a pasted offer URL and the chosen
+ * CVVersion. The worker scrapes/extracts that one offer and then creates the
+ * Analysis; the "Analyse one offer" screen polls for that Analysis and routes
+ * to its detail view. services/api forces `maxOffers = 1` for this mode.
+ */
+export function useCreateSingleUrlIngestionJob() {
+  return useMutation({
+    mutationFn: ({
+      inputUrl,
+      cvVersionId,
+    }: {
+      inputUrl: string;
+      cvVersionId: string;
+    }) =>
+      bff.post<{ ingestionJob: IngestionJob }>("/ingestion-jobs", {
+        mode: "SINGLE_URL",
+        inputUrl,
+        cvVersionId,
+      }),
+  });
+}
