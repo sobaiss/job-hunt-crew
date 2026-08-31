@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -10,6 +11,7 @@ import { useTranslations } from "next-intl";
 import {
   useCreateSingleUrlIngestionJob,
   useIngestionJob,
+  isListingPageError,
   TERMINAL_INGESTION_STATUSES,
 } from "@/hooks/use-ingestion-jobs";
 import { useAnalyses } from "@/hooks/use-analyses";
@@ -46,6 +48,7 @@ function WaitingState({
 
   const analysisId = analyses.data?.[0]?.id ?? null;
   const jobFailed = job.data?.status === "FAILED";
+  const looksLikeListing = isListingPageError(job.data?.errorMessage);
 
   useEffect(() => {
     if (analysisId && !navigated.current) {
@@ -53,6 +56,22 @@ function WaitingState({
       router.replace(`/analyses/${analysisId}`);
     }
   }, [analysisId, router]);
+
+  if (jobFailed && !analysisId && looksLikeListing) {
+    return (
+      <div className="flex flex-col gap-4">
+        <div
+          role="alert"
+          className="rounded-md border border-border bg-muted/10 p-4 text-sm"
+        >
+          {t("listing")}
+        </div>
+        <Button asChild className="self-start">
+          <Link href="/analyses/new/several">{t("listingCta")}</Link>
+        </Button>
+      </div>
+    );
+  }
 
   if (jobFailed && !analysisId) {
     return (

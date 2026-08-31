@@ -98,7 +98,9 @@
     "step1": "Récupération de l'offre",
     "step2": "Analyse de votre correspondance",
     "failed": "Impossible de récupérer ou de lire cette offre d'emploi.",
-    "retry": "Réessayer"
+    "retry": "Réessayer",
+    "listing": "Cette URL ressemble à une liste d'offres, et non à une seule offre d'emploi.",
+    "listingCta": "Analyser plusieurs offres"
   },
   "cvVersions": {
     "title": "Versions de CV",

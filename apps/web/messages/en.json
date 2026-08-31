@@ -98,7 +98,9 @@
     "step1": "Fetching the offer",
     "step2": "Analysing your match",
     "failed": "We couldn't fetch or read that job offer.",
-    "retry": "Try again"
+    "retry": "Try again",
+    "listing": "That URL looks like a list of offers, not a single job offer.",
+    "listingCta": "Analyse several offers"
   },
   "cvVersions": {
     "title": "CV versions",

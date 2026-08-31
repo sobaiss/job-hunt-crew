@@ -247,4 +247,40 @@ describe("AnalyseOneOfferPage", () => {
     await user.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(stub.creates()).toBe(2));
   });
+
+  it("maps a listing-page failure to the redirect message and link, no retry", async () => {
+    const stub = stubApi({
+      jobStatus: "FAILED",
+      jobErrorMessage:
+        "LISTING_PAGE_DETECTED: the fetched page looks like a job listing / search-results page, not a single offer",
+      analyses: [],
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<AnalyseOneOfferPage />);
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("CV version")).toHaveValue("cv-default"),
+    );
+    await user.type(
+      screen.getByLabelText("Job offer URL"),
+      "https://jobs.example.com/search?q=backend",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Analyse this offer" }),
+    );
+
+    expect(
+      await screen.findByText(
+        "That URL looks like a list of offers, not a single job offer.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("We couldn't fetch or read that job offer."),
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+
+    const link = screen.getByRole("link", { name: "Analyse several offers" });
+    expect(link).toHaveAttribute("href", "/analyses/new/several");
+    expect(stub.creates()).toBe(1);
+  });
 });

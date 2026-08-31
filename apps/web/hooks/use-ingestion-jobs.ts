@@ -24,6 +24,23 @@ export const TERMINAL_INGESTION_STATUSES: ReadonlySet<IngestionJobStatus> =
 export const INGESTION_POLL_INTERVAL_MS = 2000;
 
 /**
+ * Machine-readable prefix the SINGLE_URL pipeline puts on
+ * `IngestionJob.errorMessage` when the pasted page turned out to be a
+ * listing / search-results page rather than one offer (see
+ * `LISTING_PAGE_ERROR_MESSAGE` in `services/ingestion`). Lets the "Analyse one
+ * offer" screen show the "looks like a listing" redirect instead of the
+ * generic fetch-failure message.
+ */
+export const LISTING_PAGE_ERROR_PREFIX = "LISTING_PAGE_DETECTED";
+
+/** True when a failed IngestionJob failed because its input was a listing page. */
+export function isListingPageError(
+  errorMessage: string | null | undefined,
+): boolean {
+  return errorMessage?.startsWith(LISTING_PAGE_ERROR_PREFIX) ?? false;
+}
+
+/**
  * Filter values services/api accepts for a SITE_SEARCH job. Mirrors
  * `POSTED_WITHIN_VALUES` / `REMOTE_VALUES` in `services/api/src/api/v1.py`; the
  * form validates against these so a bad value is rejected before the request.
