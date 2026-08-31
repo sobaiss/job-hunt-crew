@@ -145,6 +145,90 @@ async def test_dispatch_ingestion_job_single_url_runs_the_pipeline():
 
 
 @pytest.mark.asyncio
+async def test_dispatch_ingestion_job_single_url_creates_analysis_and_enqueues():
+    """The shared end-of-fan-out step (issue #27 slice 4): once the SINGLE_URL
+    pipeline leaves a linked JobOffer READY, dispatch creates one Analysis
+    (userId + cvVersionId carried on the IngestionJob, jobOfferId,
+    ingestionJobId) and enqueues {"analysisId": id} on analysis-intake."""
+    from py_db.models import Analysis, CVVersion, Cvconversionstatus, Cvfiletype
+
+    class FakeSqs:
+        def __init__(self):
+            self.messages = []
+
+        def send_message(self, *, QueueUrl, MessageBody):
+            self.messages.append((QueueUrl, json.loads(MessageBody)))
+
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    source_url = f"https://jobs.example.com/offer/{uuid.uuid4()}"
+    user_id, ingestion_job_id = await _seed_job(
+        session_factory, mode=Ingestionmode.SINGLE_URL, input_url=source_url
+    )
+    cv_version_id = f"test-cv-{uuid.uuid4()}"
+    async with session_factory() as session:
+        session.add(
+            CVVersion(
+                id=cv_version_id,
+                userId=user_id,
+                label="CV",
+                fileKey="cv/x.pdf",
+                fileName="x.pdf",
+                fileType=Cvfiletype.PDF,
+                fileSizeBytes=1234,
+                conversionStatus=Cvconversionstatus.CONVERTED,
+                markdownContent="# CV",
+                updatedAt=_now(),
+            )
+        )
+        job = await session.get(IngestionJob, ingestion_job_id)
+        job.cvVersionId = cv_version_id
+        await session.commit()
+
+    fake_sqs = FakeSqs()
+    try:
+        with respx.mock:
+            respx.mock.get(source_url).mock(
+                return_value=Response(200, text="<html><body><h1>Role</h1></body></html>")
+            )
+            async with session_factory() as session:
+                await dispatch_ingestion_job(
+                    session, ingestion_job_id, llm_provider=StubLLMProvider(), sqs_client=fake_sqs
+                )
+
+        async with session_factory() as session:
+            offer = await session.scalar(select(JobOffer).where(JobOffer.sourceUrl == source_url))
+            analyses = (
+                await session.scalars(
+                    select(Analysis).where(Analysis.ingestionJobId == ingestion_job_id)
+                )
+            ).all()
+        assert len(analyses) == 1
+        assert analyses[0].jobOfferId == offer.id
+        assert analyses[0].userId == user_id
+        assert analyses[0].cvVersionId == cv_version_id
+        assert [m[1]["analysisId"] for m in fake_sqs.messages] == [analyses[0].id]
+    finally:
+        async with session_factory() as session:
+            for row in (
+                await session.scalars(select(Analysis).where(Analysis.userId == user_id))
+            ).all():
+                await session.delete(row)
+            await session.commit()
+            cv = await session.get(CVVersion, cv_version_id)
+            if cv is not None:
+                await session.delete(cv)
+            await session.commit()
+        await _cleanup(
+            session_factory,
+            user_id=user_id,
+            ingestion_job_id=ingestion_job_id,
+            source_urls=[source_url],
+        )
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_dispatch_ingestion_job_missing_row_raises():
     engine = make_engine()
     session_factory = make_session_factory(engine)

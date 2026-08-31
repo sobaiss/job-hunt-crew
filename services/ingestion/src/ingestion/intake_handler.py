@@ -22,6 +22,7 @@ from py_db.session import make_engine, make_session_factory
 from py_db.structured_logging import get_logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .analysis_fanout import create_analyses_for_ready_offers
 from .single_url_pipeline import run_single_url_ingestion
 from .site_search_pipeline import run_site_search_ingestion
 
@@ -43,10 +44,13 @@ async def dispatch_ingestion_job(
     *,
     http_client: httpx.AsyncClient | None = None,
     llm_provider: LLMProvider | None = None,
+    sqs_client=None,
 ) -> IngestionJob:
-    """Loads `ingestion_job_id`, marks it `RUNNING`, and hands it to the
-    per-mode pipeline entrypoint. Raises `IngestionIntakeError` if the row is
-    missing or a `SITE_SEARCH` job has no resolvable `SiteConfig`.
+    """Loads `ingestion_job_id`, marks it `RUNNING`, hands it to the per-mode
+    pipeline entrypoint, then runs the shared end-of-fan-out step that
+    creates one `Analysis` per `READY` `JobOffer` and enqueues it on
+    `analysis-intake`. Raises `IngestionIntakeError` if the row is missing or
+    a `SITE_SEARCH` job has no resolvable `SiteConfig`.
     """
     ingestion_job = await session.get(IngestionJob, ingestion_job_id)
     if ingestion_job is None:
@@ -57,11 +61,10 @@ async def dispatch_ingestion_job(
     await session.commit()
 
     if ingestion_job.mode == Ingestionmode.SINGLE_URL:
-        return await run_single_url_ingestion(
+        await run_single_url_ingestion(
             session, ingestion_job, http_client=http_client, llm_provider=llm_provider
         )
-
-    if ingestion_job.mode == Ingestionmode.SITE_SEARCH:
+    elif ingestion_job.mode == Ingestionmode.SITE_SEARCH:
         site_config = (
             await session.get(SiteConfig, ingestion_job.siteConfigId)
             if ingestion_job.siteConfigId
@@ -72,7 +75,7 @@ async def dispatch_ingestion_job(
                 f"IngestionJob {ingestion_job_id} has no resolvable SiteConfig "
                 f"(siteConfigId={ingestion_job.siteConfigId!r})"
             )
-        return await run_site_search_ingestion(
+        await run_site_search_ingestion(
             session,
             ingestion_job,
             site_config,
@@ -80,13 +83,17 @@ async def dispatch_ingestion_job(
             http_client=http_client,
             llm_provider=llm_provider,
         )
+    else:
+        ingestion_job.status = Ingestionjobstatus.FAILED
+        ingestion_job.errorMessage = f"Unsupported ingestion mode {ingestion_job.mode.value}"
+        ingestion_job.updatedAt = _now()
+        await session.commit()
+        await session.refresh(ingestion_job)
+        return ingestion_job
 
-    ingestion_job.status = Ingestionjobstatus.FAILED
-    ingestion_job.errorMessage = f"Unsupported ingestion mode {ingestion_job.mode.value}"
-    ingestion_job.updatedAt = _now()
-    await session.commit()
-    await session.refresh(ingestion_job)
-    return ingestion_job
+    ingestion_job = await session.get(IngestionJob, ingestion_job_id)
+    await create_analyses_for_ready_offers(session, ingestion_job, sqs_client=sqs_client)
+    return await session.get(IngestionJob, ingestion_job_id)
 
 
 def handle_ingestion_intake(event: dict, context=None) -> None:
