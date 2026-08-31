@@ -16,7 +16,6 @@ function cvVersion(overrides: Record<string, unknown> = {}) {
     fileType: "PDF",
     fileSizeBytes: 12345,
     isDefault: false,
-    parseStatus: "PARSED",
     conversionStatus: "CONVERTED",
     conversionError: null,
     createdAt: "2026-08-01T00:00:00.000Z",
@@ -168,18 +167,18 @@ describe("CvVersionsPage — upload form", () => {
 });
 
 describe("CvVersionsPage — list", () => {
-  it("renders each CV version with its parse status", async () => {
+  it("renders each CV version with its conversion status", async () => {
     server.use(
       http.get("/api/cv-versions", () =>
         HttpResponse.json({
-          cvVersions: [cvVersion({ parseStatus: "PARSING" })],
+          cvVersions: [cvVersion({ conversionStatus: "CONVERTING" })],
         }),
       ),
     );
     renderWithProviders(<CvVersionsPage />);
 
     expect(await screen.findByText("Grad CV")).toBeInTheDocument();
-    expect(screen.getByText("Parsing")).toBeInTheDocument();
+    expect(screen.getByText("Converting")).toBeInTheDocument();
   });
 
   it("fetches and shows the Markdown rendition only after the panel is opened", async () => {

@@ -8,7 +8,8 @@
 - DOCX (slice 3, issue #18): `mammoth` converts the document to HTML, then the
   same normalisation pass and bounded retry as the PDF branch.
 
-Prior art: test_cv_extraction_agent.py (same fixture-bytes + S3 helpers).
+The fixture-bytes + S3 helpers here were carried over from the retired
+test_cv_extraction_agent.py (#21).
 """
 
 import io
@@ -61,8 +62,7 @@ class StubLLMProvider(LLMProvider):
 
 def _build_fixture_pdf_bytes(text: str) -> bytes:
     """Hand-crafted minimal single-page PDF with a real, pypdf-extractable
-    text content stream (no external PDF-writing library needed). Copied from
-    test_cv_extraction_agent.py."""
+    text content stream (no external PDF-writing library needed)."""
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",

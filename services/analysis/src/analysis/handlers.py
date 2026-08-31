@@ -1,7 +1,7 @@
 """AnalysisWorkflow Lambda handlers (PRD Section 10 steps 4-6, M5-T2).
 
 Thin, synchronous Lambda entrypoints wrapping the existing async pipeline
-functions (M2-T4's extract_job_offer, M2-T5's extract_cv). Each handler's
+functions (convert_cv, M2-T4's extract_job_offer). Each handler's
 input/output is `{"analysisId": "..."}` so Step Functions can chain them
 via the state machine's `$.analysisId` path (analysis_workflow.asl.json).
 """
@@ -15,7 +15,6 @@ from py_db.models import (
     Analysisstatus,
     Cvconversionstatus,
     CVVersion,
-    Cvparsestatus,
     JobOffer,
     Jobofferextractionstatus,
 )
@@ -24,7 +23,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .crew_task import run_crew_task
 from .cv_conversion import convert_cv
-from .cv_extraction_agent import extract_cv
 from .job_offer_extraction_agent import extract_job_offer
 from .llm_provider import LLMProvider
 
@@ -36,10 +34,10 @@ class HandlerError(Exception):
 async def ensure_cv_converted(
     session: AsyncSession, analysis_id: str, *, llm_provider: LLMProvider | None = None
 ) -> None:
-    """PRD Section 10 step 4 (issue #16): checks CVVersion.conversionStatus; if
-    not CONVERTED, runs Conversion (convert_cv) to build the Markdown rendition.
+    """PRD Section 10 step 4: checks CVVersion.conversionStatus; if not
+    CONVERTED, runs Conversion (convert_cv) to build the Markdown rendition.
     No-op if already CONVERTED (a rendition only changes via an explicit manual
-    re-convert). Runs before ensure_cv_parsed during the expand step.
+    re-convert). The AnalysisWorkflow's first state.
     """
     analysis = await session.get(Analysis, analysis_id)
     if analysis is None:
@@ -55,29 +53,10 @@ async def ensure_cv_converted(
         )
 
 
-async def ensure_cv_parsed(
-    session: AsyncSession, analysis_id: str, *, llm_provider: LLMProvider | None = None
-) -> None:
-    """PRD Section 10 step 4: checks CVVersion.parseStatus; if not PARSED,
-    runs CVExtractionAgent. No-op if already PARSED (avoids re-parsing an
-    unchanged CV, per PRD Section 8.2).
-    """
-    analysis = await session.get(Analysis, analysis_id)
-    if analysis is None:
-        raise HandlerError(f"Analysis {analysis_id} not found")
-
-    cv_version = await session.get(CVVersion, analysis.cvVersionId)
-    if cv_version is None:
-        raise HandlerError(f"CVVersion {analysis.cvVersionId} not found")
-
-    if cv_version.parseStatus != Cvparsestatus.PARSED:
-        await extract_cv(session, analysis.cvVersionId, llm_provider=llm_provider, analysis_id=analysis_id)
-
-
 async def ensure_offer_extracted(
     session: AsyncSession, analysis_id: str, *, llm_provider: LLMProvider | None = None
 ) -> None:
-    """PRD Section 10 step 5: same as ensure_cv_parsed, for JobOffer via
+    """PRD Section 10 step 5: same as ensure_cv_converted, for JobOffer via
     JobOfferExtractionAgent. No-op if already READY.
     """
     analysis = await session.get(Analysis, analysis_id)
@@ -110,22 +89,6 @@ def ensure_cv_converted_handler(event: dict, context=None) -> dict:
     return {"analysisId": analysis_id}
 
 
-def ensure_cv_parsed_handler(event: dict, context=None) -> dict:
-    analysis_id = event["analysisId"]
-
-    async def _run() -> None:
-        engine = make_engine()
-        session_factory = make_session_factory(engine)
-        try:
-            async with session_factory() as session:
-                await ensure_cv_parsed(session, analysis_id)
-        finally:
-            await engine.dispose()
-
-    asyncio.run(_run())
-    return {"analysisId": analysis_id}
-
-
 def ensure_offer_extracted_handler(event: dict, context=None) -> dict:
     analysis_id = event["analysisId"]
 
@@ -148,7 +111,7 @@ def _error_message_from_catch(error: dict) -> str:
     shape). `Cause` is either a plain string (e.g. crew_task's own
     SendTaskFailure `cause=`, already a clear message) or a JSON-encoded
     Lambda function-error payload (`{"errorMessage": ..., "errorType": ...}`,
-    what a raised exception in ensure_cv_parsed_handler/
+    what a raised exception in ensure_cv_converted_handler/
     ensure_offer_extracted_handler surfaces as, since AWS Lambda — and
     lambda_shim, standing in for it locally — reports handler errors that
     way). Unwrap the JSON case so errorMessage always carries the underlying

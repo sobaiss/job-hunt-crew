@@ -146,11 +146,8 @@ class CVVersionResponse(BaseModel):
     fileType: str
     fileSizeBytes: int
     isDefault: bool
-    parseStatus: str
     conversionStatus: str
     conversionError: str | None
-    structuredData: dict[str, Any] | None
-    structuredDataVer: int | None
     createdAt: datetime
     updatedAt: datetime
 
@@ -169,11 +166,8 @@ def _cv_version_response(row: CVVersion) -> CVVersionResponse:
         fileType=row.fileType.value,
         fileSizeBytes=row.fileSizeBytes,
         isDefault=row.isDefault,
-        parseStatus=row.parseStatus.value,
         conversionStatus=row.conversionStatus.value,
         conversionError=row.conversionError,
-        structuredData=row.structuredData,
-        structuredDataVer=row.structuredDataVer,
         createdAt=row.createdAt,
         updatedAt=row.updatedAt,
     )

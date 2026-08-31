@@ -69,16 +69,10 @@ enum CVFileType {
   TXT
 }
 
-enum CVParseStatus {
-  PENDING
-  PARSING
-  PARSED
-  FAILED
-}
-
 // Status of a CVVersion's Markdown rendition (its `markdownContent`). See
-// docs/adr/0001-cv-matching-uses-markdown-rendition.md. Replaces CVParseStatus
-// on the CV path; both are kept side by side during the expand step (#16).
+// docs/adr/0001-cv-matching-uses-markdown-rendition.md. This is the sole
+// status on the CV path; the structured-data extraction it replaced (and its
+// `CVParseStatus`) were retired in #21.
 enum CVConversionStatus {
   PENDING
   CONVERTING
@@ -95,9 +89,6 @@ model CVVersion {
   fileType          CVFileType
   fileSizeBytes     Int
   isDefault         Boolean            @default(false)
-  parseStatus       CVParseStatus      @default(PENDING)
-  structuredData    Json?
-  structuredDataVer Int?
   markdownContent   String?
   conversionStatus  CVConversionStatus @default(PENDING)
   conversionError   String?

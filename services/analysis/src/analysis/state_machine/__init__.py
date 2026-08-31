@@ -24,7 +24,6 @@ DEFAULT_ROLE_ARN = "arn:aws:iam::123456789012:role/AnalysisWorkflowRole"
 DEFAULT_ENSURE_CV_CONVERTED_ARN = (
     "arn:aws:lambda:us-east-1:123456789012:function:ensure-cv-converted"
 )
-DEFAULT_ENSURE_CV_PARSED_ARN = "arn:aws:lambda:us-east-1:123456789012:function:ensure-cv-parsed"
 DEFAULT_ENSURE_OFFER_EXTRACTED_ARN = (
     "arn:aws:lambda:us-east-1:123456789012:function:ensure-offer-extracted"
 )
@@ -39,15 +38,14 @@ DEFAULT_MARK_ANALYSIS_FAILED_ARN = (
 def render_definition(
     *,
     ensure_cv_converted_arn: str | None = None,
-    ensure_cv_parsed_arn: str | None = None,
     ensure_offer_extracted_arn: str | None = None,
     run_comparison_crew_arn: str | None = None,
     mark_analysis_failed_arn: str | None = None,
 ) -> str:
-    """Renders analysis_workflow.asl.json with the 3 task Lambdas' ARNs
+    """Renders analysis_workflow.asl.json with the task Lambdas' ARNs
     substituted in, returning the ASL definition as a JSON string (the shape
     CreateStateMachine's `definition` parameter expects). ARNs default to
-    env vars (ENSURE_CV_PARSED_FUNCTION_ARN / ENSURE_OFFER_EXTRACTED_FUNCTION_ARN
+    env vars (ENSURE_CV_CONVERTED_FUNCTION_ARN / ENSURE_OFFER_EXTRACTED_FUNCTION_ARN
     / RUN_COMPARISON_CREW_FUNCTION_ARN), falling back to the local-dev Lambda
     shim's fixed ARNs.
 
@@ -63,11 +61,6 @@ def render_definition(
             or os.environ.get(
                 "ENSURE_CV_CONVERTED_FUNCTION_ARN", DEFAULT_ENSURE_CV_CONVERTED_ARN
             ),
-        )
-        .replace(
-            "__ENSURE_CV_PARSED_FUNCTION_ARN__",
-            ensure_cv_parsed_arn
-            or os.environ.get("ENSURE_CV_PARSED_FUNCTION_ARN", DEFAULT_ENSURE_CV_PARSED_ARN),
         )
         .replace(
             "__ENSURE_OFFER_EXTRACTED_FUNCTION_ARN__",

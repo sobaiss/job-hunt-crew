@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 
 import pytest
-from py_db.models import Analysis, Analysisstatus, CVVersion, Cvfiletype, Cvparsestatus, JobOffer, Jobofferextractionstatus, Joboffersourcesite, User
+from py_db.models import Analysis, Analysisstatus, CVVersion, Cvfiletype, JobOffer, Jobofferextractionstatus, Joboffersourcesite, User
 from py_db.session import make_engine, make_session_factory
 
 from analysis.intake_handler import IntakeError, start_analysis_workflow
@@ -44,7 +44,6 @@ async def _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, a
                 fileName="cv.pdf",
                 fileType=Cvfiletype.PDF,
                 fileSizeBytes=1024,
-                parseStatus=Cvparsestatus.PARSED,
                 updatedAt=now,
             )
         )

@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .analysis_result import AnalysisResult
 from .comparison_analysis_agent import ComparisonAnalysisError, run_comparison_analysis
-from .cv_comparison_input import CVComparisonInputError, load_cv_comparison_input
+from .cv_comparison_input import CVComparisonInputError, load_cv_markdown
 from .llm_provider import LLMProvider, get_llm_provider
 from .recommendation_writer_agent import RecommendationWriterError, run_recommendation_writer
 
@@ -38,8 +38,9 @@ async def run_analysis(
 ) -> Analysis:
     """Runs the ComparisonAnalysisAgent + RecommendationWriterAgent crew for
     Analysis.id, transitioning status PENDING -> RUNNING_CREW -> COMPLETED.
-    Requires the linked JobOffer/CVVersion to already carry structuredData
-    (extractionStatus=READY / parseStatus=PARSED, per M2-T4/T5). On any
+    Requires the linked JobOffer to already carry structuredData
+    (extractionStatus=READY, per M2-T4) and the CVVersion to be CONVERTED
+    with a Markdown rendition. On any
     failure (missing prerequisites or malformed/failed LLM output after
     bounded retries), transitions to FAILED with errorMessage set and never
     writes a partial resultJSON.
@@ -66,7 +67,7 @@ async def run_analysis(
         raise AnalysisError(message)
 
     try:
-        cv_input = await load_cv_comparison_input(session, analysis.cvVersionId)
+        cv_markdown = await load_cv_markdown(session, analysis.cvVersionId)
     except CVComparisonInputError as exc:
         message = str(exc)
         analysis.status = Analysisstatus.FAILED
@@ -79,8 +80,7 @@ async def run_analysis(
     try:
         comparison = run_comparison_analysis(
             job_offer.structuredData,
-            cv_input.structured_data,
-            cv_markdown=cv_input.markdown,
+            cv_markdown,
             llm_provider=provider,
         )
         recommendation = run_recommendation_writer(comparison, llm_provider=provider)

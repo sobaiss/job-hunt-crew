@@ -226,8 +226,8 @@ def test_create_cv_version_success_and_list(user_id):
         assert cv_versions[0]["id"] == body["cvVersionId"]
         assert cv_versions[0]["fileType"] == "PDF"
         assert cv_versions[0]["isDefault"] is False
-        assert cv_versions[0]["parseStatus"] == "PENDING"
         assert cv_versions[0]["conversionStatus"] == "PENDING"
+        assert "parseStatus" not in cv_versions[0]
 
 
 def test_set_default_unsets_exactly_one_prior_default(user_id):

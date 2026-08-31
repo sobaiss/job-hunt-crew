@@ -1,32 +1,11 @@
 {
-  "Comment": "AnalysisWorkflow (PRD Section 10 steps 3-7, 10): EnsureCVConverted -> EnsureCVParsed -> EnsureOfferExtracted -> RunComparisonCrew (waitForTaskToken), each with a Retry (3x, base 2s, backoff rate 2.0) and a Catch routing to MarkAnalysisFailed so no step failure leaves the Analysis stuck in a non-terminal state. EnsureCVConverted (issue #16) builds the CV's Markdown rendition; it runs alongside EnsureCVParsed during the expand step until #21 retires the structured-data path. Deployment-time Lambda ARNs are substituted into the __..._FUNCTION_ARN__ placeholders by analysis.state_machine.render_definition (plain string replacement, not Python's string.Template, since this file's JSONPaths already use Step Functions' own $/$$ syntax).",
+  "Comment": "AnalysisWorkflow (PRD Section 10 steps 3-7, 10): EnsureCVConverted -> EnsureOfferExtracted -> RunComparisonCrew (waitForTaskToken), each with a Retry (3x, base 2s, backoff rate 2.0) and a Catch routing to MarkAnalysisFailed so no step failure leaves the Analysis stuck in a non-terminal state. EnsureCVConverted builds the CV's Markdown rendition, the sole matching input since #21 retired the CV structured-data path. Deployment-time Lambda ARNs are substituted into the __..._FUNCTION_ARN__ placeholders by analysis.state_machine.render_definition (plain string replacement, not Python's string.Template, since this file's JSONPaths already use Step Functions' own $/$$ syntax).",
   "StartAt": "EnsureCVConverted",
   "States": {
     "EnsureCVConverted": {
       "Type": "Task",
-      "Comment": "issue #16: checks CVVersion.conversionStatus; if not CONVERTED, runs Conversion (convert_cv) to build the Markdown rendition.",
+      "Comment": "PRD Section 10 step 4: checks CVVersion.conversionStatus; if not CONVERTED, runs Conversion (convert_cv) to build the Markdown rendition.",
       "Resource": "__ENSURE_CV_CONVERTED_FUNCTION_ARN__",
-      "Retry": [
-        {
-          "ErrorEquals": ["States.ALL"],
-          "IntervalSeconds": 2,
-          "MaxAttempts": 3,
-          "BackoffRate": 2.0
-        }
-      ],
-      "Catch": [
-        {
-          "ErrorEquals": ["States.ALL"],
-          "ResultPath": "$.error",
-          "Next": "MarkAnalysisFailed"
-        }
-      ],
-      "Next": "EnsureCVParsed"
-    },
-    "EnsureCVParsed": {
-      "Type": "Task",
-      "Comment": "PRD Section 10 step 4: checks CVVersion.parseStatus; if not PARSED, runs CVExtractionAgent.",
-      "Resource": "__ENSURE_CV_PARSED_FUNCTION_ARN__",
       "Retry": [
         {
           "ErrorEquals": ["States.ALL"],

@@ -1,9 +1,9 @@
-"""M6-T3: a full pipeline run (scrape -> extract -> crew -> persist) emits a
-PipelineEvent row for every one of those 4 stages, per PRD Section 11's
+"""M6-T3: a full pipeline run (scrape -> extract -> convert -> crew -> persist)
+emits a PipelineEvent row for every one of those stages, per PRD Section 11's
 "structured logs across Lambda/Fargate steps" + PipelineEvent trail
 requirement. Lives in services/ingestion (not services/analysis) since only
 ingestion depends on analysis (not the reverse) and this test needs both
-scrape_job_offer (ingestion) and extract_job_offer/extract_cv/run_crew_task/
+scrape_job_offer (ingestion) and extract_job_offer/convert_cv/run_crew_task/
 persist_analysis_result (analysis).
 """
 
@@ -23,7 +23,6 @@ from py_db.models import (
     Analysisstatus,
     CVVersion,
     Cvfiletype,
-    Cvparsestatus,
     JobOffer,
     Jobofferextractionstatus,
     Joboffersourcesite,
@@ -34,7 +33,7 @@ from py_db.session import make_engine, make_session_factory
 from sqlalchemy import or_, select
 
 from analysis.crew_task import run_crew_task
-from analysis.cv_extraction_agent import extract_cv
+from analysis.cv_conversion import convert_cv
 from analysis.job_offer_extraction_agent import extract_job_offer
 from analysis.llm_provider import LLMProvider
 from analysis.persist_result_lambda import persist_analysis_result
@@ -56,7 +55,9 @@ JOB_OFFER_LLM_OUTPUT = json.dumps(
         "seniority": "senior",
     }
 )
-CV_LLM_OUTPUT = json.dumps({"skills": ["Python", "AWS"], "experience": [], "education": []})
+# convert_cv's DOCX branch runs one LLM normalisation pass whose output is
+# taken as the Markdown rendition verbatim.
+CV_LLM_OUTPUT = "# Jane Doe\n\n## Skills\n\n- Python\n- AWS\n"
 COMPARISON_LLM_OUTPUT = json.dumps(
     {
         "match_score": 82,
@@ -82,7 +83,7 @@ class SequentialStubLLMProvider(LLMProvider):
         self.calls = 0
         self.model = "stub-model"
 
-    def generate(self, *, system: str, prompt: str) -> str:
+    def generate(self, *, system: str, prompt: str, max_tokens: int | None = None) -> str:
         response = self._responses[self.calls]
         self.calls += 1
         return response
@@ -152,7 +153,6 @@ async def test_full_pipeline_run_produces_a_pipeline_event_per_stage():
                 fileName="cv.docx",
                 fileType=Cvfiletype.DOCX,
                 fileSizeBytes=len(cv_docx_bytes),
-                parseStatus=Cvparsestatus.PENDING,
                 updatedAt=now,
             )
         )
@@ -182,7 +182,7 @@ async def test_full_pipeline_run_produces_a_pipeline_event_per_stage():
             await extract_job_offer(session, job_offer_id, llm_provider=provider, analysis_id=analysis_id)
 
         async with session_factory() as session:
-            await extract_cv(session, cv_version_id, llm_provider=provider, analysis_id=analysis_id)
+            await convert_cv(session, cv_version_id, llm_provider=provider, analysis_id=analysis_id)
 
         async with session_factory() as session:
             await run_crew_task(session, analysis_id, llm_provider=provider, s3_client=s3)
@@ -192,7 +192,7 @@ async def test_full_pipeline_run_produces_a_pipeline_event_per_stage():
             assert analysis.status == Analysisstatus.COMPLETED
 
         # The task's literal verification: a full pipeline run produces a
-        # PipelineEvent row per stage (scrape, extract, crew, persist).
+        # PipelineEvent row per stage (scrape, extract, convert, crew, persist).
         # scrape's events aren't tagged with analysisId (scrape_job_offer ran
         # with no ingestion_job_id in this direct-to-analysis scenario), so
         # match them by the job_offer_id embedded in their message instead.
@@ -209,9 +209,9 @@ async def test_full_pipeline_run_produces_a_pipeline_event_per_stage():
             ).all()
 
         stages_seen = {event.stage for event in events}
-        assert stages_seen == {"scrape", "extract", "crew", "persist"}
+        assert stages_seen == {"scrape", "extract", "convert", "crew", "persist"}
         # Each stage recorded at least a STARTED and a SUCCEEDED transition.
-        for stage in ("scrape", "extract", "crew", "persist"):
+        for stage in ("scrape", "extract", "convert", "crew", "persist"):
             statuses = {event.status for event in events if event.stage == stage}
             assert "SUCCEEDED" in statuses
     finally:

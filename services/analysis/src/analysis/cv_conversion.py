@@ -1,8 +1,8 @@
 """CV Conversion — build a CVVersion's Markdown rendition (issue #16).
 
-Replaces `cv_extraction_agent.extract_cv` on the CV path: every CVVersion now
-carries one canonical Markdown document (`CVVersion.markdownContent`) that the
-comparison reads directly, instead of the lossy `structuredData` JSON summary.
+Every CVVersion carries one canonical Markdown document
+(`CVVersion.markdownContent`) that the comparison reads directly. This
+replaced the CV structured-data extraction path, retired in #21.
 See docs/adr/0001-cv-matching-uses-markdown-rendition.md.
 
 Per source format:

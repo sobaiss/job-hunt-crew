@@ -8,7 +8,6 @@ import { useTranslations } from "next-intl";
 type EnumNamespace =
   | "analysisStatus"
   | "ingestionStatus"
-  | "cvParseStatus"
   | "cvConversionStatus";
 
 /**

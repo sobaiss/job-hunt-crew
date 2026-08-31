@@ -1,10 +1,10 @@
 """ComparisonAnalysisAgent (PRD Section 10 step 6, M2-T6).
 
-Compares a JobOffer's structuredData against a CVVersion's structuredData
+Compares a JobOffer's structuredData against a CVVersion's Markdown rendition
 and produces the matched/missing skills, strengths, weaknesses, and
 match_score portion of the Section 8.6 Analysis result schema. Built on top
 of the LLM provider abstraction (analysis.llm_provider), mirroring
-job_offer_extraction_agent/cv_extraction_agent's design (M2-T4/T5).
+job_offer_extraction_agent's design (M2-T4).
 """
 
 import json
@@ -25,15 +25,9 @@ _RESPONSE_SHAPE = (
     '"strengths": [string], "weaknesses": [string]}.'
 )
 
-# Legacy path: CV as the structured-data JSON summary (retired in #21).
+# The CV is the candidate's full CV/resume as Markdown prose (its Markdown
+# rendition); the job offer is structured JSON.
 SYSTEM_PROMPT = (
-    "You compare a candidate's CV against a job offer, both given as structured JSON. "
-    + _RESPONSE_SHAPE
-)
-
-# Markdown-rendition path (issue #16): the CV is the candidate's full CV as
-# Markdown prose; the job offer is still structured JSON.
-SYSTEM_PROMPT_MARKDOWN = (
     "You compare a candidate's CV against a job offer. The CV is given as Markdown "
     "(the candidate's full CV/resume); the job offer is given as structured JSON. "
     + _RESPONSE_SHAPE
@@ -74,27 +68,18 @@ def _parse_llm_output(raw: str) -> ComparisonResult:
 
 def run_comparison_analysis(
     job_offer_structured_data: dict,
-    cv_structured_data: dict | None = None,
+    cv_markdown: str,
     *,
-    cv_markdown: str | None = None,
     llm_provider: LLMProvider | None = None,
 ) -> ComparisonResult:
     """Runs the ComparisonAnalysisAgent against the given job offer (structured
-    JSON) and CV, retrying up to MAX_ATTEMPTS on malformed LLM output (mirrors
-    the extraction agents' bounded-retry design, M2-T4/T5). Raises
-    ComparisonAnalysisError if every attempt fails.
-
-    The CV is read from `cv_markdown` (its Markdown rendition, issue #16) when
-    given, falling back to `cv_structured_data` (the legacy JSON summary,
-    retired in #21) otherwise.
+    JSON) and CV (its Markdown rendition), retrying up to MAX_ATTEMPTS on
+    malformed LLM output (mirrors the extraction agent's bounded-retry design,
+    M2-T4). Raises ComparisonAnalysisError if every attempt fails.
     """
     provider = llm_provider or get_llm_provider()
-    if cv_markdown is not None:
-        system = SYSTEM_PROMPT_MARKDOWN
-        prompt = json.dumps({"job_offer": job_offer_structured_data, "cv_markdown": cv_markdown})
-    else:
-        system = SYSTEM_PROMPT
-        prompt = json.dumps({"job_offer": job_offer_structured_data, "cv": cv_structured_data})
+    system = SYSTEM_PROMPT
+    prompt = json.dumps({"job_offer": job_offer_structured_data, "cv_markdown": cv_markdown})
 
     last_error: Exception | None = None
     for _attempt in range(1, MAX_ATTEMPTS + 1):

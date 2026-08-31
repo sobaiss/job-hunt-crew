@@ -10,7 +10,6 @@ import { bff } from "@/lib/bff-client";
 // and the hand-rolled `useCallback` + `fetch` that used to live in the page,
 // and invalidate the list on a successful write.
 
-export type CvParseStatus = "PENDING" | "PARSING" | "PARSED" | "FAILED";
 export type CvConversionStatus =
   | "PENDING"
   | "CONVERTING"
@@ -25,7 +24,6 @@ export type CvVersion = {
   fileType: CvFileType;
   fileSizeBytes: number;
   isDefault: boolean;
-  parseStatus: CvParseStatus;
   conversionStatus: CvConversionStatus;
   conversionError: string | null;
   createdAt: string;
@@ -69,7 +67,7 @@ type CreateCvVersionResponse = {
 /**
  * Create a CVVersion then PUT the bytes straight to the presigned URL, exactly
  * as the previous hand-rolled page did. Invalidates the list on success so the
- * new row (and its `PENDING` parse status) appears.
+ * new row (and its `PENDING` conversion status) appears.
  */
 export function useCreateCvVersion() {
   const queryClient = useQueryClient();

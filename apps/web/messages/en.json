@@ -181,12 +181,6 @@
       "COMPLETED": "Completed",
       "FAILED": "Failed"
     },
-    "cvParseStatus": {
-      "PENDING": "Pending",
-      "PARSING": "Parsing",
-      "PARSED": "Parsed",
-      "FAILED": "Failed"
-    },
     "cvConversionStatus": {
       "PENDING": "Pending",
       "CONVERTING": "Converting",

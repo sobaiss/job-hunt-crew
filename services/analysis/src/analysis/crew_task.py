@@ -42,7 +42,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .analysis_result import AnalysisResult
 from .comparison_analysis_agent import ComparisonAnalysisError, run_comparison_analysis
-from .cv_comparison_input import CVComparisonInputError, load_cv_comparison_input
+from .cv_comparison_input import CVComparisonInputError, load_cv_markdown
 from .llm_provider import LLMProvider, get_llm_provider
 from .recommendation_writer_agent import RecommendationWriterError, run_recommendation_writer
 from .s3_client import S3_BUCKET, analysis_result_key, make_s3_client
@@ -117,7 +117,7 @@ async def run_crew_task(
         raise CrewTaskError(message)
 
     try:
-        cv_input = await load_cv_comparison_input(session, analysis.cvVersionId)
+        cv_markdown = await load_cv_markdown(session, analysis.cvVersionId)
     except CVComparisonInputError as exc:
         message = str(exc)
         await _fail(message)
@@ -128,8 +128,7 @@ async def run_crew_task(
     try:
         comparison = run_comparison_analysis(
             job_offer.structuredData,
-            cv_input.structured_data,
-            cv_markdown=cv_input.markdown,
+            cv_markdown,
             llm_provider=provider,
         )
         recommendation = run_recommendation_writer(comparison, llm_provider=provider)

@@ -14,7 +14,6 @@ import {
   useSetDefaultCvVersion,
   ACCEPTED_CV_CONTENT_TYPES,
   MAX_CV_SIZE_BYTES,
-  type CvParseStatus,
   type CvConversionStatus,
 } from "@/hooks/use-cv-versions";
 import { useEnumLabel } from "@/lib/enum-labels";
@@ -46,15 +45,6 @@ function firstFile(value: unknown): File | undefined {
     }
   }
   return undefined;
-}
-
-function parseBadgeVariant(
-  status: CvParseStatus,
-): "secondary" | "success" | "destructive" | "warning" {
-  if (status === "PARSED") return "success";
-  if (status === "FAILED") return "destructive";
-  if (status === "PARSING") return "warning";
-  return "secondary";
 }
 
 function conversionBadgeVariant(
@@ -102,7 +92,6 @@ function CvMarkdownPreview({ id }: { id: string }) {
 
 export default function CvVersionsPage() {
   const t = useTranslations("cvVersions");
-  const parseStatusLabel = useEnumLabel("cvParseStatus");
   const conversionStatusLabel = useEnumLabel("cvConversionStatus");
 
   const list = useCvVersions();
@@ -264,9 +253,6 @@ export default function CvVersionsPage() {
                         </span>
                       </div>
                       <div className="flex shrink-0 items-center gap-3">
-                        <Badge variant={parseBadgeVariant(cv.parseStatus)}>
-                          {parseStatusLabel(cv.parseStatus)}
-                        </Badge>
                         <Badge
                           variant={conversionBadgeVariant(cv.conversionStatus)}
                         >

@@ -11,7 +11,6 @@ from py_db.models import (
     Cvconversionstatus,
     CVVersion,
     Cvfiletype,
-    Cvparsestatus,
     JobOffer,
     Jobofferextractionstatus,
     Joboffersourcesite,
@@ -33,11 +32,7 @@ JOB_OFFER_STRUCTURED_DATA = {
     "remotePolicy": "hybrid",
     "seniority": "senior",
 }
-CV_STRUCTURED_DATA = {
-    "skills": ["Python", "AWS", "PostgreSQL"],
-    "experience": [],
-    "education": [],
-}
+CV_MARKDOWN = "# Jane Doe\n\n## Skills\n\n- Python\n- AWS\n- PostgreSQL\n"
 VALID_COMPARISON_OUTPUT = json.dumps(
     {
         "match_score": 82,
@@ -124,8 +119,8 @@ async def _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, a
                 fileName="cv.pdf",
                 fileType=Cvfiletype.PDF,
                 fileSizeBytes=1024,
-                parseStatus=Cvparsestatus.PARSED,
-                structuredData=CV_STRUCTURED_DATA,
+                conversionStatus=Cvconversionstatus.CONVERTED,
+                markdownContent=CV_MARKDOWN,
                 updatedAt=now,
             )
         )
@@ -315,9 +310,8 @@ async def test_run_crew_task_fails_and_reports_task_failure_on_malformed_recomme
 
 @pytest.mark.asyncio
 async def test_run_crew_task_reads_the_markdown_rendition_when_the_cv_is_converted():
-    # issue #16: a CONVERTED CV with markdownContent is matched from that
-    # Markdown rendition (Markdown-prose system prompt), not the structured-data
-    # summary — even with parseStatus still PENDING and no structuredData.
+    # A CONVERTED CV is matched from its Markdown rendition (Markdown-prose
+    # system prompt), passed straight through to the comparison agent.
     engine = make_engine()
     session_factory = make_session_factory(engine)
     user_id = f"test-{uuid.uuid4()}"
@@ -329,8 +323,6 @@ async def test_run_crew_task_reads_the_markdown_rendition_when_the_cv_is_convert
     cv_markdown = "# Jane Doe\n\n## Skills\n\n- Python\n- AWS\n"
     async with session_factory() as session:
         cv_version = await session.get(CVVersion, cv_version_id)
-        cv_version.parseStatus = Cvparsestatus.PENDING
-        cv_version.structuredData = None
         cv_version.conversionStatus = Cvconversionstatus.CONVERTED
         cv_version.markdownContent = cv_markdown
         await session.commit()
@@ -365,7 +357,7 @@ async def test_run_crew_task_reads_the_markdown_rendition_when_the_cv_is_convert
 
 
 @pytest.mark.asyncio
-async def test_run_crew_task_fails_when_cv_not_parsed_without_calling_llm():
+async def test_run_crew_task_fails_when_cv_not_converted_without_calling_llm():
     engine = make_engine()
     session_factory = make_session_factory(engine)
     user_id = f"test-{uuid.uuid4()}"
@@ -376,8 +368,8 @@ async def test_run_crew_task_fails_when_cv_not_parsed_without_calling_llm():
     await _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
     async with session_factory() as session:
         cv_version = await session.get(CVVersion, cv_version_id)
-        cv_version.parseStatus = Cvparsestatus.PENDING
-        cv_version.structuredData = None
+        cv_version.conversionStatus = Cvconversionstatus.PENDING
+        cv_version.markdownContent = None
         await session.commit()
 
     provider = StubLLMProvider([VALID_COMPARISON_OUTPUT, VALID_RECOMMENDATION_OUTPUT])

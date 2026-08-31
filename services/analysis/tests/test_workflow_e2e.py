@@ -3,14 +3,14 @@ real `stepfunctions-local` engine (docker-compose service) and real handler
 code (via analysis.lambda_shim, the local stand-in for the 3 deployed
 Lambda functions — see lambda_shim.py's docstring). Exercises the actual
 control flow PRD Section 10 steps 3-7 describe: SQS-intake starts an
-execution, EnsureCVParsed -> EnsureOfferExtracted -> RunComparisonCrew.
+execution, EnsureCVConverted -> EnsureOfferExtracted -> RunComparisonCrew.
 
-The fixture CVVersion/JobOffer here are already PARSED/READY, so the two
-Ensure* Lambdas are no-ops (no live LLM call) — extraction itself is
-already covered end-to-end by test_handlers.py/test_cv_extraction_agent.py/
-test_job_offer_extraction_agent.py; this test's job is purely to prove the
-state machine's control flow and Analysis bookkeeping, per M5-T2's literal
-verification wording.
+The fixture CVVersion/JobOffer here are already CONVERTED/READY, so the two
+Ensure* Lambdas are no-ops (no live LLM call) — Conversion and extraction
+themselves are already covered end-to-end by test_handlers.py/
+test_cv_conversion.py/test_job_offer_extraction_agent.py; this test's job is
+purely to prove the state machine's control flow and Analysis bookkeeping,
+per M5-T2's literal verification wording.
 """
 
 import json
@@ -28,7 +28,6 @@ from py_db.models import (
     Cvconversionstatus,
     CVVersion,
     Cvfiletype,
-    Cvparsestatus,
     JobOffer,
     Jobofferextractionstatus,
     Joboffersourcesite,
@@ -134,8 +133,6 @@ async def _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, a
                 fileName="cv.pdf",
                 fileType=Cvfiletype.PDF,
                 fileSizeBytes=1024,
-                parseStatus=Cvparsestatus.PARSED,
-                structuredData={"skills": ["Python"], "experience": [], "education": []},
                 conversionStatus=Cvconversionstatus.CONVERTED,
                 markdownContent="# Candidate\n\n## Skills\n\n- Python\n",
                 updatedAt=now,
@@ -235,7 +232,6 @@ async def test_analysis_workflow_execution_reaches_run_comparison_crew(state_mac
         ]
         assert entered_states == [
             "EnsureCVConverted",
-            "EnsureCVParsed",
             "EnsureOfferExtracted",
             "RunComparisonCrew",
         ]
@@ -324,7 +320,7 @@ async def test_analysis_workflow_execution_completes_via_run_comparison_crew(
 async def test_analysis_workflow_retries_then_fails_via_mark_analysis_failed(
     state_machine_arn, monkeypatch
 ):
-    """M5-T5: a persistent EnsureCVParsed failure is retried by Step
+    """M5-T5: a persistent EnsureOfferExtracted failure is retried by Step
     Functions itself (3x, base 2s exponential backoff) then caught and
     routed to MarkAnalysisFailed, so the real execution reaches FAILED and
     Analysis.status reaches FAILED with a non-empty errorMessage rather than
@@ -334,9 +330,9 @@ async def test_analysis_workflow_retries_then_fails_via_mark_analysis_failed(
 
     async def _always_raise(session, analysis_id, *, llm_provider=None):
         call_count["n"] += 1
-        raise RuntimeError("forced EnsureCVParsed failure for M5-T5")
+        raise RuntimeError("forced EnsureOfferExtracted failure for M5-T5")
 
-    monkeypatch.setattr(handlers, "ensure_cv_parsed", _always_raise)
+    monkeypatch.setattr(handlers, "ensure_offer_extracted", _always_raise)
 
     engine = make_engine()
     session_factory = make_session_factory(engine)
@@ -377,7 +373,7 @@ async def test_analysis_workflow_retries_then_fails_via_mark_analysis_failed(
             reloaded = await session.get(Analysis, analysis_id)
             assert reloaded.status == Analysisstatus.FAILED
             assert reloaded.errorMessage
-            assert "forced EnsureCVParsed failure" in reloaded.errorMessage
+            assert "forced EnsureOfferExtracted failure" in reloaded.errorMessage
     finally:
         await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
 
@@ -389,7 +385,7 @@ async def test_analysis_workflow_fails_terminally_when_cv_conversion_fails(
     """Issue #17: a Conversion failure inside the workflow (EnsureCVConverted,
     the StartAt state) must land the Analysis in a terminal FAILED status with a
     message — Step Functions retries it, then its Catch routes to
-    MarkAnalysisFailed, exactly like the EnsureCVParsed case above."""
+    MarkAnalysisFailed, exactly like the EnsureOfferExtracted case above."""
     call_count = {"n": 0}
 
     async def _always_raise(session, analysis_id, *, llm_provider=None):

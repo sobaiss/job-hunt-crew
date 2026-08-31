@@ -6,9 +6,9 @@ import pytest
 from py_db.models import (
     Analysis,
     Analysisstatus,
+    Cvconversionstatus,
     CVVersion,
     Cvfiletype,
-    Cvparsestatus,
     JobOffer,
     Jobofferextractionstatus,
     Joboffersourcesite,
@@ -27,19 +27,13 @@ JOB_OFFER_STRUCTURED_DATA = {
     "remotePolicy": "hybrid",
     "seniority": "senior",
 }
-CV_STRUCTURED_DATA = {
-    "skills": ["Python", "AWS", "PostgreSQL"],
-    "experience": [
-        {
-            "title": "Backend Engineer",
-            "company": "Acme Corp",
-            "startDate": "2021-01",
-            "endDate": None,
-            "description": "Built backend services.",
-        }
-    ],
-    "education": [],
-}
+CV_MARKDOWN = (
+    "# Jane Doe\n\n"
+    "## Skills\n\n- Python\n- AWS\n- PostgreSQL\n\n"
+    "## Experience\n\n"
+    "### Backend Engineer — Acme Corp (2021-01 – present)\n\n"
+    "Built backend services.\n"
+)
 VALID_COMPARISON_OUTPUT = json.dumps(
     {
         "match_score": 82,
@@ -101,8 +95,8 @@ async def _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, a
                 fileName="cv.pdf",
                 fileType=Cvfiletype.PDF,
                 fileSizeBytes=1024,
-                parseStatus=Cvparsestatus.PARSED,
-                structuredData=CV_STRUCTURED_DATA,
+                conversionStatus=Cvconversionstatus.CONVERTED,
+                markdownContent=CV_MARKDOWN,
                 updatedAt=now,
             )
         )
