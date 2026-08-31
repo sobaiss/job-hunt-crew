@@ -83,12 +83,12 @@
       "labelLabel": "Label",
       "labelPlaceholder": "Software Engineer — Fintech",
       "fileLabel": "File",
-      "fileHint": "PDF or DOCX, up to 10 MB.",
+      "fileHint": "PDF, DOCX, Markdown, or plain text, up to 10 MB.",
       "submit": "Upload",
       "uploading": "Uploading…",
       "labelRequired": "Give this CV version a label.",
-      "fileRequired": "Choose a PDF or DOCX file.",
-      "fileType": "Only PDF and DOCX files are supported.",
+      "fileRequired": "Choose a PDF, DOCX, Markdown, or plain-text file.",
+      "fileType": "Only PDF, DOCX, Markdown, and plain-text files are supported.",
       "fileTooLarge": "That file is larger than the 10 MB limit.",
       "success": "CV version uploaded.",
       "error": "The upload failed. Please try again."
@@ -102,7 +102,18 @@
       "setDefault": "Set as default",
       "settingDefault": "Setting…",
       "setDefaultError": "We couldn't set that as your default. Please try again.",
-      "setDefaultSuccess": "Default CV version updated."
+      "setDefaultSuccess": "Default CV version updated.",
+      "viewMarkdown": "View Markdown",
+      "hideMarkdown": "Hide Markdown",
+      "markdownHeading": "Markdown rendition",
+      "markdownLoading": "Loading the Markdown rendition",
+      "markdownError": "We couldn't load the Markdown rendition. Please try again.",
+      "markdownEmpty": "This CV version hasn't been converted to Markdown yet.",
+      "convert": "Convert to Markdown",
+      "reconvert": "Reconvert",
+      "converting": "Converting…",
+      "convertError": "We couldn't start the Conversion. Please try again.",
+      "conversionFailed": "Conversion failed."
     }
   },
   "ingestion": {
@@ -170,10 +181,10 @@
       "COMPLETED": "Completed",
       "FAILED": "Failed"
     },
-    "cvParseStatus": {
+    "cvConversionStatus": {
       "PENDING": "Pending",
-      "PARSING": "Parsing",
-      "PARSED": "Parsed",
+      "CONVERTING": "Converting",
+      "CONVERTED": "Converted",
       "FAILED": "Failed"
     }
   }

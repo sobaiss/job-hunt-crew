@@ -16,7 +16,8 @@ function cvVersion(overrides: Record<string, unknown> = {}) {
     fileType: "PDF",
     fileSizeBytes: 12345,
     isDefault: false,
-    parseStatus: "PARSED",
+    conversionStatus: "CONVERTED",
+    conversionError: null,
     createdAt: "2026-08-01T00:00:00.000Z",
     updatedAt: "2026-08-01T00:00:00.000Z",
     ...overrides,
@@ -47,11 +48,11 @@ describe("CvVersionsPage — upload form", () => {
       await screen.findByText("Give this CV version a label."),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Choose a PDF or DOCX file."),
+      screen.getByText("Choose a PDF, DOCX, Markdown, or plain-text file."),
     ).toBeInTheDocument();
   });
 
-  it("rejects a non PDF/DOCX file with a type message", async () => {
+  it("rejects an unsupported file type with a type message", async () => {
     server.use(
       http.get("/api/cv-versions", () =>
         HttpResponse.json({ cvVersions: [] }),
@@ -61,17 +62,51 @@ describe("CvVersionsPage — upload form", () => {
     renderWithProviders(<CvVersionsPage />);
 
     await user.type(screen.getByLabelText("Label"), "My CV");
-    // Named `.pdf` (so the <input accept> lets user-event set it) but with a
-    // non-PDF media type, so the zod content-type check is what rejects it.
+    // Named `.pdf` (so the <input accept> lets user-event set it) but with an
+    // unsupported media type, so the zod content-type check is what rejects it.
     await user.upload(
       screen.getByLabelText("File"),
-      new File(["hi"], "notes.pdf", { type: "text/plain" }),
+      new File(["hi"], "notes.pdf", { type: "application/rtf" }),
     );
     await user.click(screen.getByRole("button", { name: "Upload" }));
 
     expect(
-      await screen.findByText("Only PDF and DOCX files are supported."),
+      await screen.findByText(
+        "Only PDF, DOCX, Markdown, and plain-text files are supported.",
+      ),
     ).toBeInTheDocument();
+  });
+
+  it("accepts a Markdown file", async () => {
+    let createBody: Record<string, unknown> | null = null;
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [] }),
+      ),
+      http.post("/api/cv-versions", async ({ request }) => {
+        createBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json(
+          { cvVersionId: "cvmd", fileKey: "k", uploadUrl: UPLOAD_URL },
+          { status: 201 },
+        );
+      }),
+      http.put(UPLOAD_URL, () => new HttpResponse(null, { status: 200 })),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await user.type(screen.getByLabelText("Label"), "Markdown CV");
+    await user.upload(
+      screen.getByLabelText("File"),
+      new File(["# CV"], "cv.md", { type: "text/markdown" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Upload" }));
+
+    expect(await screen.findByText("CV version uploaded.")).toBeInTheDocument();
+    expect(createBody).toMatchObject({
+      fileName: "cv.md",
+      contentType: "text/markdown",
+    });
   });
 
   it("rejects a file over the 10 MB limit", async () => {
@@ -132,18 +167,117 @@ describe("CvVersionsPage — upload form", () => {
 });
 
 describe("CvVersionsPage — list", () => {
-  it("renders each CV version with its parse status", async () => {
+  it("renders each CV version with its conversion status", async () => {
     server.use(
       http.get("/api/cv-versions", () =>
         HttpResponse.json({
-          cvVersions: [cvVersion({ parseStatus: "PARSING" })],
+          cvVersions: [cvVersion({ conversionStatus: "CONVERTING" })],
         }),
       ),
     );
     renderWithProviders(<CvVersionsPage />);
 
     expect(await screen.findByText("Grad CV")).toBeInTheDocument();
-    expect(screen.getByText("Parsing")).toBeInTheDocument();
+    expect(screen.getByText("Converting")).toBeInTheDocument();
+  });
+
+  it("fetches and shows the Markdown rendition only after the panel is opened", async () => {
+    let markdownRequests = 0;
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cvVersion()] }),
+      ),
+      http.get("/api/cv-versions/cv1/markdown", () => {
+        markdownRequests += 1;
+        return HttpResponse.json({
+          markdownContent: "# Jane Doe\n\nStaff Engineer since 2019",
+          conversionStatus: "CONVERTED",
+        });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await screen.findByText("Grad CV");
+    expect(markdownRequests).toBe(0);
+    expect(screen.queryByText(/Staff Engineer since 2019/)).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "View Markdown" }));
+
+    expect(
+      await screen.findByText(/Staff Engineer since 2019/),
+    ).toBeInTheDocument();
+    expect(markdownRequests).toBe(1);
+
+    await user.click(screen.getByRole("button", { name: "Hide Markdown" }));
+    await waitFor(() =>
+      expect(screen.queryByText(/Staff Engineer since 2019/)).toBeNull(),
+    );
+  });
+
+  it("triggers a Conversion via POST /api/cv-versions/:id/convert", async () => {
+    let convertCalls = 0;
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: [cvVersion({ conversionStatus: "PENDING" })],
+        }),
+      ),
+      http.post("/api/cv-versions/cv1/convert", () => {
+        convertCalls += 1;
+        return HttpResponse.json(
+          { conversionStatus: "PENDING" },
+          { status: 202 },
+        );
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Convert to Markdown" }),
+    );
+
+    await waitFor(() => expect(convertCalls).toBe(1));
+  });
+
+  it("labels the button 'Reconvert' once converted and disables it while CONVERTING", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: [
+            cvVersion({ id: "cvA", conversionStatus: "CONVERTED" }),
+            cvVersion({ id: "cvB", conversionStatus: "CONVERTING" }),
+          ],
+        }),
+      ),
+    );
+    renderWithProviders(<CvVersionsPage />);
+
+    expect(
+      await screen.findByRole("button", { name: "Reconvert" }),
+    ).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Converting…" })).toBeDisabled();
+  });
+
+  it("surfaces conversionError text on a FAILED row", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: [
+            cvVersion({
+              conversionStatus: "FAILED",
+              conversionError: "no extractable text — is this a scanned PDF?",
+            }),
+          ],
+        }),
+      ),
+    );
+    renderWithProviders(<CvVersionsPage />);
+
+    expect(
+      await screen.findByText(/no extractable text — is this a scanned PDF\?/),
+    ).toBeInTheDocument();
   });
 
   it("shows an error state when the list fails to load", async () => {

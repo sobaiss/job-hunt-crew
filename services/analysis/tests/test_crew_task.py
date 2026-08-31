@@ -8,9 +8,9 @@ from botocore.client import Config
 from py_db.models import (
     Analysis,
     Analysisstatus,
+    Cvconversionstatus,
     CVVersion,
     Cvfiletype,
-    Cvparsestatus,
     JobOffer,
     Jobofferextractionstatus,
     Joboffersourcesite,
@@ -32,11 +32,7 @@ JOB_OFFER_STRUCTURED_DATA = {
     "remotePolicy": "hybrid",
     "seniority": "senior",
 }
-CV_STRUCTURED_DATA = {
-    "skills": ["Python", "AWS", "PostgreSQL"],
-    "experience": [],
-    "education": [],
-}
+CV_MARKDOWN = "# Jane Doe\n\n## Skills\n\n- Python\n- AWS\n- PostgreSQL\n"
 VALID_COMPARISON_OUTPUT = json.dumps(
     {
         "match_score": 82,
@@ -65,9 +61,11 @@ class StubLLMProvider(LLMProvider):
         self._responses = list(responses)
         self.calls = 0
         self.model = "stub-model"
+        self.prompts: list[tuple[str, str]] = []
 
     def generate(self, *, system: str, prompt: str) -> str:
         self.calls += 1
+        self.prompts.append((system, prompt))
         return self._responses[min(self.calls, len(self._responses)) - 1]
 
 
@@ -121,8 +119,8 @@ async def _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, a
                 fileName="cv.pdf",
                 fileType=Cvfiletype.PDF,
                 fileSizeBytes=1024,
-                parseStatus=Cvparsestatus.PARSED,
-                structuredData=CV_STRUCTURED_DATA,
+                conversionStatus=Cvconversionstatus.CONVERTED,
+                markdownContent=CV_MARKDOWN,
                 updatedAt=now,
             )
         )
@@ -311,7 +309,55 @@ async def test_run_crew_task_fails_and_reports_task_failure_on_malformed_recomme
 
 
 @pytest.mark.asyncio
-async def test_run_crew_task_fails_when_cv_not_parsed_without_calling_llm():
+async def test_run_crew_task_reads_the_markdown_rendition_when_the_cv_is_converted():
+    # A CONVERTED CV is matched from its Markdown rendition (Markdown-prose
+    # system prompt), passed straight through to the comparison agent.
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id = f"test-{uuid.uuid4()}"
+    job_offer_id = f"test-{uuid.uuid4()}"
+    cv_version_id = f"test-{uuid.uuid4()}"
+    analysis_id = f"test-{uuid.uuid4()}"
+
+    await _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+    cv_markdown = "# Jane Doe\n\n## Skills\n\n- Python\n- AWS\n"
+    async with session_factory() as session:
+        cv_version = await session.get(CVVersion, cv_version_id)
+        cv_version.conversionStatus = Cvconversionstatus.CONVERTED
+        cv_version.markdownContent = cv_markdown
+        await session.commit()
+
+    provider = StubLLMProvider([VALID_COMPARISON_OUTPUT, VALID_RECOMMENDATION_OUTPUT])
+    sfn = StubSfnClient()
+    s3 = _s3_client()
+    key = analysis_result_key(analysis_id)
+
+    try:
+        async with session_factory() as session:
+            await run_crew_task(
+                session,
+                analysis_id,
+                llm_provider=provider,
+                s3_client=s3,
+                sfn_client=sfn,
+                task_token="tok",
+            )
+
+        async with session_factory() as session:
+            reloaded = await session.get(Analysis, analysis_id)
+            assert reloaded.status == Analysisstatus.AWAITING_RESULT
+        assert len(sfn.successes) == 1
+
+        comparison_system, comparison_prompt = provider.prompts[0]
+        assert "Markdown" in comparison_system
+        assert json.loads(comparison_prompt)["cv_markdown"] == cv_markdown
+    finally:
+        s3.delete_object(Bucket=S3_BUCKET, Key=key)
+        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+
+
+@pytest.mark.asyncio
+async def test_run_crew_task_fails_when_cv_not_converted_without_calling_llm():
     engine = make_engine()
     session_factory = make_session_factory(engine)
     user_id = f"test-{uuid.uuid4()}"
@@ -322,8 +368,8 @@ async def test_run_crew_task_fails_when_cv_not_parsed_without_calling_llm():
     await _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
     async with session_factory() as session:
         cv_version = await session.get(CVVersion, cv_version_id)
-        cv_version.parseStatus = Cvparsestatus.PENDING
-        cv_version.structuredData = None
+        cv_version.conversionStatus = Cvconversionstatus.PENDING
+        cv_version.markdownContent = None
         await session.commit()
 
     provider = StubLLMProvider([VALID_COMPARISON_OUTPUT, VALID_RECOMMENDATION_OUTPUT])

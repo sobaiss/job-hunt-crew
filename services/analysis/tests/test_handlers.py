@@ -5,9 +5,9 @@ import pytest
 from py_db.models import (
     Analysis,
     Analysisstatus,
+    Cvconversionstatus,
     CVVersion,
     Cvfiletype,
-    Cvparsestatus,
     JobOffer,
     Jobofferextractionstatus,
     Joboffersourcesite,
@@ -19,7 +19,7 @@ from sqlalchemy import select
 
 from analysis.handlers import (
     HandlerError,
-    ensure_cv_parsed,
+    ensure_cv_converted,
     ensure_offer_extracted,
     mark_analysis_failed,
     run_comparison_crew_handler,
@@ -48,7 +48,6 @@ async def _make_fixture(
     cv_version_id,
     analysis_id,
     *,
-    cv_parse_status: Cvparsestatus,
     offer_extraction_status: Jobofferextractionstatus,
 ):
     now = _now()
@@ -78,10 +77,6 @@ async def _make_fixture(
                 fileName="cv.pdf",
                 fileType=Cvfiletype.PDF,
                 fileSizeBytes=1024,
-                parseStatus=cv_parse_status,
-                structuredData={"skills": ["Python"], "experience": [], "education": []}
-                if cv_parse_status == Cvparsestatus.PARSED
-                else None,
                 updatedAt=now,
             )
         )
@@ -121,7 +116,9 @@ async def _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id
 
 
 @pytest.mark.asyncio
-async def test_ensure_cv_parsed_is_a_noop_when_already_parsed():
+async def test_ensure_cv_converted_is_a_noop_when_already_converted(monkeypatch):
+    import analysis.handlers as handlers_module
+
     engine = make_engine()
     session_factory = make_session_factory(engine)
     user_id, job_offer_id, cv_version_id, analysis_id = (
@@ -136,26 +133,33 @@ async def test_ensure_cv_parsed_is_a_noop_when_already_parsed():
         job_offer_id,
         cv_version_id,
         analysis_id,
-        cv_parse_status=Cvparsestatus.PARSED,
         offer_extraction_status=Jobofferextractionstatus.SCRAPED,
     )
-    provider = StubLLMProvider(["should never be called"])
+    async with session_factory() as session:
+        cv_version = await session.get(CVVersion, cv_version_id)
+        cv_version.conversionStatus = Cvconversionstatus.CONVERTED
+        cv_version.markdownContent = "# Already converted\n"
+        await session.commit()
+
+    calls = {"n": 0}
+
+    async def _spy(*args, **kwargs):
+        calls["n"] += 1
+
+    monkeypatch.setattr(handlers_module, "convert_cv", _spy)
 
     try:
         async with session_factory() as session:
-            await ensure_cv_parsed(session, analysis_id, llm_provider=provider)
-        assert provider.calls == 0
+            await ensure_cv_converted(session, analysis_id)
+        assert calls["n"] == 0
     finally:
         await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
 
 
 @pytest.mark.asyncio
-async def test_ensure_cv_parsed_runs_extraction_when_not_yet_parsed():
-    import io
-
+async def test_ensure_cv_converted_runs_conversion_when_not_yet_converted():
     import boto3
     from botocore.client import Config
-    from docx import Document
 
     from analysis.s3_client import S3_BUCKET
 
@@ -173,14 +177,8 @@ async def test_ensure_cv_parsed_runs_extraction_when_not_yet_parsed():
         job_offer_id,
         cv_version_id,
         analysis_id,
-        cv_parse_status=Cvparsestatus.PENDING,
         offer_extraction_status=Jobofferextractionstatus.SCRAPED,
     )
-
-    document = Document()
-    document.add_paragraph("Skills: Python, AWS.")
-    buf = io.BytesIO()
-    document.save(buf)
 
     s3 = boto3.client(
         "s3",
@@ -190,25 +188,24 @@ async def test_ensure_cv_parsed_runs_extraction_when_not_yet_parsed():
         aws_secret_access_key="minioadmin",
         config=Config(s3={"addressing_style": "path"}),
     )
+    markdown = "# Jane Doe\n\n## Skills\n\n- Python\n"
     async with session_factory() as session:
         cv_version = await session.get(CVVersion, cv_version_id)
-        cv_version.fileType = Cvfiletype.DOCX
-        cv_version.fileKey = f"cvs/{user_id}/{cv_version_id}/cv.docx"
-        cv_version.fileName = "cv.docx"
+        cv_version.fileType = Cvfiletype.MD
+        cv_version.fileKey = f"cvs/{user_id}/{cv_version_id}/cv.md"
+        cv_version.fileName = "cv.md"
         await session.commit()
         file_key = cv_version.fileKey
-    s3.put_object(Bucket=S3_BUCKET, Key=file_key, Body=buf.getvalue())
-
-    provider = StubLLMProvider(['{"skills": ["Python"], "experience": [], "education": []}'])
+    s3.put_object(Bucket=S3_BUCKET, Key=file_key, Body=markdown.encode("utf-8"))
 
     try:
         async with session_factory() as session:
-            await ensure_cv_parsed(session, analysis_id, llm_provider=provider)
-        assert provider.calls == 1
+            await ensure_cv_converted(session, analysis_id)
 
         async with session_factory() as session:
             reloaded = await session.get(CVVersion, cv_version_id)
-            assert reloaded.parseStatus == Cvparsestatus.PARSED
+            assert reloaded.conversionStatus == Cvconversionstatus.CONVERTED
+            assert reloaded.markdownContent == markdown
     finally:
         s3.delete_object(Bucket=S3_BUCKET, Key=file_key)
         await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
@@ -230,7 +227,6 @@ async def test_ensure_offer_extracted_is_a_noop_when_already_ready():
         job_offer_id,
         cv_version_id,
         analysis_id,
-        cv_parse_status=Cvparsestatus.PENDING,
         offer_extraction_status=Jobofferextractionstatus.READY,
     )
     provider = StubLLMProvider(["should never be called"])
@@ -244,13 +240,13 @@ async def test_ensure_offer_extracted_is_a_noop_when_already_ready():
 
 
 @pytest.mark.asyncio
-async def test_ensure_cv_parsed_raises_when_analysis_missing():
+async def test_ensure_cv_converted_raises_when_analysis_missing():
     engine = make_engine()
     session_factory = make_session_factory(engine)
     try:
         async with session_factory() as session:
             with pytest.raises(HandlerError):
-                await ensure_cv_parsed(session, "does-not-exist")
+                await ensure_cv_converted(session, "does-not-exist")
     finally:
         await engine.dispose()
 
@@ -273,7 +269,6 @@ async def test_mark_analysis_failed_sets_terminal_status_from_plain_cause():
         job_offer_id,
         cv_version_id,
         analysis_id,
-        cv_parse_status=Cvparsestatus.PENDING,
         offer_extraction_status=Jobofferextractionstatus.SCRAPED,
     )
     try:
@@ -281,13 +276,13 @@ async def test_mark_analysis_failed_sets_terminal_status_from_plain_cause():
             await mark_analysis_failed(
                 session,
                 analysis_id,
-                {"Error": "CrewTaskError", "Cause": "CVVersion is not PARSED with structuredData"},
+                {"Error": "CrewTaskError", "Cause": "CVVersion is not CONVERTED with markdownContent"},
             )
 
         async with session_factory() as session:
             reloaded = await session.get(Analysis, analysis_id)
             assert reloaded.status == Analysisstatus.FAILED
-            assert reloaded.errorMessage == "CVVersion is not PARSED with structuredData"
+            assert reloaded.errorMessage == "CVVersion is not CONVERTED with markdownContent"
     finally:
         await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
 
@@ -295,7 +290,7 @@ async def test_mark_analysis_failed_sets_terminal_status_from_plain_cause():
 @pytest.mark.asyncio
 async def test_mark_analysis_failed_unwraps_json_lambda_error_cause():
     # M5-T5: the Catch target's error shape for a raised exception inside
-    # ensure_cv_parsed_handler/ensure_offer_extracted_handler — AWS Lambda
+    # ensure_cv_converted_handler/ensure_offer_extracted_handler — AWS Lambda
     # (and lambda_shim, standing in for it locally) reports handler errors
     # as a JSON-encoded {"errorMessage": ..., "errorType": ...} body, which
     # Step Functions surfaces verbatim as the Catch's string Cause.
@@ -313,7 +308,6 @@ async def test_mark_analysis_failed_unwraps_json_lambda_error_cause():
         job_offer_id,
         cv_version_id,
         analysis_id,
-        cv_parse_status=Cvparsestatus.PENDING,
         offer_extraction_status=Jobofferextractionstatus.SCRAPED,
     )
     try:
@@ -351,7 +345,6 @@ async def test_mark_analysis_failed_does_not_clobber_an_already_failed_analysis(
         job_offer_id,
         cv_version_id,
         analysis_id,
-        cv_parse_status=Cvparsestatus.PENDING,
         offer_extraction_status=Jobofferextractionstatus.SCRAPED,
     )
     try:

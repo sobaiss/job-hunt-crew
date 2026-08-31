@@ -65,29 +65,35 @@ model VerificationToken {
 enum CVFileType {
   PDF
   DOCX
+  MD
+  TXT
 }
 
-enum CVParseStatus {
+// Status of a CVVersion's Markdown rendition (its `markdownContent`). See
+// docs/adr/0001-cv-matching-uses-markdown-rendition.md. This is the sole
+// status on the CV path; the structured-data extraction it replaced (and its
+// `CVParseStatus`) were retired in #21.
+enum CVConversionStatus {
   PENDING
-  PARSING
-  PARSED
+  CONVERTING
+  CONVERTED
   FAILED
 }
 
 model CVVersion {
-  id                String        @id @default(cuid())
+  id                String             @id @default(cuid())
   userId            String
   label             String
   fileKey           String
   fileName          String
   fileType          CVFileType
   fileSizeBytes     Int
-  isDefault         Boolean       @default(false)
-  parseStatus       CVParseStatus @default(PENDING)
-  structuredData    Json?
-  structuredDataVer Int?
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
+  isDefault         Boolean            @default(false)
+  markdownContent   String?
+  conversionStatus  CVConversionStatus @default(PENDING)
+  conversionError   String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
 
   user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   analyses Analysis[]

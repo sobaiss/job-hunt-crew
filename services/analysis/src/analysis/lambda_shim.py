@@ -1,4 +1,4 @@
-"""Local stand-in for the 3 deployed AnalysisWorkflow Lambda functions
+"""Local stand-in for the deployed AnalysisWorkflow Lambda functions
 (M5-T2), for exercising the real Step Functions state machine against real
 handler code in dev/tests without deploying to AWS Lambda — the same role
 MinIO/ElasticMQ play for S3/SQS elsewhere in this repo.
@@ -14,14 +14,14 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .handlers import (
-    ensure_cv_parsed_handler,
+    ensure_cv_converted_handler,
     ensure_offer_extracted_handler,
     mark_analysis_failed_handler,
     run_comparison_crew_handler,
 )
 
 HANDLERS_BY_FUNCTION_NAME = {
-    "ensure-cv-parsed": ensure_cv_parsed_handler,
+    "ensure-cv-converted": ensure_cv_converted_handler,
     "ensure-offer-extracted": ensure_offer_extracted_handler,
     "run-comparison-crew": run_comparison_crew_handler,
     "mark-analysis-failed": mark_analysis_failed_handler,

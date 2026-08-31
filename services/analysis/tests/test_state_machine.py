@@ -6,16 +6,20 @@ from analysis.state_machine import render_definition
 def test_render_definition_substitutes_function_arns():
     definition = json.loads(
         render_definition(
-            ensure_cv_parsed_arn="arn:aws:lambda:us-east-1:1:function:cv",
+            ensure_cv_converted_arn="arn:aws:lambda:us-east-1:1:function:convert",
             ensure_offer_extracted_arn="arn:aws:lambda:us-east-1:1:function:offer",
             run_comparison_crew_arn="arn:aws:lambda:us-east-1:1:function:crew",
             mark_analysis_failed_arn="arn:aws:lambda:us-east-1:1:function:failed",
         )
     )
 
-    assert definition["StartAt"] == "EnsureCVParsed"
-    assert definition["States"]["EnsureCVParsed"]["Resource"] == "arn:aws:lambda:us-east-1:1:function:cv"
-    assert definition["States"]["EnsureCVParsed"]["Next"] == "EnsureOfferExtracted"
+    assert definition["StartAt"] == "EnsureCVConverted"
+    assert (
+        definition["States"]["EnsureCVConverted"]["Resource"]
+        == "arn:aws:lambda:us-east-1:1:function:convert"
+    )
+    assert definition["States"]["EnsureCVConverted"]["Next"] == "EnsureOfferExtracted"
+    assert "EnsureCVParsed" not in definition["States"]
     assert (
         definition["States"]["EnsureOfferExtracted"]["Resource"]
         == "arn:aws:lambda:us-east-1:1:function:offer"
@@ -38,7 +42,9 @@ def test_render_definition_substitutes_function_arns():
 def test_render_definition_defaults_to_local_lambda_shim_arns():
     definition = json.loads(render_definition())
 
-    assert definition["States"]["EnsureCVParsed"]["Resource"].endswith(":function:ensure-cv-parsed")
+    assert definition["States"]["EnsureCVConverted"]["Resource"].endswith(
+        ":function:ensure-cv-converted"
+    )
     assert definition["States"]["EnsureOfferExtracted"]["Resource"].endswith(
         ":function:ensure-offer-extracted"
     )
@@ -56,7 +62,11 @@ def test_render_definition_wires_retry_and_catch_on_every_task_state():
     # the Analysis stuck.
     definition = json.loads(render_definition())
 
-    for state_name in ("EnsureCVParsed", "EnsureOfferExtracted", "RunComparisonCrew"):
+    for state_name in (
+        "EnsureCVConverted",
+        "EnsureOfferExtracted",
+        "RunComparisonCrew",
+    ):
         state = definition["States"][state_name]
         retry = state["Retry"][0]
         assert retry["ErrorEquals"] == ["States.ALL"]

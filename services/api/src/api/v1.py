@@ -10,6 +10,7 @@ from py_db.models import (
     Analysis,
     Analysisstatus,
     CVVersion,
+    Cvconversionstatus,
     Cvfiletype,
     IngestionJob,
     IngestionJobOffer,
@@ -25,7 +26,7 @@ from sqlalchemy.orm import selectinload
 
 from .db import get_session
 from .s3_client import S3_BUCKET, cv_file_key, make_s3_client
-from .sqs_client import ANALYSIS_INTAKE_QUEUE_URL, make_sqs_client
+from .sqs_client import ANALYSIS_INTAKE_QUEUE_URL, CV_CONVERSION_QUEUE_URL, make_sqs_client
 
 router = APIRouter(prefix="/v1")
 
@@ -115,7 +116,21 @@ async def list_site_configs(
 CONTENT_TYPE_TO_FILE_TYPE: dict[str, Cvfiletype] = {
     "application/pdf": Cvfiletype.PDF,
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": Cvfiletype.DOCX,
+    "text/markdown": Cvfiletype.MD,
+    "text/plain": Cvfiletype.TXT,
 }
+
+
+def _resolve_cv_file_type(content_type: str, file_name: str) -> Cvfiletype | None:
+    """Maps an upload's content type to the stored CVFileType. Browsers often
+    send a generic `text/plain` for a `.md` file, so when the content type is
+    `text/plain` the filename extension breaks the tie (`.md` -> MD, else TXT).
+    MD and TXT are handled identically downstream (issue #16).
+    """
+    file_type = CONTENT_TYPE_TO_FILE_TYPE.get(content_type)
+    if file_type is Cvfiletype.TXT and file_name.lower().endswith(".md"):
+        return Cvfiletype.MD
+    return file_type
 
 UPLOAD_URL_EXPIRY_SECONDS = 300
 # PRD Section 13 default: CV max size 10MB.
@@ -131,9 +146,8 @@ class CVVersionResponse(BaseModel):
     fileType: str
     fileSizeBytes: int
     isDefault: bool
-    parseStatus: str
-    structuredData: dict[str, Any] | None
-    structuredDataVer: int | None
+    conversionStatus: str
+    conversionError: str | None
     createdAt: datetime
     updatedAt: datetime
 
@@ -152,9 +166,8 @@ def _cv_version_response(row: CVVersion) -> CVVersionResponse:
         fileType=row.fileType.value,
         fileSizeBytes=row.fileSizeBytes,
         isDefault=row.isDefault,
-        parseStatus=row.parseStatus.value,
-        structuredData=row.structuredData,
-        structuredDataVer=row.structuredDataVer,
+        conversionStatus=row.conversionStatus.value,
+        conversionError=row.conversionError,
         createdAt=row.createdAt,
         updatedAt=row.updatedAt,
     )
@@ -209,10 +222,11 @@ async def create_cv_version(
     ):
         raise HTTPException(status_code=400, detail="fileSizeBytes must be a positive number")
 
-    file_type = CONTENT_TYPE_TO_FILE_TYPE.get(content_type)
+    file_type = _resolve_cv_file_type(content_type, file_name)
     if file_type is None:
         raise HTTPException(
-            status_code=400, detail="Unsupported file type; only PDF and DOCX are supported"
+            status_code=400,
+            detail="Unsupported file type; only PDF, DOCX, Markdown, and plain text are supported",
         )
     if file_size_bytes > MAX_FILE_SIZE_BYTES:
         raise HTTPException(
@@ -297,6 +311,76 @@ async def update_cv_version(
     await session.refresh(existing)
 
     return UpdateCVVersionResponse(cvVersion=_cv_version_response(existing))
+
+
+class CVVersionMarkdownResponse(BaseModel):
+    markdownContent: str | None
+    conversionStatus: str
+
+
+@router.get(
+    "/cv-versions/{cv_version_id}/markdown", response_model=CVVersionMarkdownResponse
+)
+async def get_cv_version_markdown(
+    cv_version_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> CVVersionMarkdownResponse:
+    """The Markdown rendition of a CV version, fetched on demand by the
+    read-only preview panel (issue #20). User-scoped exactly like the PATCH:
+    another user's CV is a 404, not a 403.
+    """
+    existing = await session.get(CVVersion, cv_version_id)
+    if existing is None or existing.userId != user_id:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    return CVVersionMarkdownResponse(
+        markdownContent=existing.markdownContent,
+        conversionStatus=existing.conversionStatus.value,
+    )
+
+
+class ConvertCVVersionResponse(BaseModel):
+    conversionStatus: str
+
+
+@router.post(
+    "/cv-versions/{cv_version_id}/convert",
+    response_model=ConvertCVVersionResponse,
+    status_code=202,
+)
+async def convert_cv_version(
+    cv_version_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> ConvertCVVersionResponse:
+    """Manual "Convert to Markdown" / "Reconvert" trigger (issue #19).
+    User-scoped exactly like the PATCH: another user's CV is a 404, not a 403.
+    Returns 409 while a Conversion is already running for this CV; otherwise
+    resets conversionStatus to PENDING, enqueues `{"cvVersionId": id}` on the
+    `cv-conversion` queue (drained by services/analysis's handle_cv_conversion,
+    which runs the same convert_cv the AnalysisWorkflow prerequisite uses), and
+    returns 202 with the new status.
+    """
+    existing = await session.get(CVVersion, cv_version_id)
+    if existing is None or existing.userId != user_id:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    if existing.conversionStatus == Cvconversionstatus.CONVERTING:
+        raise HTTPException(status_code=409, detail="A Conversion is already running for this CV")
+
+    existing.conversionStatus = Cvconversionstatus.PENDING
+    existing.conversionError = None
+    existing.updatedAt = _now()
+    await session.commit()
+
+    sqs = make_sqs_client()
+    sqs.send_message(
+        QueueUrl=CV_CONVERSION_QUEUE_URL,
+        MessageBody=json.dumps({"cvVersionId": cv_version_id}),
+    )
+
+    return ConvertCVVersionResponse(conversionStatus=existing.conversionStatus.value)
 
 
 # --- Ingestion jobs (M7-T11) ---

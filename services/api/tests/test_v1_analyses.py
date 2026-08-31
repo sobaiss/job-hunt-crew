@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
-from py_db.models import Analysis, Analysisstatus, CVVersion, Cvfiletype, Cvparsestatus, JobOffer, Joboffersourcesite, User
+from py_db.models import Analysis, Analysisstatus, CVVersion, Cvfiletype, JobOffer, Joboffersourcesite, User
 from py_db.session import make_engine, make_session_factory
 from sqlalchemy import delete
 
@@ -100,7 +100,6 @@ async def _create_cv_version(user_id: str) -> str:
                     fileName="cv.pdf",
                     fileType=Cvfiletype.PDF,
                     fileSizeBytes=1024,
-                    parseStatus=Cvparsestatus.PENDING,
                     updatedAt=_now(),
                 )
             )

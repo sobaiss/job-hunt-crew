@@ -5,7 +5,10 @@ import { useTranslations } from "next-intl";
 // The server keeps sending raw enum values (`PENDING`, `COMPLETED`, …); this is
 // the one place they become Locale-aware labels, at render time. Add a matching
 // key set under `enum.<namespace>` in the message catalogues for each enum.
-type EnumNamespace = "analysisStatus" | "ingestionStatus" | "cvParseStatus";
+type EnumNamespace =
+  | "analysisStatus"
+  | "ingestionStatus"
+  | "cvConversionStatus";
 
 /**
  * Returns a `label(value)` function for one server enum. An unmapped value

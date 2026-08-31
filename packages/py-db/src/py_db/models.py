@@ -20,16 +20,18 @@ class Analysisstatus(str, enum.Enum):
     FAILED = 'FAILED'
 
 
+class Cvconversionstatus(str, enum.Enum):
+    PENDING = 'PENDING'
+    CONVERTING = 'CONVERTING'
+    CONVERTED = 'CONVERTED'
+    FAILED = 'FAILED'
+
+
 class Cvfiletype(str, enum.Enum):
     PDF = 'PDF'
     DOCX = 'DOCX'
-
-
-class Cvparsestatus(str, enum.Enum):
-    PENDING = 'PENDING'
-    PARSING = 'PARSING'
-    PARSED = 'PARSED'
-    FAILED = 'FAILED'
+    MD = 'MD'
+    TXT = 'TXT'
 
 
 class Ingestionjobstatus(str, enum.Enum):
@@ -222,11 +224,11 @@ class CVVersion(Base):
     fileType: Mapped[Cvfiletype] = mapped_column(Enum(Cvfiletype, values_callable=lambda cls: [member.value for member in cls], name='CVFileType'), nullable=False)
     fileSizeBytes: Mapped[int] = mapped_column(Integer, nullable=False)
     isDefault: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text('false'))
-    parseStatus: Mapped[Cvparsestatus] = mapped_column(Enum(Cvparsestatus, values_callable=lambda cls: [member.value for member in cls], name='CVParseStatus'), nullable=False, server_default=text('\'PENDING\'::"CVParseStatus"'))
     createdAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False, server_default=text('CURRENT_TIMESTAMP'))
     updatedAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False)
-    structuredData: Mapped[Optional[dict]] = mapped_column(JSONB)
-    structuredDataVer: Mapped[Optional[int]] = mapped_column(Integer)
+    conversionStatus: Mapped[Cvconversionstatus] = mapped_column(Enum(Cvconversionstatus, values_callable=lambda cls: [member.value for member in cls], name='CVConversionStatus'), nullable=False, server_default=text('\'PENDING\'::"CVConversionStatus"'))
+    conversionError: Mapped[Optional[str]] = mapped_column(Text)
+    markdownContent: Mapped[Optional[str]] = mapped_column(Text)
 
     User_: Mapped['User'] = relationship('User', back_populates='CVVersion')
     Analysis: Mapped[list['Analysis']] = relationship('Analysis', back_populates='CVVersion_')
