@@ -95,8 +95,9 @@ model CVVersion {
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
 
-  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  analyses Analysis[]
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  analyses      Analysis[]
+  ingestionJobs IngestionJob[]
 
   @@index([userId])
 }
@@ -158,6 +159,7 @@ model IngestionJob {
   id              String             @id @default(cuid())
   userId          String
   mode            IngestionMode
+  cvVersionId     String?
   inputUrl        String?
   siteConfigId    String?
   filters         Json?
@@ -171,7 +173,9 @@ model IngestionJob {
   updatedAt       DateTime           @updatedAt
 
   user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cvVersion CVVersion?          @relation(fields: [cvVersionId], references: [id], onDelete: Cascade)
   jobOffers IngestionJobOffer[]
+  analyses  Analysis[]
   pipelineEvents PipelineEvent[]
 
   @@index([userId])
@@ -246,6 +250,7 @@ model Analysis {
   userId                   String
   jobOfferId               String
   cvVersionId              String
+  ingestionJobId           String?
   status                   AnalysisStatus @default(PENDING)
   s3ResultKey              String?
   matchScore               Int?
@@ -256,14 +261,16 @@ model Analysis {
   startedAt                DateTime?
   completedAt              DateTime?
 
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  jobOffer  JobOffer  @relation(fields: [jobOfferId], references: [id], onDelete: Cascade)
-  cvVersion CVVersion @relation(fields: [cvVersionId], references: [id], onDelete: Cascade)
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobOffer     JobOffer      @relation(fields: [jobOfferId], references: [id], onDelete: Cascade)
+  cvVersion    CVVersion     @relation(fields: [cvVersionId], references: [id], onDelete: Cascade)
+  ingestionJob IngestionJob? @relation(fields: [ingestionJobId], references: [id], onDelete: Cascade)
   pipelineEvents PipelineEvent[]
 
   @@index([userId])
   @@index([jobOfferId])
   @@index([cvVersionId])
+  @@index([ingestionJobId])
 }
 
 // Observability/debug trail across the ingestion + analysis pipelines. See
