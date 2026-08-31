@@ -9,8 +9,12 @@ The account record for one candidate, identified by email, keyed by the canonica
 _Avoid_: Candidate, account — "candidate" names the persona in product conversations; `User` is the row every context actually references.
 
 **CVVersion**:
-One labeled, versioned upload of a candidate's CV (PDF or DOCX). Exactly one per user may be the default.
+One labeled, versioned upload of a candidate's CV (PDF, DOCX, Markdown, or plain text). Exactly one per user may be the default; each carries a Markdown rendition and its `conversionStatus`.
 _Avoid_: Resume, CV file
+
+**Markdown rendition**:
+The canonical Markdown form of one CVVersion, in `CVVersion.markdownContent` — the exact text the Analysis context's comparison reads. It is the uploaded file itself for a Markdown upload, or the output of the Analysis context's Conversion otherwise; the candidate sees it read-only.
+_Avoid_: Parsed CV, CV structured data, preview
 
 **JobOffer**:
 One job posting, deduplicated globally by its source URL — not owned by any single user, since the same posting is relevant to many candidates.
