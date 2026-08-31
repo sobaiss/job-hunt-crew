@@ -12,12 +12,15 @@ Per source format:
   normalisation pass turns it into clean, faithful Markdown. A PDF with almost
   no extractable text (a scanned/image PDF) fails Conversion immediately with a
   message naming the likely cause — no OCR, no retry.
-- DOCX (slice 3): still raises here until its branch lands.
+- DOCX (slice 3, issue #18): `mammoth` converts the document to semantic HTML,
+  then the same single LLM normalisation pass (and bounded retry) as the PDF
+  branch produces the Markdown.
 """
 
 import io
 from datetime import UTC, datetime
 
+import mammoth
 from py_db.models import CVVersion, Cvconversionstatus, Cvfiletype
 from py_db.pipeline_events import record_pipeline_event
 from py_db.structured_logging import get_logger, log_stage_event
@@ -67,6 +70,13 @@ def _now() -> datetime:
 def _extract_pdf_text(file_bytes: bytes) -> str:
     reader = PdfReader(io.BytesIO(file_bytes))
     return "\n".join(page.extract_text() or "" for page in reader.pages)
+
+
+def _extract_docx_html(file_bytes: bytes) -> str:
+    # mammoth maps Word styles to semantic HTML (headings, lists, bold/italic),
+    # which the normalisation pass turns into Markdown — richer than the flat
+    # paragraph text python-docx would give us.
+    return mammoth.convert_to_html(io.BytesIO(file_bytes)).value
 
 
 async def _emit(
@@ -120,7 +130,8 @@ async def convert_cv(
     PDF: `pypdf` text extraction, then one LLM normalisation pass (up to
     MAX_ATTEMPTS on an empty/erroring response); a PDF with under
     MIN_EXTRACTED_CHARS of text goes straight to FAILED with a cause message.
-    DOCX raises here until slice 3.
+    DOCX: `mammoth` docx -> HTML, then the same normalisation pass and bounded
+    retry as the PDF branch.
     """
     cv_version = await session.get(CVVersion, cv_version_id)
     if cv_version is None:
@@ -148,6 +159,10 @@ async def convert_cv(
         markdown = file_bytes.decode("utf-8", errors="replace")
     elif cv_version.fileType == Cvfiletype.PDF:
         markdown = await _convert_pdf(
+            session, cv_version, file_bytes, llm_provider=llm_provider, analysis_id=analysis_id
+        )
+    elif cv_version.fileType == Cvfiletype.DOCX:
+        markdown = await _convert_docx(
             session, cv_version, file_bytes, llm_provider=llm_provider, analysis_id=analysis_id
         )
     else:
@@ -196,7 +211,42 @@ async def _convert_pdf(
             analysis_id,
         )
 
-    prompt = text[:MAX_TEXT_CHARS]
+    return await _normalise_to_markdown(
+        session, cv_version, text, llm_provider=llm_provider, analysis_id=analysis_id
+    )
+
+
+async def _convert_docx(
+    session: AsyncSession,
+    cv_version: CVVersion,
+    file_bytes: bytes,
+    *,
+    llm_provider: LLMProvider | None,
+    analysis_id: str | None,
+) -> str:
+    """DOCX branch: `mammoth` docx -> semantic HTML, then the same LLM
+    normalisation pass as the PDF branch. Returns the Markdown rendition, or
+    raises CVConversionError (via _mark_failed) after recording the failure."""
+    html = _extract_docx_html(file_bytes)
+    return await _normalise_to_markdown(
+        session, cv_version, html, llm_provider=llm_provider, analysis_id=analysis_id
+    )
+
+
+async def _normalise_to_markdown(
+    session: AsyncSession,
+    cv_version: CVVersion,
+    source_text: str,
+    *,
+    llm_provider: LLMProvider | None,
+    analysis_id: str | None,
+) -> str:
+    """Shared by the PDF and DOCX branches: truncate the mechanically-extracted
+    text to MAX_TEXT_CHARS and run one LLM normalisation pass, retrying up to
+    MAX_ATTEMPTS on an empty/erroring response. Returns the stripped Markdown,
+    or raises CVConversionError (via _mark_failed) with no fallback to the raw
+    text."""
+    prompt = source_text[:MAX_TEXT_CHARS]
     provider = llm_provider or get_llm_provider()
 
     last_error: Exception | None = None

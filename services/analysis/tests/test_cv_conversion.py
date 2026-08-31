@@ -5,16 +5,20 @@
 - PDF (slice 2, issue #17): `pypdf` pulls the text, then one LLM normalisation
   pass turns it into clean Markdown; a PDF with almost no extractable text
   fails immediately with a cause message and no LLM call.
+- DOCX (slice 3, issue #18): `mammoth` converts the document to HTML, then the
+  same normalisation pass and bounded retry as the PDF branch.
 
 Prior art: test_cv_extraction_agent.py (same fixture-bytes + S3 helpers).
 """
 
+import io
 import uuid
 from datetime import UTC, datetime
 
 import boto3
 import pytest
 from botocore.client import Config
+from docx import Document as DocxDocument
 from py_db.models import CVVersion, Cvconversionstatus, Cvfiletype, PipelineEvent, User
 from py_db.session import make_engine, make_session_factory
 from sqlalchemy import select
@@ -84,6 +88,27 @@ FIXTURE_PDF_BYTES = _build_fixture_pdf_bytes(
     "Python AWS PostgreSQL Docker Kubernetes State University BSc Computer Science"
 )
 NEAR_EMPTY_PDF_BYTES = _build_fixture_pdf_bytes("Jane Doe")
+
+
+def _build_fixture_docx_bytes(paragraphs) -> bytes:
+    """Real .docx built with python-docx (a test-fixture-only dependency);
+    `mammoth` turns it back into HTML inside convert_cv."""
+    document = DocxDocument()
+    for text in paragraphs:
+        document.add_paragraph(text)
+    buf = io.BytesIO()
+    document.save(buf)
+    return buf.getvalue()
+
+
+FIXTURE_DOCX_BYTES = _build_fixture_docx_bytes(
+    [
+        "Jane Doe",
+        "Senior Backend Engineer, Acme Corp (2019-2024)",
+        "Skills: Python, AWS, PostgreSQL, Docker, Kubernetes",
+        "State University — BSc Computer Science",
+    ]
+)
 
 
 def _s3_client():
@@ -182,29 +207,68 @@ async def test_convert_cv_stores_text_verbatim_without_calling_the_llm(file_type
 
 
 @pytest.mark.asyncio
-async def test_convert_cv_marks_failed_for_a_type_it_does_not_yet_handle():
+async def test_convert_cv_normalises_a_docx_via_one_llm_call():
     engine = make_engine()
     session_factory = make_session_factory(engine)
     user_id = f"test-user-{uuid.uuid4()}"
     cv_version_id = f"test-cv-{uuid.uuid4()}"
     file_key = f"cvs/{user_id}/{cv_version_id}/cv.docx"
     s3 = _s3_client()
-    s3.put_object(Bucket=S3_BUCKET, Key=file_key, Body=b"PK\x03\x04 docx stub")
+    s3.put_object(Bucket=S3_BUCKET, Key=file_key, Body=FIXTURE_DOCX_BYTES)
 
     await _make_pending_cv_version(
         session_factory, user_id, cv_version_id, file_key, Cvfiletype.DOCX, "cv.docx"
     )
+    provider = StubLLMProvider([NORMALISED_MARKDOWN])
+
+    try:
+        async with session_factory() as session:
+            cv_version = await convert_cv(session, cv_version_id, llm_provider=provider)
+            assert cv_version.conversionStatus == Cvconversionstatus.CONVERTED
+            assert cv_version.markdownContent == NORMALISED_MARKDOWN
+            assert cv_version.conversionError is None
+
+        async with session_factory() as session:
+            reloaded = await session.get(CVVersion, cv_version_id)
+            assert reloaded.markdownContent == NORMALISED_MARKDOWN
+            events = (
+                await session.scalars(
+                    select(PipelineEvent).where(PipelineEvent.message.contains(cv_version_id))
+                )
+            ).all()
+            statuses = {e.status for e in events if e.stage == "convert"}
+            assert {"STARTED", "SUCCEEDED"} <= statuses
+        assert provider.calls == 1
+    finally:
+        await _cleanup(engine, session_factory, s3, file_key, user_id, cv_version_id)
+
+
+@pytest.mark.asyncio
+async def test_convert_cv_marks_docx_failed_after_bounded_normalisation_retries():
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id = f"test-user-{uuid.uuid4()}"
+    cv_version_id = f"test-cv-{uuid.uuid4()}"
+    file_key = f"cvs/{user_id}/{cv_version_id}/cv.docx"
+    s3 = _s3_client()
+    s3.put_object(Bucket=S3_BUCKET, Key=file_key, Body=FIXTURE_DOCX_BYTES)
+
+    await _make_pending_cv_version(
+        session_factory, user_id, cv_version_id, file_key, Cvfiletype.DOCX, "cv.docx"
+    )
+    provider = StubLLMProvider(["", "   ", ""])
 
     try:
         async with session_factory() as session:
             with pytest.raises(CVConversionError):
-                await convert_cv(session, cv_version_id)
+                await convert_cv(session, cv_version_id, llm_provider=provider)
 
         async with session_factory() as session:
             reloaded = await session.get(CVVersion, cv_version_id)
             assert reloaded.conversionStatus == Cvconversionstatus.FAILED
             assert reloaded.conversionError
             assert reloaded.markdownContent is None
+        assert provider.calls == MAX_ATTEMPTS
     finally:
         await _cleanup(engine, session_factory, s3, file_key, user_id, cv_version_id)
 
