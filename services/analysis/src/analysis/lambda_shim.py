@@ -14,6 +14,7 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .handlers import (
+    ensure_cv_converted_handler,
     ensure_cv_parsed_handler,
     ensure_offer_extracted_handler,
     mark_analysis_failed_handler,
@@ -21,6 +22,7 @@ from .handlers import (
 )
 
 HANDLERS_BY_FUNCTION_NAME = {
+    "ensure-cv-converted": ensure_cv_converted_handler,
     "ensure-cv-parsed": ensure_cv_parsed_handler,
     "ensure-offer-extracted": ensure_offer_extracted_handler,
     "run-comparison-crew": run_comparison_crew_handler,

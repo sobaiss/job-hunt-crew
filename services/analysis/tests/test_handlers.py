@@ -5,6 +5,7 @@ import pytest
 from py_db.models import (
     Analysis,
     Analysisstatus,
+    Cvconversionstatus,
     CVVersion,
     Cvfiletype,
     Cvparsestatus,
@@ -19,6 +20,7 @@ from sqlalchemy import select
 
 from analysis.handlers import (
     HandlerError,
+    ensure_cv_converted,
     ensure_cv_parsed,
     ensure_offer_extracted,
     mark_analysis_failed,
@@ -118,6 +120,104 @@ async def _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id
                 await session.delete(row)
         await session.commit()
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_ensure_cv_converted_is_a_noop_when_already_converted(monkeypatch):
+    import analysis.handlers as handlers_module
+
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id, job_offer_id, cv_version_id, analysis_id = (
+        f"test-user-{uuid.uuid4()}",
+        f"test-offer-{uuid.uuid4()}",
+        f"test-cv-{uuid.uuid4()}",
+        f"test-analysis-{uuid.uuid4()}",
+    )
+    await _make_fixture(
+        session_factory,
+        user_id,
+        job_offer_id,
+        cv_version_id,
+        analysis_id,
+        cv_parse_status=Cvparsestatus.PENDING,
+        offer_extraction_status=Jobofferextractionstatus.SCRAPED,
+    )
+    async with session_factory() as session:
+        cv_version = await session.get(CVVersion, cv_version_id)
+        cv_version.conversionStatus = Cvconversionstatus.CONVERTED
+        cv_version.markdownContent = "# Already converted\n"
+        await session.commit()
+
+    calls = {"n": 0}
+
+    async def _spy(*args, **kwargs):
+        calls["n"] += 1
+
+    monkeypatch.setattr(handlers_module, "convert_cv", _spy)
+
+    try:
+        async with session_factory() as session:
+            await ensure_cv_converted(session, analysis_id)
+        assert calls["n"] == 0
+    finally:
+        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+
+
+@pytest.mark.asyncio
+async def test_ensure_cv_converted_runs_conversion_when_not_yet_converted():
+    import boto3
+    from botocore.client import Config
+
+    from analysis.s3_client import S3_BUCKET
+
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id, job_offer_id, cv_version_id, analysis_id = (
+        f"test-user-{uuid.uuid4()}",
+        f"test-offer-{uuid.uuid4()}",
+        f"test-cv-{uuid.uuid4()}",
+        f"test-analysis-{uuid.uuid4()}",
+    )
+    await _make_fixture(
+        session_factory,
+        user_id,
+        job_offer_id,
+        cv_version_id,
+        analysis_id,
+        cv_parse_status=Cvparsestatus.PENDING,
+        offer_extraction_status=Jobofferextractionstatus.SCRAPED,
+    )
+
+    s3 = boto3.client(
+        "s3",
+        endpoint_url="http://localhost:9000",
+        region_name="us-east-1",
+        aws_access_key_id="minioadmin",
+        aws_secret_access_key="minioadmin",
+        config=Config(s3={"addressing_style": "path"}),
+    )
+    markdown = "# Jane Doe\n\n## Skills\n\n- Python\n"
+    async with session_factory() as session:
+        cv_version = await session.get(CVVersion, cv_version_id)
+        cv_version.fileType = Cvfiletype.MD
+        cv_version.fileKey = f"cvs/{user_id}/{cv_version_id}/cv.md"
+        cv_version.fileName = "cv.md"
+        await session.commit()
+        file_key = cv_version.fileKey
+    s3.put_object(Bucket=S3_BUCKET, Key=file_key, Body=markdown.encode("utf-8"))
+
+    try:
+        async with session_factory() as session:
+            await ensure_cv_converted(session, analysis_id)
+
+        async with session_factory() as session:
+            reloaded = await session.get(CVVersion, cv_version_id)
+            assert reloaded.conversionStatus == Cvconversionstatus.CONVERTED
+            assert reloaded.markdownContent == markdown
+    finally:
+        s3.delete_object(Bucket=S3_BUCKET, Key=file_key)
+        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
 
 
 @pytest.mark.asyncio

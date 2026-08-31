@@ -10,11 +10,12 @@ consistent with M2-T2..T5's direct-write precedent.
 
 from datetime import UTC, datetime
 
-from py_db.models import Analysis, Analysisstatus, CVVersion, Cvparsestatus, JobOffer, Jobofferextractionstatus
+from py_db.models import Analysis, Analysisstatus, JobOffer, Jobofferextractionstatus
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .analysis_result import AnalysisResult
 from .comparison_analysis_agent import ComparisonAnalysisError, run_comparison_analysis
+from .cv_comparison_input import CVComparisonInputError, load_cv_comparison_input
 from .llm_provider import LLMProvider, get_llm_provider
 from .recommendation_writer_agent import RecommendationWriterError, run_recommendation_writer
 
@@ -52,7 +53,6 @@ async def run_analysis(
     await session.commit()
 
     job_offer = await session.get(JobOffer, analysis.jobOfferId)
-    cv_version = await session.get(CVVersion, analysis.cvVersionId)
 
     if (
         job_offer is None
@@ -65,22 +65,23 @@ async def run_analysis(
         await session.commit()
         raise AnalysisError(message)
 
-    if (
-        cv_version is None
-        or cv_version.parseStatus != Cvparsestatus.PARSED
-        or not cv_version.structuredData
-    ):
-        message = f"CVVersion {analysis.cvVersionId} is not PARSED with structuredData"
+    try:
+        cv_input = await load_cv_comparison_input(session, analysis.cvVersionId)
+    except CVComparisonInputError as exc:
+        message = str(exc)
         analysis.status = Analysisstatus.FAILED
         analysis.errorMessage = message
         await session.commit()
-        raise AnalysisError(message)
+        raise AnalysisError(message) from exc
 
     provider = llm_provider or get_llm_provider()
 
     try:
         comparison = run_comparison_analysis(
-            job_offer.structuredData, cv_version.structuredData, llm_provider=provider
+            job_offer.structuredData,
+            cv_input.structured_data,
+            cv_markdown=cv_input.markdown,
+            llm_provider=provider,
         )
         recommendation = run_recommendation_writer(comparison, llm_provider=provider)
         result = AnalysisResult(

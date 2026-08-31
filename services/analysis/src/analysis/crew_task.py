@@ -33,8 +33,6 @@ from datetime import UTC, datetime
 from py_db.models import (
     Analysis,
     Analysisstatus,
-    CVVersion,
-    Cvparsestatus,
     JobOffer,
     Jobofferextractionstatus,
 )
@@ -44,6 +42,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .analysis_result import AnalysisResult
 from .comparison_analysis_agent import ComparisonAnalysisError, run_comparison_analysis
+from .cv_comparison_input import CVComparisonInputError, load_cv_comparison_input
 from .llm_provider import LLMProvider, get_llm_provider
 from .recommendation_writer_agent import RecommendationWriterError, run_recommendation_writer
 from .s3_client import S3_BUCKET, analysis_result_key, make_s3_client
@@ -117,21 +116,21 @@ async def run_crew_task(
         await _fail(message)
         raise CrewTaskError(message)
 
-    cv_version = await session.get(CVVersion, analysis.cvVersionId)
-    if (
-        cv_version is None
-        or cv_version.parseStatus != Cvparsestatus.PARSED
-        or not cv_version.structuredData
-    ):
-        message = f"CVVersion {analysis.cvVersionId} is not PARSED with structuredData"
+    try:
+        cv_input = await load_cv_comparison_input(session, analysis.cvVersionId)
+    except CVComparisonInputError as exc:
+        message = str(exc)
         await _fail(message)
-        raise CrewTaskError(message)
+        raise CrewTaskError(message) from exc
 
     provider = llm_provider or get_llm_provider()
 
     try:
         comparison = run_comparison_analysis(
-            job_offer.structuredData, cv_version.structuredData, llm_provider=provider
+            job_offer.structuredData,
+            cv_input.structured_data,
+            cv_markdown=cv_input.markdown,
+            llm_provider=provider,
         )
         recommendation = run_recommendation_writer(comparison, llm_provider=provider)
         result = AnalysisResult(

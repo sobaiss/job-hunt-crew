@@ -83,13 +83,61 @@ def test_create_cv_version_rejects_unsupported_content_type(user_id):
             headers=_headers(user_id),
             json={
                 "label": "Software Engineer",
-                "fileName": "cv.txt",
-                "contentType": "text/plain",
+                "fileName": "cv.rtf",
+                "contentType": "application/rtf",
                 "fileSizeBytes": 1024,
             },
         )
     assert response.status_code == 400
     assert "Unsupported file type" in response.json()["detail"]
+
+
+def test_create_cv_version_accepts_markdown_and_plain_text(user_id):
+    with TestClient(app) as client:
+        md = client.post(
+            "/v1/cv-versions",
+            headers=_headers(user_id),
+            json={
+                "label": "Markdown CV",
+                "fileName": "cv.md",
+                "contentType": "text/markdown",
+                "fileSizeBytes": 1024,
+            },
+        )
+        assert md.status_code == 201
+
+        txt = client.post(
+            "/v1/cv-versions",
+            headers=_headers(user_id),
+            json={
+                "label": "Plain text CV",
+                "fileName": "cv.txt",
+                "contentType": "text/plain",
+                "fileSizeBytes": 1024,
+            },
+        )
+        assert txt.status_code == 201
+
+        # A generic text/plain for a .md file is stored as MD (filename tie-break).
+        md_tiebreak = client.post(
+            "/v1/cv-versions",
+            headers=_headers(user_id),
+            json={
+                "label": "Markdown CV via text/plain",
+                "fileName": "resume.md",
+                "contentType": "text/plain",
+                "fileSizeBytes": 1024,
+            },
+        )
+        assert md_tiebreak.status_code == 201
+
+        by_id = {
+            row["id"]: row
+            for row in client.get("/v1/cv-versions", headers=_headers(user_id)).json()["cvVersions"]
+        }
+        assert by_id[md.json()["cvVersionId"]]["fileType"] == "MD"
+        assert by_id[txt.json()["cvVersionId"]]["fileType"] == "TXT"
+        assert by_id[md_tiebreak.json()["cvVersionId"]]["fileType"] == "MD"
 
 
 def test_create_cv_version_rejects_oversize_file(user_id):
@@ -133,6 +181,7 @@ def test_create_cv_version_success_and_list(user_id):
         assert cv_versions[0]["fileType"] == "PDF"
         assert cv_versions[0]["isDefault"] is False
         assert cv_versions[0]["parseStatus"] == "PENDING"
+        assert cv_versions[0]["conversionStatus"] == "PENDING"
 
 
 def test_set_default_unsets_exactly_one_prior_default(user_id):

@@ -24,6 +24,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 const FILE_ACCEPT = [
   ".pdf",
   ".docx",
+  ".md",
+  ".txt",
   ...Object.keys(ACCEPTED_CV_CONTENT_TYPES),
 ].join(",");
 

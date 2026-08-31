@@ -115,7 +115,21 @@ async def list_site_configs(
 CONTENT_TYPE_TO_FILE_TYPE: dict[str, Cvfiletype] = {
     "application/pdf": Cvfiletype.PDF,
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": Cvfiletype.DOCX,
+    "text/markdown": Cvfiletype.MD,
+    "text/plain": Cvfiletype.TXT,
 }
+
+
+def _resolve_cv_file_type(content_type: str, file_name: str) -> Cvfiletype | None:
+    """Maps an upload's content type to the stored CVFileType. Browsers often
+    send a generic `text/plain` for a `.md` file, so when the content type is
+    `text/plain` the filename extension breaks the tie (`.md` -> MD, else TXT).
+    MD and TXT are handled identically downstream (issue #16).
+    """
+    file_type = CONTENT_TYPE_TO_FILE_TYPE.get(content_type)
+    if file_type is Cvfiletype.TXT and file_name.lower().endswith(".md"):
+        return Cvfiletype.MD
+    return file_type
 
 UPLOAD_URL_EXPIRY_SECONDS = 300
 # PRD Section 13 default: CV max size 10MB.
@@ -132,6 +146,7 @@ class CVVersionResponse(BaseModel):
     fileSizeBytes: int
     isDefault: bool
     parseStatus: str
+    conversionStatus: str
     structuredData: dict[str, Any] | None
     structuredDataVer: int | None
     createdAt: datetime
@@ -153,6 +168,7 @@ def _cv_version_response(row: CVVersion) -> CVVersionResponse:
         fileSizeBytes=row.fileSizeBytes,
         isDefault=row.isDefault,
         parseStatus=row.parseStatus.value,
+        conversionStatus=row.conversionStatus.value,
         structuredData=row.structuredData,
         structuredDataVer=row.structuredDataVer,
         createdAt=row.createdAt,
@@ -209,10 +225,11 @@ async def create_cv_version(
     ):
         raise HTTPException(status_code=400, detail="fileSizeBytes must be a positive number")
 
-    file_type = CONTENT_TYPE_TO_FILE_TYPE.get(content_type)
+    file_type = _resolve_cv_file_type(content_type, file_name)
     if file_type is None:
         raise HTTPException(
-            status_code=400, detail="Unsupported file type; only PDF and DOCX are supported"
+            status_code=400,
+            detail="Unsupported file type; only PDF, DOCX, Markdown, and plain text are supported",
         )
     if file_size_bytes > MAX_FILE_SIZE_BYTES:
         raise HTTPException(

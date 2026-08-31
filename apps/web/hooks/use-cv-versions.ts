@@ -11,7 +11,12 @@ import { bff } from "@/lib/bff-client";
 // and invalidate the list on a successful write.
 
 export type CvParseStatus = "PENDING" | "PARSING" | "PARSED" | "FAILED";
-export type CvFileType = "PDF" | "DOCX";
+export type CvConversionStatus =
+  | "PENDING"
+  | "CONVERTING"
+  | "CONVERTED"
+  | "FAILED";
+export type CvFileType = "PDF" | "DOCX" | "MD" | "TXT";
 
 export type CvVersion = {
   id: string;
@@ -21,6 +26,7 @@ export type CvVersion = {
   fileSizeBytes: number;
   isDefault: boolean;
   parseStatus: CvParseStatus;
+  conversionStatus: CvConversionStatus;
   createdAt: string;
   updatedAt: string;
 };
@@ -35,6 +41,8 @@ export const ACCEPTED_CV_CONTENT_TYPES: Record<string, CvFileType> = {
   "application/pdf": "PDF",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
     "DOCX",
+  "text/markdown": "MD",
+  "text/plain": "TXT",
 };
 
 /** PRD Section 13 default, mirrored from `MAX_FILE_SIZE_BYTES` in services/api. */

@@ -21,6 +21,9 @@ DEFAULT_ROLE_ARN = "arn:aws:iam::123456789012:role/AnalysisWorkflowRole"
 # Local-dev defaults: `analysis.lambda_shim` (the local stand-in for real
 # deployed Lambda functions, dispatching by the ARN's function-name suffix)
 # resolves these exact names.
+DEFAULT_ENSURE_CV_CONVERTED_ARN = (
+    "arn:aws:lambda:us-east-1:123456789012:function:ensure-cv-converted"
+)
 DEFAULT_ENSURE_CV_PARSED_ARN = "arn:aws:lambda:us-east-1:123456789012:function:ensure-cv-parsed"
 DEFAULT_ENSURE_OFFER_EXTRACTED_ARN = (
     "arn:aws:lambda:us-east-1:123456789012:function:ensure-offer-extracted"
@@ -35,6 +38,7 @@ DEFAULT_MARK_ANALYSIS_FAILED_ARN = (
 
 def render_definition(
     *,
+    ensure_cv_converted_arn: str | None = None,
     ensure_cv_parsed_arn: str | None = None,
     ensure_offer_extracted_arn: str | None = None,
     run_comparison_crew_arn: str | None = None,
@@ -54,6 +58,13 @@ def render_definition(
     template_text = resources.files(__package__).joinpath("analysis_workflow.asl.json").read_text()
     rendered = (
         template_text.replace(
+            "__ENSURE_CV_CONVERTED_FUNCTION_ARN__",
+            ensure_cv_converted_arn
+            or os.environ.get(
+                "ENSURE_CV_CONVERTED_FUNCTION_ARN", DEFAULT_ENSURE_CV_CONVERTED_ARN
+            ),
+        )
+        .replace(
             "__ENSURE_CV_PARSED_FUNCTION_ARN__",
             ensure_cv_parsed_arn
             or os.environ.get("ENSURE_CV_PARSED_FUNCTION_ARN", DEFAULT_ENSURE_CV_PARSED_ARN),

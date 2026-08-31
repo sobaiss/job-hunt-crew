@@ -25,6 +25,7 @@ from botocore.client import Config
 from py_db.models import (
     Analysis,
     Analysisstatus,
+    Cvconversionstatus,
     CVVersion,
     Cvfiletype,
     Cvparsestatus,
@@ -135,6 +136,8 @@ async def _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, a
                 fileSizeBytes=1024,
                 parseStatus=Cvparsestatus.PARSED,
                 structuredData={"skills": ["Python"], "experience": [], "education": []},
+                conversionStatus=Cvconversionstatus.CONVERTED,
+                markdownContent="# Candidate\n\n## Skills\n\n- Python\n",
                 updatedAt=now,
             )
         )
@@ -230,7 +233,12 @@ async def test_analysis_workflow_execution_reaches_run_comparison_crew(state_mac
         entered_states = [
             e["stateEnteredEventDetails"]["name"] for e in events if e["type"] == "TaskStateEntered"
         ]
-        assert entered_states == ["EnsureCVParsed", "EnsureOfferExtracted", "RunComparisonCrew"]
+        assert entered_states == [
+            "EnsureCVConverted",
+            "EnsureCVParsed",
+            "EnsureOfferExtracted",
+            "RunComparisonCrew",
+        ]
 
         # Wait for the execution to actually finish (crew_task's own retry
         # on the malformed LLM output, then Catch -> MarkAnalysisFailed)

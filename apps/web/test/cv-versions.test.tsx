@@ -17,6 +17,7 @@ function cvVersion(overrides: Record<string, unknown> = {}) {
     fileSizeBytes: 12345,
     isDefault: false,
     parseStatus: "PARSED",
+    conversionStatus: "CONVERTED",
     createdAt: "2026-08-01T00:00:00.000Z",
     updatedAt: "2026-08-01T00:00:00.000Z",
     ...overrides,
@@ -47,11 +48,11 @@ describe("CvVersionsPage — upload form", () => {
       await screen.findByText("Give this CV version a label."),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Choose a PDF or DOCX file."),
+      screen.getByText("Choose a PDF, DOCX, Markdown, or plain-text file."),
     ).toBeInTheDocument();
   });
 
-  it("rejects a non PDF/DOCX file with a type message", async () => {
+  it("rejects an unsupported file type with a type message", async () => {
     server.use(
       http.get("/api/cv-versions", () =>
         HttpResponse.json({ cvVersions: [] }),
@@ -61,17 +62,51 @@ describe("CvVersionsPage — upload form", () => {
     renderWithProviders(<CvVersionsPage />);
 
     await user.type(screen.getByLabelText("Label"), "My CV");
-    // Named `.pdf` (so the <input accept> lets user-event set it) but with a
-    // non-PDF media type, so the zod content-type check is what rejects it.
+    // Named `.pdf` (so the <input accept> lets user-event set it) but with an
+    // unsupported media type, so the zod content-type check is what rejects it.
     await user.upload(
       screen.getByLabelText("File"),
-      new File(["hi"], "notes.pdf", { type: "text/plain" }),
+      new File(["hi"], "notes.pdf", { type: "application/rtf" }),
     );
     await user.click(screen.getByRole("button", { name: "Upload" }));
 
     expect(
-      await screen.findByText("Only PDF and DOCX files are supported."),
+      await screen.findByText(
+        "Only PDF, DOCX, Markdown, and plain-text files are supported.",
+      ),
     ).toBeInTheDocument();
+  });
+
+  it("accepts a Markdown file", async () => {
+    let createBody: Record<string, unknown> | null = null;
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [] }),
+      ),
+      http.post("/api/cv-versions", async ({ request }) => {
+        createBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json(
+          { cvVersionId: "cvmd", fileKey: "k", uploadUrl: UPLOAD_URL },
+          { status: 201 },
+        );
+      }),
+      http.put(UPLOAD_URL, () => new HttpResponse(null, { status: 200 })),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await user.type(screen.getByLabelText("Label"), "Markdown CV");
+    await user.upload(
+      screen.getByLabelText("File"),
+      new File(["# CV"], "cv.md", { type: "text/markdown" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Upload" }));
+
+    expect(await screen.findByText("CV version uploaded.")).toBeInTheDocument();
+    expect(createBody).toMatchObject({
+      fileName: "cv.md",
+      contentType: "text/markdown",
+    });
   });
 
   it("rejects a file over the 10 MB limit", async () => {

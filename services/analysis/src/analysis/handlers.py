@@ -13,6 +13,7 @@ import threading
 from py_db.models import (
     Analysis,
     Analysisstatus,
+    Cvconversionstatus,
     CVVersion,
     Cvparsestatus,
     JobOffer,
@@ -22,6 +23,7 @@ from py_db.session import make_engine, make_session_factory
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .crew_task import run_crew_task
+from .cv_conversion import convert_cv
 from .cv_extraction_agent import extract_cv
 from .job_offer_extraction_agent import extract_job_offer
 from .llm_provider import LLMProvider
@@ -29,6 +31,28 @@ from .llm_provider import LLMProvider
 
 class HandlerError(Exception):
     pass
+
+
+async def ensure_cv_converted(
+    session: AsyncSession, analysis_id: str, *, llm_provider: LLMProvider | None = None
+) -> None:
+    """PRD Section 10 step 4 (issue #16): checks CVVersion.conversionStatus; if
+    not CONVERTED, runs Conversion (convert_cv) to build the Markdown rendition.
+    No-op if already CONVERTED (a rendition only changes via an explicit manual
+    re-convert). Runs before ensure_cv_parsed during the expand step.
+    """
+    analysis = await session.get(Analysis, analysis_id)
+    if analysis is None:
+        raise HandlerError(f"Analysis {analysis_id} not found")
+
+    cv_version = await session.get(CVVersion, analysis.cvVersionId)
+    if cv_version is None:
+        raise HandlerError(f"CVVersion {analysis.cvVersionId} not found")
+
+    if cv_version.conversionStatus != Cvconversionstatus.CONVERTED:
+        await convert_cv(
+            session, analysis.cvVersionId, llm_provider=llm_provider, analysis_id=analysis_id
+        )
 
 
 async def ensure_cv_parsed(
@@ -68,6 +92,22 @@ async def ensure_offer_extracted(
         await extract_job_offer(
             session, analysis.jobOfferId, llm_provider=llm_provider, analysis_id=analysis_id
         )
+
+
+def ensure_cv_converted_handler(event: dict, context=None) -> dict:
+    analysis_id = event["analysisId"]
+
+    async def _run() -> None:
+        engine = make_engine()
+        session_factory = make_session_factory(engine)
+        try:
+            async with session_factory() as session:
+                await ensure_cv_converted(session, analysis_id)
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_run())
+    return {"analysisId": analysis_id}
 
 
 def ensure_cv_parsed_handler(event: dict, context=None) -> dict:

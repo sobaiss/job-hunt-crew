@@ -20,9 +20,18 @@ class Analysisstatus(str, enum.Enum):
     FAILED = 'FAILED'
 
 
+class Cvconversionstatus(str, enum.Enum):
+    PENDING = 'PENDING'
+    CONVERTING = 'CONVERTING'
+    CONVERTED = 'CONVERTED'
+    FAILED = 'FAILED'
+
+
 class Cvfiletype(str, enum.Enum):
     PDF = 'PDF'
     DOCX = 'DOCX'
+    MD = 'MD'
+    TXT = 'TXT'
 
 
 class Cvparsestatus(str, enum.Enum):
@@ -225,8 +234,11 @@ class CVVersion(Base):
     parseStatus: Mapped[Cvparsestatus] = mapped_column(Enum(Cvparsestatus, values_callable=lambda cls: [member.value for member in cls], name='CVParseStatus'), nullable=False, server_default=text('\'PENDING\'::"CVParseStatus"'))
     createdAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False, server_default=text('CURRENT_TIMESTAMP'))
     updatedAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False)
+    conversionStatus: Mapped[Cvconversionstatus] = mapped_column(Enum(Cvconversionstatus, values_callable=lambda cls: [member.value for member in cls], name='CVConversionStatus'), nullable=False, server_default=text('\'PENDING\'::"CVConversionStatus"'))
     structuredData: Mapped[Optional[dict]] = mapped_column(JSONB)
     structuredDataVer: Mapped[Optional[int]] = mapped_column(Integer)
+    conversionError: Mapped[Optional[str]] = mapped_column(Text)
+    markdownContent: Mapped[Optional[str]] = mapped_column(Text)
 
     User_: Mapped['User'] = relationship('User', back_populates='CVVersion')
     Analysis: Mapped[list['Analysis']] = relationship('Analysis', back_populates='CVVersion_')

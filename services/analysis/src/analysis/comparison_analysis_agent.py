@@ -16,14 +16,27 @@ from .llm_provider import LLMProvider, get_llm_provider
 
 MAX_ATTEMPTS = 3
 
-SYSTEM_PROMPT = (
-    "You compare a candidate's CV against a job offer, both given as structured JSON. "
+_RESPONSE_SHAPE = (
     "Respond with ONLY a single JSON object, no markdown fences, no commentary, "
     "matching this shape: "
     '{"match_score": integer 0-100, '
     '"matched_skills": [{"skill": string, "evidence": string}], '
     '"missing_skills": [{"skill": string, "importance": "required"|"nice_to_have"}], '
     '"strengths": [string], "weaknesses": [string]}.'
+)
+
+# Legacy path: CV as the structured-data JSON summary (retired in #21).
+SYSTEM_PROMPT = (
+    "You compare a candidate's CV against a job offer, both given as structured JSON. "
+    + _RESPONSE_SHAPE
+)
+
+# Markdown-rendition path (issue #16): the CV is the candidate's full CV as
+# Markdown prose; the job offer is still structured JSON.
+SYSTEM_PROMPT_MARKDOWN = (
+    "You compare a candidate's CV against a job offer. The CV is given as Markdown "
+    "(the candidate's full CV/resume); the job offer is given as structured JSON. "
+    + _RESPONSE_SHAPE
 )
 
 
@@ -61,24 +74,32 @@ def _parse_llm_output(raw: str) -> ComparisonResult:
 
 def run_comparison_analysis(
     job_offer_structured_data: dict,
-    cv_structured_data: dict,
+    cv_structured_data: dict | None = None,
     *,
+    cv_markdown: str | None = None,
     llm_provider: LLMProvider | None = None,
 ) -> ComparisonResult:
-    """Runs the ComparisonAnalysisAgent against the given structured data,
-    retrying up to MAX_ATTEMPTS on malformed LLM output (mirrors the
-    extraction agents' bounded-retry design, M2-T4/T5). Raises
+    """Runs the ComparisonAnalysisAgent against the given job offer (structured
+    JSON) and CV, retrying up to MAX_ATTEMPTS on malformed LLM output (mirrors
+    the extraction agents' bounded-retry design, M2-T4/T5). Raises
     ComparisonAnalysisError if every attempt fails.
+
+    The CV is read from `cv_markdown` (its Markdown rendition, issue #16) when
+    given, falling back to `cv_structured_data` (the legacy JSON summary,
+    retired in #21) otherwise.
     """
     provider = llm_provider or get_llm_provider()
-    prompt = json.dumps(
-        {"job_offer": job_offer_structured_data, "cv": cv_structured_data}
-    )
+    if cv_markdown is not None:
+        system = SYSTEM_PROMPT_MARKDOWN
+        prompt = json.dumps({"job_offer": job_offer_structured_data, "cv_markdown": cv_markdown})
+    else:
+        system = SYSTEM_PROMPT
+        prompt = json.dumps({"job_offer": job_offer_structured_data, "cv": cv_structured_data})
 
     last_error: Exception | None = None
     for _attempt in range(1, MAX_ATTEMPTS + 1):
         try:
-            raw = provider.generate(system=SYSTEM_PROMPT, prompt=prompt)
+            raw = provider.generate(system=system, prompt=prompt)
             return _parse_llm_output(raw)
         except (json.JSONDecodeError, ValidationError, TypeError) as exc:
             last_error = exc
