@@ -316,6 +316,33 @@ async def update_cv_version(
     return UpdateCVVersionResponse(cvVersion=_cv_version_response(existing))
 
 
+class CVVersionMarkdownResponse(BaseModel):
+    markdownContent: str | None
+    conversionStatus: str
+
+
+@router.get(
+    "/cv-versions/{cv_version_id}/markdown", response_model=CVVersionMarkdownResponse
+)
+async def get_cv_version_markdown(
+    cv_version_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> CVVersionMarkdownResponse:
+    """The Markdown rendition of a CV version, fetched on demand by the
+    read-only preview panel (issue #20). User-scoped exactly like the PATCH:
+    another user's CV is a 404, not a 403.
+    """
+    existing = await session.get(CVVersion, cv_version_id)
+    if existing is None or existing.userId != user_id:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    return CVVersionMarkdownResponse(
+        markdownContent=existing.markdownContent,
+        conversionStatus=existing.conversionStatus.value,
+    )
+
+
 # --- Ingestion jobs (M7-T11) ---
 # Ports apps/web/app/api/ingestion-jobs/{route.ts,[id]/route.ts}'s mode/filter
 # validation and INGESTION_MAX_OFFERS default verbatim (PRD Section 8.5, 11/13).

@@ -99,6 +99,24 @@ export function useCreateCvVersion() {
   });
 }
 
+export type CvVersionMarkdown = {
+  markdownContent: string | null;
+  conversionStatus: CvConversionStatus;
+};
+
+/**
+ * The Markdown rendition of one CV version, for the read-only preview panel.
+ * `enabled` is false until the panel is opened, so the content is only fetched
+ * on demand (it is not inlined in the list response).
+ */
+export function useCvVersionMarkdown(id: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["cv-versions", id, "markdown"] as const,
+    queryFn: () => bff.get<CvVersionMarkdown>(`/cv-versions/${id}/markdown`),
+    enabled,
+  });
+}
+
 /** Set one CVVersion as the default; services/api clears the previous default. */
 export function useSetDefaultCvVersion() {
   const queryClient = useQueryClient();

@@ -102,7 +102,13 @@
       "setDefault": "Set as default",
       "settingDefault": "Setting…",
       "setDefaultError": "We couldn't set that as your default. Please try again.",
-      "setDefaultSuccess": "Default CV version updated."
+      "setDefaultSuccess": "Default CV version updated.",
+      "viewMarkdown": "View Markdown",
+      "hideMarkdown": "Hide Markdown",
+      "markdownHeading": "Markdown rendition",
+      "markdownLoading": "Loading the Markdown rendition",
+      "markdownError": "We couldn't load the Markdown rendition. Please try again.",
+      "markdownEmpty": "This CV version hasn't been converted to Markdown yet."
     }
   },
   "ingestion": {

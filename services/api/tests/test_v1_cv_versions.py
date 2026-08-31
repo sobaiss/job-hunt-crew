@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
-from py_db.models import User
+from py_db.models import CVVersion, Cvconversionstatus, User
 from py_db.session import make_engine, make_session_factory
 from sqlalchemy import delete
 
@@ -49,6 +49,19 @@ async def _delete_user(user_id: str) -> None:
         session_factory = make_session_factory(engine)
         async with session_factory() as session:
             await session.execute(delete(User).where(User.id == user_id))
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+
+async def _set_markdown(cv_version_id: str, markdown: str) -> None:
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            row = await session.get(CVVersion, cv_version_id)
+            row.markdownContent = markdown
+            row.conversionStatus = Cvconversionstatus.CONVERTED
             await session.commit()
     finally:
         await engine.dispose()
@@ -247,6 +260,56 @@ def test_patch_rejects_empty_update_and_empty_label(user_id):
         )
         assert empty_label.status_code == 400
         assert empty_label.json()["detail"] == "label must not be empty"
+
+
+def test_get_markdown_returns_content_and_status(user_id):
+    with TestClient(app) as client:
+        cv_id = client.post(
+            "/v1/cv-versions",
+            headers=_headers(user_id),
+            json={
+                "label": "CV 1",
+                "fileName": "cv1.md",
+                "contentType": "text/markdown",
+                "fileSizeBytes": 1024,
+            },
+        ).json()["cvVersionId"]
+
+        before = client.get(f"/v1/cv-versions/{cv_id}/markdown", headers=_headers(user_id))
+        assert before.status_code == 200
+        assert before.json() == {"markdownContent": None, "conversionStatus": "PENDING"}
+
+        asyncio.run(_set_markdown(cv_id, "# Jane Doe\n\nStaff Engineer"))
+
+        after = client.get(f"/v1/cv-versions/{cv_id}/markdown", headers=_headers(user_id))
+        assert after.status_code == 200
+        assert after.json() == {
+            "markdownContent": "# Jane Doe\n\nStaff Engineer",
+            "conversionStatus": "CONVERTED",
+        }
+
+
+def test_get_markdown_returns_404_for_other_users_cv(user_id):
+    with TestClient(app) as client:
+        cv_id = client.post(
+            "/v1/cv-versions",
+            headers=_headers(user_id),
+            json={
+                "label": "CV 1",
+                "fileName": "cv1.md",
+                "contentType": "text/markdown",
+                "fileSizeBytes": 1024,
+            },
+        ).json()["cvVersionId"]
+
+        other_user_id = asyncio.run(_create_user())
+        try:
+            response = client.get(
+                f"/v1/cv-versions/{cv_id}/markdown", headers=_headers(other_user_id)
+            )
+            assert response.status_code == 404
+        finally:
+            asyncio.run(_delete_user(other_user_id))
 
 
 def test_patch_returns_404_for_other_users_cv(user_id):

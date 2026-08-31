@@ -181,6 +181,40 @@ describe("CvVersionsPage — list", () => {
     expect(screen.getByText("Parsing")).toBeInTheDocument();
   });
 
+  it("fetches and shows the Markdown rendition only after the panel is opened", async () => {
+    let markdownRequests = 0;
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cvVersion()] }),
+      ),
+      http.get("/api/cv-versions/cv1/markdown", () => {
+        markdownRequests += 1;
+        return HttpResponse.json({
+          markdownContent: "# Jane Doe\n\nStaff Engineer since 2019",
+          conversionStatus: "CONVERTED",
+        });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await screen.findByText("Grad CV");
+    expect(markdownRequests).toBe(0);
+    expect(screen.queryByText(/Staff Engineer since 2019/)).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "View Markdown" }));
+
+    expect(
+      await screen.findByText(/Staff Engineer since 2019/),
+    ).toBeInTheDocument();
+    expect(markdownRequests).toBe(1);
+
+    await user.click(screen.getByRole("button", { name: "Hide Markdown" }));
+    await waitFor(() =>
+      expect(screen.queryByText(/Staff Engineer since 2019/)).toBeNull(),
+    );
+  });
+
   it("shows an error state when the list fails to load", async () => {
     server.use(
       http.get("/api/cv-versions", () =>

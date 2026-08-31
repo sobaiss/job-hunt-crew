@@ -102,7 +102,13 @@
       "setDefault": "Définir par défaut",
       "settingDefault": "Application…",
       "setDefaultError": "Impossible de définir cette version par défaut. Veuillez réessayer.",
-      "setDefaultSuccess": "Version de CV par défaut mise à jour."
+      "setDefaultSuccess": "Version de CV par défaut mise à jour.",
+      "viewMarkdown": "Voir le Markdown",
+      "hideMarkdown": "Masquer le Markdown",
+      "markdownHeading": "Rendu Markdown",
+      "markdownLoading": "Chargement du rendu Markdown",
+      "markdownError": "Impossible de charger le rendu Markdown. Veuillez réessayer.",
+      "markdownEmpty": "Cette version de CV n'a pas encore été convertie en Markdown."
     }
   },
   "ingestion": {
