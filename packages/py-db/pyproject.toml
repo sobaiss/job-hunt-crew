@@ -3,8 +3,13 @@ name = "py-db"
 version = "0.0.0"
 description = "SQLAlchemy models regenerated from the Prisma-owned Postgres schema via sqlacodegen. Do not hand-edit generated models; re-run `scripts/generate.sh` after every Prisma migration."
 requires-python = ">=3.11"
+# sqlalchemy[asyncio] — this package's engine is create_async_engine, whose
+# greenlet bridge SQLAlchemy only pulls in via the `asyncio` extra on some
+# platforms (its bare dep marker lists `aarch64` but not macOS's `arm64`, so a
+# clean `uv sync` on Apple Silicon would otherwise omit greenlet and every
+# async-DB call fails with "the greenlet library is required").
 dependencies = [
-    "sqlalchemy>=2.0",
+    "sqlalchemy[asyncio]>=2.0",
     "asyncpg>=0.29",
 ]
 
