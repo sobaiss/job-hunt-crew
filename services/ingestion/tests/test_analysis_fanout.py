@@ -187,6 +187,10 @@ async def test_creates_one_analysis_per_ready_offer_and_enqueues():
             assert row.cvVersionId == cv_version_id
             assert row.status == Analysisstatus.PENDING
 
+        async with session_factory() as session:
+            job = await session.get(IngestionJob, ingestion_job_id)
+        assert job.quotaSkippedCount == 0
+
         assert sorted(m[1]["analysisId"] for m in fake_sqs.messages) == sorted(
             result.created_analysis_ids
         )
@@ -293,8 +297,9 @@ async def test_quota_cap_limits_creation_and_records_skip(monkeypatch):
 
         async with session_factory() as session:
             job = await session.get(IngestionJob, ingestion_job_id)
-        assert job.errorMessage is not None
-        assert "not analysed" in job.errorMessage
+        # Recorded on the dedicated column, not as prose on errorMessage.
+        assert job.quotaSkippedCount == 1
+        assert job.errorMessage is None
     finally:
         await _cleanup(session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id, all_offer_ids=all_offer_ids)
         await engine.dispose()
@@ -328,7 +333,9 @@ async def test_owner_already_at_cap_creates_none(monkeypatch):
                     select(Analysis).where(Analysis.ingestionJobId == ingestion_job_id)
                 )
             ).all()
+            job = await session.get(IngestionJob, ingestion_job_id)
         assert rows == []
+        assert job.quotaSkippedCount == 1
     finally:
         await _cleanup(session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id, all_offer_ids=all_offer_ids)
         await engine.dispose()

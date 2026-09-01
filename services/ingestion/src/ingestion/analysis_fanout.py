@@ -11,9 +11,9 @@ The per-user daily analysis cap (`DAILY_ANALYSIS_CAP`, default 50, counted
 since 00:00 UTC — the same rule `POST /v1/analyses` enforces) is respected:
 `Analysis` rows are created only up to the owner's remaining budget for the
 day and the number of `READY` offers left unanalysed for that reason is
-recorded on the `IngestionJob` without failing it. The candidate-facing
-side of partial batches (pre-submit estimate, per-offer "daily limit
-reached" markers, a dedicated column) is issue #33.
+recorded on `IngestionJob.quotaSkippedCount` without failing the job. The
+remaining candidate-facing side of partial batches (per-offer "daily limit
+reached" markers on the Batch result view) is issue #33.
 """
 
 import json
@@ -57,7 +57,7 @@ async def create_analyses_for_ready_offers(
     `cvVersionId` from the job) and enqueue `{"analysisId": id}` on
     `analysis-intake`. Stops once the owner's `DAILY_ANALYSIS_CAP` for the
     day is reached, recording the count of offers left unanalysed on
-    `ingestion_job.errorMessage`. Idempotent: re-running skips offers that
+    `ingestion_job.quotaSkippedCount`. Idempotent: re-running skips offers that
     already have an `Analysis` for this job, so an SQS redelivery does not
     double-create.
     """
@@ -114,13 +114,10 @@ async def create_analyses_for_ready_offers(
         result.created_analysis_ids.append(analysis.id)
 
     if skipped:
-        note = (
-            f"{skipped} READY offer(s) not analysed: daily analysis limit of {cap} "
-            "reached for the job owner"
-        )
-        ingestion_job.errorMessage = (
-            f"{ingestion_job.errorMessage}; {note}" if ingestion_job.errorMessage else note
-        )
+        # Dedicated column (issue #33) rather than prose on errorMessage — the
+        # Batch result view reads this to mark the quota-skipped offers, and
+        # errorMessage stays reserved for actual failures.
+        ingestion_job.quotaSkippedCount = skipped
         ingestion_job.updatedAt = _now()
         result.quota_skipped_count = skipped
 

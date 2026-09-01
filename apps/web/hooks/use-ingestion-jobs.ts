@@ -82,6 +82,7 @@ export type IngestionJob = {
   discoveredCount: number;
   scrapedCount: number;
   failedCount: number;
+  quotaSkippedCount: number;
   errorMessage: string | null;
 };
 

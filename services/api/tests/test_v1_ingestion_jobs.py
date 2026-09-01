@@ -400,6 +400,7 @@ def test_create_single_url_ingestion_job_forces_max_offers_1_and_enqueues(user_i
     assert job["siteConfigId"] is None
     assert job["maxOffers"] == 1
     assert job["status"] == "PENDING"
+    assert job["quotaSkippedCount"] == 0
 
     sqs = make_sqs_client()
     received = sqs.receive_message(
@@ -429,6 +430,8 @@ def test_get_ingestion_job_returns_job_offers_and_enforces_ownership(
         body = get_response.json()["ingestionJob"]
         assert body["id"] == created["id"]
         assert body["jobOffers"] == []
+        # New IngestionJob row starts with no quota-skipped offers (issue #33).
+        assert body["quotaSkippedCount"] == 0
 
         other_user_id = asyncio.run(_create_user())
         try:

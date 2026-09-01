@@ -270,6 +270,7 @@ class IngestionJob(Base):
     failedCount: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text('0'))
     createdAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False, server_default=text('CURRENT_TIMESTAMP'))
     updatedAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False)
+    quotaSkippedCount: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text('0'))
     inputUrl: Mapped[Optional[str]] = mapped_column(Text)
     siteConfigId: Mapped[Optional[str]] = mapped_column(Text)
     filters: Mapped[Optional[dict]] = mapped_column(JSONB)

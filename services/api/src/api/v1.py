@@ -481,6 +481,7 @@ class IngestionJobResponse(BaseModel):
     discoveredCount: int
     scrapedCount: int
     failedCount: int
+    quotaSkippedCount: int
     errorMessage: str | None
     createdAt: datetime
     updatedAt: datetime
@@ -500,6 +501,7 @@ def _ingestion_job_response(row: IngestionJob) -> IngestionJobResponse:
         discoveredCount=row.discoveredCount,
         scrapedCount=row.scrapedCount,
         failedCount=row.failedCount,
+        quotaSkippedCount=row.quotaSkippedCount,
         errorMessage=row.errorMessage,
         createdAt=row.createdAt,
         updatedAt=row.updatedAt,
