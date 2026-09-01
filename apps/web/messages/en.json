@@ -102,6 +102,41 @@
     "listing": "That URL looks like a list of offers, not a single job offer.",
     "listingCta": "Analyse several offers"
   },
+  "analyseSeveral": {
+    "heading": "Analyse several offers",
+    "subtitle": "Pick a job site and filters, choose how many offers to analyse, and match them all against one CV.",
+    "siteLabel": "Job site",
+    "sitePlaceholder": "Select a job site",
+    "siteLoading": "Loading job sites",
+    "siteLoadError": "We couldn't load the job sites. Please try again.",
+    "siteRequired": "Choose a job site.",
+    "reliability": {
+      "recommended": "recommended",
+      "reliable": "usually works",
+      "mayBeUnreliable": "may be unreliable",
+      "mayFail": "may fail"
+    },
+    "keywordsLabel": "Keywords",
+    "locationLabel": "Location",
+    "postedWithinLabel": "Posted within",
+    "contractTypeLabel": "Contract type",
+    "remoteLabel": "Remote policy",
+    "remoteAny": "Any",
+    "experienceLevelLabel": "Experience level",
+    "maxOffersLabel": "How many offers to analyse",
+    "maxOffersHint": "Between 1 and {max}.",
+    "submit": "Analyse these offers",
+    "submitting": "Starting…",
+    "error": "We couldn't start that analysis. Please try again.",
+    "progressHeading": "Analysing this batch",
+    "discovered": "Offers found",
+    "analysesDone": "Analyses completed",
+    "empty": "This run didn't find any offers to analyse.",
+    "allFailed": "None of the offers in this run could be fetched or read.",
+    "scrapingDetail": "Scraping progress",
+    "jobOfferFallback": "Job offer",
+    "vsCv": "vs. {label}"
+  },
   "cvVersions": {
     "title": "CV versions",
     "form": {

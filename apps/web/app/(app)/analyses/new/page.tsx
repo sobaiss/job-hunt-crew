@@ -118,6 +118,7 @@ function WaitingState({
 
 export default function AnalyseOneOfferPage() {
   const t = useTranslations("analyseOne");
+  const tSeveral = useTranslations("analyseSeveral");
   const create = useCreateSingleUrlIngestionJob();
   const [cvVersionId, setCvVersionId] = useState("");
   const [ingestionJobId, setIngestionJobId] = useState<string | null>(null);
@@ -176,43 +177,57 @@ export default function AnalyseOneOfferPage() {
           }}
         />
       ) : (
-        <form className="flex flex-col gap-4" onSubmit={onSubmit} noValidate>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="offer-url">{t("urlLabel")}</Label>
-            <Input
-              id="offer-url"
-              type="url"
-              placeholder={t("urlPlaceholder")}
-              aria-invalid={errors.inputUrl ? true : undefined}
-              {...register("inputUrl")}
+        <>
+          <nav className="flex gap-4 text-sm">
+            <span aria-current="page" className="font-medium">
+              {t("heading")}
+            </span>
+            <Link
+              href="/analyses/new/several"
+              className="text-muted hover:text-foreground"
+            >
+              {tSeveral("heading")}
+            </Link>
+          </nav>
+
+          <form className="flex flex-col gap-4" onSubmit={onSubmit} noValidate>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="offer-url">{t("urlLabel")}</Label>
+              <Input
+                id="offer-url"
+                type="url"
+                placeholder={t("urlPlaceholder")}
+                aria-invalid={errors.inputUrl ? true : undefined}
+                {...register("inputUrl")}
+              />
+              {errors.inputUrl && (
+                <p role="alert" className="text-sm text-destructive">
+                  {errors.inputUrl.message}
+                </p>
+              )}
+            </div>
+
+            <CvVersionPicker
+              id="offer-cv"
+              value={cvVersionId}
+              onChange={setCvVersionId}
             />
-            {errors.inputUrl && (
+
+            <Button
+              type="submit"
+              disabled={create.isPending || !cvVersionId}
+              className="self-start"
+            >
+              {create.isPending ? t("submitting") : t("submit")}
+            </Button>
+
+            {create.isError && (
               <p role="alert" className="text-sm text-destructive">
-                {errors.inputUrl.message}
+                {t("error")}
               </p>
             )}
-          </div>
-
-          <CvVersionPicker
-            id="offer-cv"
-            value={cvVersionId}
-            onChange={setCvVersionId}
-          />
-
-          <Button
-            type="submit"
-            disabled={create.isPending || !cvVersionId}
-            className="self-start"
-          >
-            {create.isPending ? t("submitting") : t("submit")}
-          </Button>
-
-          {create.isError && (
-            <p role="alert" className="text-sm text-destructive">
-              {t("error")}
-            </p>
-          )}
-        </form>
+          </form>
+        </>
       )}
     </main>
   );

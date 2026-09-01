@@ -102,6 +102,41 @@
     "listing": "Cette URL ressemble à une liste d'offres, et non à une seule offre d'emploi.",
     "listingCta": "Analyser plusieurs offres"
   },
+  "analyseSeveral": {
+    "heading": "Analyser plusieurs offres",
+    "subtitle": "Choisissez un site d'emploi et des filtres, indiquez combien d'offres analyser, et comparez-les toutes à un même CV.",
+    "siteLabel": "Site d'emploi",
+    "sitePlaceholder": "Sélectionnez un site d'emploi",
+    "siteLoading": "Chargement des sites d'emploi",
+    "siteLoadError": "Impossible de charger les sites d'emploi. Veuillez réessayer.",
+    "siteRequired": "Choisissez un site d'emploi.",
+    "reliability": {
+      "recommended": "recommandé",
+      "reliable": "fonctionne généralement",
+      "mayBeUnreliable": "peu fiable",
+      "mayFail": "peut échouer"
+    },
+    "keywordsLabel": "Mots-clés",
+    "locationLabel": "Lieu",
+    "postedWithinLabel": "Publiée depuis",
+    "contractTypeLabel": "Type de contrat",
+    "remoteLabel": "Politique de télétravail",
+    "remoteAny": "Indifférent",
+    "experienceLevelLabel": "Niveau d'expérience",
+    "maxOffersLabel": "Combien d'offres analyser",
+    "maxOffersHint": "Entre 1 et {max}.",
+    "submit": "Analyser ces offres",
+    "submitting": "Démarrage…",
+    "error": "Impossible de lancer cette analyse. Veuillez réessayer.",
+    "progressHeading": "Analyse de ce lot",
+    "discovered": "Offres trouvées",
+    "analysesDone": "Analyses terminées",
+    "empty": "Cette recherche n'a trouvé aucune offre à analyser.",
+    "allFailed": "Aucune des offres de cette recherche n'a pu être récupérée ou lue.",
+    "scrapingDetail": "Détail du scraping",
+    "jobOfferFallback": "Offre d'emploi",
+    "vsCv": "vs. {label}"
+  },
   "cvVersions": {
     "title": "Versions de CV",
     "form": {

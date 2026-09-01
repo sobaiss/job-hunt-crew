@@ -72,7 +72,13 @@ export type AnalysisDetail = AnalysisSummary & {
  *
  * When `ingestionJobId` is set the query polls every
  * {@link ANALYSIS_POLL_INTERVAL_MS} until at least one Analysis exists, then
- * stops — the caller is waiting for the ingestion worker to create it.
+ * stops — the "Analyse one offer" waiting state only needs the first row.
+ *
+ * The Batch result view instead passes `batchRunning` (its IngestionJob's
+ * non-terminal state): while that is `true`, or while any loaded Analysis is
+ * still non-terminal, the query keeps polling so newly fanned-out rows and
+ * their scores fill in; it stops once the run is terminal and every Analysis
+ * in the batch is too (or the run ended with none).
  *
  * The `/v1/analyses` list endpoint serialises each row with the same shape as
  * the detail endpoint (`resultJSON` and `errorMessage` included), so the list
@@ -82,9 +88,11 @@ export type AnalysisDetail = AnalysisSummary & {
 export function useAnalyses(params?: {
   jobOfferId?: string;
   ingestionJobId?: string;
+  batchRunning?: boolean;
 }) {
   const jobOfferId = params?.jobOfferId;
   const ingestionJobId = params?.ingestionJobId;
+  const batchRunning = params?.batchRunning;
 
   const query = new URLSearchParams();
   if (jobOfferId) query.set("jobOfferId", jobOfferId);
@@ -97,8 +105,14 @@ export function useAnalyses(params?: {
     select: (data) => data.analyses,
     refetchInterval: (q) => {
       if (!ingestionJobId) return false;
-      const analyses = q.state.data?.analyses;
-      return analyses && analyses.length > 0 ? false : ANALYSIS_POLL_INTERVAL_MS;
+      const analyses = q.state.data?.analyses ?? [];
+      if (batchRunning === undefined) {
+        return analyses.length > 0 ? false : ANALYSIS_POLL_INTERVAL_MS;
+      }
+      const batchTerminal =
+        analyses.length === 0 ||
+        analyses.every((a) => TERMINAL_ANALYSIS_STATUSES.has(a.status));
+      return batchRunning || !batchTerminal ? ANALYSIS_POLL_INTERVAL_MS : false;
     },
   });
 }

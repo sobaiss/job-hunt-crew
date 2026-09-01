@@ -24,6 +24,14 @@ export const TERMINAL_INGESTION_STATUSES: ReadonlySet<IngestionJobStatus> =
 export const INGESTION_POLL_INTERVAL_MS = 2000;
 
 /**
+ * Ceiling (and services/api's default) for a SITE_SEARCH run's offer count —
+ * mirrors `INGESTION_MAX_OFFERS` in `services/api`. The "Analyse several offers"
+ * form clamps its offer-count field to `1..INGESTION_MAX_OFFERS`; services/api
+ * clamps again on the request.
+ */
+export const INGESTION_MAX_OFFERS = 25;
+
+/**
  * Machine-readable prefix the SINGLE_URL pipeline puts on
  * `IngestionJob.errorMessage` when the pasted page turned out to be a
  * listing / search-results page rather than one offer (see
@@ -102,22 +110,30 @@ export function useIngestionJob(id: string) {
 }
 
 /**
- * Create a SITE_SEARCH IngestionJob. There is no ingestion-jobs list to
- * invalidate; the caller links straight to the new job's detail page.
+ * Create a SITE_SEARCH IngestionJob for the "Analyse several offers" screen: it
+ * carries the chosen CONVERTED `cvVersionId` and a `maxOffers` count the worker
+ * fans out against. There is no ingestion-jobs list to invalidate; the caller
+ * polls the new job + its Analysis batch on the Batch result view.
  */
 export function useCreateIngestionJob() {
   return useMutation({
     mutationFn: ({
       siteConfigId,
+      cvVersionId,
       filters,
+      maxOffers,
     }: {
       siteConfigId: string;
+      cvVersionId: string;
       filters: SiteSearchFilters;
+      maxOffers: number;
     }) =>
       bff.post<{ ingestionJob: IngestionJob }>("/ingestion-jobs", {
         mode: "SITE_SEARCH",
         siteConfigId,
+        cvVersionId,
         filters,
+        maxOffers,
       }),
   });
 }
