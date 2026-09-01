@@ -322,7 +322,13 @@ def test_list_and_get_analyses_scoped_to_caller(user_id, job_offer_id, cv_versio
             asyncio.run(_delete_user(other_user_id))
 
 
-async def _link_analysis_to_new_ingestion_job(user_id: str, analysis_id: str) -> str:
+async def _link_analysis_to_new_ingestion_job(
+    user_id: str,
+    analysis_id: str,
+    *,
+    mode: Ingestionmode = Ingestionmode.SINGLE_URL,
+    site_config_id: str | None = None,
+) -> str:
     """Creates an IngestionJob owned by `user_id` and stamps its id onto
     `analysis_id`'s ingestionJobId (the worker does this in the real flow)."""
     ingestion_job_id = str(uuid.uuid4())
@@ -334,7 +340,8 @@ async def _link_analysis_to_new_ingestion_job(user_id: str, analysis_id: str) ->
                 IngestionJob(
                     id=ingestion_job_id,
                     userId=user_id,
-                    mode=Ingestionmode.SINGLE_URL,
+                    mode=mode,
+                    siteConfigId=site_config_id,
                     maxOffers=1,
                     status=Ingestionjobstatus.PENDING,
                     updatedAt=_now(),
@@ -383,6 +390,47 @@ def test_list_analyses_filters_by_ingestion_job_id(user_id, job_offer_id, cv_ver
             assert other.json()["analyses"] == []
         finally:
             asyncio.run(_delete_user(other_user_id))
+
+
+def test_list_analyses_exposes_ingestion_job_ref_for_grouping(
+    user_id, job_offer_id, cv_version_id
+):
+    """The Dashboard folds a SITE_SEARCH batch into one row (issue #34): each
+    Analysis row carries `ingestionJobId` plus a nested `{mode, siteConfigId}`
+    for rows that came from an IngestionJob, and `null` for a standalone one."""
+    with TestClient(app) as client:
+        batched_id = client.post(
+            "/v1/analyses",
+            headers=_headers(user_id),
+            json={"jobOfferId": job_offer_id, "cvVersionId": cv_version_id},
+        ).json()["analysisId"]
+        standalone_id = client.post(
+            "/v1/analyses",
+            headers=_headers(user_id),
+            json={"jobOfferId": job_offer_id, "cvVersionId": cv_version_id},
+        ).json()["analysisId"]
+
+        ingestion_job_id = asyncio.run(
+            _link_analysis_to_new_ingestion_job(
+                user_id,
+                batched_id,
+                mode=Ingestionmode.SITE_SEARCH,
+                site_config_id="site-ft",
+            )
+        )
+
+        rows = {a["id"]: a for a in client.get("/v1/analyses", headers=_headers(user_id)).json()["analyses"]}
+
+        assert rows[batched_id]["ingestionJobId"] == ingestion_job_id
+        assert rows[batched_id]["ingestionJob"] == {
+            "mode": "SITE_SEARCH",
+            "siteConfigId": "site-ft",
+        }
+        assert rows[standalone_id]["ingestionJobId"] is None
+        assert rows[standalone_id]["ingestionJob"] is None
+
+        detail = client.get(f"/v1/analyses/{batched_id}", headers=_headers(user_id)).json()["analysis"]
+        assert detail["ingestionJob"]["mode"] == "SITE_SEARCH"
 
 
 def test_get_analysis_returns_404_for_unknown_id(user_id):

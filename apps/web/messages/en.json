@@ -52,6 +52,11 @@
     "jobOfferFallback": "Job offer",
     "vsCv": "vs. {label}",
     "compareLink": "Compare with other CVs",
+    "batch": {
+      "siteFallback": "Job site",
+      "offers": "{count, plural, one {# offer} other {# offers}}",
+      "bestScore": "Best match score"
+    },
     "detail": {
       "loading": "Loading this analysis",
       "loadError": "We couldn't load this analysis. Please try again.",

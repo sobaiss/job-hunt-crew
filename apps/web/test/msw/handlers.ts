@@ -7,4 +7,9 @@ import { http, HttpResponse } from "msw";
 export const handlers = [
   http.get("/api/example", () => HttpResponse.json({ ok: true })),
   http.get("/api/auth/session", () => HttpResponse.json({})),
+  // The Dashboard reads the site catalogue to name a grouped SITE_SEARCH batch
+  // row (issue #34). Default to an empty catalogue so suites that don't care
+  // about grouping don't have to stub it; grouping tests override with
+  // `server.use`.
+  http.get("/api/site-configs", () => HttpResponse.json({ siteConfigs: [] })),
 ];

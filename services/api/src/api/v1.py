@@ -701,11 +701,22 @@ async def lookup_job_offer(
 # route and the ingestion fan-out enforce one identical rule.
 
 
+class AnalysisIngestionJobRef(BaseModel):
+    """The slice of the parent IngestionJob the Dashboard needs to fold a
+    SITE_SEARCH Analysis batch into one grouped row (issue #34): the `mode`
+    (only `SITE_SEARCH` rows are grouped) and the `siteConfigId` (the row
+    resolves its site displayName from this)."""
+
+    mode: str
+    siteConfigId: str | None
+
+
 class AnalysisResponse(BaseModel):
     id: str
     userId: str
     jobOfferId: str
     cvVersionId: str
+    ingestionJobId: str | None
     status: str
     s3ResultKey: str | None
     matchScore: int | None
@@ -717,14 +728,17 @@ class AnalysisResponse(BaseModel):
     completedAt: datetime | None
     jobOffer: JobOfferResponse
     cvVersion: CVVersionResponse
+    ingestionJob: AnalysisIngestionJobRef | None
 
 
 def _analysis_response(row: Analysis) -> AnalysisResponse:
+    ingestion_job = row.IngestionJob_
     return AnalysisResponse(
         id=row.id,
         userId=row.userId,
         jobOfferId=row.jobOfferId,
         cvVersionId=row.cvVersionId,
+        ingestionJobId=row.ingestionJobId,
         status=row.status.value,
         s3ResultKey=row.s3ResultKey,
         matchScore=row.matchScore,
@@ -736,6 +750,14 @@ def _analysis_response(row: Analysis) -> AnalysisResponse:
         completedAt=row.completedAt,
         jobOffer=_job_offer_response(row.JobOffer_),
         cvVersion=_cv_version_response(row.CVVersion_),
+        ingestionJob=(
+            AnalysisIngestionJobRef(
+                mode=ingestion_job.mode.value,
+                siteConfigId=ingestion_job.siteConfigId,
+            )
+            if ingestion_job is not None
+            else None
+        ),
     )
 
 
@@ -752,7 +774,11 @@ async def list_analyses(
 ) -> AnalysisListResponse:
     stmt = (
         select(Analysis)
-        .options(selectinload(Analysis.JobOffer_), selectinload(Analysis.CVVersion_))
+        .options(
+            selectinload(Analysis.JobOffer_),
+            selectinload(Analysis.CVVersion_),
+            selectinload(Analysis.IngestionJob_),
+        )
         .where(Analysis.userId == user_id)
         .order_by(Analysis.requestedAt.desc())
     )
@@ -864,7 +890,11 @@ async def get_analysis(
 ) -> GetAnalysisResponse:
     stmt = (
         select(Analysis)
-        .options(selectinload(Analysis.JobOffer_), selectinload(Analysis.CVVersion_))
+        .options(
+            selectinload(Analysis.JobOffer_),
+            selectinload(Analysis.CVVersion_),
+            selectinload(Analysis.IngestionJob_),
+        )
         .where(Analysis.id == analysis_id)
     )
     analysis = (await session.scalars(stmt)).first()

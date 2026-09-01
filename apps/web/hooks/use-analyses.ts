@@ -50,14 +50,25 @@ export type AnalysisResult = {
   model_used?: string;
 };
 
+/** IngestionMode as serialised by `/v1/ingestion-jobs`; only `SITE_SEARCH`
+ *  rows are folded into a grouped Dashboard row (issue #34). */
+export type IngestionMode = "SINGLE_URL" | "SITE_SEARCH" | "LISTING_URL";
+
 export type AnalysisSummary = {
   id: string;
   status: AnalysisStatus;
   matchScore: number | null;
   requestedAt: string;
   cvVersionId: string;
+  /** The batch this Analysis belongs to, or `null` for one created directly
+   *  via `POST /v1/analyses`. */
+  ingestionJobId: string | null;
   jobOffer: { id: string; title: string | null; company: string | null };
   cvVersion: { label: string };
+  /** `{mode, siteConfigId}` of the parent IngestionJob when there is one —
+   *  the Dashboard groups `mode === "SITE_SEARCH"` rows per `ingestionJobId`
+   *  and resolves the site name from `siteConfigId`. */
+  ingestionJob: { mode: IngestionMode; siteConfigId: string | null } | null;
 };
 
 export type AnalysisDetail = AnalysisSummary & {
