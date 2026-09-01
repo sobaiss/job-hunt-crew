@@ -284,3 +284,158 @@ describe("AnalyseOneOfferPage", () => {
     expect(stub.creates()).toBe(1);
   });
 });
+
+const CV_UPLOAD_URL = "https://uploads.example.test/cv";
+
+type ImportStubOptions = {
+  conversionStatus?: string;
+  onCreateCv?: (body: Record<string, unknown>) => void;
+};
+
+/**
+ * Stubs the inline-CV-import path: the CV list is empty until the presigned PUT
+ * lands, then it returns one freshly imported CV whose `conversionStatus` is
+ * `conversionStatus` (so a test can pin it to CONVERTING / FAILED / CONVERTED).
+ */
+function stubImportApi(options: ImportStubOptions = {}) {
+  const { conversionStatus = "CONVERTED", onCreateCv } = options;
+  let uploaded = false;
+
+  server.use(
+    http.get("/api/cv-versions", () =>
+      HttpResponse.json({
+        cvVersions: uploaded
+          ? [
+              cv({
+                id: "cv-new",
+                label: "Fresh CV",
+                isDefault: false,
+                conversionStatus,
+              }),
+            ]
+          : [],
+      }),
+    ),
+    http.post("/api/cv-versions", async ({ request }) => {
+      onCreateCv?.((await request.json()) as Record<string, unknown>);
+      return HttpResponse.json(
+        { cvVersionId: "cv-new", fileKey: "k", uploadUrl: CV_UPLOAD_URL },
+        { status: 201 },
+      );
+    }),
+    http.put(CV_UPLOAD_URL, () => {
+      uploaded = true;
+      return new HttpResponse(null, { status: 200 });
+    }),
+    http.post("/api/ingestion-jobs", () =>
+      HttpResponse.json(
+        {
+          ingestionJob: {
+            id: "j1",
+            mode: "SINGLE_URL",
+            status: "PENDING",
+            discoveredCount: 0,
+            scrapedCount: 0,
+            failedCount: 0,
+            errorMessage: null,
+          },
+        },
+        { status: 201 },
+      ),
+    ),
+    http.get("/api/analyses", () => HttpResponse.json({ analyses: [] })),
+  );
+}
+
+function freshCvFile() {
+  return new File(["%PDF-1.4"], "fresh-cv.pdf", { type: "application/pdf" });
+}
+
+describe("AnalyseOneOfferPage — inline CV import", () => {
+  it("imports a CV inline and enables submit once it is CONVERTED", async () => {
+    let createBody: Record<string, unknown> | null = null;
+    stubImportApi({ onCreateCv: (b) => (createBody = b) });
+    const user = userEvent.setup();
+    renderWithProviders(<AnalyseOneOfferPage />);
+
+    await screen.findByLabelText("New CV label");
+    const submit = screen.getByRole("button", { name: "Analyse this offer" });
+    expect(submit).toBeDisabled();
+
+    await user.type(screen.getByLabelText("New CV label"), "Fresh CV");
+    await user.upload(screen.getByLabelText("New CV file"), freshCvFile());
+    await user.click(screen.getByRole("button", { name: "Import CV" }));
+
+    await waitFor(() => expect(submit).toBeEnabled());
+    expect(screen.getByLabelText("CV version")).toHaveValue("cv-new");
+    expect(createBody).toMatchObject({
+      fileName: "fresh-cv.pdf",
+      contentType: "application/pdf",
+    });
+  });
+
+  it("shows a converting state and keeps submit disabled while conversion is pending", async () => {
+    stubImportApi({ conversionStatus: "CONVERTING" });
+    const user = userEvent.setup();
+    renderWithProviders(<AnalyseOneOfferPage />);
+
+    await screen.findByLabelText("New CV label");
+    await user.type(screen.getByLabelText("New CV label"), "Fresh CV");
+    await user.upload(screen.getByLabelText("New CV file"), freshCvFile());
+    await user.click(screen.getByRole("button", { name: "Import CV" }));
+
+    expect(
+      await screen.findByText(
+        "Converting your CV — this usually takes a few seconds.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Analyse this offer" }),
+    ).toBeDisabled();
+  });
+
+  it("shows an error and keeps submit disabled when the conversion fails", async () => {
+    stubImportApi({ conversionStatus: "FAILED" });
+    const user = userEvent.setup();
+    renderWithProviders(<AnalyseOneOfferPage />);
+
+    await screen.findByLabelText("New CV label");
+    await user.type(screen.getByLabelText("New CV label"), "Fresh CV");
+    await user.upload(screen.getByLabelText("New CV file"), freshCvFile());
+    await user.click(screen.getByRole("button", { name: "Import CV" }));
+
+    expect(
+      await screen.findByText(
+        "We couldn't convert that CV. Try a different file.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Analyse this offer" }),
+    ).toBeDisabled();
+    expect(screen.getByLabelText("CV version")).toHaveValue("");
+  });
+
+  it("keeps the typed offer URL while a CV is imported and converted", async () => {
+    stubImportApi();
+    const user = userEvent.setup();
+    renderWithProviders(<AnalyseOneOfferPage />);
+
+    await screen.findByLabelText("New CV label");
+    await user.type(
+      screen.getByLabelText("Job offer URL"),
+      "https://jobs.example.com/staff-engineer",
+    );
+    await user.type(screen.getByLabelText("New CV label"), "Fresh CV");
+    await user.upload(screen.getByLabelText("New CV file"), freshCvFile());
+    await user.click(screen.getByRole("button", { name: "Import CV" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Analyse this offer" }),
+      ).toBeEnabled(),
+    );
+    expect(screen.getByLabelText("Job offer URL")).toHaveValue(
+      "https://jobs.example.com/staff-engineer",
+    );
+  });
+});

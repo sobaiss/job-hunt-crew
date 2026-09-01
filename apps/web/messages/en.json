@@ -82,7 +82,21 @@
     "loading": "Loading your CV versions",
     "loadError": "We couldn't load your CV versions. Please try again.",
     "noneConverted": "None of your CV versions have been converted yet.",
-    "manageLink": "Import a CV"
+    "manageLink": "Import a CV",
+    "importHeading": "Import a new CV",
+    "importLabelLabel": "New CV label",
+    "importFileLabel": "New CV file",
+    "importFileHint": "PDF, DOCX, Markdown, or plain text, up to 10 MB.",
+    "importSubmit": "Import CV",
+    "importing": "Uploading…",
+    "importLabelRequired": "Give this CV a label.",
+    "importFileRequired": "Choose a PDF, DOCX, Markdown, or plain-text file.",
+    "importFileType": "Only PDF, DOCX, Markdown, and plain-text files are supported.",
+    "importFileTooLarge": "That file is larger than the 10 MB limit.",
+    "importConverting": "Converting your CV — this usually takes a few seconds.",
+    "importFailed": "We couldn't convert that CV. Try a different file.",
+    "importConverted": "Your CV is ready and selected.",
+    "importUploadError": "The upload failed. Please try again."
   },
   "analyseOne": {
     "heading": "Analyse one offer",

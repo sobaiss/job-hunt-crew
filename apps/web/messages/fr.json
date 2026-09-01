@@ -82,7 +82,21 @@
     "loading": "Chargement de vos versions de CV",
     "loadError": "Impossible de charger vos versions de CV. Veuillez réessayer.",
     "noneConverted": "Aucune de vos versions de CV n'a encore été convertie.",
-    "manageLink": "Importer un CV"
+    "manageLink": "Importer un CV",
+    "importHeading": "Importer un nouveau CV",
+    "importLabelLabel": "Libellé du nouveau CV",
+    "importFileLabel": "Fichier du nouveau CV",
+    "importFileHint": "PDF, DOCX, Markdown ou texte brut, jusqu'à 10 Mo.",
+    "importSubmit": "Importer le CV",
+    "importing": "Téléversement…",
+    "importLabelRequired": "Donnez un libellé à ce CV.",
+    "importFileRequired": "Choisissez un fichier PDF, DOCX, Markdown ou texte brut.",
+    "importFileType": "Seuls les fichiers PDF, DOCX, Markdown et texte brut sont pris en charge.",
+    "importFileTooLarge": "Ce fichier dépasse la limite de 10 Mo.",
+    "importConverting": "Conversion de votre CV — cela prend généralement quelques secondes.",
+    "importFailed": "Nous n'avons pas pu convertir ce CV. Essayez un autre fichier.",
+    "importConverted": "Votre CV est prêt et sélectionné.",
+    "importUploadError": "Le téléversement a échoué. Veuillez réessayer."
   },
   "analyseOne": {
     "heading": "Analyser une offre",

@@ -47,14 +47,64 @@ export const ACCEPTED_CV_CONTENT_TYPES: Record<string, CvFileType> = {
 /** PRD Section 13 default, mirrored from `MAX_FILE_SIZE_BYTES` in services/api. */
 export const MAX_CV_SIZE_BYTES = 10 * 1024 * 1024;
 
+/** `accept` attribute for a CV `<input type="file">` — extensions + media types. */
+export const CV_FILE_ACCEPT = [
+  ".pdf",
+  ".docx",
+  ".md",
+  ".txt",
+  ...Object.keys(ACCEPTED_CV_CONTENT_TYPES),
+].join(",");
+
+/** Cadence for polling one just-imported CV's `conversionStatus` to a result. */
+export const CV_CONVERSION_POLL_INTERVAL_MS = 2000;
+
+/** A Conversion in one of these is still in flight; anything else is terminal. */
+const NON_TERMINAL_CONVERSION_STATUSES: ReadonlySet<CvConversionStatus> = new Set(
+  ["PENDING", "CONVERTING"],
+);
+
+/**
+ * RHF stores the raw `input.files` for a file field. jsdom / user-event give a
+ * `FileList`-like rather than a genuine `FileList` instance, so this duck-types
+ * it instead of `instanceof FileList`. Shared by the CV management page and the
+ * inline importer on the "Analyse one offer" screen.
+ */
+export function firstFile(value: unknown): File | undefined {
+  if (value && typeof value === "object" && "length" in value) {
+    const list = value as { length: number; [index: number]: unknown };
+    if (list.length > 0 && list[0] instanceof File) {
+      return list[0];
+    }
+  }
+  return undefined;
+}
+
 const CV_VERSIONS_KEY = ["cv-versions"] as const;
 
-/** The CV versions list, newest first (ordering comes from services/api). */
-export function useCvVersions() {
+/**
+ * The CV versions list, newest first (ordering comes from services/api). Pass
+ * `pollWhileConverting` (the inline importer on the "Analyse one offer" screen
+ * does) to keep refetching every {@link CV_CONVERSION_POLL_INTERVAL_MS} while any
+ * row's Conversion is still `PENDING` / `CONVERTING`, so a freshly imported CV's
+ * status settles without a manual refresh.
+ */
+export function useCvVersions(options?: { pollWhileConverting?: boolean }) {
+  const pollWhileConverting = options?.pollWhileConverting ?? false;
+
   return useQuery({
     queryKey: CV_VERSIONS_KEY,
     queryFn: () => bff.get<{ cvVersions: CvVersion[] }>("/cv-versions"),
     select: (data) => data.cvVersions,
+    refetchInterval: (query) => {
+      if (!pollWhileConverting) return false;
+      const rows = query.state.data?.cvVersions ?? [];
+      return rows.some((cv) =>
+        NON_TERMINAL_CONVERSION_STATUSES.has(cv.conversionStatus),
+      )
+        ? CV_CONVERSION_POLL_INTERVAL_MS
+        : false;
+    },
   });
 }
 

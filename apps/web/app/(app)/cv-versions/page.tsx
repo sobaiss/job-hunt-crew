@@ -12,7 +12,9 @@ import {
   useCreateCvVersion,
   useConvertCvVersion,
   useSetDefaultCvVersion,
+  firstFile,
   ACCEPTED_CV_CONTENT_TYPES,
+  CV_FILE_ACCEPT,
   MAX_CV_SIZE_BYTES,
   type CvConversionStatus,
 } from "@/hooks/use-cv-versions";
@@ -23,29 +25,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-
-const FILE_ACCEPT = [
-  ".pdf",
-  ".docx",
-  ".md",
-  ".txt",
-  ...Object.keys(ACCEPTED_CV_CONTENT_TYPES),
-].join(",");
-
-/**
- * RHF stores the raw `input.files` for a file field. jsdom / user-event give a
- * `FileList`-like rather than a genuine `FileList` instance, so this duck-types
- * it instead of `instanceof FileList`.
- */
-function firstFile(value: unknown): File | undefined {
-  if (value && typeof value === "object" && "length" in value) {
-    const list = value as { length: number; [index: number]: unknown };
-    if (list.length > 0 && list[0] instanceof File) {
-      return list[0];
-    }
-  }
-  return undefined;
-}
 
 function conversionBadgeVariant(
   status: CvConversionStatus,
@@ -161,7 +140,7 @@ export default function CvVersionsPage() {
             <Input
               id="cv-file"
               type="file"
-              accept={FILE_ACCEPT}
+              accept={CV_FILE_ACCEPT}
               aria-invalid={errors.file ? true : undefined}
               aria-describedby="cv-file-hint"
               {...register("file")}
