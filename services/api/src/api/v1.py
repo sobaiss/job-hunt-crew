@@ -19,8 +19,9 @@ from py_db.models import (
     JobOffer,
     SiteConfig,
 )
+from py_db.quota import analyses_requested_today, daily_analysis_cap
 from pydantic import BaseModel
-from sqlalchemy import func, select, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -693,22 +694,9 @@ async def lookup_job_offer(
 
 # --- Analyses (M7-T13) ---
 # Ports apps/web/app/api/analyses/{route.ts,[id]/route.ts}'s daily-cap check
-# and SQS enqueue verbatim (PRD Section 9.2, Section 10 steps 1-2, 11).
-
-DEFAULT_DAILY_ANALYSIS_CAP = 50
-
-
-def _daily_analysis_cap() -> int:
-    raw = os.environ.get("DAILY_ANALYSIS_CAP")
-    try:
-        parsed = int(raw) if raw else None
-    except ValueError:
-        parsed = None
-    return parsed if parsed is not None and parsed > 0 else DEFAULT_DAILY_ANALYSIS_CAP
-
-
-def _start_of_today() -> datetime:
-    return datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
+# and SQS enqueue verbatim (PRD Section 9.2, Section 10 steps 1-2, 11). The cap
+# check itself lives in the shared `py_db.quota` helper (issue #33) so this
+# route and the ingestion fan-out enforce one identical rule.
 
 
 class AnalysisResponse(BaseModel):
@@ -805,13 +793,8 @@ async def create_analysis(
     if cv_version is None or cv_version.userId != user_id:
         raise HTTPException(status_code=400, detail="Unknown cvVersionId")
 
-    daily_cap = _daily_analysis_cap()
-    analyses_requested_today = await session.scalar(
-        select(func.count())
-        .select_from(Analysis)
-        .where(Analysis.userId == user_id, Analysis.requestedAt >= _start_of_today())
-    )
-    if (analyses_requested_today or 0) >= daily_cap:
+    daily_cap = daily_analysis_cap()
+    if await analyses_requested_today(session, user_id) >= daily_cap:
         raise HTTPException(
             status_code=429,
             detail=f"Daily analysis limit of {daily_cap} reached. Try again tomorrow.",

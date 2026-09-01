@@ -17,7 +17,6 @@ reached" markers, a dedicated column) is issue #33.
 """
 
 import json
-import os
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -30,25 +29,11 @@ from py_db.models import (
     JobOffer,
     Jobofferextractionstatus,
 )
-from sqlalchemy import func, select
+from py_db.quota import analyses_requested_today, daily_analysis_cap
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .sqs_client import ANALYSIS_INTAKE_QUEUE_URL, make_sqs_client
-
-DEFAULT_DAILY_ANALYSIS_CAP = 50
-
-
-def _daily_analysis_cap() -> int:
-    raw = os.environ.get("DAILY_ANALYSIS_CAP")
-    try:
-        parsed = int(raw) if raw else None
-    except ValueError:
-        parsed = None
-    return parsed if parsed is not None and parsed > 0 else DEFAULT_DAILY_ANALYSIS_CAP
-
-
-def _start_of_today() -> datetime:
-    return datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
 
 
 def _now() -> datetime:
@@ -109,19 +94,9 @@ async def create_analyses_for_ready_offers(
     if not pending_offer_ids:
         return result
 
-    cap = _daily_analysis_cap()
-    requested_today = (
-        await session.scalar(
-            select(func.count())
-            .select_from(Analysis)
-            .where(
-                Analysis.userId == ingestion_job.userId,
-                Analysis.requestedAt >= _start_of_today(),
-            )
-        )
-        or 0
-    )
-    remaining = max(cap - requested_today, 0)
+    # Same rule `POST /v1/analyses` enforces, via the shared helper (issue #33).
+    cap = daily_analysis_cap()
+    remaining = max(cap - await analyses_requested_today(session, ingestion_job.userId), 0)
 
     to_create = pending_offer_ids[:remaining]
     skipped = len(pending_offer_ids) - len(to_create)
