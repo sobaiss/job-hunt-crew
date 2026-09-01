@@ -23,7 +23,13 @@ from py_db.models import CVVersion, Cvconversionstatus, Cvfiletype, PipelineEven
 from py_db.session import make_engine, make_session_factory
 from sqlalchemy import select
 
-from analysis.cv_conversion import MAX_ATTEMPTS, CVConversionError, convert_cv
+import analysis.cv_conversion as cv_conversion_module
+from analysis.cv_conversion import (
+    MAX_ATTEMPTS,
+    CVConversionError,
+    convert_cv,
+    handle_cv_conversion,
+)
 from analysis.llm_provider import LLMProvider
 from analysis.s3_client import S3_BUCKET
 
@@ -393,3 +399,51 @@ async def test_convert_cv_normalises_a_pdf_on_retry_after_one_empty_response():
         assert provider.calls == 2
     finally:
         await _cleanup(engine, session_factory, s3, file_key, user_id, cv_version_id)
+
+
+def test_handle_cv_conversion_unwraps_records_and_converts_each(monkeypatch):
+    """The `cv-conversion` SQS consumer (issue #19) unwraps `event["Records"]`
+    and runs the same `convert_cv` the AnalysisWorkflow prerequisite uses, once
+    per record — a direct analogue of `handle_analysis_intake`."""
+    seen: list[str] = []
+
+    async def _fake_convert_cv(session, cv_version_id, **kwargs):
+        seen.append(cv_version_id)
+
+    monkeypatch.setattr(cv_conversion_module, "convert_cv", _fake_convert_cv)
+
+    handle_cv_conversion(
+        {
+            "Records": [
+                {"body": '{"cvVersionId": "cv-aaa"}'},
+                {"body": '{"cvVersionId": "cv-bbb"}'},
+            ]
+        }
+    )
+
+    assert seen == ["cv-aaa", "cv-bbb"]
+
+
+def test_handle_cv_conversion_swallows_a_conversion_failure_and_continues(monkeypatch):
+    """A `convert_cv` failure is already persisted as FAILED on the row, so the
+    consumer must not let it propagate (and redeliver as a poison message) —
+    the remaining records are still processed."""
+    seen: list[str] = []
+
+    async def _fake_convert_cv(session, cv_version_id, **kwargs):
+        seen.append(cv_version_id)
+        if cv_version_id == "cv-bad":
+            raise CVConversionError("no extractable text")
+
+    monkeypatch.setattr(cv_conversion_module, "convert_cv", _fake_convert_cv)
+
+    handle_cv_conversion(
+        {
+            "Records": [
+                {"body": '{"cvVersionId": "cv-bad"}'},
+                {"body": '{"cvVersionId": "cv-good"}'},
+            ]
+        }
+    )
+
+    assert seen == ["cv-bad", "cv-good"]

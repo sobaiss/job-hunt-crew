@@ -108,7 +108,12 @@
       "markdownHeading": "Rendu Markdown",
       "markdownLoading": "Chargement du rendu Markdown",
       "markdownError": "Impossible de charger le rendu Markdown. Veuillez réessayer.",
-      "markdownEmpty": "Cette version de CV n'a pas encore été convertie en Markdown."
+      "markdownEmpty": "Cette version de CV n'a pas encore été convertie en Markdown.",
+      "convert": "Convertir en Markdown",
+      "reconvert": "Reconvertir",
+      "converting": "Conversion…",
+      "convertError": "Impossible de lancer la conversion. Veuillez réessayer.",
+      "conversionFailed": "La conversion a échoué."
     }
   },
   "ingestion": {
@@ -181,6 +186,12 @@
       "PARSING": "Analyse en cours",
       "PARSED": "Analysé",
       "FAILED": "Échoué"
+    },
+    "cvConversionStatus": {
+      "PENDING": "En attente",
+      "CONVERTING": "Conversion en cours",
+      "CONVERTED": "Convertie",
+      "FAILED": "Échouée"
     }
   }
 }

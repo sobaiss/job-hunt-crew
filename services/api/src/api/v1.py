@@ -10,6 +10,7 @@ from py_db.models import (
     Analysis,
     Analysisstatus,
     CVVersion,
+    Cvconversionstatus,
     Cvfiletype,
     IngestionJob,
     IngestionJobOffer,
@@ -25,7 +26,7 @@ from sqlalchemy.orm import selectinload
 
 from .db import get_session
 from .s3_client import S3_BUCKET, cv_file_key, make_s3_client
-from .sqs_client import ANALYSIS_INTAKE_QUEUE_URL, make_sqs_client
+from .sqs_client import ANALYSIS_INTAKE_QUEUE_URL, CV_CONVERSION_QUEUE_URL, make_sqs_client
 
 router = APIRouter(prefix="/v1")
 
@@ -147,6 +148,7 @@ class CVVersionResponse(BaseModel):
     isDefault: bool
     parseStatus: str
     conversionStatus: str
+    conversionError: str | None
     structuredData: dict[str, Any] | None
     structuredDataVer: int | None
     createdAt: datetime
@@ -169,6 +171,7 @@ def _cv_version_response(row: CVVersion) -> CVVersionResponse:
         isDefault=row.isDefault,
         parseStatus=row.parseStatus.value,
         conversionStatus=row.conversionStatus.value,
+        conversionError=row.conversionError,
         structuredData=row.structuredData,
         structuredDataVer=row.structuredDataVer,
         createdAt=row.createdAt,
@@ -341,6 +344,49 @@ async def get_cv_version_markdown(
         markdownContent=existing.markdownContent,
         conversionStatus=existing.conversionStatus.value,
     )
+
+
+class ConvertCVVersionResponse(BaseModel):
+    conversionStatus: str
+
+
+@router.post(
+    "/cv-versions/{cv_version_id}/convert",
+    response_model=ConvertCVVersionResponse,
+    status_code=202,
+)
+async def convert_cv_version(
+    cv_version_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> ConvertCVVersionResponse:
+    """Manual "Convert to Markdown" / "Reconvert" trigger (issue #19).
+    User-scoped exactly like the PATCH: another user's CV is a 404, not a 403.
+    Returns 409 while a Conversion is already running for this CV; otherwise
+    resets conversionStatus to PENDING, enqueues `{"cvVersionId": id}` on the
+    `cv-conversion` queue (drained by services/analysis's handle_cv_conversion,
+    which runs the same convert_cv the AnalysisWorkflow prerequisite uses), and
+    returns 202 with the new status.
+    """
+    existing = await session.get(CVVersion, cv_version_id)
+    if existing is None or existing.userId != user_id:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    if existing.conversionStatus == Cvconversionstatus.CONVERTING:
+        raise HTTPException(status_code=409, detail="A Conversion is already running for this CV")
+
+    existing.conversionStatus = Cvconversionstatus.PENDING
+    existing.conversionError = None
+    existing.updatedAt = _now()
+    await session.commit()
+
+    sqs = make_sqs_client()
+    sqs.send_message(
+        QueueUrl=CV_CONVERSION_QUEUE_URL,
+        MessageBody=json.dumps({"cvVersionId": cv_version_id}),
+    )
+
+    return ConvertCVVersionResponse(conversionStatus=existing.conversionStatus.value)
 
 
 # --- Ingestion jobs (M7-T11) ---

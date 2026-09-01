@@ -108,7 +108,12 @@
       "markdownHeading": "Markdown rendition",
       "markdownLoading": "Loading the Markdown rendition",
       "markdownError": "We couldn't load the Markdown rendition. Please try again.",
-      "markdownEmpty": "This CV version hasn't been converted to Markdown yet."
+      "markdownEmpty": "This CV version hasn't been converted to Markdown yet.",
+      "convert": "Convert to Markdown",
+      "reconvert": "Reconvert",
+      "converting": "Converting…",
+      "convertError": "We couldn't start the Conversion. Please try again.",
+      "conversionFailed": "Conversion failed."
     }
   },
   "ingestion": {
@@ -180,6 +185,12 @@
       "PENDING": "Pending",
       "PARSING": "Parsing",
       "PARSED": "Parsed",
+      "FAILED": "Failed"
+    },
+    "cvConversionStatus": {
+      "PENDING": "Pending",
+      "CONVERTING": "Converting",
+      "CONVERTED": "Converted",
       "FAILED": "Failed"
     }
   }

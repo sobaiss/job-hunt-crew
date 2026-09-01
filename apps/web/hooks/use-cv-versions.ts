@@ -27,6 +27,7 @@ export type CvVersion = {
   isDefault: boolean;
   parseStatus: CvParseStatus;
   conversionStatus: CvConversionStatus;
+  conversionError: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -114,6 +115,26 @@ export function useCvVersionMarkdown(id: string, enabled: boolean) {
     queryKey: ["cv-versions", id, "markdown"] as const,
     queryFn: () => bff.get<CvVersionMarkdown>(`/cv-versions/${id}/markdown`),
     enabled,
+  });
+}
+
+/**
+ * Trigger a Conversion for one CV version — "Convert to Markdown", or
+ * "Reconvert" once it is `CONVERTED`. services/api resets `conversionStatus` to
+ * `PENDING` and enqueues the work on the `cv-conversion` queue; a 409 means a
+ * Conversion is already running. Invalidates the list so the new status shows.
+ */
+export function useConvertCvVersion() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) =>
+      bff.post<{ conversionStatus: CvConversionStatus }>(
+        `/cv-versions/${id}/convert`,
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: CV_VERSIONS_KEY });
+    },
   });
 }
 
