@@ -53,6 +53,15 @@ type StubOptions = {
   onCreate?: (body: Record<string, unknown>) => void;
   jobStatus?: string;
   discoveredCount?: number;
+  quotaSkippedCount?: number;
+  jobOffers?: {
+    jobOffer: {
+      id: string;
+      title: string | null;
+      company: string | null;
+      extractionStatus: string;
+    };
+  }[];
   analyses?: ReturnType<typeof analysisRow>[];
   quota?: { cap: number; used: number; remaining: number };
 };
@@ -64,6 +73,8 @@ function stubApi(options: StubOptions = {}) {
     onCreate,
     jobStatus = "RUNNING",
     discoveredCount = 0,
+    quotaSkippedCount = 0,
+    jobOffers = [],
     analyses = [],
     quota = { cap: 50, used: 0, remaining: 50 },
   } = options;
@@ -98,8 +109,9 @@ function stubApi(options: StubOptions = {}) {
           discoveredCount,
           scrapedCount: 0,
           failedCount: 0,
+          quotaSkippedCount,
           errorMessage: null,
-          jobOffers: [],
+          jobOffers,
         },
       }),
     ),
@@ -243,6 +255,70 @@ describe("AnalyseSeveralOffersPage", () => {
     expect(
       screen.getByRole("link", { name: "Scraping progress" }),
     ).toHaveAttribute("href", "/ingestion-jobs/j1");
+  });
+
+  it("marks the quota-skipped offers with a daily-limit note", async () => {
+    stubApi({
+      jobStatus: "PARTIALLY_COMPLETED",
+      discoveredCount: 3,
+      quotaSkippedCount: 2,
+      jobOffers: [
+        {
+          jobOffer: {
+            id: "job1",
+            title: "Backend Engineer",
+            company: "Acme",
+            extractionStatus: "READY",
+          },
+        },
+        {
+          jobOffer: {
+            id: "job-skip-1",
+            title: "Platform Engineer",
+            company: "Initech",
+            extractionStatus: "READY",
+          },
+        },
+        {
+          jobOffer: {
+            id: "job-skip-2",
+            title: "Data Engineer",
+            company: "Umbrella",
+            extractionStatus: "READY",
+          },
+        },
+      ],
+      analyses: [analysisRow({ id: "a1", matchScore: 50 })],
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<AnalyseSeveralOffersPage />);
+    await submit(user);
+
+    expect(await screen.findByText("Platform Engineer")).toBeInTheDocument();
+    expect(screen.getByText("Data Engineer")).toBeInTheDocument();
+    expect(
+      screen.getAllByText("Not analysed — daily limit reached"),
+    ).toHaveLength(2);
+  });
+
+  it("shows bare quota-skipped markers (no empty-run message) when the job detail lags", async () => {
+    stubApi({
+      jobStatus: "PARTIALLY_COMPLETED",
+      discoveredCount: 2,
+      quotaSkippedCount: 2,
+      jobOffers: [],
+      analyses: [],
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<AnalyseSeveralOffersPage />);
+    await submit(user);
+
+    expect(
+      await screen.findAllByText("Not analysed — daily limit reached"),
+    ).toHaveLength(2);
+    expect(
+      screen.queryByText("This run didn't find any offers to analyse."),
+    ).not.toBeInTheDocument();
   });
 
   it("shows an all-failed message when the run finished with no analyses", async () => {

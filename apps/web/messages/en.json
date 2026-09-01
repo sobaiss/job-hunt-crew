@@ -152,6 +152,7 @@
     "analysesDone": "Analyses completed",
     "empty": "This run didn't find any offers to analyse.",
     "allFailed": "None of the offers in this run could be fetched or read.",
+    "quotaSkipped": "Not analysed — daily limit reached",
     "scrapingDetail": "Scraping progress",
     "jobOfferFallback": "Job offer",
     "vsCv": "vs. {label}"

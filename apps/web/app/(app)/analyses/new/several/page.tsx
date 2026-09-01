@@ -85,8 +85,30 @@ function BatchResultView({ ingestionJobId }: { ingestionJobId: string }) {
     TERMINAL_ANALYSIS_STATUSES.has(a.status),
   ).length;
 
+  // Offers the fan-out left unanalysed because the owner hit their daily cap.
+  // The IngestionJob only records how many (`quotaSkippedCount`); pair that
+  // count with the trailing READY offers that have no Analysis so each row can
+  // name its offer, falling back to a bare marker when the job detail lags.
+  const quotaSkippedCount = job.data?.quotaSkippedCount ?? 0;
+  const quotaSkippedRows = useMemo(() => {
+    if (quotaSkippedCount === 0) return [];
+    const analysedOfferIds = new Set(analyses.map((a) => a.jobOffer.id));
+    const unanalysed = (job.data?.jobOffers ?? [])
+      .map((entry) => entry.jobOffer)
+      .filter(
+        (offer) =>
+          offer.extractionStatus === "READY" &&
+          !analysedOfferIds.has(offer.id),
+      );
+    return Array.from({ length: quotaSkippedCount }, (_, i) => ({
+      key: unanalysed[i]?.id ?? `quota-skipped-${i}`,
+      title: unanalysed[i]?.title ?? null,
+      company: unanalysed[i]?.company ?? null,
+    }));
+  }, [quotaSkippedCount, analyses, job.data?.jobOffers]);
+
   const emptyRun =
-    jobTerminal && analyses.length === 0
+    jobTerminal && analyses.length === 0 && quotaSkippedRows.length === 0
       ? job.data?.status === "FAILED" || (job.data?.failedCount ?? 0) > 0
         ? "allFailed"
         : "empty"
@@ -150,6 +172,32 @@ function BatchResultView({ ingestionJobId }: { ingestionJobId: string }) {
                       {statusLabel(analysis.status)}
                     </Badge>
                   </div>
+                </CardContent>
+              </Card>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {quotaSkippedRows.length > 0 && (
+        <ul className="flex flex-col gap-3">
+          {quotaSkippedRows.map((row) => (
+            <li key={row.key}>
+              <Card className="py-0">
+                <CardContent className="flex items-center justify-between gap-4 py-4">
+                  <div className="flex min-w-0 flex-col">
+                    <span className="truncate font-medium">
+                      {row.title ?? t("jobOfferFallback")}
+                    </span>
+                    {row.company && (
+                      <span className="truncate text-sm text-muted">
+                        {row.company}
+                      </span>
+                    )}
+                  </div>
+                  <Badge variant="secondary" className="shrink-0">
+                    {t("quotaSkipped")}
+                  </Badge>
                 </CardContent>
               </Card>
             </li>
