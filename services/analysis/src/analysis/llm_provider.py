@@ -1,9 +1,12 @@
 """LLM provider abstraction (PRD Section 4: "LLM provider" row).
 
-Selects between Anthropic Claude and OpenAI behind a single interface via the
-LLM_PROVIDER env var (anthropic|openai), with the model id also configurable
-via env var, so CrewAI agents built on top of this never import an SDK
-directly or branch on provider.
+Selects between Anthropic Claude, OpenAI, and a local Ollama runtime behind a
+single interface via the LLM_PROVIDER env var (anthropic|openai|ollama), with
+the model id also configurable via env var, so CrewAI agents built on top of
+this never import an SDK directly or branch on provider.
+
+`ollama` is a dev-local convenience only — no API key, no per-token cost — and
+is *not* a supported production backend; production stays on anthropic|openai.
 """
 
 import os
@@ -14,6 +17,8 @@ import openai
 
 DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5"
 DEFAULT_OPENAI_MODEL = "gpt-4o"
+DEFAULT_OLLAMA_MODEL = "qwen2.5:7b"
+DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434/v1"
 
 # Response cap used when a caller does not ask for a specific one.
 DEFAULT_MAX_TOKENS = 4096
@@ -63,17 +68,55 @@ class OpenAIProvider(LLMProvider):
         return response.choices[0].message.content
 
 
+class OllamaProvider(LLMProvider):
+    """Routes every call to a local Ollama server through its OpenAI-compatible
+    API — no API key, no per-token cost. Dev-local convenience only, *not* a
+    supported production backend.
+
+    Standalone (not an `OpenAIProvider` subclass) so its `temperature=0` /
+    `base_url` / dummy-key contract stays decoupled from future `OpenAIProvider`
+    edits. Transport reuses the already-vendored `openai` SDK — no new
+    dependency — against `OLLAMA_BASE_URL` (default `http://localhost:11434/v1`)
+    with a hardcoded dummy key (the SDK rejects an empty one; Ollama ignores the
+    value). No reachability preflight: an unreachable server surfaces as the
+    caller's bounded retry loop exhausting into a terminal FAILED state, exactly
+    like a hosted-provider outage.
+    """
+
+    def __init__(self, *, model: str | None = None, client: openai.OpenAI | None = None) -> None:
+        self.model = model or os.environ.get("LLM_MODEL") or DEFAULT_OLLAMA_MODEL
+        self.client = client or openai.OpenAI(
+            base_url=os.environ.get("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL),
+            api_key="ollama",
+        )
+
+    def generate(self, *, system: str, prompt: str, max_tokens: int | None = None) -> str:
+        optional = {"max_tokens": max_tokens} if max_tokens is not None else {}
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0,
+            **optional,
+        )
+        return response.choices[0].message.content
+
+
 class UnknownLLMProviderError(ValueError):
     pass
 
 
 def get_llm_provider() -> LLMProvider:
-    """Factory selecting the configured provider per LLM_PROVIDER (anthropic|openai)."""
+    """Factory selecting the configured provider per LLM_PROVIDER (anthropic|openai|ollama)."""
     provider = os.environ.get("LLM_PROVIDER", "anthropic").lower()
     if provider == "anthropic":
         return AnthropicProvider()
     if provider == "openai":
         return OpenAIProvider()
+    if provider == "ollama":
+        return OllamaProvider()
     raise UnknownLLMProviderError(
-        f"Unknown LLM_PROVIDER {provider!r}; expected 'anthropic' or 'openai'"
+        f"Unknown LLM_PROVIDER {provider!r}; expected anthropic | openai | ollama"
     )

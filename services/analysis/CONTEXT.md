@@ -29,4 +29,4 @@ The one handler allowed to write an Analysis's terminal result to Postgres, trig
 _Avoid_: Result writer
 
 **LLM provider**:
-The swappable interface (Anthropic or OpenAI, chosen by configuration) every agent in this context calls through, so no agent imports an LLM SDK directly.
+The swappable interface every agent in this context calls through, so no agent imports an LLM SDK directly. Chosen by configuration: Anthropic or OpenAI (hosted, API key required — the only options supported in production) or a local Ollama runtime (no key, dev-local only).

@@ -177,6 +177,10 @@ services:
       LLM_MODEL: ${LLM_MODEL:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Only for LLM_PROVIDER=ollama (dev-local only, not a supported production
+      # backend). From this container Ollama on the host is reachable at
+      # http://host.docker.internal:11434/v1 — set that in your host env.
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
     depends_on:
       postgres:
         condition: service_healthy

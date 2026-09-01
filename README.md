@@ -71,10 +71,12 @@ backend behind `apps/web`'s BFF proxy.
   Terminal state is written to Postgres by exactly one Lambda
   (`PersistResultLambda`), triggered by an S3 `ObjectCreated` event — never by
   the workflow directly.
-- **The LLM provider is swappable** (Anthropic Claude or OpenAI) via the
+- **The LLM provider is swappable** (`anthropic` | `openai` | `ollama`) via the
   `LLM_PROVIDER` env var, behind a single `LLMProvider` interface
   (`services/analysis/src/analysis/llm_provider.py`) that CrewAI agents never
-  bypass.
+  bypass. `ollama` routes every call to a local Ollama server (no key, no
+  per-token cost) and is a **dev-local convenience only — not a supported
+  production backend**; production stays on `anthropic`/`openai`.
 - **Prisma is schema/migration tooling only.** `packages/prisma/schema.prisma`
   is the single source of truth for the DB schema; Python reads it through
   SQLAlchemy models in `packages/py-db`, regenerated via `sqlacodegen` after
@@ -232,9 +234,15 @@ cp packages/prisma/.env.example packages/prisma/.env
 `docker-compose.yml`), S3/SQS endpoints (pointed at MinIO/ElasticMQ by
 default), and the cost-control guardrails (`INGESTION_MAX_OFFERS`,
 `DAILY_ANALYSIS_CAP`). `services/analysis` additionally reads `LLM_PROVIDER`
-(`anthropic|openai`, defaults to `anthropic`), `LLM_MODEL`, and the
+(`anthropic|openai|ollama`, defaults to `anthropic`), `LLM_MODEL`, and the
 corresponding `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` from the environment when
-running the crew or a Lambda handler locally.
+running the crew or a Lambda handler locally. `LLM_PROVIDER=ollama` is
+**dev-local only, not a supported production backend**: it needs no API key,
+talks to a local Ollama server at `OLLAMA_BASE_URL` (default
+`http://localhost:11434/v1`; `http://host.docker.internal:11434/v1` from the
+containerised worker), and defaults `LLM_MODEL` to `qwen2.5:7b`. The pipeline
+sets no `num_ctx` and relies on Ollama's server default context window; on an
+old or RAM-constrained install, raise it server-side via `OLLAMA_CONTEXT_LENGTH`.
 
 ### 4. Seed the database
 

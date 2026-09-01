@@ -35,7 +35,8 @@ and concrete steps to close the gap.
 - Candidate can request a structured gap analysis of any (JobOffer, CVVersion) pair.
 - Pipeline is asynchronous and event-driven end to end.
 - Data is strictly isolated per authenticated user.
-- LLM provider is swappable (Claude or OpenAI) via configuration, not hardcoded.
+- LLM provider is swappable (`anthropic` | `openai`, or `ollama` for dev-local
+  runs only — not a supported production backend) via configuration, not hardcoded.
 
 **Non-Goals (MVP):** auto-rewriting the candidate's CV file; recruiter/employer-facing
 features; payments/billing; native mobile apps; guaranteed successful scraping of
@@ -74,7 +75,7 @@ or industry, wants fast objective feedback on fit before applying.
 | Backend API framework | FastAPI (`services/api`) | Matches the existing async SQLAlchemy (`py-db`) + Pydantic-first validation already used in `services/analysis` |
 | Backend API deployment | AWS Lambda + API Gateway (HTTP API) | Consistent with the existing Lambda-for-short-steps pattern (Fargate is reserved specifically for the CrewAI run's >15-min ceiling, which doesn't apply to CRUD/presign/poll). Needs an RDS Proxy (or equivalent pooler) in front of Postgres to avoid Lambda-concurrency connection exhaustion — a follow-on infra decision, not resolved by this PRD |
 | AI orchestration | CrewAI multi-agent crew (extraction, comparison, recommendation agents) | User-specified; repo name confirms intent |
-| LLM provider | Abstracted provider interface supporting both Anthropic Claude and OpenAI, selected via env var (`LLM_PROVIDER=anthropic\|openai`), model id also via env var | User-specified: configurable/both |
+| LLM provider | Abstracted provider interface supporting Anthropic Claude and OpenAI, selected via env var (`LLM_PROVIDER=anthropic\|openai\|ollama`), model id also via env var. `ollama` routes to a local Ollama server for dev-local runs only — not a supported production backend | User-specified: configurable/both |
 | Compute orchestration | AWS Step Functions (`waitForTaskToken` pattern for the crew step) coordinating Lambda; Fargate task for the crew run itself (exceeds Lambda's 15-min ceiling) | Matches user's async trigger → S3 → persist description |
 | Object storage | AWS S3 | User-specified: CVs, raw scrapes, analysis results |
 | Relational DB | AWS RDS PostgreSQL, single instance for MVP | User-specified Postgres; RDS over Aurora — open config point, default chosen for MVP simplicity |
@@ -342,7 +343,8 @@ and by `apps/web/auth.ts` during sign-in (`/internal/*`).
    crew: `ComparisonAnalysisAgent` (matched/missing skills, strengths/
    weaknesses, score) then `RecommendationWriterAgent` (`improvement_suggestions`
    + `summary`). `Analysis.status -> RUNNING_CREW`. LLM calls go through the
-   configurable provider interface (Claude or OpenAI per `LLM_PROVIDER`).
+   configurable provider interface (`anthropic` | `openai` per `LLM_PROVIDER`,
+   or `ollama` for dev-local runs — not a supported production backend).
 7. On completion, the task writes validated JSON (Section 8.6 schema) to
    `s3://{bucket}/analysis-results/{analysisId}.json`, calls `SendTaskSuccess`
    with the S3 key. `Analysis.status -> AWAITING_RESULT`.
