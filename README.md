@@ -100,7 +100,9 @@ job-hunt-crew/
 ├── PRD.md                 Full product/technical spec.
 ├── progress.txt           Milestone-by-milestone build log.
 ├── docker-compose.yml      Local Postgres, MinIO (S3), ElasticMQ (SQS),
-│                            Step Functions Local, and the api container.
+│                            Step Functions Local, the api container, migrate
+│                            (Prisma migrations on startup), and worker (local
+│                            SQS -> handler stand-in, drains cv-conversion).
 ├── pnpm-workspace.yaml / turbo.json    JS/TS workspace (pnpm + Turborepo).
 └── pyproject.toml / uv.lock             Python workspace (uv), members:
                                           services/*, packages/py-db.
@@ -202,12 +204,19 @@ uv sync
 
 ```bash
 docker compose up -d
+# or: make up
 ```
 
 This starts Postgres, MinIO (S3-compatible, auto-creates the `job-hunt-crew`
-bucket), ElasticMQ (SQS-compatible), Step Functions Local, and the `api`
-container (FastAPI, built from the repo root so `uv` can resolve the
-workspace).
+bucket), ElasticMQ (SQS-compatible), Step Functions Local, `migrate` (applies
+pending Prisma migrations against Postgres, then exits — see
+`packages/prisma/Dockerfile`), the `api` container (FastAPI, built from the
+repo root so `uv` can resolve the workspace), and `worker` (the local
+stand-in for the AWS SQS → Lambda event-source mappings; drains the
+`cv-conversion` queue so "Convert to Markdown" works out of the box — see
+`services/ingestion/src/ingestion/local_worker.py`). `api` waits for
+`migrate` to finish successfully before starting, so a fresh Postgres volume
+never leaves `api` running against a missing schema.
 
 ### 3. Configure environment variables
 
@@ -227,11 +236,22 @@ default), and the cost-control guardrails (`INGESTION_MAX_OFFERS`,
 corresponding `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` from the environment when
 running the crew or a Lambda handler locally.
 
-### 4. Apply the database schema
+### 4. Seed the database
+
+Step 2's `migrate` service already applied the schema. Seed data still needs
+a manual run:
+
+```bash
+pnpm --filter @job-hunt-crew/prisma exec prisma db seed
+# or: make seed
+```
+
+If you ever need to (re-)apply migrations without a full `docker compose up`
+(e.g. after pulling new ones):
 
 ```bash
 pnpm --filter @job-hunt-crew/prisma exec prisma migrate deploy
-pnpm --filter @job-hunt-crew/prisma exec prisma db seed
+# or: make migrate
 ```
 
 ### 5. Run the app
@@ -242,10 +262,22 @@ pnpm dev              # apps/web on http://localhost:3000 (via Turborepo)
 
 `services/api` is already running inside Docker on `http://localhost:8000`
 (`/docs` and `/openapi.json` are reachable in dev without the internal
-secret). To exercise the async analysis pipeline locally you also need the
-Lambda shim and a Step Functions execution — see the comments in
-`docker-compose.yml` (`stepfunctions-local` service) and
-`services/analysis/src/analysis/lambda_shim.py`.
+secret).
+
+The compose `worker` drains the `cv-conversion` queue only. To also drain
+`analysis-intake` / `ingestion-intake` — the rest of the async pipeline —
+run the worker on the host, which polls all three queues:
+
+```bash
+make worker              # long-running; Ctrl-C to stop
+# or one-shot: make worker-once   (drains what is queued, then exits)
+```
+
+That path additionally needs the Lambda shim, a Step Functions execution,
+and `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` in the environment — see the
+comments in `docker-compose.yml` (`stepfunctions-local` / `worker` services)
+and `services/analysis/src/analysis/lambda_shim.py`. Restrict the host
+worker to a subset with `WORKER_QUEUES=cv-conversion,analysis-intake`.
 
 ## Testing
 

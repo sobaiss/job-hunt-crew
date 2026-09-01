@@ -21,16 +21,20 @@ One job posting, deduplicated globally by its source URL — not owned by any si
 _Avoid_: Job posting, listing — "listing" means something else here, see `IngestionJob`.
 
 **IngestionJob**:
-One user-initiated request to discover and process job offers, in one of three modes (a single offer URL, a listing URL, or a preconfigured site plus filters). Fans out into 1..N linked JobOffers.
-_Avoid_: Ingestion request, scrape job
+One user-initiated request to discover and process job offers, in one of two modes: a single offer URL, or a preconfigured site plus filters. Carries the CVVersion the discovered offers are to be matched against, and fans out into 1..N linked JobOffers, each of which leads to an Analysis.
+_Avoid_: Ingestion request, scrape job, matching run — the run has no aggregate of its own, see Analysis batch.
 
 **SiteConfig**:
 The data-driven adapter configuration for one supported job site — selectors or an API endpoint, plus risk and enablement flags — that a site-search `IngestionJob` reads to know how to query that site.
 _Avoid_: Site adapter — that's the Ingestion-context code that reads a SiteConfig, not the config row itself.
 
 **Analysis**:
-One requested comparison of a JobOffer against a CVVersion, tracked from request through its terminal completed/failed state.
+One requested comparison of a JobOffer against a CVVersion, tracked from request through its terminal completed/failed state. Every Analysis is created by an IngestionJob and carries its `ingestionJobId`.
 _Avoid_: Comparison, report
+
+**Analysis batch**:
+The set of Analyses sharing one IngestionJob — every JobOffer that IngestionJob discovered, each matched against the single CVVersion it carries. It has no row of its own: it is exactly the Analyses for one `ingestionJobId`, and is what the multi-offer result view lists, ranked by Match score.
+_Avoid_: Match run, matching job — there is deliberately no dedicated entity, see ADR 0002.
 
 **Match score**:
 An Analysis result's 0-100 fit rating between a CVVersion and a JobOffer.

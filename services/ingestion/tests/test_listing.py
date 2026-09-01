@@ -2,7 +2,7 @@ import pytest
 import respx
 from httpx import Response
 
-from ingestion.listing import extract_offer_urls, fetch_listing_pages
+from ingestion.listing import extract_offer_urls, fetch_listing_pages, looks_like_listing
 
 BASE = "https://example.com/jobs"
 
@@ -117,3 +117,27 @@ def test_extract_offer_urls_returns_empty_list_when_no_repeated_pattern():
     urls = extract_offer_urls(html, BASE)
 
     assert urls == []
+
+
+def test_looks_like_listing_true_for_a_page_full_of_repeated_offer_cards():
+    html = _card_listing_html([f"/jobs/{i}" for i in range(12)])
+
+    assert looks_like_listing(html, BASE) is True
+
+
+def test_looks_like_listing_false_for_a_single_offer_page():
+    html = (
+        "<html><body>"
+        "<h1>Senior Backend Engineer</h1>"
+        "<p>We are hiring a backend engineer.</p>"
+        '<a class="apply" href="/apply">Apply now</a>'
+        '<div class="related"><a class="rel" href="/jobs/1">A related role</a>'
+        '<a class="rel" href="/jobs/2">Another related role</a></div>'
+        "</body></html>"
+    )
+
+    assert looks_like_listing(html, BASE) is False
+
+
+def test_looks_like_listing_false_for_an_empty_page():
+    assert looks_like_listing("<html><body><h1>Role</h1></body></html>", BASE) is False

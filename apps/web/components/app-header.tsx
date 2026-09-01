@@ -29,11 +29,11 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { LocaleSwitch } from "@/components/locale-switch";
 
 // The primary areas a Candidate reaches in one click. Order is
-// Dashboard (the analyses list) -> CV versions -> start a new ingestion.
+// Dashboard (the analyses list) -> CV versions -> start a new analysis.
 const NAV_LINKS = [
   { href: "/analyses", key: "dashboard" },
   { href: "/cv-versions", key: "cvVersions" },
-  { href: "/ingestion-jobs/new", key: "newIngestion" },
+  { href: "/analyses/new", key: "newAnalysis" },
 ] as const;
 
 /** Two-letter monogram for the avatar fallback, from the name then the email. */

@@ -18,6 +18,14 @@ CV_CONVERSION_QUEUE_URL = os.environ.get(
     "SQS_CV_CONVERSION_QUEUE_URL", "http://localhost:9324/000000000000/cv-conversion"
 )
 
+# POST /v1/ingestion-jobs enqueues `{"ingestionJobId": id}` here for both
+# SINGLE_URL and SITE_SEARCH modes; the ingestion-intake worker (issue #27)
+# loads the IngestionJob, runs the discover/scrape/extract pipeline, and
+# creates one Analysis per ready JobOffer. Mirrors ANALYSIS_INTAKE_QUEUE_URL.
+INGESTION_INTAKE_QUEUE_URL = os.environ.get(
+    "SQS_INGESTION_INTAKE_QUEUE_URL", "http://localhost:9324/000000000000/ingestion-intake"
+)
+
 
 def make_sqs_client():
     return boto3.client(

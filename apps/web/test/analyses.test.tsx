@@ -28,10 +28,23 @@ function summary(overrides: Record<string, unknown> = {}) {
     status: "COMPLETED",
     matchScore: 87,
     requestedAt: "2026-08-01T00:00:00.000Z",
+    ingestionJobId: null,
+    ingestionJob: null,
     jobOffer: { id: "job1", title: "Backend Engineer", company: "Acme Inc" },
     cvVersion: { label: "Grad CV" },
     ...overrides,
   };
+}
+
+function batchRow(
+  ingestionJobId: string,
+  overrides: Record<string, unknown> = {},
+) {
+  return summary({
+    ingestionJobId,
+    ingestionJob: { mode: "SITE_SEARCH", siteConfigId: "site-ft" },
+    ...overrides,
+  });
 }
 
 function detail(overrides: Record<string, unknown> = {}) {
@@ -71,6 +84,101 @@ describe("AnalysesDashboardPage", () => {
     expect(
       await screen.findByText("No analyses requested yet."),
     ).toBeInTheDocument();
+  });
+
+  it("folds a SITE_SEARCH batch into one row with the site, offer count, best score and a link to the batch view", async () => {
+    server.use(
+      http.get("/api/site-configs", () =>
+        HttpResponse.json({
+          siteConfigs: [
+            {
+              id: "site-ft",
+              siteKey: "france-travail",
+              displayName: "France Travail",
+              integrationType: "OFFICIAL_API",
+              antiBotRiskLevel: "LOW",
+            },
+          ],
+        }),
+      ),
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            batchRow("job-1", {
+              id: "b1",
+              matchScore: 71,
+              requestedAt: "2026-08-05T00:00:00.000Z",
+            }),
+            batchRow("job-1", {
+              id: "b2",
+              matchScore: 88,
+              requestedAt: "2026-08-04T00:00:00.000Z",
+            }),
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+
+    expect(await screen.findByText("France Travail")).toBeInTheDocument();
+    expect(screen.getByText("2 offers")).toBeInTheDocument();
+    expect(screen.getByText("88")).toBeInTheDocument();
+    expect(screen.queryByText("71")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /France Travail/ })).toHaveAttribute(
+      "href",
+      "/analyses/batch/job-1",
+    );
+  });
+
+  it("keeps SINGLE_URL / null-ingestionJobId analyses individual and orders grouped and individual rows by recency", async () => {
+    server.use(
+      http.get("/api/site-configs", () =>
+        HttpResponse.json({
+          siteConfigs: [
+            {
+              id: "site-ft",
+              siteKey: "france-travail",
+              displayName: "France Travail",
+              integrationType: "OFFICIAL_API",
+              antiBotRiskLevel: "LOW",
+            },
+          ],
+        }),
+      ),
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          // API returns rows recency-desc: a standalone one is newest, then
+          // the batch's two rows.
+          analyses: [
+            summary({
+              id: "s1",
+              jobOffer: { id: "job9", title: "Solo Role", company: "SoloCo" },
+              requestedAt: "2026-08-06T00:00:00.000Z",
+            }),
+            batchRow("job-1", {
+              id: "b1",
+              requestedAt: "2026-08-05T00:00:00.000Z",
+            }),
+            batchRow("job-1", {
+              id: "b2",
+              requestedAt: "2026-08-04T00:00:00.000Z",
+            }),
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+
+    const solo = await screen.findByText("Solo Role");
+    const batch = screen.getByText("France Travail");
+    expect(solo.compareDocumentPosition(batch)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(
+      screen.getByRole("link", { name: /Solo Role/ }),
+    ).toHaveAttribute("href", "/analyses/s1");
   });
 
   it("shows an error state when the request fails", async () => {

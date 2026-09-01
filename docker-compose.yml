@@ -75,6 +75,20 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  # Applies pending Prisma migrations to Postgres, then exits. Runs on every
+  # `docker compose up` (idempotent — no-ops once the schema is current), so
+  # a fresh Postgres volume never starts `api` against a missing schema.
+  # `api` waits on this completing (see its `depends_on` below).
+  migrate:
+    build:
+      context: .
+      dockerfile: packages/prisma/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/job_hunt_crew
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   # services/api (FastAPI): sole owner of Postgres/S3/SQS per PRD Section 7,
   # called only by apps/web's BFF proxy (M7). Built from the repo root so uv
   # can resolve the workspace (see services/api/Dockerfile).
@@ -109,11 +123,65 @@ services:
       SQS_REGION: us-east-1
       SQS_ANALYSIS_INTAKE_QUEUE_URL: http://elasticmq:9324/000000000000/analysis-intake
       SQS_CV_CONVERSION_QUEUE_URL: http://elasticmq:9324/000000000000/cv-conversion
+      SQS_INGESTION_INTAKE_QUEUE_URL: http://elasticmq:9324/000000000000/ingestion-intake
       SQS_ACCESS_KEY_ID: x
       SQS_SECRET_ACCESS_KEY: x
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
+      elasticmq:
+        condition: service_started
+
+  # Local stand-in for the AWS SQS -> Lambda event-source mappings that drain
+  # the pipeline's queues in production (out of scope per PRD Section 4/15, so
+  # nothing drains them locally otherwise). Polls ElasticMQ and runs the real
+  # handlers — see services/ingestion/src/ingestion/local_worker.py.
+  #
+  # Defaults to `cv-conversion` only: that consumer needs no host-only
+  # `lambda_shim` / Step Functions execution / LLM key to make progress, so
+  # "Convert to Markdown" works straight after `docker compose up`. To drain
+  # `analysis-intake` / `ingestion-intake` too, run the full pipeline on the
+  # host (`make worker`, with the Lambda shim + a Step Functions execution +
+  # LLM keys) or override WORKER_QUEUES here.
+  worker:
+    build:
+      context: .
+      dockerfile: services/ingestion/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/job_hunt_crew
+      WORKER_QUEUES: cv-conversion
+      # S3 is read directly here (no presigning), so unlike `api` this uses the
+      # docker-network hostname, not localhost.
+      S3_ENDPOINT: http://minio:9000
+      S3_REGION: us-east-1
+      S3_BUCKET: job-hunt-crew
+      S3_FORCE_PATH_STYLE: "true"
+      S3_ACCESS_KEY_ID: minioadmin
+      S3_SECRET_ACCESS_KEY: minioadmin
+      SQS_ENDPOINT: http://elasticmq:9324
+      SQS_REGION: us-east-1
+      SQS_CV_CONVERSION_QUEUE_URL: http://elasticmq:9324/000000000000/cv-conversion
+      SQS_ANALYSIS_INTAKE_QUEUE_URL: http://elasticmq:9324/000000000000/analysis-intake
+      SQS_INGESTION_INTAKE_QUEUE_URL: http://elasticmq:9324/000000000000/ingestion-intake
+      SQS_ACCESS_KEY_ID: x
+      SQS_SECRET_ACCESS_KEY: x
+      # Needed only when WORKER_QUEUES includes a queue whose Conversion/crew
+      # step calls an LLM (PDF/DOCX CVs, ingestion extraction). Passed through
+      # from the host env; harmless when unset for the MD/TXT path.
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      LLM_MODEL: ${LLM_MODEL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       minio:
         condition: service_healthy
       elasticmq:

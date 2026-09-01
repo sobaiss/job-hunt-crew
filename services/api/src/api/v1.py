@@ -19,14 +19,20 @@ from py_db.models import (
     JobOffer,
     SiteConfig,
 )
+from py_db.quota import analyses_requested_today, daily_analysis_cap
 from pydantic import BaseModel
-from sqlalchemy import func, select, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from .db import get_session
 from .s3_client import S3_BUCKET, cv_file_key, make_s3_client
-from .sqs_client import ANALYSIS_INTAKE_QUEUE_URL, CV_CONVERSION_QUEUE_URL, make_sqs_client
+from .sqs_client import (
+    ANALYSIS_INTAKE_QUEUE_URL,
+    CV_CONVERSION_QUEUE_URL,
+    INGESTION_INTAKE_QUEUE_URL,
+    make_sqs_client,
+)
 
 router = APIRouter(prefix="/v1")
 
@@ -383,15 +389,16 @@ async def convert_cv_version(
     return ConvertCVVersionResponse(conversionStatus=existing.conversionStatus.value)
 
 
-# --- Ingestion jobs (M7-T11) ---
+# --- Ingestion jobs (M7-T11, matching flow #27) ---
 # Ports apps/web/app/api/ingestion-jobs/{route.ts,[id]/route.ts}'s mode/filter
-# validation and INGESTION_MAX_OFFERS default verbatim (PRD Section 8.5, 11/13).
-# Only Mode 3 (SITE_SEARCH) has a trigger endpoint today; per M7-T11, this port
-# preserves the pre-existing gap as-is — it only creates the IngestionJob row,
-# it does not wire in scraping/extraction.
+# validation and INGESTION_MAX_OFFERS default (PRD Section 8.5, 11/13). Both
+# SINGLE_URL and SITE_SEARCH now carry a caller-owned CONVERTED cvVersionId and,
+# on success, enqueue `{"ingestionJobId": id}` on the ingestion-intake queue for
+# the worker (#27) to run the pipeline and create the Analysis.
 
 POSTED_WITHIN_VALUES = ("24h", "7d", "14d", "30d", "any")
 REMOTE_VALUES = ("onsite", "hybrid", "remote")
+INGESTION_MODES = ("SINGLE_URL", "SITE_SEARCH")
 
 DEFAULT_MAX_OFFERS = 25
 
@@ -403,6 +410,21 @@ def _ingestion_max_offers() -> int:
     except ValueError:
         parsed = None
     return parsed if parsed is not None and parsed > 0 else DEFAULT_MAX_OFFERS
+
+
+def _clamp_max_offers(value: Any) -> int:
+    """SITE_SEARCH's maxOffers, taken from the request when a finite number is
+    given and clamped to 1..INGESTION_MAX_OFFERS; defaults to the ceiling when
+    absent or unparseable. SINGLE_URL always forces maxOffers = 1.
+    """
+    ceiling = _ingestion_max_offers()
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int | float)
+        or not math.isfinite(value)
+    ):
+        return ceiling
+    return max(1, min(int(value), ceiling))
 
 
 def _optional_string(value: Any) -> str | None:
@@ -452,12 +474,14 @@ class IngestionJobResponse(BaseModel):
     mode: str
     inputUrl: str | None
     siteConfigId: str | None
+    cvVersionId: str | None
     filters: dict[str, Any] | None
     maxOffers: int
     status: str
     discoveredCount: int
     scrapedCount: int
     failedCount: int
+    quotaSkippedCount: int
     errorMessage: str | None
     createdAt: datetime
     updatedAt: datetime
@@ -470,12 +494,14 @@ def _ingestion_job_response(row: IngestionJob) -> IngestionJobResponse:
         mode=row.mode.value,
         inputUrl=row.inputUrl,
         siteConfigId=row.siteConfigId,
+        cvVersionId=row.cvVersionId,
         filters=row.filters,
         maxOffers=row.maxOffers,
         status=row.status.value,
         discoveredCount=row.discoveredCount,
         scrapedCount=row.scrapedCount,
         failedCount=row.failedCount,
+        quotaSkippedCount=row.quotaSkippedCount,
         errorMessage=row.errorMessage,
         createdAt=row.createdAt,
         updatedAt=row.updatedAt,
@@ -516,8 +542,11 @@ def _ingestion_job_detail_response(row: IngestionJob) -> IngestionJobDetailRespo
 
 class CreateIngestionJobRequest(BaseModel):
     mode: Any = None
+    inputUrl: Any = None
     siteConfigId: Any = None
+    cvVersionId: Any = None
     filters: dict[str, Any] | None = None
+    maxOffers: Any = None
 
 
 class CreateIngestionJobResponse(BaseModel):
@@ -530,55 +559,87 @@ async def create_ingestion_job(
     user_id: str = Depends(require_user_id),
     session: AsyncSession = Depends(get_session),
 ) -> CreateIngestionJobResponse:
-    if req.mode != "SITE_SEARCH":
-        raise HTTPException(status_code=400, detail="mode must be SITE_SEARCH")
+    if req.mode not in INGESTION_MODES:
+        raise HTTPException(status_code=400, detail="mode must be SINGLE_URL or SITE_SEARCH")
 
-    site_config_id = _optional_string(req.siteConfigId)
-    if not site_config_id:
-        raise HTTPException(status_code=400, detail="siteConfigId is required")
+    input_url: str | None = None
+    site_config_id: str | None = None
+    filters: dict[str, Any] | None = None
+    max_offers = 1
 
-    site_config = await session.get(SiteConfig, site_config_id)
-    if site_config is None or not site_config.enabled:
-        raise HTTPException(status_code=400, detail="Unknown or disabled siteConfigId")
+    if req.mode == "SINGLE_URL":
+        input_url = _optional_string(req.inputUrl)
+        if not input_url:
+            raise HTTPException(status_code=400, detail="inputUrl is required for SINGLE_URL")
+    else:
+        site_config_id = _optional_string(req.siteConfigId)
+        if not site_config_id:
+            raise HTTPException(status_code=400, detail="siteConfigId is required")
 
-    filters_in = req.filters or {}
+        site_config = await session.get(SiteConfig, site_config_id)
+        if site_config is None or not site_config.enabled:
+            raise HTTPException(status_code=400, detail="Unknown or disabled siteConfigId")
 
-    posted_within = _optional_string(filters_in.get("postedWithin"))
-    if posted_within is not None and posted_within not in POSTED_WITHIN_VALUES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"filters.postedWithin must be one of: {', '.join(POSTED_WITHIN_VALUES)}",
-        )
+        filters_in = req.filters or {}
 
-    remote = _optional_string(filters_in.get("remote"))
-    if remote is not None and remote not in REMOTE_VALUES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"filters.remote must be one of: {', '.join(REMOTE_VALUES)}",
-        )
+        posted_within = _optional_string(filters_in.get("postedWithin"))
+        if posted_within is not None and posted_within not in POSTED_WITHIN_VALUES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"filters.postedWithin must be one of: {', '.join(POSTED_WITHIN_VALUES)}",
+            )
 
-    filters = {
-        "keywords": _optional_string(filters_in.get("keywords")),
-        "location": _optional_string(filters_in.get("location")),
-        "postedWithin": posted_within,
-        "contractType": _optional_string(filters_in.get("contractType")),
-        "remote": remote,
-        "experienceLevel": _optional_string(filters_in.get("experienceLevel")),
-    }
+        remote = _optional_string(filters_in.get("remote"))
+        if remote is not None and remote not in REMOTE_VALUES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"filters.remote must be one of: {', '.join(REMOTE_VALUES)}",
+            )
+
+        filters = {
+            "keywords": _optional_string(filters_in.get("keywords")),
+            "location": _optional_string(filters_in.get("location")),
+            "postedWithin": posted_within,
+            "contractType": _optional_string(filters_in.get("contractType")),
+            "remote": remote,
+            "experienceLevel": _optional_string(filters_in.get("experienceLevel")),
+        }
+        max_offers = _clamp_max_offers(req.maxOffers)
+
+    # cvVersionId is required for both modes: it must reference a CV the caller
+    # owns whose Conversion has succeeded, since the worker matches against its
+    # Markdown rendition (PRD Section 8.6; only CONVERTED CVs are selectable).
+    cv_version_id = _optional_string(req.cvVersionId)
+    if not cv_version_id:
+        raise HTTPException(status_code=400, detail="cvVersionId is required")
+
+    cv_version = await session.get(CVVersion, cv_version_id)
+    if cv_version is None or cv_version.userId != user_id:
+        raise HTTPException(status_code=400, detail="Unknown cvVersionId")
+    if cv_version.conversionStatus != Cvconversionstatus.CONVERTED:
+        raise HTTPException(status_code=400, detail="cvVersionId must reference a CONVERTED CV")
 
     ingestion_job = IngestionJob(
         id=str(uuid.uuid4()),
         userId=user_id,
-        mode=Ingestionmode.SITE_SEARCH,
+        mode=Ingestionmode(req.mode),
+        inputUrl=input_url,
         siteConfigId=site_config_id,
+        cvVersionId=cv_version_id,
         filters=filters,
-        maxOffers=_ingestion_max_offers(),
+        maxOffers=max_offers,
         status=Ingestionjobstatus.PENDING,
         updatedAt=_now(),
     )
     session.add(ingestion_job)
     await session.commit()
     await session.refresh(ingestion_job)
+
+    sqs = make_sqs_client()
+    sqs.send_message(
+        QueueUrl=INGESTION_INTAKE_QUEUE_URL,
+        MessageBody=json.dumps({"ingestionJobId": ingestion_job.id}),
+    )
 
     return CreateIngestionJobResponse(ingestionJob=_ingestion_job_response(ingestion_job))
 
@@ -601,24 +662,53 @@ async def get_ingestion_job(
     return GetIngestionJobResponse(ingestionJob=_ingestion_job_detail_response(ingestion_job))
 
 
+# --- Job offers ---
+# Backs the "Analyse one offer" known-offer shortcut (#29): the screen looks the
+# pasted URL up before deciding whether to open an IngestionJob or create the
+# Analysis directly.
+
+
+class LookupJobOfferResponse(BaseModel):
+    jobOffer: JobOfferResponse | None
+
+
+@router.get("/job-offers", response_model=LookupJobOfferResponse)
+async def lookup_job_offer(
+    url: str | None = None,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> LookupJobOfferResponse:
+    """Look up a globally-deduplicated JobOffer by its exact ``sourceUrl``. The
+    "Analyse one offer" screen calls this on submit: when the pasted URL already
+    resolves to a ``READY`` JobOffer it creates the Analysis straight away via
+    ``POST /v1/analyses`` instead of opening an IngestionJob. ``url`` is matched
+    verbatim against ``JobOffer.sourceUrl`` — the same key the SINGLE_URL
+    pipeline get-or-creates against — and ``{"jobOffer": null}`` is returned
+    when nothing matches (an unknown URL takes the ingestion path).
+    """
+    normalized = _optional_string(url)
+    if not normalized:
+        raise HTTPException(status_code=400, detail="url is required")
+
+    row = await session.scalar(select(JobOffer).where(JobOffer.sourceUrl == normalized))
+    return LookupJobOfferResponse(jobOffer=_job_offer_response(row) if row else None)
+
+
 # --- Analyses (M7-T13) ---
 # Ports apps/web/app/api/analyses/{route.ts,[id]/route.ts}'s daily-cap check
-# and SQS enqueue verbatim (PRD Section 9.2, Section 10 steps 1-2, 11).
-
-DEFAULT_DAILY_ANALYSIS_CAP = 50
-
-
-def _daily_analysis_cap() -> int:
-    raw = os.environ.get("DAILY_ANALYSIS_CAP")
-    try:
-        parsed = int(raw) if raw else None
-    except ValueError:
-        parsed = None
-    return parsed if parsed is not None and parsed > 0 else DEFAULT_DAILY_ANALYSIS_CAP
+# and SQS enqueue verbatim (PRD Section 9.2, Section 10 steps 1-2, 11). The cap
+# check itself lives in the shared `py_db.quota` helper (issue #33) so this
+# route and the ingestion fan-out enforce one identical rule.
 
 
-def _start_of_today() -> datetime:
-    return datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
+class AnalysisIngestionJobRef(BaseModel):
+    """The slice of the parent IngestionJob the Dashboard needs to fold a
+    SITE_SEARCH Analysis batch into one grouped row (issue #34): the `mode`
+    (only `SITE_SEARCH` rows are grouped) and the `siteConfigId` (the row
+    resolves its site displayName from this)."""
+
+    mode: str
+    siteConfigId: str | None
 
 
 class AnalysisResponse(BaseModel):
@@ -626,6 +716,7 @@ class AnalysisResponse(BaseModel):
     userId: str
     jobOfferId: str
     cvVersionId: str
+    ingestionJobId: str | None
     status: str
     s3ResultKey: str | None
     matchScore: int | None
@@ -637,14 +728,17 @@ class AnalysisResponse(BaseModel):
     completedAt: datetime | None
     jobOffer: JobOfferResponse
     cvVersion: CVVersionResponse
+    ingestionJob: AnalysisIngestionJobRef | None
 
 
 def _analysis_response(row: Analysis) -> AnalysisResponse:
+    ingestion_job = row.IngestionJob_
     return AnalysisResponse(
         id=row.id,
         userId=row.userId,
         jobOfferId=row.jobOfferId,
         cvVersionId=row.cvVersionId,
+        ingestionJobId=row.ingestionJobId,
         status=row.status.value,
         s3ResultKey=row.s3ResultKey,
         matchScore=row.matchScore,
@@ -656,6 +750,14 @@ def _analysis_response(row: Analysis) -> AnalysisResponse:
         completedAt=row.completedAt,
         jobOffer=_job_offer_response(row.JobOffer_),
         cvVersion=_cv_version_response(row.CVVersion_),
+        ingestionJob=(
+            AnalysisIngestionJobRef(
+                mode=ingestion_job.mode.value,
+                siteConfigId=ingestion_job.siteConfigId,
+            )
+            if ingestion_job is not None
+            else None
+        ),
     )
 
 
@@ -666,19 +768,57 @@ class AnalysisListResponse(BaseModel):
 @router.get("/analyses", response_model=AnalysisListResponse)
 async def list_analyses(
     jobOfferId: str | None = None,
+    ingestionJobId: str | None = None,
     user_id: str = Depends(require_user_id),
     session: AsyncSession = Depends(get_session),
 ) -> AnalysisListResponse:
     stmt = (
         select(Analysis)
-        .options(selectinload(Analysis.JobOffer_), selectinload(Analysis.CVVersion_))
+        .options(
+            selectinload(Analysis.JobOffer_),
+            selectinload(Analysis.CVVersion_),
+            selectinload(Analysis.IngestionJob_),
+        )
         .where(Analysis.userId == user_id)
         .order_by(Analysis.requestedAt.desc())
     )
     if jobOfferId:
         stmt = stmt.where(Analysis.jobOfferId == jobOfferId)
+    if ingestionJobId:
+        stmt = stmt.where(Analysis.ingestionJobId == ingestionJobId)
     rows = (await session.scalars(stmt)).all()
     return AnalysisListResponse(analyses=[_analysis_response(row) for row in rows])
+
+
+class AnalysisQuota(BaseModel):
+    cap: int
+    used: int
+    remaining: int
+
+
+class AnalysisQuotaResponse(BaseModel):
+    quota: AnalysisQuota
+
+
+# Declared before `/analyses/{analysis_id}` so "quota" is matched here rather
+# than captured as an analysis id.
+@router.get("/analyses/quota", response_model=AnalysisQuotaResponse)
+async def get_analyses_quota(
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> AnalysisQuotaResponse:
+    """The caller's per-user daily analysis budget: `cap`
+    (`DAILY_ANALYSIS_CAP`), how many `Analysis` rows they have `used` since
+    00:00 UTC, and how many `remaining` (floored at 0). Backs the "Analyse
+    several offers" pre-submit estimate — "up to N analyses will run — M left
+    today" (issue #33). Same shared `py_db.quota` rule `POST /v1/analyses`
+    enforces for its 429.
+    """
+    cap = daily_analysis_cap()
+    used = await analyses_requested_today(session, user_id)
+    return AnalysisQuotaResponse(
+        quota=AnalysisQuota(cap=cap, used=used, remaining=max(cap - used, 0))
+    )
 
 
 class CreateAnalysisRequest(BaseModel):
@@ -712,13 +852,8 @@ async def create_analysis(
     if cv_version is None or cv_version.userId != user_id:
         raise HTTPException(status_code=400, detail="Unknown cvVersionId")
 
-    daily_cap = _daily_analysis_cap()
-    analyses_requested_today = await session.scalar(
-        select(func.count())
-        .select_from(Analysis)
-        .where(Analysis.userId == user_id, Analysis.requestedAt >= _start_of_today())
-    )
-    if (analyses_requested_today or 0) >= daily_cap:
+    daily_cap = daily_analysis_cap()
+    if await analyses_requested_today(session, user_id) >= daily_cap:
         raise HTTPException(
             status_code=429,
             detail=f"Daily analysis limit of {daily_cap} reached. Try again tomorrow.",
@@ -755,7 +890,11 @@ async def get_analysis(
 ) -> GetAnalysisResponse:
     stmt = (
         select(Analysis)
-        .options(selectinload(Analysis.JobOffer_), selectinload(Analysis.CVVersion_))
+        .options(
+            selectinload(Analysis.JobOffer_),
+            selectinload(Analysis.CVVersion_),
+            selectinload(Analysis.IngestionJob_),
+        )
         .where(Analysis.id == analysis_id)
     )
     analysis = (await session.scalars(stmt)).first()

@@ -5,6 +5,12 @@ from bs4 import BeautifulSoup
 
 DEFAULT_MAX_PAGES = 3
 
+# A single-offer page may carry a small "related roles" block; a genuine
+# search-results / listing page carries many more repeated offer links. Above
+# this many, treat the fetched page as a listing rather than one offer
+# (issue #31 — "Analyse one offer" must reject a pasted listing URL).
+LISTING_LINK_THRESHOLD = 6
+
 
 class ListingFetchError(Exception):
     pass
@@ -55,6 +61,16 @@ def extract_offer_urls(html: str, page_url: str) -> list[str]:
             seen.add(absolute_url)
             urls.append(absolute_url)
     return urls
+
+
+def looks_like_listing(html: str, page_url: str, *, threshold: int = LISTING_LINK_THRESHOLD) -> bool:
+    """True when `html` looks like a job listing / search-results page rather
+    than a single offer: the generic "repeated card" heuristic
+    (`extract_offer_urls`) finds more than `threshold` distinct offer links.
+    Used by the SINGLE_URL pipeline to reject a pasted listing URL with a
+    distinguishable reason (issue #31) instead of scraping it as one offer.
+    """
+    return len(extract_offer_urls(html, page_url)) > threshold
 
 
 async def fetch_listing_pages(

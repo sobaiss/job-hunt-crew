@@ -1,6 +1,6 @@
 # Ingestion
 
-Turns a candidate's ingestion request into scraped, structured JobOffers — the scrape/listing/site-adapter pipeline behind an `IngestionJob`'s three modes. Reads and writes the same Postgres tables and S3 buckets as [API](../api/CONTEXT.md) directly, independent of API's HTTP surface. Entities referenced below (`JobOffer`, `IngestionJob`, `SiteConfig`) are defined in API's context; this glossary covers only the process vocabulary specific to this context.
+Turns a candidate's ingestion request into scraped, structured JobOffers, then starts one Analysis per offer — the scrape/listing/site-adapter pipeline behind an `IngestionJob`'s two modes (a single offer URL, or a preconfigured site plus filters). Reads and writes the same Postgres tables and S3 buckets as [API](../api/CONTEXT.md) directly, independent of API's HTTP surface. Entities referenced below (`JobOffer`, `IngestionJob`, `SiteConfig`) are defined in API's context; this glossary covers only the process vocabulary specific to this context.
 
 ## Language
 
@@ -27,4 +27,4 @@ _Avoid_: SiteConfig — the config row itself, owned by the API context.
 Deduplicating discovered offer URLs and truncating the list to an IngestionJob's max-offers limit, before any of them are linked or scraped.
 
 **Fan-out**:
-Linking each retained discovered URL to a globally-deduplicated JobOffer and running scrape + extraction for each in turn, then rolling up the parent IngestionJob's aggregate counts and status from the results.
+Linking each retained discovered URL to a globally-deduplicated JobOffer, running scrape + extraction for each in turn, starting an Analysis for each offer that reaches a ready state, then rolling up the parent IngestionJob's aggregate counts and status from the results.
