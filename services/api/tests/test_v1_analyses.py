@@ -231,6 +231,58 @@ def test_create_analysis_returns_429_once_daily_cap_reached(monkeypatch, user_id
     assert "Daily analysis limit of 1 reached" in second.json()["detail"]
 
 
+def test_get_analyses_quota_requires_user_id_header():
+    with TestClient(app) as client:
+        response = client.get("/v1/analyses/quota", headers=INTERNAL_SECRET_HEADERS)
+    assert response.status_code == 401
+
+
+def test_get_analyses_quota_reports_cap_used_and_remaining(
+    monkeypatch, user_id, job_offer_id, cv_version_id
+):
+    monkeypatch.setenv("DAILY_ANALYSIS_CAP", "3")
+    with TestClient(app) as client:
+        before = client.get("/v1/analyses/quota", headers=_headers(user_id))
+        assert before.status_code == 200
+        assert before.json()["quota"] == {"cap": 3, "used": 0, "remaining": 3}
+
+        posted = client.post(
+            "/v1/analyses",
+            headers=_headers(user_id),
+            json={"jobOfferId": job_offer_id, "cvVersionId": cv_version_id},
+        )
+        assert posted.status_code == 202
+
+        after = client.get("/v1/analyses/quota", headers=_headers(user_id))
+        assert after.json()["quota"] == {"cap": 3, "used": 1, "remaining": 2}
+
+        other_user_id = asyncio.run(_create_user())
+        try:
+            other = client.get("/v1/analyses/quota", headers=_headers(other_user_id))
+            assert other.json()["quota"] == {"cap": 3, "used": 0, "remaining": 3}
+        finally:
+            asyncio.run(_delete_user(other_user_id))
+
+
+def test_get_analyses_quota_never_negative_remaining(
+    monkeypatch, user_id, job_offer_id, cv_version_id
+):
+    monkeypatch.setenv("DAILY_ANALYSIS_CAP", "1")
+    with TestClient(app) as client:
+        client.post(
+            "/v1/analyses",
+            headers=_headers(user_id),
+            json={"jobOfferId": job_offer_id, "cvVersionId": cv_version_id},
+        )
+        client.post(
+            "/v1/analyses",
+            headers=_headers(user_id),
+            json={"jobOfferId": job_offer_id, "cvVersionId": cv_version_id},
+        )
+        quota = client.get("/v1/analyses/quota", headers=_headers(user_id)).json()["quota"]
+    assert quota == {"cap": 1, "used": 1, "remaining": 0}
+
+
 def test_list_and_get_analyses_scoped_to_caller(user_id, job_offer_id, cv_version_id):
     with TestClient(app) as client:
         created = client.post(

@@ -118,6 +118,22 @@ export function useAnalyses(params?: {
   });
 }
 
+export type AnalysisQuota = { cap: number; used: number; remaining: number };
+
+/**
+ * The caller's per-user daily analysis budget (`GET /api/analyses/quota`):
+ * `cap`, how many they've `used` since 00:00 UTC, and how many `remaining`.
+ * Backs the "Analyse several offers" pre-submit estimate — "up to N analyses
+ * will run — M left today" (#33). Read on mount; not polled.
+ */
+export function useAnalysisQuota() {
+  return useQuery({
+    queryKey: ["analyses-quota"],
+    queryFn: () => bff.get<{ quota: AnalysisQuota }>("/analyses/quota"),
+    select: (data) => data.quota,
+  });
+}
+
 /**
  * One Analysis. Polls every {@link ANALYSIS_POLL_INTERVAL_MS} while the status is
  * non-terminal and stops once it is `COMPLETED` or `FAILED`.

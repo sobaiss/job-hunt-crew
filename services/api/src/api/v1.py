@@ -762,6 +762,37 @@ async def list_analyses(
     return AnalysisListResponse(analyses=[_analysis_response(row) for row in rows])
 
 
+class AnalysisQuota(BaseModel):
+    cap: int
+    used: int
+    remaining: int
+
+
+class AnalysisQuotaResponse(BaseModel):
+    quota: AnalysisQuota
+
+
+# Declared before `/analyses/{analysis_id}` so "quota" is matched here rather
+# than captured as an analysis id.
+@router.get("/analyses/quota", response_model=AnalysisQuotaResponse)
+async def get_analyses_quota(
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> AnalysisQuotaResponse:
+    """The caller's per-user daily analysis budget: `cap`
+    (`DAILY_ANALYSIS_CAP`), how many `Analysis` rows they have `used` since
+    00:00 UTC, and how many `remaining` (floored at 0). Backs the "Analyse
+    several offers" pre-submit estimate — "up to N analyses will run — M left
+    today" (issue #33). Same shared `py_db.quota` rule `POST /v1/analyses`
+    enforces for its 429.
+    """
+    cap = daily_analysis_cap()
+    used = await analyses_requested_today(session, user_id)
+    return AnalysisQuotaResponse(
+        quota=AnalysisQuota(cap=cap, used=used, remaining=max(cap - used, 0))
+    )
+
+
 class CreateAnalysisRequest(BaseModel):
     jobOfferId: Any = None
     cvVersionId: Any = None

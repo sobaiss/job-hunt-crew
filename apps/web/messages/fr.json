@@ -143,6 +143,7 @@
     "experienceLevelLabel": "Niveau d'expérience",
     "maxOffersLabel": "Combien d'offres analyser",
     "maxOffersHint": "Entre 1 et {max}.",
+    "quotaEstimate": "{count, plural, one {Jusqu'à # analyse sera lancée} other {Jusqu'à # analyses seront lancées}} — il en reste {remaining} aujourd'hui.",
     "submit": "Analyser ces offres",
     "submitting": "Démarrage…",
     "error": "Impossible de lancer cette analyse. Veuillez réessayer.",

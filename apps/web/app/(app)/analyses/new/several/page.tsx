@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useTranslations } from "next-intl";
@@ -18,6 +18,7 @@ import {
 } from "@/hooks/use-ingestion-jobs";
 import {
   useAnalyses,
+  useAnalysisQuota,
   TERMINAL_ANALYSIS_STATUSES,
   type AnalysisDetail,
   type AnalysisStatus,
@@ -173,6 +174,7 @@ export default function AnalyseSeveralOffersPage() {
   const reliabilityLabel = useTranslations("analyseSeveral.reliability");
 
   const sites = useSiteConfigs();
+  const quota = useAnalysisQuota();
   const create = useCreateIngestionJob();
   const [cvVersionId, setCvVersionId] = useState("");
   const [ingestionJobId, setIngestionJobId] = useState<string | null>(null);
@@ -193,6 +195,7 @@ export default function AnalyseSeveralOffersPage() {
   const {
     register,
     handleSubmit,
+    control,
     formState: { errors },
   } = useForm<z.infer<typeof schema>>({
     resolver: zodResolver(schema),
@@ -208,12 +211,17 @@ export default function AnalyseSeveralOffersPage() {
     },
   });
 
+  const clampOffers = (value: number) =>
+    Math.min(Math.max(1, Math.round(value || 1)), INGESTION_MAX_OFFERS);
+
+  // What the pre-submit estimate shows: the offer count the form would submit
+  // right now, before it is clamped again on submit / by services/api.
+  const watchedMaxOffers = useWatch({ control, name: "maxOffers" });
+  const plannedOffers = clampOffers(watchedMaxOffers);
+
   const onSubmit = handleSubmit((values) => {
     if (!cvVersionId) return;
-    const maxOffers = Math.min(
-      Math.max(1, Math.round(values.maxOffers || 1)),
-      INGESTION_MAX_OFFERS,
-    );
+    const maxOffers = clampOffers(values.maxOffers);
     create.mutate(
       {
         siteConfigId: values.siteConfigId,
@@ -377,6 +385,14 @@ export default function AnalyseSeveralOffersPage() {
                 <p className="text-xs text-muted">
                   {t("maxOffersHint", { max: INGESTION_MAX_OFFERS })}
                 </p>
+                {quota.data && (
+                  <p role="status" className="text-xs text-muted">
+                    {t("quotaEstimate", {
+                      count: plannedOffers,
+                      remaining: quota.data.remaining,
+                    })}
+                  </p>
+                )}
               </div>
 
               <CvVersionPicker
