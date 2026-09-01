@@ -114,7 +114,11 @@
     "failed": "We couldn't fetch or read that job offer.",
     "retry": "Try again",
     "listing": "That URL looks like a list of offers, not a single job offer.",
-    "listingCta": "Analyse several offers"
+    "listingCta": "Analyse several offers",
+    "rerunNote": "You've already analysed this offer with this CV.",
+    "rerunView": "View the analysis",
+    "rerun": "Re-run",
+    "dailyCap": "You've reached today's analysis limit. Try again tomorrow."
   },
   "analyseSeveral": {
     "heading": "Analyse several offers",

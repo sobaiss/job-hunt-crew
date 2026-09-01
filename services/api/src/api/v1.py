@@ -659,6 +659,38 @@ async def get_ingestion_job(
     return GetIngestionJobResponse(ingestionJob=_ingestion_job_detail_response(ingestion_job))
 
 
+# --- Job offers ---
+# Backs the "Analyse one offer" known-offer shortcut (#29): the screen looks the
+# pasted URL up before deciding whether to open an IngestionJob or create the
+# Analysis directly.
+
+
+class LookupJobOfferResponse(BaseModel):
+    jobOffer: JobOfferResponse | None
+
+
+@router.get("/job-offers", response_model=LookupJobOfferResponse)
+async def lookup_job_offer(
+    url: str | None = None,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> LookupJobOfferResponse:
+    """Look up a globally-deduplicated JobOffer by its exact ``sourceUrl``. The
+    "Analyse one offer" screen calls this on submit: when the pasted URL already
+    resolves to a ``READY`` JobOffer it creates the Analysis straight away via
+    ``POST /v1/analyses`` instead of opening an IngestionJob. ``url`` is matched
+    verbatim against ``JobOffer.sourceUrl`` — the same key the SINGLE_URL
+    pipeline get-or-creates against — and ``{"jobOffer": null}`` is returned
+    when nothing matches (an unknown URL takes the ingestion path).
+    """
+    normalized = _optional_string(url)
+    if not normalized:
+        raise HTTPException(status_code=400, detail="url is required")
+
+    row = await session.scalar(select(JobOffer).where(JobOffer.sourceUrl == normalized))
+    return LookupJobOfferResponse(jobOffer=_job_offer_response(row) if row else None)
+
+
 # --- Analyses (M7-T13) ---
 # Ports apps/web/app/api/analyses/{route.ts,[id]/route.ts}'s daily-cap check
 # and SQS enqueue verbatim (PRD Section 9.2, Section 10 steps 1-2, 11).

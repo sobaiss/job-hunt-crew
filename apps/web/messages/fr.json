@@ -114,7 +114,11 @@
     "failed": "Impossible de récupérer ou de lire cette offre d'emploi.",
     "retry": "Réessayer",
     "listing": "Cette URL ressemble à une liste d'offres, et non à une seule offre d'emploi.",
-    "listingCta": "Analyser plusieurs offres"
+    "listingCta": "Analyser plusieurs offres",
+    "rerunNote": "Vous avez déjà analysé cette offre avec ce CV.",
+    "rerunView": "Voir l'analyse",
+    "rerun": "Relancer",
+    "dailyCap": "Vous avez atteint la limite d'analyses du jour. Réessayez demain."
   },
   "analyseSeveral": {
     "heading": "Analyser plusieurs offres",

@@ -14,13 +14,21 @@ import {
   isListingPageError,
   TERMINAL_INGESTION_STATUSES,
 } from "@/hooks/use-ingestion-jobs";
-import { useAnalyses } from "@/hooks/use-analyses";
+import {
+  useAnalyses,
+  useCreateAnalysis,
+  useKnownOfferShortcut,
+} from "@/hooks/use-analyses";
+import { BffError } from "@/lib/bff-client";
 import { CvVersionPicker } from "@/components/cv-version-picker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 type Submitted = { inputUrl: string; cvVersionId: string };
+
+/** The exact-(JobOffer, CVVersion) match found by the known-offer shortcut. */
+type AlreadyAnalysed = { jobOfferId: string; analysisId: string };
 
 /**
  * The waiting state after a SINGLE_URL IngestionJob is created: a two-step
@@ -119,10 +127,17 @@ function WaitingState({
 export default function AnalyseOneOfferPage() {
   const t = useTranslations("analyseOne");
   const tSeveral = useTranslations("analyseSeveral");
+  const router = useRouter();
   const create = useCreateSingleUrlIngestionJob();
+  const shortcut = useKnownOfferShortcut();
+  const createAnalysis = useCreateAnalysis();
   const [cvVersionId, setCvVersionId] = useState("");
   const [ingestionJobId, setIngestionJobId] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState<Submitted | null>(null);
+  const [alreadyAnalysed, setAlreadyAnalysed] = useState<AlreadyAnalysed | null>(
+    null,
+  );
+  const [dailyCapReached, setDailyCapReached] = useState(false);
 
   const schema = z.object({
     inputUrl: z
@@ -155,10 +170,56 @@ export default function AnalyseOneOfferPage() {
     });
   };
 
-  const onSubmit = handleSubmit((values) => {
+  // Direct path: the URL already resolves to a READY JobOffer with no prior
+  // analysis for this CV, or the candidate hit "Re-run". Creates one Analysis
+  // via POST /api/analyses and routes straight to its detail view. A daily-cap
+  // 429 is shown in place instead of navigating.
+  const runDirect = async (jobOfferId: string) => {
+    setDailyCapReached(false);
+    try {
+      const { analysisId } = await createAnalysis.mutateAsync({
+        jobOfferId,
+        cvVersionId,
+      });
+      router.replace(`/analyses/${analysisId}`);
+    } catch (err) {
+      if (err instanceof BffError && err.status === 429) {
+        setDailyCapReached(true);
+      }
+      // Any other failure is surfaced by createAnalysis.isError below.
+    }
+  };
+
+  const onSubmit = handleSubmit(async (values) => {
     if (!cvVersionId) return;
-    start({ inputUrl: values.inputUrl.trim(), cvVersionId });
+    const inputUrl = values.inputUrl.trim();
+    setDailyCapReached(false);
+
+    let result;
+    try {
+      result = await shortcut.mutateAsync({ url: inputUrl, cvVersionId });
+    } catch {
+      return; // shortcut.isError renders the generic message
+    }
+
+    if (result.kind === "unknown") {
+      start({ inputUrl, cvVersionId });
+      return;
+    }
+    if (result.existingAnalysisId) {
+      setAlreadyAnalysed({
+        jobOfferId: result.jobOfferId,
+        analysisId: result.existingAnalysisId,
+      });
+      return;
+    }
+    await runDirect(result.jobOfferId);
   });
+
+  const busy = create.isPending || shortcut.isPending || createAnalysis.isPending;
+  const genericError =
+    !dailyCapReached &&
+    (create.isError || shortcut.isError || createAnalysis.isError);
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-col gap-8 p-8">
@@ -176,6 +237,40 @@ export default function AnalyseOneOfferPage() {
             if (submitted) start(submitted);
           }}
         />
+      ) : alreadyAnalysed ? (
+        <div className="flex flex-col gap-4">
+          <div
+            role="status"
+            className="rounded-md border border-border bg-muted/10 p-4 text-sm"
+          >
+            {t("rerunNote")}
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <Button asChild variant="outline" className="self-start">
+              <Link href={`/analyses/${alreadyAnalysed.analysisId}`}>
+                {t("rerunView")}
+              </Link>
+            </Button>
+            <Button
+              type="button"
+              onClick={() => runDirect(alreadyAnalysed.jobOfferId)}
+              disabled={createAnalysis.isPending}
+              className="self-start"
+            >
+              {createAnalysis.isPending ? t("submitting") : t("rerun")}
+            </Button>
+          </div>
+          {dailyCapReached && (
+            <p role="alert" className="text-sm text-destructive">
+              {t("dailyCap")}
+            </p>
+          )}
+          {genericError && (
+            <p role="alert" className="text-sm text-destructive">
+              {t("error")}
+            </p>
+          )}
+        </div>
       ) : (
         <>
           <nav className="flex gap-4 text-sm">
@@ -216,13 +311,19 @@ export default function AnalyseOneOfferPage() {
 
             <Button
               type="submit"
-              disabled={create.isPending || !cvVersionId}
+              disabled={busy || !cvVersionId}
               className="self-start"
             >
-              {create.isPending ? t("submitting") : t("submit")}
+              {busy ? t("submitting") : t("submit")}
             </Button>
 
-            {create.isError && (
+            {dailyCapReached && (
+              <p role="alert" className="text-sm text-destructive">
+                {t("dailyCap")}
+              </p>
+            )}
+
+            {genericError && (
               <p role="alert" className="text-sm text-destructive">
                 {t("error")}
               </p>

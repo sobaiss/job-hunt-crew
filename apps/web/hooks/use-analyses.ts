@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 
 import { bff } from "@/lib/bff-client";
 
@@ -55,6 +55,7 @@ export type AnalysisSummary = {
   status: AnalysisStatus;
   matchScore: number | null;
   requestedAt: string;
+  cvVersionId: string;
   jobOffer: { id: string; title: string | null; company: string | null };
   cvVersion: { label: string };
 };
@@ -131,6 +132,72 @@ export function useAnalysis(id: string) {
       return status && TERMINAL_ANALYSIS_STATUSES.has(status)
         ? false
         : ANALYSIS_POLL_INTERVAL_MS;
+    },
+  });
+}
+
+/**
+ * Create one Analysis directly, without an IngestionJob (`POST /api/analyses`).
+ * Used by the "Analyse one offer" known-offer shortcut (#29) — when the pasted
+ * URL already resolves to a `READY` JobOffer — and by its "Re-run" action.
+ * A daily-cap `429` surfaces as a {@link BffError} with `status === 429`, which
+ * the screen maps to the "limit reached" message.
+ */
+export function useCreateAnalysis() {
+  return useMutation({
+    mutationFn: ({
+      jobOfferId,
+      cvVersionId,
+    }: {
+      jobOfferId: string;
+      cvVersionId: string;
+    }) =>
+      bff.post<{ analysisId: string }>("/analyses", { jobOfferId, cvVersionId }),
+  });
+}
+
+export type KnownOfferResult =
+  | { kind: "unknown" }
+  | { kind: "ready"; jobOfferId: string; existingAnalysisId: string | null };
+
+/**
+ * The "Analyse one offer" known-offer shortcut (#29). Given the pasted URL and
+ * the chosen CV, resolves what the screen should do on submit:
+ *
+ * - `unknown` — the URL is not a JobOffer we have extracted yet; the screen
+ *   opens a `SINGLE_URL` IngestionJob as before.
+ * - `ready` with `existingAnalysisId` — a `COMPLETED` Analysis for this exact
+ *   `(JobOffer, CVVersion)` pair already exists; the screen surfaces it with a
+ *   "Re-run" action instead of silently creating a duplicate.
+ * - `ready` with `existingAnalysisId: null` — the offer is `READY` but not yet
+ *   analysed with this CV; the screen creates the Analysis directly.
+ */
+export function useKnownOfferShortcut() {
+  return useMutation({
+    mutationFn: async ({
+      url,
+      cvVersionId,
+    }: {
+      url: string;
+      cvVersionId: string;
+    }): Promise<KnownOfferResult> => {
+      const { jobOffer } = await bff.get<{
+        jobOffer: { id: string; extractionStatus: string } | null;
+      }>(`/job-offers?url=${encodeURIComponent(url)}`);
+      if (!jobOffer || jobOffer.extractionStatus !== "READY") {
+        return { kind: "unknown" };
+      }
+      const { analyses } = await bff.get<{ analyses: AnalysisDetail[] }>(
+        `/analyses?jobOfferId=${encodeURIComponent(jobOffer.id)}`,
+      );
+      const existing = analyses.find(
+        (a) => a.cvVersionId === cvVersionId && a.status === "COMPLETED",
+      );
+      return {
+        kind: "ready",
+        jobOfferId: jobOffer.id,
+        existingAnalysisId: existing?.id ?? null,
+      };
     },
   });
 }

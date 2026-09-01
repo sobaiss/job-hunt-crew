@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { http, HttpResponse } from "msw";
 import userEvent from "@testing-library/user-event";
 
@@ -33,6 +33,7 @@ function analysisRow(overrides: Record<string, unknown> = {}) {
     status: "RUNNING_CREW",
     matchScore: null,
     requestedAt: "2026-08-01T00:00:00.000Z",
+    cvVersionId: "cv-default",
     jobOffer: { id: "job1", title: "Backend Engineer", company: "Acme" },
     cvVersion: { label: "Default CV" },
     resultJSON: null,
@@ -47,6 +48,11 @@ type StubOptions = {
   jobStatus?: string;
   jobErrorMessage?: string | null;
   analyses?: ReturnType<typeof analysisRow>[];
+  /** What `GET /api/job-offers?url=` resolves to; `null` (default) = unknown URL. */
+  knownOffer?: { id: string; extractionStatus: string } | null;
+  onCreateAnalysis?: (body: Record<string, unknown>) => void;
+  /** Status for `POST /api/analyses` — 202 (default) or 429 for the daily cap. */
+  analysisPostStatus?: number;
 };
 
 function stubApi(options: StubOptions = {}) {
@@ -56,11 +62,18 @@ function stubApi(options: StubOptions = {}) {
     jobStatus = "RUNNING",
     jobErrorMessage = null,
     analyses = [],
+    knownOffer = null,
+    onCreateAnalysis,
+    analysisPostStatus = 202,
   } = options;
   let creates = 0;
+  let analysisCreates = 0;
 
   server.use(
     http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions })),
+    http.get("/api/job-offers", () =>
+      HttpResponse.json({ jobOffer: knownOffer }),
+    ),
     http.post("/api/ingestion-jobs", async ({ request }) => {
       creates += 1;
       onCreate?.((await request.json()) as Record<string, unknown>);
@@ -77,6 +90,20 @@ function stubApi(options: StubOptions = {}) {
           },
         },
         { status: 201 },
+      );
+    }),
+    http.post("/api/analyses", async ({ request }) => {
+      analysisCreates += 1;
+      onCreateAnalysis?.((await request.json()) as Record<string, unknown>);
+      if (analysisPostStatus === 429) {
+        return HttpResponse.json(
+          { error: "Daily analysis limit reached" },
+          { status: 429 },
+        );
+      }
+      return HttpResponse.json(
+        { analysisId: `a-new-${analysisCreates}` },
+        { status: 202 },
       );
     }),
     http.get("/api/ingestion-jobs/j1", () =>
@@ -96,10 +123,15 @@ function stubApi(options: StubOptions = {}) {
     http.get("/api/analyses", () => HttpResponse.json({ analyses })),
   );
 
-  return { creates: () => creates };
+  return {
+    creates: () => creates,
+    analysisCreates: () => analysisCreates,
+  };
 }
 
 describe("AnalyseOneOfferPage", () => {
+  beforeEach(() => replace.mockClear());
+
   it("preselects the default CONVERTED CV and enables submit", async () => {
     stubApi();
     renderWithProviders(<AnalyseOneOfferPage />);
@@ -282,6 +314,101 @@ describe("AnalyseOneOfferPage", () => {
     const link = screen.getByRole("link", { name: "Analyse several offers" });
     expect(link).toHaveAttribute("href", "/analyses/new/several");
     expect(stub.creates()).toBe(1);
+  });
+
+  it("takes the direct analyses path for a URL that already resolves to a READY offer", async () => {
+    let body: Record<string, unknown> | null = null;
+    const stub = stubApi({
+      knownOffer: { id: "job-ready", extractionStatus: "READY" },
+      analyses: [],
+      onCreateAnalysis: (b) => (body = b),
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<AnalyseOneOfferPage />);
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("CV version")).toHaveValue("cv-default"),
+    );
+    await user.type(
+      screen.getByLabelText("Job offer URL"),
+      "https://jobs.example.com/known-role",
+    );
+    await user.click(screen.getByRole("button", { name: "Analyse this offer" }));
+
+    await waitFor(() => expect(body).not.toBeNull());
+    expect(body).toEqual({ jobOfferId: "job-ready", cvVersionId: "cv-default" });
+    await waitFor(() =>
+      expect(replace).toHaveBeenCalledWith("/analyses/a-new-1"),
+    );
+    expect(stub.creates()).toBe(0);
+  });
+
+  it("surfaces an existing completed analysis for the same offer + CV with a Re-run action", async () => {
+    const stub = stubApi({
+      knownOffer: { id: "job-ready", extractionStatus: "READY" },
+      analyses: [
+        analysisRow({
+          id: "a-existing",
+          status: "COMPLETED",
+          cvVersionId: "cv-default",
+        }),
+      ],
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<AnalyseOneOfferPage />);
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("CV version")).toHaveValue("cv-default"),
+    );
+    await user.type(
+      screen.getByLabelText("Job offer URL"),
+      "https://jobs.example.com/known-role",
+    );
+    await user.click(screen.getByRole("button", { name: "Analyse this offer" }));
+
+    expect(
+      await screen.findByText(
+        "You've already analysed this offer with this CV.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "View the analysis" }),
+    ).toHaveAttribute("href", "/analyses/a-existing");
+    expect(replace).not.toHaveBeenCalled();
+    expect(stub.analysisCreates()).toBe(0);
+
+    await user.click(screen.getByRole("button", { name: "Re-run" }));
+
+    await waitFor(() => expect(stub.analysisCreates()).toBe(1));
+    await waitFor(() =>
+      expect(replace).toHaveBeenCalledWith("/analyses/a-new-1"),
+    );
+  });
+
+  it("shows the daily-limit message when POST /api/analyses returns 429", async () => {
+    stubApi({
+      knownOffer: { id: "job-ready", extractionStatus: "READY" },
+      analyses: [],
+      analysisPostStatus: 429,
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<AnalyseOneOfferPage />);
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("CV version")).toHaveValue("cv-default"),
+    );
+    await user.type(
+      screen.getByLabelText("Job offer URL"),
+      "https://jobs.example.com/known-role",
+    );
+    await user.click(screen.getByRole("button", { name: "Analyse this offer" }));
+
+    expect(
+      await screen.findByText(
+        "You've reached today's analysis limit. Try again tomorrow.",
+      ),
+    ).toBeInTheDocument();
+    expect(replace).not.toHaveBeenCalled();
   });
 });
 
