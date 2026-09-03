@@ -24,5 +24,9 @@ packages = ["src/api"]
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "pytest-asyncio>=0.24",
     "httpx>=0.27",
 ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
