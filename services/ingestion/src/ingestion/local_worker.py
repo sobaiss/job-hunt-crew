@@ -21,9 +21,20 @@ not the reverse).
 
 Run it via `make worker` (host) or the `worker` service in docker-compose.yml.
 `WORKER_QUEUES` (comma-separated queue names) selects which subset to drain; the
-compose service defaults to `cv-conversion` alone, the one consumer that needs
-no host-only `lambda_shim` / Step Functions execution / LLM key to make
-progress. `WORKER_RUN_ONCE=1` drains what is currently queued and exits.
+compose service drains all three (`cv-conversion`, `ingestion-intake`,
+`analysis-intake`), so "Convert to Markdown", "Analyse one offer" and "Analyse
+several offers" all complete on their own after `docker compose up`.
+`WORKER_RUN_ONCE=1` drains what is currently queued and exits.
+
+`analysis-intake` has two drainers, chosen by `WORKER_ANALYSIS_MODE`:
+- `local` (default): `analysis.local_pipeline.handle_analysis_intake_local`
+  runs the whole AnalysisWorkflow in-process (the same shape `cv-conversion`
+  uses) — no `stepfunctions-local` / `lambda_shim` / registered state machine
+  needed, so it works straight after `docker compose up`.
+- `stepfunctions`: `analysis.intake_handler.handle_analysis_intake` starts a
+  real Step Functions Local execution — the production-shaped path, needing the
+  host `lambda_shim`, a Step Functions execution, and `SFN_*` env. Use it to
+  exercise the state machine itself.
 """
 
 import os
@@ -46,6 +57,32 @@ WAIT_SECONDS = int(os.environ.get("WORKER_WAIT_SECONDS", "5"))
 MAX_MESSAGES = 10
 
 _DEFAULT_QUEUE_BASE = "http://localhost:9324/000000000000"
+
+# `analysis-intake` drainers, keyed by WORKER_ANALYSIS_MODE (see module docstring).
+_ANALYSIS_INTAKE_HANDLER_REFS: dict[str, str] = {
+    "local": "analysis.local_pipeline:handle_analysis_intake_local",
+    "stepfunctions": "analysis.intake_handler:handle_analysis_intake",
+}
+DEFAULT_ANALYSIS_MODE = "local"
+
+
+class UnknownAnalysisModeError(ValueError):
+    pass
+
+
+def resolve_analysis_intake_handler_ref(raw: str | None) -> str:
+    """`module:attr` for the `analysis-intake` handler `WORKER_ANALYSIS_MODE`
+    selects. Blank / unset -> the in-process `local` runner. An unrecognised
+    mode is a hard error rather than a silent fallback.
+    """
+    mode = (raw or DEFAULT_ANALYSIS_MODE).strip().lower() or DEFAULT_ANALYSIS_MODE
+    try:
+        return _ANALYSIS_INTAKE_HANDLER_REFS[mode]
+    except KeyError:
+        raise UnknownAnalysisModeError(
+            f"Unknown WORKER_ANALYSIS_MODE {mode!r}; known modes: "
+            f"{list(_ANALYSIS_INTAKE_HANDLER_REFS)}"
+        ) from None
 
 
 @dataclass(frozen=True)
@@ -77,7 +114,7 @@ QUEUE_SPECS: dict[str, QueueSpec] = {
     "analysis-intake": QueueSpec(
         "analysis-intake",
         _queue_url("analysis-intake", "SQS_ANALYSIS_INTAKE_QUEUE_URL"),
-        "analysis.intake_handler:handle_analysis_intake",
+        resolve_analysis_intake_handler_ref(os.environ.get("WORKER_ANALYSIS_MODE")),
     ),
     "ingestion-intake": QueueSpec(
         "ingestion-intake",

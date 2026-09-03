@@ -13,9 +13,11 @@ from ingestion import local_worker
 from ingestion.local_worker import (
     QUEUE_SPECS,
     QueueSpec,
+    UnknownAnalysisModeError,
     UnknownQueueError,
     drain,
     poll_once,
+    resolve_analysis_intake_handler_ref,
     resolve_queue_names,
     run_forever,
 )
@@ -72,6 +74,30 @@ def test_resolve_queue_names_dedupes():
 def test_resolve_queue_names_rejects_an_unknown_queue():
     with pytest.raises(UnknownQueueError):
         resolve_queue_names("cv-conversion,not-a-queue")
+
+
+# --- resolve_analysis_intake_handler_ref -------------------------------------
+
+
+def test_analysis_intake_handler_defaults_to_the_in_process_local_runner():
+    ref = "analysis.local_pipeline:handle_analysis_intake_local"
+    assert resolve_analysis_intake_handler_ref(None) == ref
+    assert resolve_analysis_intake_handler_ref("  ") == ref
+    assert resolve_analysis_intake_handler_ref("LOCAL") == ref
+    # ...and that is what the registered QueueSpec uses out of the box.
+    assert QUEUE_SPECS["analysis-intake"].handler_ref == ref
+
+
+def test_analysis_intake_handler_stepfunctions_mode_selects_the_workflow_starter():
+    assert (
+        resolve_analysis_intake_handler_ref("stepfunctions")
+        == "analysis.intake_handler:handle_analysis_intake"
+    )
+
+
+def test_analysis_intake_handler_rejects_an_unknown_mode():
+    with pytest.raises(UnknownAnalysisModeError):
+        resolve_analysis_intake_handler_ref("sqs-lambda")
 
 
 # --- poll_once -----------------------------------------------------------------

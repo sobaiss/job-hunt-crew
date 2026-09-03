@@ -6,7 +6,7 @@ from py_db.models import (
     Siteconfigsitekey,
 )
 
-from ingestion.site_search import SiteSearchConfigError, build_search_url
+from ingestion.site_search import SiteSearchConfigError, build_search_url, extract_offer_id
 
 
 def _indeed_site_config() -> SiteConfig:
@@ -26,6 +26,7 @@ def _indeed_site_config() -> SiteConfig:
             "postedWithin": "fromage",
             "contractType": "jt",
             "remote": "remotejob",
+            "id": "jk",
         },
         integrationType=Siteconfigintegrationtype.HTML_SCRAPE,
         requiresJsRendering=False,
@@ -48,6 +49,7 @@ def _france_travail_site_config() -> SiteConfig:
             "postedWithin": "minCreationDate",
             "contractType": "typeContrat",
             "remote": "travailATemps",
+            "id": "id",
         },
         integrationType=Siteconfigintegrationtype.OFFICIAL_API,
         apiBaseUrl="https://api.francetravail.io/partenaire/offresdemploi/v2",
@@ -121,3 +123,53 @@ def test_build_search_url_official_api_requires_api_base_url():
 
     with pytest.raises(SiteSearchConfigError):
         build_search_url(site_config, {})
+
+
+def test_build_search_url_ignores_the_id_mapping_entry():
+    # `id` in filterParamMapping is for offer-detail extraction, not search —
+    # a SITE_SEARCH `filters` dict never carries it, so it must not leak into
+    # the built query string.
+    url = build_search_url(_france_travail_site_config(), {"keywords": "python", "id": "213CTNR"})
+
+    assert "213CTNR" not in url
+    assert url == "https://api.francetravail.io/partenaire/offresdemploi/v2?motsCles=python"
+
+
+def test_extract_offer_id_reads_the_mapped_query_param():
+    offer_id = extract_offer_id(
+        _indeed_site_config(), "https://fr.indeed.com/viewjob?jk=1a2b3c4d5e6f7g8h&from=serp"
+    )
+
+    assert offer_id == "1a2b3c4d5e6f7g8h"
+
+
+def test_extract_offer_id_falls_back_to_last_path_segment_for_api_url():
+    # France Travail's partner-API URL: the id is the last path segment, not a
+    # query param — the fallback branch.
+    offer_id = extract_offer_id(
+        _france_travail_site_config(),
+        "https://api.francetravail.io/partenaire/offresdemploi/v2/offres/213CTNR",
+    )
+
+    assert offer_id == "213CTNR"
+
+
+def test_extract_offer_id_falls_back_to_last_path_segment_for_candidate_url():
+    offer_id = extract_offer_id(
+        _france_travail_site_config(),
+        "https://candidat.francetravail.fr/offres/recherche/detail/213CTNR/",
+    )
+
+    assert offer_id == "213CTNR"
+
+
+def test_extract_offer_id_prefers_the_query_param_over_the_path_segment():
+    site_config = _indeed_site_config()
+    offer_id = extract_offer_id(site_config, "https://fr.indeed.com/viewjob?jk=ABC123")
+
+    # Last path segment would be "viewjob" — the mapped `jk` param must win.
+    assert offer_id == "ABC123"
+
+
+def test_extract_offer_id_returns_none_when_nothing_identifiable():
+    assert extract_offer_id(_indeed_site_config(), "https://fr.indeed.com/") is None

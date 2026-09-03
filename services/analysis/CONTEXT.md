@@ -18,7 +18,7 @@ The agent that compares a JobOffer's structured data against a CVVersion's Markd
 The agent that takes ComparisonAnalysisAgent's output and writes the prioritized improvement suggestions and summary.
 
 **AnalysisWorkflow**:
-The Step Functions state machine that sequences one Analysis's prerequisites (CVVersion converted, JobOffer extracted) and the comparison crew run, retrying each step before giving up and marking the Analysis failed.
+The Step Functions state machine that sequences one Analysis's prerequisites (CVVersion converted, JobOffer extracted) and the comparison crew run, retrying each step before giving up and marking the Analysis failed. `local_pipeline` is the dev-only in-process equivalent: the same steps in the same order, chained directly with no Step Functions, so the local `worker` can drain `analysis-intake` off `docker compose up` alone — the same shape Conversion's SQS handler already has.
 _Avoid_: Pipeline — too generic; this names the state machine specifically, not the whole system.
 
 **Task token**:

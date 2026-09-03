@@ -85,8 +85,12 @@ class OllamaProvider(LLMProvider):
 
     def __init__(self, *, model: str | None = None, client: openai.OpenAI | None = None) -> None:
         self.model = model or os.environ.get("LLM_MODEL") or DEFAULT_OLLAMA_MODEL
+        # `or` (not get's default arg): docker-compose injects OLLAMA_BASE_URL as
+        # an empty string via `${OLLAMA_BASE_URL:-}` when the host env is unset,
+        # and `openai.OpenAI(base_url="")` fails every call with "Connection
+        # error" rather than falling back to the real default.
         self.client = client or openai.OpenAI(
-            base_url=os.environ.get("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL),
+            base_url=os.environ.get("OLLAMA_BASE_URL") or DEFAULT_OLLAMA_BASE_URL,
             api_key="ollama",
         )
 

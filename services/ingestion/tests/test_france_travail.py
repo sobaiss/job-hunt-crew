@@ -1,5 +1,6 @@
+import re
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import respx
@@ -22,9 +23,12 @@ from py_db.session import make_engine, make_session_factory
 from sqlalchemy import select
 
 from ingestion.france_travail import (
+    DEFAULT_SCOPE,
     FranceTravailApiError,
     TOKEN_URL,
+    fetch_offer,
     ingest_france_travail_offers,
+    ingest_france_travail_single_offer,
     search_offers,
 )
 
@@ -60,6 +64,12 @@ FIXTURE_SEARCH_RESPONSE = {
 }
 
 
+# What `GET /v2/offres/{id}` returns: a single offer object, same shape as one
+# element of a search response's `resultats`.
+FIXTURE_OFFER_RESPONSE = FIXTURE_SEARCH_RESPONSE["resultats"][0]
+OFFER_URL_PREFIX = "https://api.francetravail.io/partenaire/offresdemploi/v2/offres/"
+
+
 def _france_travail_site_config() -> SiteConfig:
     return SiteConfig(
         id="site-france-travail",
@@ -73,6 +83,7 @@ def _france_travail_site_config() -> SiteConfig:
             "postedWithin": "minCreationDate",
             "contractType": "typeContrat",
             "remote": "travailATemps",
+            "id": "id",
         },
         integrationType=Siteconfigintegrationtype.OFFICIAL_API,
         apiBaseUrl="https://api.francetravail.io/partenaire/offresdemploi/v2",
@@ -108,6 +119,85 @@ async def test_search_offers_returns_resultats_given_valid_filters(monkeypatch):
 
     assert len(offers) == 2
     assert offers[0]["intitule"] == "Ingénieur logiciel backend"
+
+
+@pytest.mark.asyncio
+async def test_get_access_token_falls_back_to_default_scope_when_env_var_is_empty(monkeypatch):
+    """Regression: docker-compose passes `FRANCE_TRAVAIL_SCOPE` through as
+    `${VAR:-}`, so the var is *present but empty* in the worker. That must
+    still send DEFAULT_SCOPE — an empty `scope=` makes the token endpoint 400.
+    """
+    from urllib.parse import parse_qs
+
+    monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_ID", "test-client-id")
+    monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_SECRET", "test-client-secret")
+    monkeypatch.setenv("FRANCE_TRAVAIL_SCOPE", "")
+    site_config = _france_travail_site_config()
+
+    with respx.mock:
+        token_route = respx.mock.post(TOKEN_URL).mock(
+            return_value=Response(200, json={"access_token": "fake-token", "expires_in": 1499})
+        )
+        respx.mock.get(
+            url__startswith="https://api.francetravail.io/partenaire/offresdemploi/v2/offres/search"
+        ).mock(return_value=Response(200, json=FIXTURE_SEARCH_RESPONSE))
+
+        await search_offers(site_config, {"keywords": "python"})
+
+    posted = parse_qs(token_route.calls.last.request.content.decode())
+    assert posted["scope"] == [DEFAULT_SCOPE]
+
+
+@pytest.mark.asyncio
+async def test_search_offers_translates_posted_within_token_to_creation_date_window(monkeypatch):
+    """Regression: France Travail returns 400 for `minCreationDate=24h` -- the
+    relative `postedWithin` token must be resolved to an absolute ISO-8601 UTC
+    instant ("2022-10-23T08:15:42Z") and paired with `maxCreationDate`.
+    """
+    monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_ID", "test-client-id")
+    monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_SECRET", "test-client-secret")
+
+    with respx.mock:
+        _mock_token(respx.mock)
+        route = respx.mock.get(
+            url__startswith="https://api.francetravail.io/partenaire/offresdemploi/v2/offres/search"
+        ).mock(return_value=Response(200, json=FIXTURE_SEARCH_RESPONSE))
+
+        await search_offers(
+            _france_travail_site_config(), {"keywords": "symfony", "postedWithin": "24h"}
+        )
+
+    sent = route.calls.last.request.url
+    params = dict(sent.params)
+    assert "24h" not in str(sent), "the relative token must never reach the API"
+    assert "postedWithin" not in params
+    iso = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
+    assert iso.fullmatch(params["minCreationDate"])
+    assert iso.fullmatch(params["maxCreationDate"])
+    lo = datetime.strptime(params["minCreationDate"], "%Y-%m-%dT%H:%M:%SZ")
+    hi = datetime.strptime(params["maxCreationDate"], "%Y-%m-%dT%H:%M:%SZ")
+    assert hi - lo == timedelta(hours=24)
+
+
+@pytest.mark.asyncio
+async def test_search_offers_omits_creation_date_for_posted_within_any(monkeypatch):
+    monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_ID", "test-client-id")
+    monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_SECRET", "test-client-secret")
+
+    with respx.mock:
+        _mock_token(respx.mock)
+        route = respx.mock.get(
+            url__startswith="https://api.francetravail.io/partenaire/offresdemploi/v2/offres/search"
+        ).mock(return_value=Response(200, json=FIXTURE_SEARCH_RESPONSE))
+
+        await search_offers(
+            _france_travail_site_config(), {"keywords": "symfony", "postedWithin": "any"}
+        )
+
+    params = dict(route.calls.last.request.url.params)
+    assert params["motsCles"] == "symfony"
+    assert "minCreationDate" not in params
+    assert "maxCreationDate" not in params
 
 
 @pytest.mark.asyncio
@@ -379,4 +469,215 @@ async def test_ingest_france_travail_offers_reuses_globally_deduplicated_job_off
             if user is not None:
                 await session.delete(user)
             await session.commit()
+        await engine.dispose()
+
+
+# --- SINGLE_URL path: fetch one offer straight from the API -------------------
+
+
+@pytest.mark.asyncio
+async def test_fetch_offer_returns_the_offer_object(monkeypatch):
+    monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_ID", "test-client-id")
+    monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_SECRET", "test-client-secret")
+
+    with respx.mock:
+        _mock_token(respx.mock)
+        route = respx.mock.get(f"{OFFER_URL_PREFIX}123ABCD").mock(
+            return_value=Response(200, json=FIXTURE_OFFER_RESPONSE)
+        )
+
+        offre = await fetch_offer(_france_travail_site_config(), "123ABCD")
+
+    assert route.called
+    assert offre["intitule"] == "Ingénieur logiciel backend"
+    assert route.calls.last.request.headers["Authorization"] == "Bearer fake-token"
+
+
+@pytest.mark.asyncio
+async def test_fetch_offer_raises_on_401(monkeypatch):
+    monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_ID", "test-client-id")
+    monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_SECRET", "test-client-secret")
+
+    with respx.mock:
+        _mock_token(respx.mock)
+        respx.mock.get(f"{OFFER_URL_PREFIX}213CTNR").mock(return_value=Response(401))
+
+        with pytest.raises(FranceTravailApiError):
+            await fetch_offer(_france_travail_site_config(), "213CTNR")
+
+
+@pytest.mark.asyncio
+async def test_fetch_offer_raises_without_credentials(monkeypatch):
+    monkeypatch.delenv("FRANCE_TRAVAIL_CLIENT_ID", raising=False)
+    monkeypatch.delenv("FRANCE_TRAVAIL_CLIENT_SECRET", raising=False)
+
+    with pytest.raises(FranceTravailApiError):
+        await fetch_offer(_france_travail_site_config(), "213CTNR")
+
+
+@pytest.mark.asyncio
+async def test_fetch_offer_raises_on_204_no_content(monkeypatch):
+    monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_ID", "test-client-id")
+    monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_SECRET", "test-client-secret")
+
+    with respx.mock:
+        _mock_token(respx.mock)
+        respx.mock.get(f"{OFFER_URL_PREFIX}213CTNR").mock(return_value=Response(204))
+
+        with pytest.raises(FranceTravailApiError):
+            await fetch_offer(_france_travail_site_config(), "213CTNR")
+
+
+async def _seed_single_offer_job(session_factory, *, source_url):
+    user_id = f"test-user-{uuid.uuid4()}"
+    ingestion_job_id = f"test-job-{uuid.uuid4()}"
+    job_offer_id = str(uuid.uuid4())
+    async with session_factory() as session:
+        session.add(User(id=user_id, updatedAt=_now()))
+        session.add(
+            IngestionJob(
+                id=ingestion_job_id,
+                userId=user_id,
+                mode=Ingestionmode.SINGLE_URL,
+                inputUrl=source_url,
+                maxOffers=1,
+                status=Ingestionjobstatus.RUNNING,
+                updatedAt=_now(),
+            )
+        )
+        session.add(
+            JobOffer(
+                id=job_offer_id,
+                sourceUrl=source_url,
+                sourceSite=Joboffersourcesite.FRANCE_TRAVAIL,
+                extractionStatus=Jobofferextractionstatus.PENDING,
+                updatedAt=_now(),
+            )
+        )
+        session.add(
+            IngestionJobOffer(
+                id=str(uuid.uuid4()),
+                ingestionJobId=ingestion_job_id,
+                jobOfferId=job_offer_id,
+            )
+        )
+        await session.commit()
+    return user_id, ingestion_job_id, job_offer_id
+
+
+async def _cleanup_single_offer_job(session_factory, *, user_id, ingestion_job_id, job_offer_id):
+    from py_db.models import PipelineEvent
+
+    async with session_factory() as session:
+        for link in (
+            await session.scalars(
+                select(IngestionJobOffer).where(IngestionJobOffer.ingestionJobId == ingestion_job_id)
+            )
+        ).all():
+            await session.delete(link)
+        for event in (
+            await session.scalars(
+                select(PipelineEvent).where(PipelineEvent.ingestionJobId == ingestion_job_id)
+            )
+        ).all():
+            await session.delete(event)
+        await session.commit()
+
+        offer = await session.get(JobOffer, job_offer_id)
+        if offer is not None:
+            await session.delete(offer)
+        job = await session.get(IngestionJob, ingestion_job_id)
+        if job is not None:
+            await session.delete(job)
+        user = await session.get(User, user_id)
+        if user is not None:
+            await session.delete(user)
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_ingest_france_travail_single_offer_populates_ready_offer(monkeypatch):
+    monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_ID", "test-client-id")
+    monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_SECRET", "test-client-secret")
+
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    offer_id = f"123ABCD{uuid.uuid4().hex[:8]}"
+    source_url = f"{OFFER_URL_PREFIX}{offer_id}"
+    site_config = _france_travail_site_config()
+    user_id, ingestion_job_id, job_offer_id = await _seed_single_offer_job(
+        session_factory, source_url=source_url
+    )
+
+    try:
+        with respx.mock:
+            _mock_token(respx.mock)
+            respx.mock.get(source_url).mock(return_value=Response(200, json=FIXTURE_OFFER_RESPONSE))
+
+            async with session_factory() as session:
+                ingestion_job = await session.get(IngestionJob, ingestion_job_id)
+                job_offer = await session.get(JobOffer, job_offer_id)
+                result = await ingest_france_travail_single_offer(
+                    session, ingestion_job, site_config, job_offer, offer_id
+                )
+
+        assert result.extractionStatus == Jobofferextractionstatus.READY
+
+        async with session_factory() as session:
+            offer = await session.get(JobOffer, job_offer_id)
+            assert offer.extractionStatus == Jobofferextractionstatus.READY
+            assert offer.errorMessage is None
+            assert offer.title == "Ingénieur logiciel backend"
+            assert offer.company == "Acme France"
+            assert offer.structuredData["requirements"] == ["Python", "SQL"]
+            assert offer.sourceUrl == source_url
+    finally:
+        await _cleanup_single_offer_job(
+            session_factory,
+            user_id=user_id,
+            ingestion_job_id=ingestion_job_id,
+            job_offer_id=job_offer_id,
+        )
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_ingest_france_travail_single_offer_marks_offer_failed_on_api_error(monkeypatch):
+    monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_ID", "test-client-id")
+    monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_SECRET", "test-client-secret")
+
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    offer_id = f"213CTNR{uuid.uuid4().hex[:8]}"
+    source_url = f"{OFFER_URL_PREFIX}{offer_id}"
+    site_config = _france_travail_site_config()
+    user_id, ingestion_job_id, job_offer_id = await _seed_single_offer_job(
+        session_factory, source_url=source_url
+    )
+
+    try:
+        with respx.mock:
+            _mock_token(respx.mock)
+            respx.mock.get(source_url).mock(return_value=Response(401))
+
+            async with session_factory() as session:
+                ingestion_job = await session.get(IngestionJob, ingestion_job_id)
+                job_offer = await session.get(JobOffer, job_offer_id)
+                with pytest.raises(FranceTravailApiError):
+                    await ingest_france_travail_single_offer(
+                        session, ingestion_job, site_config, job_offer, offer_id
+                    )
+
+        async with session_factory() as session:
+            offer = await session.get(JobOffer, job_offer_id)
+            assert offer.extractionStatus == Jobofferextractionstatus.FAILED
+            assert offer.errorMessage
+            assert offer_id in offer.errorMessage
+    finally:
+        await _cleanup_single_offer_job(
+            session_factory,
+            user_id=user_id,
+            ingestion_job_id=ingestion_job_id,
+            job_offer_id=job_offer_id,
+        )
         await engine.dispose()

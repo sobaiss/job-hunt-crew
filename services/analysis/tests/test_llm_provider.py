@@ -94,6 +94,18 @@ def test_ollama_base_url_env_var_overrides_default(monkeypatch):
     )
 
 
+def test_ollama_empty_base_url_env_var_falls_back_to_default(monkeypatch):
+    # docker-compose's `${OLLAMA_BASE_URL:-}` sets the var to "" when the host
+    # env is unset; that must not reach openai.OpenAI(base_url="").
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.setenv("OLLAMA_BASE_URL", "")
+    with patch("analysis.llm_provider.openai.OpenAI") as openai_ctor:
+        OllamaProvider()
+    openai_ctor.assert_called_once_with(
+        base_url="http://localhost:11434/v1", api_key="ollama"
+    )
+
+
 def test_ollama_generate_passes_temperature_zero_and_omits_max_tokens(monkeypatch):
     fake_client = MagicMock()
     fake_client.chat.completions.create.return_value = MagicMock(

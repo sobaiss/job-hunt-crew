@@ -24,8 +24,22 @@ from py_db.models import (
 from py_db.session import make_engine, make_session_factory
 from sqlalchemy import select
 
+from ingestion.france_travail import TOKEN_URL
 from ingestion.s3_client import S3_BUCKET, raw_scrape_key
 from ingestion.single_url_pipeline import LISTING_PAGE_ERROR_MESSAGE, run_single_url_ingestion
+
+FT_OFFER_PREFIX = "https://api.francetravail.io/partenaire/offresdemploi/v2/offres/"
+FT_OFFER_RESPONSE = {
+    "id": "213CTNR",
+    "intitule": "Ingénieur DevOps",
+    "description": "Kubernetes, Terraform, CI/CD.",
+    "dateCreation": "2026-08-15T09:00:00.000Z",
+    "entreprise": {"nom": "Cloud SAS"},
+    "lieuTravail": {"libelle": "31 - Toulouse"},
+    "typeContratLibelle": "Contrat à durée indéterminée",
+    "competences": [{"libelle": "Kubernetes"}, {"libelle": "Terraform"}],
+    "origineOffre": {"urlOrigine": "https://candidat.francetravail.fr/offres/recherche/detail/213CTNR"},
+}
 
 FIXTURE_OFFER_HTML = "<html><body><h1>Senior Backend Engineer</h1></body></html>"
 FIXTURE_LISTING_HTML = (
@@ -364,6 +378,112 @@ async def test_run_single_url_ingestion_scrape_failure_marks_job_failed():
         assert result.errorMessage
         assert result.discoveredCount == 1
         assert result.failedCount == 1
+    finally:
+        await _cleanup(
+            session_factory,
+            user_id=user_id,
+            ingestion_job_id=ingestion_job_id,
+            source_urls=[source_url],
+        )
+        await engine.dispose()
+
+
+async def _require_france_travail_site_config(session_factory):
+    async with session_factory() as session:
+        seeded = await session.scalar(
+            select(SiteConfig).where(SiteConfig.siteKey == Siteconfigsitekey.FRANCE_TRAVAIL)
+        )
+    if seeded is None or not seeded.enabled:
+        pytest.skip("France Travail SiteConfig not seeded in this database")
+
+
+@pytest.mark.asyncio
+async def test_run_single_url_ingestion_france_travail_url_fetches_via_api_without_scraping(monkeypatch):
+    """A SINGLE_URL job whose inputUrl resolves to France Travail (an
+    OFFICIAL_API site) is fetched straight from the API into structured data:
+    JobOffer goes to READY with no HTML scrape (no S3 rawContentKey) and no
+    LLM extraction call."""
+    monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_ID", "test-client-id")
+    monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_SECRET", "test-client-secret")
+
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    await _require_france_travail_site_config(session_factory)
+
+    offer_id = f"213CTNR{uuid.uuid4().hex[:8]}"
+    source_url = f"{FT_OFFER_PREFIX}{offer_id}"
+    user_id, ingestion_job_id = await _seed_job(session_factory, input_url=source_url)
+    stub = StubLLMProvider()
+
+    try:
+        with respx.mock:
+            respx.mock.post(TOKEN_URL).mock(
+                return_value=Response(200, json={"access_token": "fake-token", "expires_in": 1499})
+            )
+            respx.mock.get(source_url).mock(return_value=Response(200, json=FT_OFFER_RESPONSE))
+
+            async with session_factory() as session:
+                ingestion_job = await session.get(IngestionJob, ingestion_job_id)
+                result = await run_single_url_ingestion(session, ingestion_job, llm_provider=stub)
+
+        assert result.status == Ingestionjobstatus.COMPLETED
+        assert result.discoveredCount == 1
+        assert result.scrapedCount == 1
+        assert result.errorMessage is None
+        assert stub.calls == 0
+
+        async with session_factory() as session:
+            offer = await session.scalar(select(JobOffer).where(JobOffer.sourceUrl == source_url))
+            assert offer.extractionStatus == Jobofferextractionstatus.READY
+            assert offer.sourceSite == Joboffersourcesite.FRANCE_TRAVAIL
+            assert offer.rawContentKey is None
+            assert offer.title == "Ingénieur DevOps"
+            assert offer.structuredData["requirements"] == ["Kubernetes", "Terraform"]
+    finally:
+        await _cleanup(
+            session_factory,
+            user_id=user_id,
+            ingestion_job_id=ingestion_job_id,
+            source_urls=[source_url],
+        )
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_run_single_url_ingestion_france_travail_api_401_marks_job_failed(monkeypatch):
+    """The originally-reported failure: a France Travail offer URL whose API
+    fetch 401s must land the job FAILED with an errorMessage and the offer
+    FAILED — not raise, and not fall through to an unauthenticated scrape."""
+    monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_ID", "test-client-id")
+    monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_SECRET", "test-client-secret")
+
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    await _require_france_travail_site_config(session_factory)
+
+    offer_id = f"213CTNR{uuid.uuid4().hex[:8]}"
+    source_url = f"{FT_OFFER_PREFIX}{offer_id}"
+    user_id, ingestion_job_id = await _seed_job(session_factory, input_url=source_url)
+
+    try:
+        with respx.mock:
+            respx.mock.post(TOKEN_URL).mock(
+                return_value=Response(200, json={"access_token": "fake-token", "expires_in": 1499})
+            )
+            respx.mock.get(source_url).mock(return_value=Response(401))
+
+            async with session_factory() as session:
+                ingestion_job = await session.get(IngestionJob, ingestion_job_id)
+                result = await run_single_url_ingestion(session, ingestion_job, llm_provider=StubLLMProvider())
+
+        assert result.status == Ingestionjobstatus.FAILED
+        assert result.errorMessage
+        assert result.failedCount == 1
+
+        async with session_factory() as session:
+            offer = await session.scalar(select(JobOffer).where(JobOffer.sourceUrl == source_url))
+            assert offer.extractionStatus == Jobofferextractionstatus.FAILED
+            assert offer.errorMessage
     finally:
         await _cleanup(
             session_factory,

@@ -79,15 +79,15 @@ services:
   # `docker compose up` (idempotent — no-ops once the schema is current), so
   # a fresh Postgres volume never starts `api` against a missing schema.
   # `api` waits on this completing (see its `depends_on` below).
-  migrate:
-    build:
-      context: .
-      dockerfile: packages/prisma/Dockerfile
-    environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/job_hunt_crew
-    depends_on:
-      postgres:
-        condition: service_healthy
+  # migrate:
+  #   build:
+  #     context: .
+  #     dockerfile: packages/prisma/Dockerfile
+  #   environment:
+  #     DATABASE_URL: postgresql://postgres:postgres@postgres:5432/job_hunt_crew
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
 
   # services/api (FastAPI): sole owner of Postgres/S3/SQS per PRD Section 7,
   # called only by apps/web's BFF proxy (M7). Built from the repo root so uv
@@ -129,8 +129,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
+      # migrate:
+      #   condition: service_completed_successfully
       minio:
         condition: service_healthy
       elasticmq:
@@ -141,12 +141,20 @@ services:
   # nothing drains them locally otherwise). Polls ElasticMQ and runs the real
   # handlers — see services/ingestion/src/ingestion/local_worker.py.
   #
-  # Defaults to `cv-conversion` only: that consumer needs no host-only
-  # `lambda_shim` / Step Functions execution / LLM key to make progress, so
-  # "Convert to Markdown" works straight after `docker compose up`. To drain
-  # `analysis-intake` / `ingestion-intake` too, run the full pipeline on the
-  # host (`make worker`, with the Lambda shim + a Step Functions execution +
-  # LLM keys) or override WORKER_QUEUES here.
+  # Drains all three pipeline queues, so "Convert to Markdown", "Analyse one
+  # offer" and "Analyse several offers" all work straight after
+  # `docker compose up`:
+  #   - cv-conversion    -> analysis.cv_conversion.handle_cv_conversion
+  #   - ingestion-intake -> ingestion.intake_handler.handle_ingestion_intake
+  #     (the ADR 0002 fan-out worker: runs discover/scrape/extract for the
+  #     IngestionJob, then creates one Analysis per READY JobOffer and enqueues
+  #     it on analysis-intake)
+  #   - analysis-intake  -> analysis.local_pipeline (WORKER_ANALYSIS_MODE=local):
+  #     the whole AnalysisWorkflow in-process, no host-only `lambda_shim` /
+  #     Step Functions execution needed, just an LLM the crew can reach
+  #     (LLM_PROVIDER below, ollama by default).
+  # Set WORKER_ANALYSIS_MODE=stepfunctions + run `make worker` on the host to
+  # exercise the real Step Functions state machine instead.
   worker:
     build:
       context: .
@@ -154,7 +162,10 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/job_hunt_crew
-      WORKER_QUEUES: cv-conversion
+      WORKER_QUEUES: cv-conversion,ingestion-intake,analysis-intake
+      # `local` (in-process AnalysisWorkflow) vs `stepfunctions` (real Step
+      # Functions Local execution — needs the host lambda_shim + SFN_* env).
+      WORKER_ANALYSIS_MODE: ${WORKER_ANALYSIS_MODE:-local}
       # S3 is read directly here (no presigning), so unlike `api` this uses the
       # docker-network hostname, not localhost.
       S3_ENDPOINT: http://minio:9000
@@ -170,10 +181,10 @@ services:
       SQS_INGESTION_INTAKE_QUEUE_URL: http://elasticmq:9324/000000000000/ingestion-intake
       SQS_ACCESS_KEY_ID: x
       SQS_SECRET_ACCESS_KEY: x
-      # Needed only when WORKER_QUEUES includes a queue whose Conversion/crew
-      # step calls an LLM (PDF/DOCX CVs, ingestion extraction). Passed through
-      # from the host env; harmless when unset for the MD/TXT path.
-      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      # The crew run (analysis-intake) and any PDF/DOCX Conversion call an LLM
+      # through this provider; the MD/TXT Conversion path needs none. Passed
+      # through from the host env, defaulting to a local Ollama (no API key).
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
       LLM_MODEL: ${LLM_MODEL:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -181,11 +192,20 @@ services:
       # backend). From this container Ollama on the host is reachable at
       # http://host.docker.internal:11434/v1 — set that in your host env.
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
+      # SITE_SEARCH ("Analyse several offers") against France Travail — the one
+      # seeded OFFICIAL_API site — calls the France Travail API, which needs an
+      # OAuth client-credentials pair. Passed through from the host env (.env);
+      # the HTML_SCRAPE sites and "Analyse one offer" on a non-FT URL don't use
+      # them. FRANCE_TRAVAIL_SCOPE is an optional override — left unset here so
+      # france_travail.py's DEFAULT_SCOPE applies (passing `${VAR:-}` would
+      # inject an empty string, which is *not* the same as unset).
+      FRANCE_TRAVAIL_CLIENT_ID: ${FRANCE_TRAVAIL_CLIENT_ID:-}
+      FRANCE_TRAVAIL_CLIENT_SECRET: ${FRANCE_TRAVAIL_CLIENT_SECRET:-}
     depends_on:
       postgres:
         condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
+      # migrate:
+      #   condition: service_completed_successfully
       minio:
         condition: service_healthy
       elasticmq:

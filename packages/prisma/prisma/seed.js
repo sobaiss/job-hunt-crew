@@ -1,5 +1,11 @@
 // Seeds the 5 SiteConfig rows for PRD Section 8.5's Mode 3 site picker.
 // Run via `pnpm prisma db seed` (invoked by prisma migrate dev / directly).
+//
+// filterParamMapping maps a generic filter key to that site's own param name.
+// Alongside the search filters it carries `id` — the query-string parameter
+// that identifies a single offer in that site's URLs — used by the SINGLE_URL
+// pipeline (ingestion.site_search.extract_offer_id) to pull an offer id out of
+// a pasted URL, not by search-URL building.
 const { PrismaClient } = require("@prisma/client");
 
 const prisma = new PrismaClient();
@@ -17,6 +23,7 @@ const siteConfigs = [
       postedWithin: "f_TPR",
       contractType: "f_JT",
       remote: "f_WT",
+      id: "currentJobId",
     },
     listItemSelector: "ul.jobs-search__results-list > li",
     offerLinkSelector: "a.base-card__full-link",
@@ -41,6 +48,7 @@ const siteConfigs = [
       postedWithin: "fromage",
       contractType: "jt",
       remote: "remotejob",
+      id: "jk",
     },
     listItemSelector: "div.job_seen_beacon",
     offerLinkSelector: "a.jcs-JobTitle",
@@ -64,6 +72,7 @@ const siteConfigs = [
       postedWithin: "minCreationDate",
       contractType: "typeContrat",
       remote: "travailATemps",
+      id: "id",
     },
     listItemSelector: null,
     offerLinkSelector: null,
@@ -88,6 +97,7 @@ const siteConfigs = [
       postedWithin: "range",
       contractType: "refinementList[contract_type][]",
       remote: "refinementList[remote][]",
+      id: "reference",
     },
     listItemSelector: "li[data-testid='search-results-list-item-wrapper']",
     offerLinkSelector: "a[data-testid='job-card-link']",
@@ -111,6 +121,7 @@ const siteConfigs = [
       postedWithin: "fromAge",
       contractType: "jobType",
       remote: "remoteWorkType",
+      id: "jl",
     },
     listItemSelector: "li.react-job-listing",
     offerLinkSelector: "a.jobLink",

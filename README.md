@@ -161,6 +161,9 @@ The AI pipeline:
 - `lambda_shim.py` — local stand-in for the 3 real Lambda functions, so
   Step Functions Local has something to invoke in dev (see docker-compose
   comments).
+- `local_pipeline.py` — dev-only: chains those same handlers in-process
+  (no Step Functions) so the compose `worker` can drain `analysis-intake`
+  the way it already drains `cv-conversion`.
 
 ### `packages/prisma` and `packages/py-db`
 
@@ -214,8 +217,10 @@ bucket), ElasticMQ (SQS-compatible), Step Functions Local, `migrate` (applies
 pending Prisma migrations against Postgres, then exits — see
 `packages/prisma/Dockerfile`), the `api` container (FastAPI, built from the
 repo root so `uv` can resolve the workspace), and `worker` (the local
-stand-in for the AWS SQS → Lambda event-source mappings; drains the
-`cv-conversion` queue so "Convert to Markdown" works out of the box — see
+stand-in for the AWS SQS → Lambda event-source mappings; drains all three
+pipeline queues — `cv-conversion`, `ingestion-intake`, `analysis-intake` —
+so "Convert to Markdown", "Analyse one offer" and "Analyse several offers"
+all work out of the box — see
 `services/ingestion/src/ingestion/local_worker.py`). `api` waits for
 `migrate` to finish successfully before starting, so a fresh Postgres volume
 never leaves `api` running against a missing schema.
@@ -272,20 +277,39 @@ pnpm dev              # apps/web on http://localhost:3000 (via Turborepo)
 (`/docs` and `/openapi.json` are reachable in dev without the internal
 secret).
 
-The compose `worker` drains the `cv-conversion` queue only. To also drain
-`analysis-intake` / `ingestion-intake` — the rest of the async pipeline —
-run the worker on the host, which polls all three queues:
+The compose `worker` drains all three pipeline queues:
+
+- `cv-conversion` → `analysis.cv_conversion.handle_cv_conversion`.
+- `ingestion-intake` → `ingestion.intake_handler.handle_ingestion_intake`
+  (the ADR 0002 fan-out worker): runs the discover/scrape/extract pipeline
+  for the `IngestionJob`, then creates one `Analysis` per `READY` `JobOffer`
+  and enqueues it on `analysis-intake`. This is what makes "Analyse several
+  offers" (and "Analyse one offer" on an unknown URL) advance on their own.
+  A `SITE_SEARCH` run against France Travail needs
+  `FRANCE_TRAVAIL_CLIENT_ID` / `FRANCE_TRAVAIL_CLIENT_SECRET` in the host
+  env (passed through to the container).
+- `analysis-intake` → `WORKER_ANALYSIS_MODE=local`: the whole
+  AnalysisWorkflow (EnsureCVConverted → EnsureOfferExtracted → the
+  comparison crew → persist) in-process via `analysis.local_pipeline`, the
+  same shape `cv-conversion` uses — no `stepfunctions-local` / `lambda_shim`
+  / registered state machine, just an LLM the crew can reach (`LLM_PROVIDER`,
+  `ollama` by default). So a `POST /v1/analyses` ("Analyse one offer" on a
+  known offer, or a re-run) also completes on its own.
+
+To run `analysis-intake` through the real Step Functions state machine
+instead of in-process, run the worker on the host:
 
 ```bash
 make worker              # long-running; Ctrl-C to stop
 # or one-shot: make worker-once   (drains what is queued, then exits)
 ```
 
-That path additionally needs the Lambda shim, a Step Functions execution,
-and `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` in the environment — see the
-comments in `docker-compose.yml` (`stepfunctions-local` / `worker` services)
-and `services/analysis/src/analysis/lambda_shim.py`. Restrict the host
-worker to a subset with `WORKER_QUEUES=cv-conversion,analysis-intake`.
+`WORKER_ANALYSIS_MODE=stepfunctions make worker` additionally needs the
+Lambda shim, a Step Functions execution, and
+`ANTHROPIC_API_KEY`/`OPENAI_API_KEY` in the environment — see the comments
+in `docker-compose.yml` (`stepfunctions-local` / `worker` services) and
+`services/analysis/src/analysis/lambda_shim.py`. Restrict the host worker to
+a subset with `WORKER_QUEUES=cv-conversion,analysis-intake`.
 
 ## Testing
 
