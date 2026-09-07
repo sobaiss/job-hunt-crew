@@ -5,11 +5,73 @@
   "landing": {
     "tagline": "Match your CV against real job offers and see exactly where you stand.",
     "description": "Job Hunt Crew reads a job posting and one of your CVs, then shows the matched skills, the gaps, and what to change before you apply.",
-    "signIn": "Sign in"
+    "signIn": "Sign in",
+    "hero": {
+      "eyebrow": "CV-to-offer matching"
+    },
+    "howItWorks": {
+      "heading": "How it works",
+      "step1Title": "Add a job offer",
+      "step1Body": "Paste the URL of a posting you care about. We fetch and read it for you.",
+      "step2Title": "Choose a CV",
+      "step2Body": "Pick which version of your CV to match against the offer.",
+      "step3Title": "Read the analysis",
+      "step3Body": "See your match score, the skills you already have, and the gaps to close before applying."
+    },
+    "features": {
+      "heading": "More than a single number",
+      "evidenceTitle": "Evidence for every match",
+      "evidenceBody": "Each matched skill is backed by the line in your CV that earned it, so you can trust the score.",
+      "gapsTitle": "Gaps that actually matter",
+      "gapsBody": "Missing skills are tagged required or nice-to-have, so you know what to fix first.",
+      "suggestionsTitle": "Prioritised suggestions",
+      "suggestionsBody": "Concrete changes to make before you apply, ordered by how much they move the needle.",
+      "compareTitle": "Compare your CVs",
+      "compareBody": "Run several CV versions against the same offer and see them side by side.",
+      "batchTitle": "Analyse a whole site",
+      "batchBody": "Point it at a job site with your filters and get every matching offer ranked by fit.",
+      "trendTitle": "Track your progress",
+      "trendBody": "Every analysis is kept, with a match-score trend so you can see your search improving."
+    },
+    "preview": {
+      "heading": "A dashboard built around your search",
+      "body": "Your average and best match score, recent analyses, and a score trend — all in one place once you sign in.",
+      "caption": "Preview of the signed-in dashboard"
+    },
+    "privacy": {
+      "heading": "Your data stays yours",
+      "body": "Every CV you upload and every analysis you run is scoped to your account. Requests are filtered by your user id, so no other user can reach your CVs or your results.",
+      "point1": "CVs and analyses are private to your account",
+      "point2": "Job postings are the only shared data, and only as de-duplicated public records",
+      "point3": "Sign in with Google, LinkedIn, or an email link — no password to leak"
+    },
+    "faq": {
+      "heading": "Frequently asked questions",
+      "formatsQ": "What CV formats can I upload?",
+      "formatsA": "PDF, DOCX, Markdown, or plain text, up to 10 MB per file.",
+      "sourcesQ": "Which job sites are supported?",
+      "sourcesA": "You can paste a single offer URL from any site, or run a search against the configured job sites (LinkedIn, Indeed, France Travail, Welcome to the Jungle, Glassdoor).",
+      "limitsQ": "Is there a limit on how many analyses I can run?",
+      "limitsA": "Yes — there is a daily cap on analyses per account.",
+      "privacyQ": "Who can see my CVs and analyses?",
+      "privacyA": "Only you. Every query is filtered by your account, and CVs and results are never shown to other users.",
+      "modelQ": "What AI model does the analysis use?",
+      "modelA": "A large language model reads the offer and your CV to produce the match. It does not rewrite your CV file for you."
+    },
+    "footer": {
+      "tagline": "Match your CV against real job offers.",
+      "legalHeading": "Legal",
+      "copyright": "Job Hunt Crew"
+    },
+    "placeholders": {
+      "dailyCap": "daily analysis limit: number to be confirmed",
+      "legalLinks": "Legal links (privacy, terms) to be added"
+    }
   },
   "signIn": {
     "title": "Sign in",
     "subtitle": "Sign in to analyse your CV against job offers.",
+    "backToHome": "Back to home",
     "google": "Continue with Google",
     "linkedin": "Continue with LinkedIn",
     "divider": "or",

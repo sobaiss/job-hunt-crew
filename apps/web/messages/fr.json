@@ -5,11 +5,73 @@
   "landing": {
     "tagline": "Comparez votre CV à de vraies offres d'emploi et sachez exactement où vous en êtes.",
     "description": "Job Hunt Crew lit une offre d'emploi et l'un de vos CV, puis affiche les compétences qui correspondent, les manques et ce qu'il faut changer avant de postuler.",
-    "signIn": "Se connecter"
+    "signIn": "Se connecter",
+    "hero": {
+      "eyebrow": "Correspondance CV / offre"
+    },
+    "howItWorks": {
+      "heading": "Comment ça marche",
+      "step1Title": "Ajoutez une offre",
+      "step1Body": "Collez l'URL d'une annonce qui vous intéresse. Nous la récupérons et la lisons pour vous.",
+      "step2Title": "Choisissez un CV",
+      "step2Body": "Indiquez quelle version de votre CV comparer à l'offre.",
+      "step3Title": "Lisez l'analyse",
+      "step3Body": "Découvrez votre score de correspondance, les compétences que vous avez déjà et les manques à combler avant de postuler."
+    },
+    "features": {
+      "heading": "Bien plus qu'un simple score",
+      "evidenceTitle": "Une preuve pour chaque correspondance",
+      "evidenceBody": "Chaque compétence reconnue est appuyée par la ligne de votre CV qui la justifie : le score reste fiable.",
+      "gapsTitle": "Des manques qui comptent vraiment",
+      "gapsBody": "Les compétences absentes sont marquées indispensables ou optionnelles, pour savoir quoi corriger en priorité.",
+      "suggestionsTitle": "Des suggestions priorisées",
+      "suggestionsBody": "Des changements concrets à faire avant de postuler, classés selon leur impact.",
+      "compareTitle": "Comparez vos CV",
+      "compareBody": "Analysez plusieurs versions de votre CV pour une même offre et comparez-les côte à côte.",
+      "batchTitle": "Analysez tout un site",
+      "batchBody": "Ciblez un site d'emploi avec vos filtres et obtenez chaque offre correspondante classée par pertinence.",
+      "trendTitle": "Suivez votre progression",
+      "trendBody": "Chaque analyse est conservée, avec une courbe du score de correspondance pour voir vos candidatures s'améliorer."
+    },
+    "preview": {
+      "heading": "Un tableau de bord pensé pour votre recherche",
+      "body": "Votre score de correspondance moyen et votre meilleur score, vos analyses récentes et une courbe de progression — le tout au même endroit une fois connecté.",
+      "caption": "Aperçu du tableau de bord après connexion"
+    },
+    "privacy": {
+      "heading": "Vos données restent les vôtres",
+      "body": "Chaque CV que vous importez et chaque analyse que vous lancez sont rattachés à votre compte. Les requêtes sont filtrées par votre identifiant d'utilisateur : aucun autre utilisateur ne peut accéder à vos CV ni à vos résultats.",
+      "point1": "Les CV et les analyses sont privés à votre compte",
+      "point2": "Seules les annonces sont partagées, et uniquement comme données publiques dédupliquées",
+      "point3": "Connexion via Google, LinkedIn ou un lien e-mail — aucun mot de passe à compromettre"
+    },
+    "faq": {
+      "heading": "Questions fréquentes",
+      "formatsQ": "Quels formats de CV puis-je importer ?",
+      "formatsA": "PDF, DOCX, Markdown ou texte brut, jusqu'à 10 Mo par fichier.",
+      "sourcesQ": "Quels sites d'emploi sont pris en charge ?",
+      "sourcesA": "Vous pouvez coller l'URL d'une offre depuis n'importe quel site, ou lancer une recherche sur les sites configurés (LinkedIn, Indeed, France Travail, Welcome to the Jungle, Glassdoor).",
+      "limitsQ": "Y a-t-il une limite au nombre d'analyses ?",
+      "limitsA": "Oui — le nombre d'analyses par compte est plafonné chaque jour.",
+      "privacyQ": "Qui peut voir mes CV et mes analyses ?",
+      "privacyA": "Vous seul. Chaque requête est filtrée par votre compte, et les CV comme les résultats ne sont jamais montrés à d'autres utilisateurs.",
+      "modelQ": "Quel modèle d'IA réalise l'analyse ?",
+      "modelA": "Un grand modèle de langage lit l'offre et votre CV pour produire la correspondance. Il ne réécrit pas votre fichier de CV à votre place."
+    },
+    "footer": {
+      "tagline": "Comparez votre CV à de vraies offres d'emploi.",
+      "legalHeading": "Mentions légales",
+      "copyright": "Job Hunt Crew"
+    },
+    "placeholders": {
+      "dailyCap": "limite d'analyses quotidienne : nombre à confirmer",
+      "legalLinks": "Liens légaux (confidentialité, conditions) à ajouter"
+    }
   },
   "signIn": {
     "title": "Connexion",
     "subtitle": "Connectez-vous pour analyser votre CV face aux offres d'emploi.",
+    "backToHome": "Retour à l'accueil",
     "google": "Continuer avec Google",
     "linkedin": "Continuer avec LinkedIn",
     "divider": "ou",
