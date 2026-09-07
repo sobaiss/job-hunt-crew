@@ -35,6 +35,27 @@
     "language": "Langue",
     "signOut": "Se déconnecter"
   },
+  "settings": {
+    "title": "Paramètres",
+    "preferences": {
+      "heading": "Préférences",
+      "themeLabel": "Thème",
+      "themeHint": "Clair, sombre ou selon votre système.",
+      "languageLabel": "Langue",
+      "languageHint": "La langue d'affichage de l'interface."
+    },
+    "account": {
+      "heading": "Compte",
+      "nameLabel": "Nom",
+      "emailLabel": "E-mail",
+      "unknown": "Non renseigné",
+      "readOnlyNote": "Votre nom et votre e-mail proviennent du compte utilisé pour vous connecter et ne peuvent pas être modifiés ici."
+    },
+    "session": {
+      "heading": "Session",
+      "signOut": "Se déconnecter"
+    }
+  },
   "theme": {
     "label": "Changer de thème",
     "light": "Clair",

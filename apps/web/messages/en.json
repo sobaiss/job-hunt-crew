@@ -35,6 +35,27 @@
     "language": "Language",
     "signOut": "Sign out"
   },
+  "settings": {
+    "title": "Settings",
+    "preferences": {
+      "heading": "Preferences",
+      "themeLabel": "Theme",
+      "themeHint": "Light, dark, or match your system.",
+      "languageLabel": "Language",
+      "languageHint": "The language the interface is shown in."
+    },
+    "account": {
+      "heading": "Account",
+      "nameLabel": "Name",
+      "emailLabel": "Email",
+      "unknown": "Not set",
+      "readOnlyNote": "Your name and email come from the account you signed in with and can't be edited here."
+    },
+    "session": {
+      "heading": "Session",
+      "signOut": "Sign out"
+    }
+  },
   "theme": {
     "label": "Change theme",
     "light": "Light",

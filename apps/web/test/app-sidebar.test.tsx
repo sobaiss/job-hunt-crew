@@ -73,6 +73,19 @@ describe("AppSidebar", () => {
     ).not.toHaveAttribute("aria-current");
   });
 
+  it("marks Settings active on the /settings route", () => {
+    pathname = "/settings";
+    renderWithProviders(<AppSidebar />, { session: SESSION });
+
+    expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(
+      screen.getByRole("link", { name: "Dashboard" }),
+    ).not.toHaveAttribute("aria-current");
+  });
+
   it("marks Dashboard active only on an exact / match", () => {
     pathname = "/";
     renderWithProviders(<AppSidebar />, { session: SESSION });
