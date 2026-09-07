@@ -29,13 +29,21 @@ The active UI language, `en` or `fr`. Resolved per request in `i18n/request.ts` 
 _Avoid_: Language (fine in prose, but the resolved value is the Locale), i18n (that's the mechanism)
 
 **Landing page**:
-The public `/` view a signed-out Visitor sees — the product statement and a "Sign in" call to action. A signed-in Candidate hitting `/` is redirected to the Dashboard instead. Lives in `app/(public)`.
-_Avoid_: Home (ambiguous with the Dashboard)
+The public `/` view a signed-out Visitor sees — a marketing page: hero with a "Sign in" call to action, a "how it works" walkthrough, a features grid, a product preview, an FAQ, and a footer. A signed-in Candidate hitting `/` is redirected to the Dashboard instead. Lives in `app/(public)`.
+_Avoid_: Home (ambiguous with the Dashboard), marketing site (it's one in-app page, not a separate site)
 
 **Dashboard**:
-The signed-in landing view — the analyses list at `/analyses`. Where `/` sends a Candidate once they have a Session.
-_Avoid_: Home, analyses page (that's the route)
+The signed-in overview at `/` — stat tiles (average and best Match score, analysis count, CV-version count), recent analyses, a Match-score trend, and quick actions. While the Candidate has no Analysis yet it shows a three-step onboarding checklist in place of the tiles. Where `/` sends a Candidate once they have a Session.
+_Avoid_: Home, Overview (fine in prose; the term is Dashboard), analyses list (that's Analyses)
+
+**Analyses**:
+The list at `/analyses` — every standalone Analysis and every grouped SITE_SEARCH batch, with client-side search, status and CV filters, and date/score sort. Reached from the Dashboard and the Sidebar.
+_Avoid_: Dashboard (that's the overview now), analyses page (that's the route), History
 
 **App shell**:
-The persistent frame around every signed-in page: the header with the brand, primary navigation, and the user menu (theme control, `LocaleSwitch`, sign out). Implemented as `app/(app)/layout.tsx` + `components/app-header.tsx`; `app/(public)` pages render outside it.
-_Avoid_: Layout (too generic), navbar (it's more than the nav)
+The persistent frame around every signed-in page: a left **Sidebar** (brand wordmark, the "New analysis" primary action, the Dashboard / Analyses / CV-versions / Settings links, and the user menu with theme, `LocaleSwitch`, sign out) plus a context **Topbar** (page title and page-level actions). Implemented as `app/(app)/layout.tsx` + `components/app-sidebar.tsx` + `components/app-topbar.tsx`; `app/(public)` pages render outside it. Collapses to a drawer on narrow viewports.
+_Avoid_: Layout (too generic), navbar / header (it's a Sidebar now)
+
+**Settings**:
+The `/settings` page — theme, Locale, and read-only account details (name and email from the Session), plus sign out. No account deletion (there is no API for it).
+_Avoid_: Preferences, Account page

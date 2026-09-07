@@ -1,0 +1,17 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html", "x": 0, "y": 0, "w": 1440, "h": 4300, "title": "Landing publique" },
+    { "file": "Shell.dc.html", "x": 1560, "y": 0, "w": 1440, "h": 1040, "title": "Shell + Dashboard" },
+    { "file": "AnalysisDetail.dc.html", "x": 3120, "y": 0, "w": 1440, "h": 1480, "title": "Detail d'analyse" }
+  ],
+  "annotations": [
+    {
+      "id": "brief",
+      "x": 0,
+      "y": -180,
+      "w": 900,
+      "text": "Job Hunt Crew — refonte UI/UX (maquettes statiques, mode clair).\nSysteme repris de globals.css : papier #faf9f5, panel #f0eee6, coral #d97757 (marque + actions), success/warning/danger reserves au score et aux statuts. Titres Source Serif 4, UI Inter, radius 10-14px.\nLe dark mode et le responsive (drawer mobile) sont traites en phase de code."
+    }
+  ],
+  "launch": { "view": "canvas" }
+}

@@ -1,0 +1,272 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600;8..60,700&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#faf9f5; --panel:#f0eee6; --fg:#1f1e1d; --muted:#6b6a63;
+      --accent:#d97757; --accent-2:#c25f3f; --border:#e5e2d9;
+      --success:#3f7d4e; --warning:#b7791f; --danger:#c0392b;
+      --sans:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+      --serif:'Source Serif 4',Georgia,'Times New Roman',serif;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--sans);-webkit-font-smoothing:antialiased;line-height:1.5}
+    h1,h2,h3,h4{font-family:var(--serif);font-weight:600;margin:0;letter-spacing:-0.015em;line-height:1.18;color:var(--fg)}
+    p{margin:0}
+    a{color:var(--accent);text-decoration:none}
+    a:hover{color:var(--accent-2)}
+    .app{width:1440px;height:1480px;display:grid;grid-template-columns:248px minmax(0,1fr);background:var(--bg);overflow:hidden}
+    .muted{color:var(--muted)}
+    .badge{display:inline-flex;align-items:center;gap:5px;border-radius:8px;padding:3px 9px;font:500 12px var(--sans);border:1px solid transparent;white-space:nowrap}
+    .b-success{background:rgba(63,125,78,.15);color:var(--success)}
+    .b-warning{background:rgba(183,121,31,.15);color:var(--warning)}
+    .b-danger{background:rgba(192,57,43,.15);color:var(--danger)}
+    .b-muted{background:var(--panel);color:var(--muted);border-color:var(--border)}
+    .ico{width:18px;height:18px;display:block;flex:none}
+    .nav-item{display:flex;align-items:center;gap:11px;padding:8px 11px;border-radius:8px;font-size:14px;color:var(--muted);cursor:pointer}
+    .nav-item.active{background:var(--bg);color:var(--fg);font-weight:500;box-shadow:inset 0 0 0 1px var(--border)}
+    .card{background:var(--bg);border:1px solid var(--border);border-radius:14px;box-shadow:0 1px 2px rgba(31,30,29,.05)}
+    .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:34px;padding:0 14px;border-radius:8px;font:500 13px var(--sans);border:1px solid var(--border);background:var(--bg);color:var(--fg);cursor:pointer;white-space:nowrap}
+    .sec-title{font:600 12px var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+    .skill-row{display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-top:1px solid var(--border)}
+    .dot{width:7px;height:7px;border-radius:50%;margin-top:6px;flex:none}
+    .prio{display:inline-flex;align-items:center;border-radius:6px;padding:1px 7px;font:600 11px var(--sans);flex:none}
+  </style>
+</helmet>
+
+<div class="app">
+
+  <!-- ============ SIDEBAR ============ -->
+  <aside style="background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:18px 14px">
+    <div style="display:flex;align-items:center;gap:9px;padding:4px 8px 0">
+      <svg style="width:26px;height:26px;flex:none" viewBox="0 0 28 28" fill="none"><rect x="1.5" y="1.5" width="25" height="25" rx="7" fill="rgba(217,119,87,.16)"/><circle cx="14" cy="14" r="7" stroke="var(--accent)" stroke-width="2"/><circle cx="14" cy="14" r="2.6" fill="var(--accent)"/><path d="M14 3.2v3.2M14 21.6v3.2M24.8 14h-3.2M6.4 14H3.2" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"/></svg>
+      <span style="font-family:var(--serif);font-size:15px;font-weight:600;letter-spacing:-0.01em">Job Hunt Crew</span>
+    </div>
+
+    <button style="margin-top:20px;height:38px;border:none;border-radius:9px;background:var(--accent);color:#fff;font:500 14px var(--sans);display:flex;align-items:center;justify-content:center;gap:7px;cursor:pointer">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+      Nouvelle analyse
+    </button>
+
+    <nav style="margin-top:20px;display:flex;flex-direction:column;gap:3px">
+      <div class="nav-item">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+        Dashboard
+      </div>
+      <div class="nav-item active">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>
+        Analyses
+      </div>
+      <div class="nav-item">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+        Mes CV
+      </div>
+      <div class="nav-item">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.31.22.65.22 1"/></svg>
+        Paramètres
+      </div>
+    </nav>
+
+    <div style="margin-top:auto;display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--muted);padding:0 4px">
+        <div style="display:flex;align-items:center;gap:6px">
+          <svg class="ico" style="width:15px;height:15px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M5 12H3M21 12h-2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M17 7l1.4-1.4M5.6 18.4 7 17"/></svg>
+          Clair
+        </div>
+        <div style="display:flex;align-items:center;gap:3px;border:1px solid var(--border);border-radius:7px;padding:2px 6px"><span style="color:var(--fg);font-weight:500">FR</span>·<span>EN</span></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;border-top:1px solid var(--border);padding-top:12px">
+        <div style="width:32px;height:32px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex:none">BD</div>
+        <div style="min-width:0;flex:1">
+          <div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Bairing D.</div>
+          <div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">bairing.djonkamla@gmail.com</div>
+        </div>
+        <svg class="ico" style="width:15px;height:15px;color:var(--muted)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============ MAIN ============ -->
+  <div style="display:flex;flex-direction:column;min-width:0">
+
+    <!-- topbar -->
+    <div style="height:60px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 32px;flex:none">
+      <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)">
+        <a href="#">Analyses</a>
+        <span>/</span>
+        <span style="color:var(--fg)">Senior Data Engineer</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button class="btn"><svg class="ico" style="width:15px;height:15px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>Voir l'offre</button>
+        <button class="btn"><svg class="ico" style="width:15px;height:15px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9 9 0 0 0-6.3 2.6L3 8"/><path d="M3 3v5h5"/></svg>Relancer</button>
+      </div>
+    </div>
+
+    <!-- content -->
+    <div style="padding:32px;display:flex;flex-direction:column;gap:22px;overflow:hidden">
+
+      <!-- header block -->
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:24px">
+        <div>
+          <h1 style="font-size:28px">Senior Data Engineer</h1>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:8px;font-size:14px;color:var(--muted)">
+            <span>Payflow</span><span>·</span><span>vs. Data — Fintech</span>
+            <span class="badge b-success">Terminé</span>
+          </div>
+        </div>
+        <a href="#" style="display:inline-flex;align-items:center;gap:6px;font-size:13px;flex:none;margin-top:4px">
+          <svg class="ico" style="width:15px;height:15px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/></svg>
+          Comparer avec d'autres CV
+        </a>
+      </div>
+
+      <!-- score + summary -->
+      <div style="display:grid;grid-template-columns:340px minmax(0,1fr);gap:20px;align-items:stretch">
+        <div class="card" style="padding:22px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px">
+          <svg viewBox="0 0 160 160" style="width:170px;height:170px">
+            <circle cx="80" cy="80" r="66" fill="none" stroke="var(--border)" stroke-width="14"/>
+            <circle cx="80" cy="80" r="66" fill="none" stroke="var(--success)" stroke-width="14" stroke-linecap="round" stroke-dasharray="414.7" stroke-dashoffset="99.5" transform="rotate(-90 80 80)"/>
+            <text x="80" y="78" text-anchor="middle" style="font:600 46px var(--serif);fill:var(--fg)">76</text>
+            <text x="80" y="102" text-anchor="middle" style="font:500 13px var(--sans);fill:var(--muted)">/ 100</text>
+          </svg>
+          <span class="badge b-success" style="font-size:13px;padding:4px 12px">Fort</span>
+          <div style="font-size:11.5px;color:var(--muted);text-align:center;line-height:1.7">
+            ≥ 75 — fort&nbsp;&nbsp;·&nbsp;&nbsp;45–74 — partiel&nbsp;&nbsp;·&nbsp;&nbsp;&lt; 45 — faible
+          </div>
+        </div>
+        <div class="card" style="padding:22px 24px;display:flex;flex-direction:column;gap:10px">
+          <span class="sec-title">Résumé</span>
+          <p style="font-family:var(--serif);font-size:16px;line-height:1.65">
+            Votre profil couvre l'essentiel du poste côté data engineering — Python, orchestration, cloud AWS en production. Les manques portent sur le streaming temps réel (Kafka/Kinesis) et la visibilité d'un rôle de lead technique. Deux ajustements de CV suffiraient à passer « fort » sur l'ensemble des critères requis.
+          </p>
+          <div style="font-size:11.5px;color:var(--muted);margin-top:auto;padding-top:12px;border-top:1px solid var(--border)">Généré le 6 sept. 2026 · fournisseur configurable côté serveur</div>
+        </div>
+      </div>
+
+      <!-- skills -->
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px">
+        <div class="card" style="padding:22px 24px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <span class="sec-title">Compétences en phase</span>
+            <span class="badge b-success">12</span>
+          </div>
+          <div>
+            <div class="skill-row">
+              <span class="dot" style="background:var(--success)"></span>
+              <div><span style="font-size:14px;font-weight:500">Python</span><div style="font-size:12.5px;color:var(--muted)">« 6 ans, pipelines ETL en production chez Payflow »</div></div>
+            </div>
+            <div class="skill-row">
+              <span class="dot" style="background:var(--success)"></span>
+              <div><span style="font-size:14px;font-weight:500">Orchestration (Airflow)</span><div style="font-size:12.5px;color:var(--muted)">« DAGs Airflow, ~40 pipelines quotidiens »</div></div>
+            </div>
+            <div class="skill-row">
+              <span class="dot" style="background:var(--success)"></span>
+              <div><span style="font-size:14px;font-weight:500">AWS (S3, Glue, Redshift)</span><div style="font-size:12.5px;color:var(--muted)">« Infrastructure data AWS, 3 ans »</div></div>
+            </div>
+            <div class="skill-row">
+              <span class="dot" style="background:var(--success)"></span>
+              <div><span style="font-size:14px;font-weight:500">SQL avancé &amp; modélisation</span><div style="font-size:12.5px;color:var(--muted)">« dbt, modèles en étoile, optimisation de requêtes »</div></div>
+            </div>
+            <div class="skill-row">
+              <span class="dot" style="background:var(--success)"></span>
+              <div><span style="font-size:14px;font-weight:500">CI/CD &amp; tests de données</span><div style="font-size:12.5px;color:var(--muted)">« GitHub Actions, Great Expectations »</div></div>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:14px">
+              <span class="badge b-success">Terraform</span>
+              <span class="badge b-success">Docker</span>
+              <span class="badge b-success">Spark</span>
+              <span class="badge b-success">Snowflake</span>
+              <span class="badge b-success">Git</span>
+              <span class="badge b-success">Parquet</span>
+              <span class="badge b-success">+ 2</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="padding:22px 24px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <span class="sec-title">Compétences manquantes</span>
+            <span class="badge b-warning">5</span>
+          </div>
+          <div>
+            <div class="skill-row" style="align-items:center;justify-content:space-between">
+              <div style="display:flex;align-items:center;gap:10px"><span class="dot" style="background:var(--danger);margin-top:0"></span><span style="font-size:14px;font-weight:500">Kafka / streaming temps réel</span></div>
+              <span class="badge b-danger">Requis</span>
+            </div>
+            <div class="skill-row" style="align-items:center;justify-content:space-between">
+              <div style="display:flex;align-items:center;gap:10px"><span class="dot" style="background:var(--danger);margin-top:0"></span><span style="font-size:14px;font-weight:500">Leadership technique (lead d'équipe)</span></div>
+              <span class="badge b-danger">Requis</span>
+            </div>
+            <div class="skill-row" style="align-items:center;justify-content:space-between">
+              <div style="display:flex;align-items:center;gap:10px"><span class="dot" style="background:var(--warning);margin-top:0"></span><span style="font-size:14px;font-weight:500">Kubernetes</span></div>
+              <span class="badge b-warning">Apprécié</span>
+            </div>
+            <div class="skill-row" style="align-items:center;justify-content:space-between">
+              <div style="display:flex;align-items:center;gap:10px"><span class="dot" style="background:var(--warning);margin-top:0"></span><span style="font-size:14px;font-weight:500">Approche data mesh</span></div>
+              <span class="badge b-warning">Apprécié</span>
+            </div>
+            <div class="skill-row" style="align-items:center;justify-content:space-between">
+              <div style="display:flex;align-items:center;gap:10px"><span class="dot" style="background:var(--warning);margin-top:0"></span><span style="font-size:14px;font-weight:500">Certification AWS</span></div>
+              <span class="badge b-warning">Apprécié</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- strengths / weaknesses / suggestions -->
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px">
+        <div class="card" style="padding:22px 24px">
+          <span class="sec-title">Forces</span>
+          <ul style="margin:12px 0 0;padding-left:18px;font-size:14px;line-height:1.9">
+            <li>Socle data engineering solide et récent</li>
+            <li>Expérience cloud AWS en production, pas seulement en POC</li>
+            <li>Bonne culture qualité : tests de données, CI/CD</li>
+          </ul>
+        </div>
+        <div class="card" style="padding:22px 24px">
+          <span class="sec-title">Faiblesses</span>
+          <ul style="margin:12px 0 0;padding-left:18px;font-size:14px;line-height:1.9">
+            <li>Aucune expérience de streaming temps réel affichée</li>
+            <li>Le rôle de lead / cadrage est peu visible sur le CV</li>
+            <li>Stack Kubernetes absente</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="card" style="padding:22px 24px">
+        <span class="sec-title">Suggestions d'amélioration</span>
+        <div style="margin-top:12px">
+          <div style="display:flex;gap:12px;padding:12px 0;border-top:1px solid var(--border)">
+            <span class="prio b-danger">Haute</span>
+            <div><span style="font-size:14px;font-weight:500">Compétences — </span><span style="font-size:14px">ajoutez une ligne sur Kafka ou Kinesis si vous y avez touché, même en preuve de concept ; c'est un critère requis.</span></div>
+          </div>
+          <div style="display:flex;gap:12px;padding:12px 0;border-top:1px solid var(--border)">
+            <span class="prio b-danger">Haute</span>
+            <div><span style="font-size:14px;font-weight:500">Expérience — </span><span style="font-size:14px">reformulez la mission Payflow pour faire ressortir le cadrage technique et l'encadrement (nombre de personnes, périmètre).</span></div>
+          </div>
+          <div style="display:flex;gap:12px;padding:12px 0;border-top:1px solid var(--border)">
+            <span class="prio b-warning">Moyenne</span>
+            <div><span style="font-size:14px;font-weight:500">Mise en forme — </span><span style="font-size:14px">regroupez les compétences cloud sous un intitulé « AWS (production) » pour un repérage immédiat.</span></div>
+          </div>
+          <div style="display:flex;gap:12px;padding:12px 0;border-top:1px solid var(--border)">
+            <span class="prio b-muted" style="border:1px solid var(--border)">Basse</span>
+            <div><span style="font-size:14px;font-weight:500">Divers — </span><span style="font-size:14px">mentionnez votre veille data (conférences, publications) pour appuyer la dimension senior.</span></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

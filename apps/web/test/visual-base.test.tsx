@@ -48,3 +48,27 @@ describe("template assets", () => {
     expect(css).not.toMatch(/font-family:\s*Arial/i);
   });
 });
+
+describe("design system foundations", () => {
+  it("DESIGN.md exists", () => {
+    expect(existsSync(join(__dirname, "..", "DESIGN.md"))).toBe(true);
+  });
+
+  it("globals.css declares the type-scale, elevation, and motion tokens", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const css = await readFile(
+      join(__dirname, "..", "app", "globals.css"),
+      "utf8",
+    );
+    for (const token of [
+      "--text-base",
+      "--text-3xl",
+      "--shadow-sm",
+      "--shadow-lg",
+      "--ease-standard",
+      "--duration-base",
+    ]) {
+      expect(css).toContain(token);
+    }
+  });
+});
