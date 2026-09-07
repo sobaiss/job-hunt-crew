@@ -23,7 +23,9 @@
   },
   "nav": {
     "dashboard": "Tableau de bord",
+    "analyses": "Analyses",
     "cvVersions": "Versions de CV",
+    "settings": "Paramètres",
     "newAnalysis": "Nouvelle analyse",
     "openMenu": "Ouvrir le menu"
   },

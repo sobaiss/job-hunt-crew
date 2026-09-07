@@ -23,7 +23,9 @@
   },
   "nav": {
     "dashboard": "Dashboard",
+    "analyses": "Analyses",
     "cvVersions": "CV versions",
+    "settings": "Settings",
     "newAnalysis": "New analysis",
     "openMenu": "Open menu"
   },
