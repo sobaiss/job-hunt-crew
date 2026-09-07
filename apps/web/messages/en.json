@@ -227,6 +227,7 @@
       "empty": "No analyses found for this job offer.",
       "count": "Comparing {count} CV versions",
       "singleNotice": "Only one CV version has been analysed for this offer — request an analysis against another CV version to compare.",
+      "category": "Category",
       "noResult": "No result yet."
     }
   },
