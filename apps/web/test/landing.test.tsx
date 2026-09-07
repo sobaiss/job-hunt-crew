@@ -68,6 +68,15 @@ describe("LandingPage (marketing content)", () => {
     expect(
       screen.getByText("Preview of the signed-in dashboard"),
     ).toBeInTheDocument();
+
+    // A real Dashboard screenshot, not the old stylised in-page mock.
+    const preview = screen.getByRole("img", {
+      name: "Preview of the signed-in dashboard",
+    });
+    expect(preview).toHaveAttribute(
+      "src",
+      expect.stringContaining("dashboard-preview"),
+    );
   });
 
   it("states that data is isolated per account", () => {

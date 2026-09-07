@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import {
@@ -179,8 +180,11 @@ export function LandingPage() {
           </div>
         </section>
 
-        {/* Product preview — a stylised in-page mock of the Dashboard until the
-            real screenshot lands in the final slice. */}
+        {/* Product preview — real screenshots of the redesigned signed-in
+            Dashboard (spec #49). Regenerate with
+            `pnpm exec playwright test --config design/capture/playwright.capture.config.ts`.
+            The light / dark pair is swapped by the `dark` class next-themes
+            puts on <html>, so it follows the visitor's system preference. */}
         <section className="flex flex-col gap-10 lg:flex-row lg:items-center">
           <div className="flex flex-col gap-4 lg:w-2/5">
             <h2 className="font-serif text-3xl font-semibold tracking-tight">
@@ -189,32 +193,22 @@ export function LandingPage() {
             <p className="text-muted">{t("preview.body")}</p>
           </div>
           <figure className="flex flex-col gap-2 lg:w-3/5">
-            <div
-              aria-hidden="true"
-              className="rounded-xl border border-border bg-panel p-4 shadow-md"
-            >
-              <div className="grid grid-cols-3 gap-3">
-                {["72", "91", "18"].map((n) => (
-                  <div
-                    key={n}
-                    className="flex flex-col gap-1 rounded-lg bg-background p-3 ring-1 ring-border"
-                  >
-                    <span className="text-2xl font-semibold tabular-nums">
-                      {n}
-                    </span>
-                    <span className="h-2 w-2/3 rounded bg-border" />
-                  </div>
-                ))}
-              </div>
-              <div className="mt-3 flex items-end gap-1.5 rounded-lg bg-background p-3 ring-1 ring-border">
-                {[30, 44, 38, 56, 62, 58, 74].map((h, i) => (
-                  <span
-                    key={i}
-                    style={{ height: `${h}px` }}
-                    className="w-full rounded-t bg-accent/40"
-                  />
-                ))}
-              </div>
+            <div className="overflow-hidden rounded-xl border border-border bg-panel p-2 shadow-md">
+              <Image
+                src="/dashboard-preview-light.png"
+                alt={t("preview.caption")}
+                width={1024}
+                height={1295}
+                className="w-full rounded-lg border border-border dark:hidden"
+              />
+              <Image
+                src="/dashboard-preview-dark.png"
+                alt=""
+                aria-hidden="true"
+                width={1024}
+                height={1295}
+                className="hidden w-full rounded-lg border border-border dark:block"
+              />
             </div>
             <figcaption className="text-center text-xs text-muted">
               {t("preview.caption")}
