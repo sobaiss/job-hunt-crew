@@ -396,6 +396,7 @@
       "discovered": "Discovered",
       "scraped": "Scraped",
       "failedCount": "Failed",
+      "scrapingProgress": "Scraping progress",
       "offersHeading": "Job offers",
       "offersEmpty": "No job offers discovered yet."
     }

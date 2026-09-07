@@ -396,6 +396,7 @@
       "discovered": "Découvertes",
       "scraped": "Extraites",
       "failedCount": "Échecs",
+      "scrapingProgress": "Progression de l'extraction",
       "offersHeading": "Offres d'emploi",
       "offersEmpty": "Aucune offre découverte pour l'instant."
     }

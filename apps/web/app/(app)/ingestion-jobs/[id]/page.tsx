@@ -59,6 +59,16 @@ export default function IngestionJobPage() {
       { key: "failedCount", value: job.failedCount },
     ];
 
+  // The scraping-progress bar: how many discovered offers have been fetched so
+  // far. Hidden before there is anything to scrape (PENDING, or nothing found).
+  const showProgress = job.status !== "PENDING" && job.discoveredCount > 0;
+  const scrapedPct = job.discoveredCount
+    ? Math.min(
+        100,
+        Math.round((job.scrapedCount / job.discoveredCount) * 100),
+      )
+    : 0;
+
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-col gap-8 p-8">
       <div className="flex flex-col gap-2">
@@ -90,6 +100,30 @@ export default function IngestionJobPage() {
         </div>
       )}
 
+      {showProgress && (
+        <div className="flex flex-col gap-2">
+          <div className="flex items-baseline justify-between text-sm">
+            <span className="text-muted">{t("detail.scrapingProgress")}</span>
+            <span className="font-semibold tabular-nums">
+              {`${job.scrapedCount} / ${job.discoveredCount}`}
+            </span>
+          </div>
+          <div
+            className="h-2 overflow-hidden rounded-full bg-border"
+            role="progressbar"
+            aria-label={t("detail.scrapingProgress")}
+            aria-valuenow={scrapedPct}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
+            <div
+              className="h-full rounded-full bg-foreground transition-[width]"
+              style={{ width: `${scrapedPct}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       <dl className="grid grid-cols-3 gap-3">
         {stats.map(({ key, value }) => (
           <Card key={key} className="py-0">
@@ -116,9 +150,18 @@ export default function IngestionJobPage() {
                     <span className="truncate text-sm">
                       {jobOffer.title ?? jobOffer.id}
                     </span>
-                    <span className="shrink-0 text-xs text-muted">
+                    <Badge
+                      variant={
+                        jobOffer.extractionStatus === "READY"
+                          ? "success"
+                          : jobOffer.extractionStatus === "FAILED"
+                            ? "destructive"
+                            : "secondary"
+                      }
+                      className="shrink-0"
+                    >
                       {jobOffer.extractionStatus}
-                    </span>
+                    </Badge>
                   </CardContent>
                 </Card>
               </li>

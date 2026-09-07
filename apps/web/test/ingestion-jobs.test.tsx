@@ -41,6 +41,41 @@ describe("IngestionJobPage", () => {
     expect(screen.getByText("1")).toBeInTheDocument();
   });
 
+  it("renders a scraping-progress bar reflecting scraped / discovered", async () => {
+    server.use(
+      http.get("/api/ingestion-jobs/j1", () =>
+        HttpResponse.json({
+          ingestionJob: job({
+            status: "RUNNING",
+            discoveredCount: 10,
+            scrapedCount: 4,
+          }),
+        }),
+      ),
+    );
+    renderWithProviders(<IngestionJobPage />);
+
+    const bar = await screen.findByRole("progressbar", {
+      name: "Scraping progress",
+    });
+    expect(bar).toHaveAttribute("aria-valuenow", "40");
+    expect(screen.getByText("4 / 10")).toBeInTheDocument();
+  });
+
+  it("does not render the scraping-progress bar for a PENDING job", async () => {
+    server.use(
+      http.get("/api/ingestion-jobs/j1", () =>
+        HttpResponse.json({
+          ingestionJob: job({ status: "PENDING", discoveredCount: 10 }),
+        }),
+      ),
+    );
+    renderWithProviders(<IngestionJobPage />);
+
+    await screen.findByText(/hasn't been picked up yet/i);
+    expect(screen.queryByRole("progressbar")).toBeNull();
+  });
+
   it("shows an explicit waiting-to-start state for a PENDING job, not a spinner", async () => {
     server.use(
       http.get("/api/ingestion-jobs/j1", () =>

@@ -90,6 +90,35 @@ describe("BatchResultPage", () => {
     ).toHaveAttribute("href", "/ingestion-jobs/j1");
   });
 
+  it("shows each scored analysis as a match-score gauge and a two-phase progress bar", async () => {
+    stubApi({
+      jobStatus: "COMPLETED",
+      discoveredCount: 2,
+      analyses: [
+        analysisRow({ id: "a-high", matchScore: 88 }),
+        analysisRow({
+          id: "a-pending",
+          status: "RUNNING_CREW",
+          matchScore: null,
+        }),
+      ],
+    });
+
+    renderWithProviders(<BatchResultPage />);
+
+    // The completed analysis is shown with the shared Match-score gauge…
+    expect(
+      await screen.findByRole("img", { name: "Match score 88 out of 100" }),
+    ).toBeInTheDocument();
+    // …and the still-running one keeps its status badge until a score lands.
+    expect(screen.getByText("Running")).toBeInTheDocument();
+
+    // Phase 2 progress: one of the two analyses is terminal -> 50%.
+    const bar = screen.getByRole("progressbar", { name: "Analyses completed" });
+    expect(bar).toHaveAttribute("aria-valuenow", "50");
+    expect(screen.getByText("1 / 2")).toBeInTheDocument();
+  });
+
   it("stops polling the job once it is terminal and every analysis is too", async () => {
     let jobCalls = 0;
     stubApi({
