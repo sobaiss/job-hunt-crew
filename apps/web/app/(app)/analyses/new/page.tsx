@@ -20,10 +20,19 @@ import {
   useKnownOfferShortcut,
 } from "@/hooks/use-analyses";
 import { BffError } from "@/lib/bff-client";
+import { Check } from "lucide-react";
+
 import { CvVersionPicker } from "@/components/cv-version-picker";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
+import {
+  SUBNAV_CLASS,
+  SUBNAV_ACTIVE_CLASS,
+  SUBNAV_LINK_CLASS,
+} from "@/components/matching-subnav";
 
 type Submitted = { inputUrl: string; cvVersionId: string };
 
@@ -107,20 +116,48 @@ function WaitingState({
     (job.data != null && TERMINAL_INGESTION_STATUSES.has(job.data.status));
   const step2Active = analysisId !== null;
 
+  const steps = [
+    { label: t("step1"), done: step1Done, active: !step1Done },
+    { label: t("step2"), done: false, active: step2Active },
+  ];
+
   return (
-    <div role="status" className="flex flex-col gap-3">
-      <h2 className="font-serif text-xl font-semibold">{t("waitingHeading")}</h2>
-      <ol className="flex flex-col gap-2 text-sm">
-        <li className={step1Done ? "text-muted" : "font-medium"}>
-          <span aria-hidden="true">{step1Done ? "✓ " : "→ "}</span>
-          <span>{t("step1")}</span>
-        </li>
-        <li className={step2Active ? "font-medium" : "text-muted"}>
-          <span aria-hidden="true">{step2Active ? "→ " : "· "}</span>
-          <span>{t("step2")}</span>
-        </li>
-      </ol>
-    </div>
+    <Card>
+      <CardContent className="flex flex-col gap-4 py-6">
+        <div role="status" className="flex flex-col gap-4">
+          <h2 className="font-serif text-lg font-semibold">
+            {t("waitingHeading")}
+          </h2>
+          <ol className="flex flex-col gap-3">
+            {steps.map((step, i) => (
+              <li key={i} className="flex items-center gap-3">
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    "flex size-5 flex-none items-center justify-center rounded-full border text-xs",
+                    step.done
+                      ? "border-success bg-success text-white"
+                      : step.active
+                        ? "border-foreground text-foreground"
+                        : "border-border text-muted",
+                  )}
+                >
+                  {step.done ? <Check className="size-3" /> : i + 1}
+                </span>
+                <span
+                  className={cn(
+                    "text-sm",
+                    step.active ? "font-medium" : "text-muted",
+                  )}
+                >
+                  {step.label}
+                </span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -134,9 +171,8 @@ export default function AnalyseOneOfferPage() {
   const [cvVersionId, setCvVersionId] = useState("");
   const [ingestionJobId, setIngestionJobId] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState<Submitted | null>(null);
-  const [alreadyAnalysed, setAlreadyAnalysed] = useState<AlreadyAnalysed | null>(
-    null,
-  );
+  const [alreadyAnalysed, setAlreadyAnalysed] =
+    useState<AlreadyAnalysed | null>(null);
   const [dailyCapReached, setDailyCapReached] = useState(false);
 
   const schema = z.object({
@@ -216,7 +252,8 @@ export default function AnalyseOneOfferPage() {
     await runDirect(result.jobOfferId);
   });
 
-  const busy = create.isPending || shortcut.isPending || createAnalysis.isPending;
+  const busy =
+    create.isPending || shortcut.isPending || createAnalysis.isPending;
   const genericError =
     !dailyCapReached &&
     (create.isError || shortcut.isError || createAnalysis.isError);
@@ -273,62 +310,67 @@ export default function AnalyseOneOfferPage() {
         </div>
       ) : (
         <>
-          <nav className="flex gap-4 text-sm">
-            <span aria-current="page" className="font-medium">
+          <nav className={SUBNAV_CLASS}>
+            <span aria-current="page" className={SUBNAV_ACTIVE_CLASS}>
               {t("heading")}
             </span>
-            <Link
-              href="/analyses/new/several"
-              className="text-muted hover:text-foreground"
-            >
+            <Link href="/analyses/new/several" className={SUBNAV_LINK_CLASS}>
               {tSeveral("heading")}
             </Link>
           </nav>
 
-          <form className="flex flex-col gap-4" onSubmit={onSubmit} noValidate>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="offer-url">{t("urlLabel")}</Label>
-              <Input
-                id="offer-url"
-                type="url"
-                placeholder={t("urlPlaceholder")}
-                aria-invalid={errors.inputUrl ? true : undefined}
-                {...register("inputUrl")}
-              />
-              {errors.inputUrl && (
-                <p role="alert" className="text-sm text-destructive">
-                  {errors.inputUrl.message}
-                </p>
-              )}
-            </div>
+          <Card>
+            <CardContent className="py-6">
+              <form
+                className="flex flex-col gap-4"
+                onSubmit={onSubmit}
+                noValidate
+              >
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="offer-url">{t("urlLabel")}</Label>
+                  <Input
+                    id="offer-url"
+                    type="url"
+                    placeholder={t("urlPlaceholder")}
+                    aria-invalid={errors.inputUrl ? true : undefined}
+                    {...register("inputUrl")}
+                  />
+                  {errors.inputUrl && (
+                    <p role="alert" className="text-sm text-destructive">
+                      {errors.inputUrl.message}
+                    </p>
+                  )}
+                </div>
 
-            <CvVersionPicker
-              id="offer-cv"
-              value={cvVersionId}
-              onChange={setCvVersionId}
-              allowImport
-            />
+                <CvVersionPicker
+                  id="offer-cv"
+                  value={cvVersionId}
+                  onChange={setCvVersionId}
+                  allowImport
+                />
 
-            <Button
-              type="submit"
-              disabled={busy || !cvVersionId}
-              className="self-start"
-            >
-              {busy ? t("submitting") : t("submit")}
-            </Button>
+                <Button
+                  type="submit"
+                  disabled={busy || !cvVersionId}
+                  className="self-start"
+                >
+                  {busy ? t("submitting") : t("submit")}
+                </Button>
 
-            {dailyCapReached && (
-              <p role="alert" className="text-sm text-destructive">
-                {t("dailyCap")}
-              </p>
-            )}
+                {dailyCapReached && (
+                  <p role="alert" className="text-sm text-destructive">
+                    {t("dailyCap")}
+                  </p>
+                )}
 
-            {genericError && (
-              <p role="alert" className="text-sm text-destructive">
-                {t("error")}
-              </p>
-            )}
-          </form>
+                {genericError && (
+                  <p role="alert" className="text-sm text-destructive">
+                    {t("error")}
+                  </p>
+                )}
+              </form>
+            </CardContent>
+          </Card>
         </>
       )}
     </main>

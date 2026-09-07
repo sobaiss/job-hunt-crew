@@ -115,70 +115,88 @@ export default function CvVersionsPage() {
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-col gap-10 p-8">
+      <h1 className="font-serif text-2xl font-semibold">{t("title")}</h1>
+
       <section className="flex flex-col gap-4">
-        <h1 className="font-serif text-2xl font-semibold">{t("form.heading")}</h1>
+        <h2 className="font-serif text-xl font-semibold">
+          {t("form.heading")}
+        </h2>
 
-        <form className="flex flex-col gap-4" onSubmit={onSubmit} noValidate>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="cv-label">{t("form.labelLabel")}</Label>
-            <Input
-              id="cv-label"
-              type="text"
-              placeholder={t("form.labelPlaceholder")}
-              aria-invalid={errors.label ? true : undefined}
-              {...register("label")}
-            />
-            {errors.label && (
-              <p role="alert" className="text-sm text-destructive">
-                {errors.label.message}
-              </p>
-            )}
-          </div>
+        <Card>
+          <CardContent className="py-6">
+            <form
+              className="flex flex-col gap-4"
+              onSubmit={onSubmit}
+              noValidate
+            >
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="cv-label">{t("form.labelLabel")}</Label>
+                <Input
+                  id="cv-label"
+                  type="text"
+                  placeholder={t("form.labelPlaceholder")}
+                  aria-invalid={errors.label ? true : undefined}
+                  {...register("label")}
+                />
+                {errors.label && (
+                  <p role="alert" className="text-sm text-destructive">
+                    {errors.label.message}
+                  </p>
+                )}
+              </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="cv-file">{t("form.fileLabel")}</Label>
-            <Input
-              id="cv-file"
-              type="file"
-              accept={CV_FILE_ACCEPT}
-              aria-invalid={errors.file ? true : undefined}
-              aria-describedby="cv-file-hint"
-              {...register("file")}
-            />
-            <p id="cv-file-hint" className="text-xs text-muted">
-              {t("form.fileHint")}
-            </p>
-            {errors.file && (
-              <p role="alert" className="text-sm text-destructive">
-                {errors.file.message as string}
-              </p>
-            )}
-          </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="cv-file">{t("form.fileLabel")}</Label>
+                <Input
+                  id="cv-file"
+                  type="file"
+                  accept={CV_FILE_ACCEPT}
+                  aria-invalid={errors.file ? true : undefined}
+                  aria-describedby="cv-file-hint"
+                  {...register("file")}
+                />
+                <p id="cv-file-hint" className="text-xs text-muted">
+                  {t("form.fileHint")}
+                </p>
+                {errors.file && (
+                  <p role="alert" className="text-sm text-destructive">
+                    {errors.file.message as string}
+                  </p>
+                )}
+              </div>
 
-          <Button type="submit" disabled={create.isPending} className="self-start">
-            {create.isPending ? t("form.uploading") : t("form.submit")}
-          </Button>
+              <Button
+                type="submit"
+                disabled={create.isPending}
+                className="self-start"
+              >
+                {create.isPending ? t("form.uploading") : t("form.submit")}
+              </Button>
 
-          {create.isPending && (
-            <p role="status" className="text-sm text-muted">
-              {t("form.uploading")}
-            </p>
-          )}
-          {create.isSuccess && (
-            <p role="status" className="text-sm text-success">
-              {t("form.success")}
-            </p>
-          )}
-          {create.isError && (
-            <p role="alert" className="text-sm text-destructive">
-              {t("form.error")}
-            </p>
-          )}
-        </form>
+              {create.isPending && (
+                <p role="status" className="text-sm text-muted">
+                  {t("form.uploading")}
+                </p>
+              )}
+              {create.isSuccess && (
+                <p role="status" className="text-sm text-success">
+                  {t("form.success")}
+                </p>
+              )}
+              {create.isError && (
+                <p role="alert" className="text-sm text-destructive">
+                  {t("form.error")}
+                </p>
+              )}
+            </form>
+          </CardContent>
+        </Card>
       </section>
 
       <section className="flex flex-col gap-4">
-        <h2 className="font-serif text-xl font-semibold">{t("list.heading")}</h2>
+        <h2 className="font-serif text-xl font-semibold">
+          {t("list.heading")}
+        </h2>
 
         {list.isPending && (
           <div
@@ -293,10 +311,7 @@ export default function CvVersionsPage() {
                       </div>
                     </div>
                     {cv.conversionStatus === "FAILED" && (
-                      <p
-                        role="alert"
-                        className="mt-2 text-sm text-destructive"
-                      >
+                      <p role="alert" className="mt-2 text-sm text-destructive">
                         {t("list.conversionFailed")}
                         {cv.conversionError ? ` ${cv.conversionError}` : ""}
                       </p>

@@ -18,7 +18,13 @@ import { useAnalysisQuota } from "@/hooks/use-analyses";
 import { useSiteConfigs, siteReliability } from "@/hooks/use-site-configs";
 import { BatchResultView } from "@/components/batch-result-view";
 import { CvVersionPicker } from "@/components/cv-version-picker";
+import {
+  SUBNAV_CLASS,
+  SUBNAV_ACTIVE_CLASS,
+  SUBNAV_LINK_CLASS,
+} from "@/components/matching-subnav";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -113,14 +119,11 @@ export default function AnalyseSeveralOffersPage() {
         <BatchResultView key={ingestionJobId} ingestionJobId={ingestionJobId} />
       ) : (
         <>
-          <nav className="flex gap-4 text-sm">
-            <Link
-              href="/analyses/new"
-              className="text-muted hover:text-foreground"
-            >
+          <nav className={SUBNAV_CLASS}>
+            <Link href="/analyses/new" className={SUBNAV_LINK_CLASS}>
               {tOne("heading")}
             </Link>
-            <span aria-current="page" className="font-medium">
+            <span aria-current="page" className={SUBNAV_ACTIVE_CLASS}>
               {t("heading")}
             </span>
           </nav>
@@ -144,139 +147,155 @@ export default function AnalyseSeveralOffersPage() {
           )}
 
           {sites.data && (
-            <form
-              className="flex flex-col gap-4"
-              onSubmit={onSubmit}
-              noValidate
-            >
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="site">{t("siteLabel")}</Label>
-                <select
-                  id="site"
-                  className={SELECT_CLASS}
-                  aria-invalid={errors.siteConfigId ? true : undefined}
-                  {...register("siteConfigId")}
+            <Card>
+              <CardContent className="py-6">
+                <form
+                  className="flex flex-col gap-4"
+                  onSubmit={onSubmit}
+                  noValidate
                 >
-                  <option value="" disabled>
-                    {t("sitePlaceholder")}
-                  </option>
-                  {sites.data.map((site) => (
-                    <option key={site.id} value={site.id}>
-                      {site.displayName} —{" "}
-                      {reliabilityLabel(siteReliability(site))}
-                    </option>
-                  ))}
-                </select>
-                {errors.siteConfigId && (
-                  <p role="alert" className="text-sm text-destructive">
-                    {errors.siteConfigId.message}
-                  </p>
-                )}
-              </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="site">{t("siteLabel")}</Label>
+                    <select
+                      id="site"
+                      className={SELECT_CLASS}
+                      aria-invalid={errors.siteConfigId ? true : undefined}
+                      {...register("siteConfigId")}
+                    >
+                      <option value="" disabled>
+                        {t("sitePlaceholder")}
+                      </option>
+                      {sites.data.map((site) => (
+                        <option key={site.id} value={site.id}>
+                          {site.displayName} —{" "}
+                          {reliabilityLabel(siteReliability(site))}
+                        </option>
+                      ))}
+                    </select>
+                    {errors.siteConfigId && (
+                      <p role="alert" className="text-sm text-destructive">
+                        {errors.siteConfigId.message}
+                      </p>
+                    )}
+                  </div>
 
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="keywords">{t("keywordsLabel")}</Label>
-                <Input id="keywords" type="text" {...register("keywords")} />
-              </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="keywords">{t("keywordsLabel")}</Label>
+                    <Input
+                      id="keywords"
+                      type="text"
+                      {...register("keywords")}
+                    />
+                  </div>
 
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="location">{t("locationLabel")}</Label>
-                <Input id="location" type="text" {...register("location")} />
-              </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="location">{t("locationLabel")}</Label>
+                    <Input
+                      id="location"
+                      type="text"
+                      {...register("location")}
+                    />
+                  </div>
 
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="postedWithin">{t("postedWithinLabel")}</Label>
-                <select
-                  id="postedWithin"
-                  className={SELECT_CLASS}
-                  {...register("postedWithin")}
-                >
-                  {POSTED_WITHIN_VALUES.map((value) => (
-                    <option key={value} value={value}>
-                      {tIng(`postedWithin.${value}`)}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="postedWithin">
+                      {t("postedWithinLabel")}
+                    </Label>
+                    <select
+                      id="postedWithin"
+                      className={SELECT_CLASS}
+                      {...register("postedWithin")}
+                    >
+                      {POSTED_WITHIN_VALUES.map((value) => (
+                        <option key={value} value={value}>
+                          {tIng(`postedWithin.${value}`)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="contractType">{t("contractTypeLabel")}</Label>
-                <Input
-                  id="contractType"
-                  type="text"
-                  {...register("contractType")}
-                />
-              </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="contractType">
+                      {t("contractTypeLabel")}
+                    </Label>
+                    <Input
+                      id="contractType"
+                      type="text"
+                      {...register("contractType")}
+                    />
+                  </div>
 
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="remote">{t("remoteLabel")}</Label>
-                <select
-                  id="remote"
-                  className={SELECT_CLASS}
-                  {...register("remote")}
-                >
-                  <option value="">{t("remoteAny")}</option>
-                  {REMOTE_VALUES.map((value) => (
-                    <option key={value} value={value}>
-                      {tIng(`remote.${value}`)}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="remote">{t("remoteLabel")}</Label>
+                    <select
+                      id="remote"
+                      className={SELECT_CLASS}
+                      {...register("remote")}
+                    >
+                      <option value="">{t("remoteAny")}</option>
+                      {REMOTE_VALUES.map((value) => (
+                        <option key={value} value={value}>
+                          {tIng(`remote.${value}`)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="experienceLevel">
-                  {t("experienceLevelLabel")}
-                </Label>
-                <Input
-                  id="experienceLevel"
-                  type="text"
-                  {...register("experienceLevel")}
-                />
-              </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="experienceLevel">
+                      {t("experienceLevelLabel")}
+                    </Label>
+                    <Input
+                      id="experienceLevel"
+                      type="text"
+                      {...register("experienceLevel")}
+                    />
+                  </div>
 
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="maxOffers">{t("maxOffersLabel")}</Label>
-                <Input
-                  id="maxOffers"
-                  type="number"
-                  min={1}
-                  max={INGESTION_MAX_OFFERS}
-                  {...register("maxOffers", { valueAsNumber: true })}
-                />
-                <p className="text-xs text-muted">
-                  {t("maxOffersHint", { max: INGESTION_MAX_OFFERS })}
-                </p>
-                {quota.data && (
-                  <p role="status" className="text-xs text-muted">
-                    {t("quotaEstimate", {
-                      count: plannedOffers,
-                      remaining: quota.data.remaining,
-                    })}
-                  </p>
-                )}
-              </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="maxOffers">{t("maxOffersLabel")}</Label>
+                    <Input
+                      id="maxOffers"
+                      type="number"
+                      min={1}
+                      max={INGESTION_MAX_OFFERS}
+                      {...register("maxOffers", { valueAsNumber: true })}
+                    />
+                    <p className="text-xs text-muted">
+                      {t("maxOffersHint", { max: INGESTION_MAX_OFFERS })}
+                    </p>
+                    {quota.data && (
+                      <p role="status" className="text-xs text-muted">
+                        {t("quotaEstimate", {
+                          count: plannedOffers,
+                          remaining: quota.data.remaining,
+                        })}
+                      </p>
+                    )}
+                  </div>
 
-              <CvVersionPicker
-                id="several-cv"
-                value={cvVersionId}
-                onChange={setCvVersionId}
-              />
+                  <CvVersionPicker
+                    id="several-cv"
+                    value={cvVersionId}
+                    onChange={setCvVersionId}
+                  />
 
-              <Button
-                type="submit"
-                disabled={create.isPending || !cvVersionId}
-                className="self-start"
-              >
-                {create.isPending ? t("submitting") : t("submit")}
-              </Button>
+                  <Button
+                    type="submit"
+                    disabled={create.isPending || !cvVersionId}
+                    className="self-start"
+                  >
+                    {create.isPending ? t("submitting") : t("submit")}
+                  </Button>
 
-              {create.isError && (
-                <p role="alert" className="text-sm text-destructive">
-                  {t("error")}
-                </p>
-              )}
-            </form>
+                  {create.isError && (
+                    <p role="alert" className="text-sm text-destructive">
+                      {t("error")}
+                    </p>
+                  )}
+                </form>
+              </CardContent>
+            </Card>
           )}
         </>
       )}
