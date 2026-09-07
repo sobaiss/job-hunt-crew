@@ -192,14 +192,33 @@
       "loadError": "Impossible de charger cette analyse. Veuillez réessayer.",
       "running": "Cette analyse est toujours en cours — cette page se met à jour toute seule.",
       "failed": "Cette analyse a échoué.",
+      "retry": "Relancer l'analyse",
+      "retryStarted": "Une nouvelle analyse a démarré — l'ouvrir",
+      "retryError": "Impossible de démarrer une nouvelle analyse. Veuillez réessayer.",
       "noResult": "Pas encore de résultat.",
       "none": "Aucune.",
       "matchScore": "Score de correspondance",
+      "gaugeLabel": "Score de correspondance {score} sur 100",
+      "band": {
+        "strong": "Fort",
+        "partial": "Partiel",
+        "weak": "Faible"
+      },
       "matchedSkills": "Compétences correspondantes",
       "missingSkills": "Compétences manquantes",
+      "evidenceLabel": "Preuve",
+      "importance": {
+        "required": "Requise",
+        "nice_to_have": "Souhaitée"
+      },
       "strengths": "Points forts",
       "weaknesses": "Points faibles",
       "suggestions": "Suggestions d'amélioration",
+      "priority": {
+        "high": "Priorité haute",
+        "medium": "Priorité moyenne",
+        "low": "Priorité basse"
+      },
       "summary": "Résumé"
     },
     "compare": {

@@ -29,6 +29,7 @@ function summary(overrides: Record<string, unknown> = {}) {
     status: "COMPLETED",
     matchScore: 87,
     requestedAt: "2026-08-01T00:00:00.000Z",
+    cvVersionId: "cv1",
     ingestionJobId: null,
     ingestionJob: null,
     jobOffer: { id: "job1", title: "Backend Engineer", company: "Acme Inc" },
@@ -379,6 +380,93 @@ describe("AnalysisDetailPage", () => {
     expect(screen.getByText("TypeScript")).toBeInTheDocument();
   });
 
+  it("shows the score as a gauge with the qualitative band for the score", async () => {
+    server.use(
+      http.get("/api/analyses/a1", () =>
+        HttpResponse.json({ analysis: detail() }),
+      ),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />);
+
+    // 87 -> "Strong"; the gauge is an accessible image labelled with the score.
+    expect(
+      await screen.findByRole("img", { name: "Match score 87 out of 100" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Strong")).toBeInTheDocument();
+  });
+
+  it.each([
+    [82, "Strong"],
+    [60, "Partial"],
+    [30, "Weak"],
+  ])("labels a score of %i as %s", async (score, label) => {
+    server.use(
+      http.get("/api/analyses/a1", () =>
+        HttpResponse.json({
+          analysis: detail({ resultJSON: { ...RESULT, match_score: score } }),
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />);
+
+    expect(await screen.findByText(label)).toBeInTheDocument();
+  });
+
+  it("renders matched skills with their evidence and missing skills with an importance tag", async () => {
+    server.use(
+      http.get("/api/analyses/a1", () =>
+        HttpResponse.json({
+          analysis: detail({
+            resultJSON: {
+              ...RESULT,
+              matched_skills: [
+                { skill: "TypeScript", evidence: "5 years at Acme" },
+              ],
+              missing_skills: [
+                { skill: "Kubernetes", importance: "required" as const },
+                { skill: "GraphQL", importance: "nice_to_have" as const },
+              ],
+            },
+          }),
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />);
+
+    expect(await screen.findByText(/5 years at Acme/)).toBeInTheDocument();
+    expect(screen.getByText("Required")).toBeInTheDocument();
+    expect(screen.getByText("Nice to have")).toBeInTheDocument();
+  });
+
+  it("orders improvement suggestions by priority and tags each one", async () => {
+    server.use(
+      http.get("/api/analyses/a1", () =>
+        HttpResponse.json({
+          analysis: detail({
+            resultJSON: {
+              ...RESULT,
+              improvement_suggestions: [
+                { area: "Later", suggestion: "polish", priority: "low" as const },
+                { area: "Now", suggestion: "fix", priority: "high" as const },
+              ],
+            },
+          }),
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />);
+
+    const high = await screen.findByText("High priority");
+    const low = screen.getByText("Low priority");
+    expect(high.compareDocumentPosition(low)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
   it("shows a helpful message when the analysis has FAILED", async () => {
     server.use(
       http.get("/api/analyses/a1", () =>
@@ -395,6 +483,36 @@ describe("AnalysisDetailPage", () => {
     renderWithProviders(<AnalysisDetailPage />);
 
     expect(await screen.findByRole("alert")).toHaveTextContent("LLM timed out");
+    expect(
+      screen.getByRole("button", { name: "Run it again" }),
+    ).toBeInTheDocument();
+  });
+
+  it("re-runs a FAILED analysis and links to the new one", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses/a1", () =>
+        HttpResponse.json({
+          analysis: detail({
+            status: "FAILED",
+            resultJSON: null,
+            errorMessage: "LLM timed out",
+          }),
+        }),
+      ),
+      http.post("/api/analyses", () =>
+        HttpResponse.json({ analysisId: "a2" }),
+      ),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Run it again" }));
+
+    const link = await screen.findByRole("link", {
+      name: /a new analysis has started/i,
+    });
+    expect(link).toHaveAttribute("href", "/analyses/a2");
   });
 
   it("polls while non-terminal and stops once the analysis is terminal", async () => {

@@ -192,14 +192,33 @@
       "loadError": "We couldn't load this analysis. Please try again.",
       "running": "This analysis is still running — this page updates itself.",
       "failed": "This analysis failed.",
+      "retry": "Run it again",
+      "retryStarted": "A new analysis has started — open it",
+      "retryError": "We couldn't start a new analysis. Please try again.",
       "noResult": "No result yet.",
       "none": "None.",
       "matchScore": "Match score",
+      "gaugeLabel": "Match score {score} out of 100",
+      "band": {
+        "strong": "Strong",
+        "partial": "Partial",
+        "weak": "Weak"
+      },
       "matchedSkills": "Matched skills",
       "missingSkills": "Missing skills",
+      "evidenceLabel": "Evidence",
+      "importance": {
+        "required": "Required",
+        "nice_to_have": "Nice to have"
+      },
       "strengths": "Strengths",
       "weaknesses": "Weaknesses",
       "suggestions": "Improvement suggestions",
+      "priority": {
+        "high": "High priority",
+        "medium": "Medium priority",
+        "low": "Low priority"
+      },
       "summary": "Summary"
     },
     "compare": {
