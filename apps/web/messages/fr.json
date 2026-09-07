@@ -166,10 +166,22 @@
     "title": "Vos analyses",
     "loading": "Chargement de vos analyses",
     "empty": "Aucune analyse demandée pour l'instant.",
+    "noMatches": "Aucune analyse ne correspond à vos filtres.",
     "loadError": "Impossible de charger vos analyses. Veuillez réessayer.",
     "jobOfferFallback": "Offre d'emploi",
     "vsCv": "vs. {label}",
     "compareLink": "Comparer avec d'autres CV",
+    "controls": {
+      "searchLabel": "Rechercher",
+      "searchPlaceholder": "Titre de l'offre ou entreprise",
+      "statusLabel": "Statut",
+      "statusAll": "Tous les statuts",
+      "cvLabel": "Version de CV",
+      "cvAll": "Toutes les versions de CV",
+      "sortLabel": "Trier par",
+      "sortRecent": "Plus récentes",
+      "sortScore": "Meilleur score"
+    },
     "batch": {
       "siteFallback": "Site d'emploi",
       "offers": "{count, plural, one {# offre} other {# offres}}",

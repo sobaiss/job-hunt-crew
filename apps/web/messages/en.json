@@ -166,10 +166,22 @@
     "title": "Your analyses",
     "loading": "Loading your analyses",
     "empty": "No analyses requested yet.",
+    "noMatches": "No analyses match your filters.",
     "loadError": "We couldn't load your analyses. Please try again.",
     "jobOfferFallback": "Job offer",
     "vsCv": "vs. {label}",
     "compareLink": "Compare with other CVs",
+    "controls": {
+      "searchLabel": "Search",
+      "searchPlaceholder": "Offer title or company",
+      "statusLabel": "Status",
+      "statusAll": "All statuses",
+      "cvLabel": "CV version",
+      "cvAll": "All CV versions",
+      "sortLabel": "Sort by",
+      "sortRecent": "Most recent",
+      "sortScore": "Highest score"
+    },
     "batch": {
       "siteFallback": "Job site",
       "offers": "{count, plural, one {# offer} other {# offers}}",
