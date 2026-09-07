@@ -91,6 +91,39 @@
     "newAnalysis": "New analysis",
     "openMenu": "Open menu"
   },
+  "dashboard": {
+    "title": "Overview",
+    "loading": "Loading your dashboard",
+    "loadError": "We couldn't load your dashboard. Please try again.",
+    "stats": {
+      "heading": "Your numbers",
+      "averageScore": "Average match score",
+      "bestScore": "Best match score",
+      "analysisCount": "Analyses run",
+      "cvVersionCount": "CV versions"
+    },
+    "onboarding": {
+      "heading": "Get started in three steps",
+      "importCv": "Import a CV",
+      "importCvHint": "Upload the CV you want to match against job offers.",
+      "runAnalysis": "Run your first analysis",
+      "runAnalysisHint": "Paste a job offer URL and see where you stand.",
+      "compare": "Compare two CVs on one offer",
+      "compareHint": "Analyse the same offer with another CV to see them side by side."
+    },
+    "quickActions": {
+      "heading": "Quick actions",
+      "analyseOne": "Analyse one offer",
+      "analyseSeveral": "Analyse several offers",
+      "importCv": "Import a CV"
+    },
+    "trend": {
+      "heading": "Match score trend"
+    },
+    "recent": {
+      "heading": "Recent analyses"
+    }
+  },
   "userMenu": {
     "label": "Account menu",
     "theme": "Theme",

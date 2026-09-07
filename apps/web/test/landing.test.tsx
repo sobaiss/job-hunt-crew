@@ -3,6 +3,7 @@ import type { Session } from "next-auth";
 
 import { renderWithProviders, screen, within } from "./test-utils";
 import { LandingPage } from "@/components/landing-page";
+import { AppShell } from "@/components/app-shell";
 import LandingRoute from "@/app/(public)/page";
 
 const { redirect } = vi.hoisted(() => ({ redirect: vi.fn() }));
@@ -128,16 +129,17 @@ describe("LandingPage (marketing content)", () => {
 });
 
 describe("Landing route (auth gate)", () => {
-  it("redirects a signed-in visitor away from the marketing page", async () => {
+  it("serves the Dashboard inside the App shell to a signed-in visitor, not the marketing page", async () => {
     const session: Session = {
       expires: "2999-01-01T00:00:00.000Z",
       user: { id: "u1", name: "Ada", email: "ada@example.com" },
     };
     auth.mockResolvedValue(session);
 
-    await LandingRoute();
+    const element = await LandingRoute();
 
-    expect(redirect).toHaveBeenCalledWith("/analyses");
+    expect(redirect).not.toHaveBeenCalled();
+    expect(element.type).toBe(AppShell);
   });
 
   it("renders the marketing page for a signed-out visitor", async () => {

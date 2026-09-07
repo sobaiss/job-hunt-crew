@@ -91,6 +91,39 @@
     "newAnalysis": "Nouvelle analyse",
     "openMenu": "Ouvrir le menu"
   },
+  "dashboard": {
+    "title": "Aperçu",
+    "loading": "Chargement de votre tableau de bord",
+    "loadError": "Impossible de charger votre tableau de bord. Veuillez réessayer.",
+    "stats": {
+      "heading": "Vos chiffres",
+      "averageScore": "Score de correspondance moyen",
+      "bestScore": "Meilleur score de correspondance",
+      "analysisCount": "Analyses réalisées",
+      "cvVersionCount": "Versions de CV"
+    },
+    "onboarding": {
+      "heading": "Démarrez en trois étapes",
+      "importCv": "Importer un CV",
+      "importCvHint": "Téléversez le CV à comparer aux offres d'emploi.",
+      "runAnalysis": "Lancer votre première analyse",
+      "runAnalysisHint": "Collez l'URL d'une offre et voyez où vous en êtes.",
+      "compare": "Comparer deux CV sur une même offre",
+      "compareHint": "Analysez la même offre avec un autre CV pour les comparer côte à côte."
+    },
+    "quickActions": {
+      "heading": "Actions rapides",
+      "analyseOne": "Analyser une offre",
+      "analyseSeveral": "Analyser plusieurs offres",
+      "importCv": "Importer un CV"
+    },
+    "trend": {
+      "heading": "Évolution du score de correspondance"
+    },
+    "recent": {
+      "heading": "Analyses récentes"
+    }
+  },
   "userMenu": {
     "label": "Menu du compte",
     "theme": "Thème",
