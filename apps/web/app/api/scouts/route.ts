@@ -2,30 +2,28 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { proxyToApi } from "@/lib/internal-api";
 
-export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET() {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const { id } = await params;
-  const body = await request.text();
 
-  return proxyToApi(`/v1/cv-versions/${id}`, {
-    method: "PATCH",
+  return proxyToApi("/v1/scouts", {
     headers: { "X-User-Id": session.user.id },
-    body,
   });
 }
 
-export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(request: Request) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const { id } = await params;
 
-  return proxyToApi(`/v1/cv-versions/${id}`, {
-    method: "DELETE",
+  const body = await request.text();
+
+  return proxyToApi("/v1/scouts", {
+    method: "POST",
     headers: { "X-User-Id": session.user.id },
+    body,
   });
 }

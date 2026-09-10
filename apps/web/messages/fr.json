@@ -86,6 +86,7 @@
   "nav": {
     "dashboard": "Tableau de bord",
     "analyses": "Analyses",
+    "agents": "Agents",
     "cvVersions": "Versions de CV",
     "settings": "Paramètres",
     "newAnalysis": "Nouvelle analyse",
@@ -311,6 +312,74 @@
     "scrapingDetail": "Détail du scraping",
     "jobOfferFallback": "Offre d'emploi",
     "vsCv": "vs. {label}"
+  },
+  "scouts": {
+    "title": "Agents",
+    "list": {
+      "subtitle": "Des recherches enregistrées qui comparent les nouvelles offres à votre CV. Créez-en une et elle travaille pour vous.",
+      "loading": "Chargement de vos Scouts",
+      "loadError": "Impossible de charger vos Scouts. Veuillez réessayer.",
+      "empty": "Vous n'avez encore aucun Scout.",
+      "new": "Nouveau Scout",
+      "baseCv": "CV de base",
+      "lastRun": "Dernière exécution",
+      "neverRun": "Jamais exécuté",
+      "sites": "{count, plural, one {# site} other {# sites}}"
+    },
+    "status": {
+      "ACTIVE": "Actif",
+      "PAUSED": "En pause",
+      "ARCHIVED": "Archivé"
+    },
+    "actions": {
+      "pause": "Mettre en pause",
+      "resume": "Reprendre",
+      "archive": "Archiver",
+      "edit": "Modifier",
+      "updateError": "Impossible de mettre à jour ce Scout. Veuillez réessayer."
+    },
+    "form": {
+      "newHeading": "Nouveau Scout",
+      "editHeading": "Modifier le Scout",
+      "labelLabel": "Libellé",
+      "labelPlaceholder": "Backend senior — Télétravail UE",
+      "labelRequired": "Donnez un libellé à ce Scout.",
+      "sitesLabel": "Sites d'emploi à explorer",
+      "sitesHint": "France Travail est la source la plus fiable pour une recherche automatisée ; les sites basés sur le scraping peuvent être moins fiables.",
+      "sitesRequired": "Choisissez au moins un site d'emploi.",
+      "thresholdLabel": "Seuil de pertinence",
+      "thresholdHint": "Seules les offres atteignant ce score (0–100) comptent comme une trouvaille pertinente.",
+      "keywordsLabel": "Mots-clés",
+      "locationLabel": "Lieu",
+      "postedWithinLabel": "Publiée depuis",
+      "submit": "Créer le Scout",
+      "submitting": "Création…",
+      "save": "Enregistrer",
+      "saving": "Enregistrement…",
+      "error": "Impossible d'enregistrer ce Scout. Veuillez réessayer.",
+      "cancel": "Annuler"
+    },
+    "detail": {
+      "loading": "Chargement de ce Scout",
+      "loadError": "Impossible de charger ce Scout. Veuillez réessayer.",
+      "configHeading": "Configuration",
+      "baseCv": "CV de base",
+      "sites": "Sites d'emploi",
+      "threshold": "Seuil de pertinence",
+      "filters": "Filtres",
+      "noFilters": "Aucun filtre défini",
+      "status": "Statut",
+      "lastRun": "Dernière exécution",
+      "neverRun": "Jamais exécuté",
+      "back": "Retour aux Agents"
+    },
+    "siteKeys": {
+      "FRANCE_TRAVAIL": "France Travail",
+      "LINKEDIN": "LinkedIn",
+      "INDEED": "Indeed",
+      "WTTJ": "Welcome to the Jungle",
+      "GLASSDOOR": "Glassdoor"
+    }
   },
   "cvVersions": {
     "title": "Versions de CV",

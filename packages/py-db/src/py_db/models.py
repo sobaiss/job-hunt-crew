@@ -66,6 +66,12 @@ class Joboffersourcesite(str, enum.Enum):
     OTHER = 'OTHER'
 
 
+class Scoutstatus(str, enum.Enum):
+    ACTIVE = 'ACTIVE'
+    PAUSED = 'PAUSED'
+    ARCHIVED = 'ARCHIVED'
+
+
 class Siteconfigantibotrisklevel(str, enum.Enum):
     LOW = 'LOW'
     MEDIUM = 'MEDIUM'
@@ -155,6 +161,7 @@ class User(Base):
     CVVersion: Mapped[list['CVVersion']] = relationship('CVVersion', back_populates='User_')
     Session: Mapped[list['Session']] = relationship('Session', back_populates='User_')
     IngestionJob: Mapped[list['IngestionJob']] = relationship('IngestionJob', back_populates='User_')
+    Scout: Mapped[list['Scout']] = relationship('Scout', back_populates='User_')
     Analysis: Mapped[list['Analysis']] = relationship('Analysis', back_populates='User_')
 
 
@@ -232,6 +239,7 @@ class CVVersion(Base):
 
     User_: Mapped['User'] = relationship('User', back_populates='CVVersion')
     IngestionJob: Mapped[list['IngestionJob']] = relationship('IngestionJob', back_populates='CVVersion_')
+    Scout: Mapped[list['Scout']] = relationship('Scout', back_populates='CVVersion_')
     Analysis: Mapped[list['Analysis']] = relationship('Analysis', back_populates='CVVersion_')
 
 
@@ -282,6 +290,32 @@ class IngestionJob(Base):
     Analysis: Mapped[list['Analysis']] = relationship('Analysis', back_populates='IngestionJob_')
     IngestionJobOffer: Mapped[list['IngestionJobOffer']] = relationship('IngestionJobOffer', back_populates='IngestionJob_')
     PipelineEvent: Mapped[list['PipelineEvent']] = relationship('PipelineEvent', back_populates='IngestionJob_')
+
+
+class Scout(Base):
+    __tablename__ = 'Scout'
+    __table_args__ = (
+        ForeignKeyConstraint(['cvVersionId'], ['CVVersion.id'], ondelete='RESTRICT', onupdate='CASCADE', name='Scout_cvVersionId_fkey'),
+        ForeignKeyConstraint(['userId'], ['User.id'], ondelete='CASCADE', onupdate='CASCADE', name='Scout_userId_fkey'),
+        PrimaryKeyConstraint('id', name='Scout_pkey'),
+        Index('Scout_cvVersionId_idx', 'cvVersionId'),
+        Index('Scout_userId_idx', 'userId')
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    userId: Mapped[str] = mapped_column(Text, nullable=False)
+    label: Mapped[str] = mapped_column(Text, nullable=False)
+    cvVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    targetSiteKeys: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    filters: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    matchThreshold: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text('70'))
+    status: Mapped[Scoutstatus] = mapped_column(Enum(Scoutstatus, values_callable=lambda cls: [member.value for member in cls], name='ScoutStatus'), nullable=False, server_default=text('\'ACTIVE\'::"ScoutStatus"'))
+    createdAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False, server_default=text('CURRENT_TIMESTAMP'))
+    updatedAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False)
+    lastRunAt: Mapped[Optional[datetime.datetime]] = mapped_column(TIMESTAMP(precision=3))
+
+    CVVersion_: Mapped['CVVersion'] = relationship('CVVersion', back_populates='Scout')
+    User_: Mapped['User'] = relationship('User', back_populates='Scout')
 
 
 class Analysis(Base):

@@ -24,6 +24,7 @@ model User {
   cvVersions    CVVersion[]
   ingestionJobs IngestionJob[]
   analyses      Analysis[]
+  scouts        Scout[]
 }
 
 model Account {
@@ -98,6 +99,7 @@ model CVVersion {
   user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   analyses      Analysis[]
   ingestionJobs IngestionJob[]
+  scouts        Scout[]
 
   @@index([userId])
 }
@@ -292,4 +294,37 @@ model PipelineEvent {
 
   @@index([analysisId])
   @@index([ingestionJobId])
+}
+
+enum ScoutStatus {
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+// A saved, self-running search + match configuration owned by one Candidate.
+// See issue #52 / docs/adr/0004. Slice 1 (#53) is CRUD only — Scouts do not run
+// yet. The base-CV FK is `onDelete: Restrict`: services/api rejects deleting a
+// CVVersion any Scout still references, naming the referencing Scouts.
+model Scout {
+  id             String      @id @default(cuid())
+  userId         String
+  label          String
+  cvVersionId    String
+  // string[] of SiteConfigSiteKey values — the sites this Scout searches.
+  targetSiteKeys Json
+  // Same shape as IngestionJob.filters: keywords, location, postedWithin,
+  // contractType, remote, experienceLevel.
+  filters        Json
+  matchThreshold Int         @default(70)
+  status         ScoutStatus @default(ACTIVE)
+  lastRunAt      DateTime?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cvVersion CVVersion @relation(fields: [cvVersionId], references: [id], onDelete: Restrict)
+
+  @@index([userId])
+  @@index([cvVersionId])
 }

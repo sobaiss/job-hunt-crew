@@ -17,11 +17,13 @@ from py_db.models import (
     Ingestionjobstatus,
     Ingestionmode,
     JobOffer,
+    Scout,
+    Scoutstatus,
     SiteConfig,
 )
 from py_db.quota import analyses_requested_today, daily_analysis_cap
 from pydantic import BaseModel
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -317,6 +319,38 @@ async def update_cv_version(
     await session.refresh(existing)
 
     return UpdateCVVersionResponse(cvVersion=_cv_version_response(existing))
+
+
+@router.delete("/cv-versions/{cv_version_id}", status_code=204)
+async def delete_cv_version(
+    cv_version_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """Delete a CV version the caller owns. Rejected with a 409 naming the
+    referencing Scouts while any Scout still uses it as its base CV — the
+    `Scout.cvVersionId` FK is `onDelete: Restrict` (issue #53). User-scoped:
+    another user's CV is a 404, not a 403.
+    """
+    existing = await session.get(CVVersion, cv_version_id)
+    if existing is None or existing.userId != user_id:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    referencing = (
+        await session.scalars(
+            select(Scout).where(Scout.cvVersionId == cv_version_id).order_by(Scout.createdAt)
+        )
+    ).all()
+    if referencing:
+        labels = ", ".join(f'"{scout.label}"' for scout in referencing)
+        raise HTTPException(
+            status_code=409,
+            detail=f"This CV version is used by {len(referencing)} Scout(s): {labels}. "
+            "Point those Scouts at another CV first.",
+        )
+
+    await session.delete(existing)
+    await session.commit()
 
 
 class CVVersionMarkdownResponse(BaseModel):
@@ -902,3 +936,297 @@ async def get_analysis(
         raise HTTPException(status_code=404, detail="Not found")
 
     return GetAnalysisResponse(analysis=_analysis_response(analysis))
+
+
+# --- Scouts (issue #53, Scout slice 1) ---
+# CRUD for the saved, self-running search + match configs a Candidate manages
+# from the "Agents" area. Scouts do not run yet — this slice is create / list /
+# get / patch (relabel, reconfigure, pause / resume / archive) plus the
+# MAX_SCOUTS_PER_USER guard. Every route is user-scoped: another user's Scout is
+# a 404, never a 403 (same convention as cv-versions / analyses).
+
+DEFAULT_MAX_SCOUTS_PER_USER = 5
+VALID_SITE_KEYS = ("LINKEDIN", "INDEED", "FRANCE_TRAVAIL", "WTTJ", "GLASSDOOR")
+SCOUT_STATUS_VALUES = ("ACTIVE", "PAUSED", "ARCHIVED")
+DEFAULT_SCOUT_MATCH_THRESHOLD = 70
+
+
+def _max_scouts_per_user() -> int:
+    raw = os.environ.get("MAX_SCOUTS_PER_USER")
+    try:
+        parsed = int(raw) if raw else None
+    except ValueError:
+        parsed = None
+    return parsed if parsed is not None and parsed > 0 else DEFAULT_MAX_SCOUTS_PER_USER
+
+
+def _normalize_site_keys(value: Any) -> list[str]:
+    if not isinstance(value, list) or not value:
+        raise HTTPException(status_code=400, detail="targetSiteKeys must be a non-empty array")
+    keys: list[str] = []
+    for entry in value:
+        if not isinstance(entry, str) or entry not in VALID_SITE_KEYS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"targetSiteKeys entries must be one of: {', '.join(VALID_SITE_KEYS)}",
+            )
+        if entry not in keys:
+            keys.append(entry)
+    return keys
+
+
+def _normalize_scout_filters(value: Any) -> dict[str, Any]:
+    filters_in = value if isinstance(value, dict) else {}
+
+    posted_within = _optional_string(filters_in.get("postedWithin"))
+    if posted_within is not None and posted_within not in POSTED_WITHIN_VALUES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"filters.postedWithin must be one of: {', '.join(POSTED_WITHIN_VALUES)}",
+        )
+
+    remote = _optional_string(filters_in.get("remote"))
+    if remote is not None and remote not in REMOTE_VALUES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"filters.remote must be one of: {', '.join(REMOTE_VALUES)}",
+        )
+
+    return {
+        "keywords": _optional_string(filters_in.get("keywords")),
+        "location": _optional_string(filters_in.get("location")),
+        "postedWithin": posted_within,
+        "contractType": _optional_string(filters_in.get("contractType")),
+        "remote": remote,
+        "experienceLevel": _optional_string(filters_in.get("experienceLevel")),
+    }
+
+
+def _normalize_threshold(value: Any) -> int:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int | float)
+        or not math.isfinite(value)
+    ):
+        raise HTTPException(
+            status_code=400, detail="matchThreshold must be a number between 0 and 100"
+        )
+    parsed = int(value)
+    if parsed < 0 or parsed > 100:
+        raise HTTPException(status_code=400, detail="matchThreshold must be between 0 and 100")
+    return parsed
+
+
+async def _active_scout_count(session: AsyncSession, user_id: str, *, exclude_id: str | None = None) -> int:
+    stmt = select(func.count()).select_from(Scout).where(
+        Scout.userId == user_id, Scout.status == Scoutstatus.ACTIVE
+    )
+    if exclude_id is not None:
+        stmt = stmt.where(Scout.id != exclude_id)
+    return int((await session.scalar(stmt)) or 0)
+
+
+async def _owned_cv_version(session: AsyncSession, cv_version_id: str, user_id: str) -> CVVersion:
+    cv_version = await session.get(CVVersion, cv_version_id)
+    if cv_version is None or cv_version.userId != user_id:
+        raise HTTPException(status_code=400, detail="Unknown cvVersionId")
+    return cv_version
+
+
+class ScoutResponse(BaseModel):
+    id: str
+    userId: str
+    label: str
+    cvVersionId: str
+    targetSiteKeys: list[str]
+    filters: dict[str, Any]
+    matchThreshold: int
+    status: str
+    lastRunAt: datetime | None
+    createdAt: datetime
+    updatedAt: datetime
+
+
+def _scout_response(row: Scout) -> ScoutResponse:
+    return ScoutResponse(
+        id=row.id,
+        userId=row.userId,
+        label=row.label,
+        cvVersionId=row.cvVersionId,
+        targetSiteKeys=list(row.targetSiteKeys or []),
+        filters=dict(row.filters or {}),
+        matchThreshold=row.matchThreshold,
+        status=row.status.value,
+        lastRunAt=row.lastRunAt,
+        createdAt=row.createdAt,
+        updatedAt=row.updatedAt,
+    )
+
+
+class ScoutListResponse(BaseModel):
+    scouts: list[ScoutResponse]
+
+
+class GetScoutResponse(BaseModel):
+    scout: ScoutResponse
+
+
+@router.get("/scouts", response_model=ScoutListResponse)
+async def list_scouts(
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> ScoutListResponse:
+    rows = (
+        await session.scalars(
+            select(Scout).where(Scout.userId == user_id).order_by(Scout.createdAt.desc())
+        )
+    ).all()
+    return ScoutListResponse(scouts=[_scout_response(row) for row in rows])
+
+
+class CreateScoutRequest(BaseModel):
+    label: Any = None
+    cvVersionId: Any = None
+    targetSiteKeys: Any = None
+    filters: Any = None
+    matchThreshold: Any = None
+
+
+@router.post("/scouts", response_model=GetScoutResponse, status_code=201)
+async def create_scout(
+    req: CreateScoutRequest,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> GetScoutResponse:
+    label = req.label.strip() if isinstance(req.label, str) else ""
+    if not label:
+        raise HTTPException(status_code=400, detail="label is required")
+
+    cv_version_id = _optional_string(req.cvVersionId)
+    if not cv_version_id:
+        raise HTTPException(status_code=400, detail="cvVersionId is required")
+    await _owned_cv_version(session, cv_version_id, user_id)
+
+    target_site_keys = _normalize_site_keys(req.targetSiteKeys)
+    filters = _normalize_scout_filters(req.filters)
+    match_threshold = (
+        DEFAULT_SCOUT_MATCH_THRESHOLD
+        if req.matchThreshold is None
+        else _normalize_threshold(req.matchThreshold)
+    )
+
+    cap = _max_scouts_per_user()
+    if await _active_scout_count(session, user_id) >= cap:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"You can have at most {cap} active Scouts. "
+                "Pause or archive one before creating another."
+            ),
+        )
+
+    scout = Scout(
+        id=str(uuid.uuid4()),
+        userId=user_id,
+        label=label,
+        cvVersionId=cv_version_id,
+        targetSiteKeys=target_site_keys,
+        filters=filters,
+        matchThreshold=match_threshold,
+        status=Scoutstatus.ACTIVE,
+        updatedAt=_now(),
+    )
+    session.add(scout)
+    await session.commit()
+    await session.refresh(scout)
+
+    return GetScoutResponse(scout=_scout_response(scout))
+
+
+@router.get("/scouts/{scout_id}", response_model=GetScoutResponse)
+async def get_scout(
+    scout_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> GetScoutResponse:
+    scout = await session.get(Scout, scout_id)
+    if scout is None or scout.userId != user_id:
+        raise HTTPException(status_code=404, detail="Not found")
+    return GetScoutResponse(scout=_scout_response(scout))
+
+
+class UpdateScoutRequest(BaseModel):
+    label: Any = None
+    cvVersionId: Any = None
+    targetSiteKeys: Any = None
+    filters: Any = None
+    matchThreshold: Any = None
+    status: Any = None
+
+
+@router.patch("/scouts/{scout_id}", response_model=GetScoutResponse)
+async def update_scout(
+    scout_id: str,
+    req: UpdateScoutRequest,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> GetScoutResponse:
+    scout = await session.get(Scout, scout_id)
+    if scout is None or scout.userId != user_id:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    if scout.status == Scoutstatus.ARCHIVED:
+        raise HTTPException(status_code=409, detail="Archived Scouts are read-only")
+
+    provided = req.model_dump(exclude_unset=True)
+    if not provided:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+
+    if "label" in provided:
+        if not isinstance(req.label, str) or not req.label.strip():
+            raise HTTPException(status_code=400, detail="label must not be empty")
+        scout.label = req.label.strip()
+
+    if "cvVersionId" in provided:
+        cv_version_id = _optional_string(req.cvVersionId)
+        if not cv_version_id:
+            raise HTTPException(status_code=400, detail="cvVersionId must not be empty")
+        await _owned_cv_version(session, cv_version_id, user_id)
+        scout.cvVersionId = cv_version_id
+
+    if "targetSiteKeys" in provided:
+        scout.targetSiteKeys = _normalize_site_keys(req.targetSiteKeys)
+
+    if "filters" in provided:
+        scout.filters = _normalize_scout_filters(req.filters)
+
+    if "matchThreshold" in provided:
+        scout.matchThreshold = _normalize_threshold(req.matchThreshold)
+
+    if "status" in provided:
+        if req.status not in SCOUT_STATUS_VALUES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"status must be one of: {', '.join(SCOUT_STATUS_VALUES)}",
+            )
+        new_status = Scoutstatus(req.status)
+        if (
+            new_status == Scoutstatus.ACTIVE
+            and scout.status != Scoutstatus.ACTIVE
+        ):
+            cap = _max_scouts_per_user()
+            if await _active_scout_count(session, user_id, exclude_id=scout.id) >= cap:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"You can have at most {cap} active Scouts. "
+                        "Pause or archive one before resuming this one."
+                    ),
+                )
+        scout.status = new_status
+
+    scout.updatedAt = _now()
+    await session.commit()
+    await session.refresh(scout)
+
+    return GetScoutResponse(scout=_scout_response(scout))

@@ -86,6 +86,7 @@
   "nav": {
     "dashboard": "Dashboard",
     "analyses": "Analyses",
+    "agents": "Agents",
     "cvVersions": "CV versions",
     "settings": "Settings",
     "newAnalysis": "New analysis",
@@ -311,6 +312,74 @@
     "scrapingDetail": "Scraping progress",
     "jobOfferFallback": "Job offer",
     "vsCv": "vs. {label}"
+  },
+  "scouts": {
+    "title": "Agents",
+    "list": {
+      "subtitle": "Saved searches that match new job offers against your CV. Create one and it runs for you.",
+      "loading": "Loading your Scouts",
+      "loadError": "We couldn't load your Scouts. Please try again.",
+      "empty": "You don't have any Scouts yet.",
+      "new": "New Scout",
+      "baseCv": "Base CV",
+      "lastRun": "Last run",
+      "neverRun": "Never run",
+      "sites": "{count, plural, one {# site} other {# sites}}"
+    },
+    "status": {
+      "ACTIVE": "Active",
+      "PAUSED": "Paused",
+      "ARCHIVED": "Archived"
+    },
+    "actions": {
+      "pause": "Pause",
+      "resume": "Resume",
+      "archive": "Archive",
+      "edit": "Edit",
+      "updateError": "We couldn't update that Scout. Please try again."
+    },
+    "form": {
+      "newHeading": "New Scout",
+      "editHeading": "Edit Scout",
+      "labelLabel": "Label",
+      "labelPlaceholder": "Senior Backend — Remote EU",
+      "labelRequired": "Give this Scout a label.",
+      "sitesLabel": "Job sites to search",
+      "sitesHint": "France Travail is the most reliable source for an unattended search; the scraping-based sites may be less dependable.",
+      "sitesRequired": "Choose at least one job site.",
+      "thresholdLabel": "Relevance threshold",
+      "thresholdHint": "Only offers scoring at or above this (0–100) count as a relevant find.",
+      "keywordsLabel": "Keywords",
+      "locationLabel": "Location",
+      "postedWithinLabel": "Posted within",
+      "submit": "Create Scout",
+      "submitting": "Creating…",
+      "save": "Save changes",
+      "saving": "Saving…",
+      "error": "We couldn't save that Scout. Please try again.",
+      "cancel": "Cancel"
+    },
+    "detail": {
+      "loading": "Loading this Scout",
+      "loadError": "We couldn't load this Scout. Please try again.",
+      "configHeading": "Configuration",
+      "baseCv": "Base CV",
+      "sites": "Job sites",
+      "threshold": "Relevance threshold",
+      "filters": "Filters",
+      "noFilters": "No filters set",
+      "status": "Status",
+      "lastRun": "Last run",
+      "neverRun": "Never run",
+      "back": "Back to Agents"
+    },
+    "siteKeys": {
+      "FRANCE_TRAVAIL": "France Travail",
+      "LINKEDIN": "LinkedIn",
+      "INDEED": "Indeed",
+      "WTTJ": "Welcome to the Jungle",
+      "GLASSDOOR": "Glassdoor"
+    }
   },
   "cvVersions": {
     "title": "CV versions",
