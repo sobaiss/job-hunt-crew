@@ -14,9 +14,45 @@ import {
   type AnalysisDetail,
   type AnalysisStatus,
 } from "@/hooks/use-analyses";
+import { Check } from "lucide-react";
+
 import { useEnumLabel } from "@/lib/enum-labels";
+import { MatchScoreGauge } from "@/components/match-score-gauge";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
+
+/**
+ * One numbered phase in the batch progress header: a filled `--success` circle
+ * with a check once done, a `--foreground` ring while it is the running phase,
+ * a muted ring before it starts. Same marker vocabulary as the "Analyse one
+ * offer" waiting state.
+ */
+function PhaseMarker({
+  n,
+  done,
+  active,
+}: {
+  n: number;
+  done: boolean;
+  active: boolean;
+}) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "flex size-5 flex-none items-center justify-center rounded-full border text-xs",
+        done
+          ? "border-success bg-success text-white"
+          : active
+            ? "border-foreground text-foreground"
+            : "border-border text-muted",
+      )}
+    >
+      {done ? <Check className="size-3" /> : n}
+    </span>
+  );
+}
 
 function badgeVariant(
   status: AnalysisStatus,
@@ -97,25 +133,70 @@ export function BatchResultView({ ingestionJobId }: { ingestionJobId: string }) 
         : "empty"
       : null;
 
+  const total = analyses.length;
+  const analysesSettled = jobTerminal && total > 0 && completed === total;
+  const analysisPct = total > 0 ? Math.round((completed / total) * 100) : 0;
+
   return (
     <div className="flex flex-col gap-6">
-      <div role="status" className="flex flex-col gap-2">
-        <h2 className="font-serif text-xl font-semibold">
-          {t("progressHeading")}
-        </h2>
-        <dl className="flex gap-6 text-sm">
-          <div className="flex flex-col">
-            <dt className="text-muted">{t("discovered")}</dt>
-            <dd className="text-lg font-semibold tabular-nums">{discovered}</dd>
+      <Card>
+        <CardContent className="py-6">
+          <div role="status" className="flex flex-col gap-4">
+            <h2 className="font-serif text-xl font-semibold">
+              {t("progressHeading")}
+            </h2>
+            <ol className="flex flex-col gap-4">
+              <li className="flex items-center gap-3">
+                <PhaseMarker n={1} done={jobTerminal} active={!jobTerminal} />
+                <span
+                  className={cn(
+                    "flex-1 text-sm",
+                    jobTerminal ? "text-muted" : "font-medium",
+                  )}
+                >
+                  {t("discovered")}
+                </span>
+                <span className="text-sm font-semibold tabular-nums">
+                  {discovered}
+                </span>
+              </li>
+              <li className="flex flex-col gap-2">
+                <div className="flex items-center gap-3">
+                  <PhaseMarker
+                    n={2}
+                    done={analysesSettled}
+                    active={total > 0 && !analysesSettled}
+                  />
+                  <span
+                    className={cn(
+                      "flex-1 text-sm",
+                      analysesSettled ? "text-muted" : "font-medium",
+                    )}
+                  >
+                    {t("analysesDone")}
+                  </span>
+                  <span className="text-sm font-semibold tabular-nums">
+                    {`${completed} / ${total}`}
+                  </span>
+                </div>
+                <div
+                  className="ml-8 h-2 overflow-hidden rounded-full bg-border"
+                  role="progressbar"
+                  aria-label={t("analysesDone")}
+                  aria-valuenow={analysisPct}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                >
+                  <div
+                    className="h-full rounded-full bg-foreground transition-[width]"
+                    style={{ width: `${analysisPct}%` }}
+                  />
+                </div>
+              </li>
+            </ol>
           </div>
-          <div className="flex flex-col">
-            <dt className="text-muted">{t("analysesDone")}</dt>
-            <dd className="text-lg font-semibold tabular-nums">
-              {completed} / {analyses.length}
-            </dd>
-          </div>
-        </dl>
-      </div>
+        </CardContent>
+      </Card>
 
       {emptyRun && (
         <p role="alert" className="text-sm text-muted">
@@ -146,14 +227,13 @@ export function BatchResultView({ ingestionJobId }: { ingestionJobId: string }) 
                     </span>
                   </Link>
                   <div className="flex shrink-0 items-center gap-3">
-                    {analysis.matchScore !== null && (
-                      <span className="text-lg font-semibold tabular-nums">
-                        {analysis.matchScore}
-                      </span>
+                    {analysis.matchScore !== null ? (
+                      <MatchScoreGauge score={analysis.matchScore} size="sm" />
+                    ) : (
+                      <Badge variant={badgeVariant(analysis.status)}>
+                        {statusLabel(analysis.status)}
+                      </Badge>
                     )}
-                    <Badge variant={badgeVariant(analysis.status)}>
-                      {statusLabel(analysis.status)}
-                    </Badge>
                   </div>
                 </CardContent>
               </Card>

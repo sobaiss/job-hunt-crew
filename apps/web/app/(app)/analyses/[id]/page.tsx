@@ -6,10 +6,12 @@ import { useTranslations } from "next-intl";
 
 import {
   useAnalysis,
+  useCreateAnalysis,
   TERMINAL_ANALYSIS_STATUSES,
 } from "@/hooks/use-analyses";
 import { useEnumLabel } from "@/lib/enum-labels";
 import { AnalysisResultView } from "@/components/analysis-result";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function AnalysisDetailPage() {
@@ -17,6 +19,7 @@ export default function AnalysisDetailPage() {
   const t = useTranslations("analyses");
   const statusLabel = useEnumLabel("analysisStatus");
   const { data: analysis, isPending, isError } = useAnalysis(params.id);
+  const rerun = useCreateAnalysis();
 
   if (isPending) {
     return (
@@ -70,15 +73,40 @@ export default function AnalysisDetailPage() {
       {isFailed && (
         <div
           role="alert"
-          className="flex flex-col gap-1 rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive"
+          className="flex flex-col items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive"
         >
           <p>{t("detail.failed")}</p>
           {analysis.errorMessage && <p>{analysis.errorMessage}</p>}
+          {rerun.data ? (
+            <Link
+              href={`/analyses/${rerun.data.analysisId}`}
+              className="text-sm font-medium text-accent hover:underline"
+            >
+              {t("detail.retryStarted")}
+            </Link>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                rerun.mutate({
+                  jobOfferId: analysis.jobOffer.id,
+                  cvVersionId: analysis.cvVersionId,
+                })
+              }
+              disabled={rerun.isPending}
+            >
+              {t("detail.retry")}
+            </Button>
+          )}
+          {rerun.isError && <p>{t("detail.retryError")}</p>}
         </div>
       )}
 
       {!isTerminal && (
-        <p className="text-sm text-muted">{t("detail.running")}</p>
+        <p role="status" className="text-sm text-muted">
+          {t("detail.running")}
+        </p>
       )}
 
       {analysis.resultJSON ? (

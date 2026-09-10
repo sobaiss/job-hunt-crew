@@ -5,11 +5,73 @@
   "landing": {
     "tagline": "Match your CV against real job offers and see exactly where you stand.",
     "description": "Job Hunt Crew reads a job posting and one of your CVs, then shows the matched skills, the gaps, and what to change before you apply.",
-    "signIn": "Sign in"
+    "signIn": "Sign in",
+    "hero": {
+      "eyebrow": "CV-to-offer matching"
+    },
+    "howItWorks": {
+      "heading": "How it works",
+      "step1Title": "Add a job offer",
+      "step1Body": "Paste the URL of a posting you care about. We fetch and read it for you.",
+      "step2Title": "Choose a CV",
+      "step2Body": "Pick which version of your CV to match against the offer.",
+      "step3Title": "Read the analysis",
+      "step3Body": "See your match score, the skills you already have, and the gaps to close before applying."
+    },
+    "features": {
+      "heading": "More than a single number",
+      "evidenceTitle": "Evidence for every match",
+      "evidenceBody": "Each matched skill is backed by the line in your CV that earned it, so you can trust the score.",
+      "gapsTitle": "Gaps that actually matter",
+      "gapsBody": "Missing skills are tagged required or nice-to-have, so you know what to fix first.",
+      "suggestionsTitle": "Prioritised suggestions",
+      "suggestionsBody": "Concrete changes to make before you apply, ordered by how much they move the needle.",
+      "compareTitle": "Compare your CVs",
+      "compareBody": "Run several CV versions against the same offer and see them side by side.",
+      "batchTitle": "Analyse a whole site",
+      "batchBody": "Point it at a job site with your filters and get every matching offer ranked by fit.",
+      "trendTitle": "Track your progress",
+      "trendBody": "Every analysis is kept, with a match-score trend so you can see your search improving."
+    },
+    "preview": {
+      "heading": "A dashboard built around your search",
+      "body": "Your average and best match score, recent analyses, and a score trend — all in one place once you sign in.",
+      "caption": "Preview of the signed-in dashboard"
+    },
+    "privacy": {
+      "heading": "Your data stays yours",
+      "body": "Every CV you upload and every analysis you run is scoped to your account. Requests are filtered by your user id, so no other user can reach your CVs or your results.",
+      "point1": "CVs and analyses are private to your account",
+      "point2": "Job postings are the only shared data, and only as de-duplicated public records",
+      "point3": "Sign in with Google, LinkedIn, or an email link — no password to leak"
+    },
+    "faq": {
+      "heading": "Frequently asked questions",
+      "formatsQ": "What CV formats can I upload?",
+      "formatsA": "PDF, DOCX, Markdown, or plain text, up to 10 MB per file.",
+      "sourcesQ": "Which job sites are supported?",
+      "sourcesA": "You can paste a single offer URL from any site, or run a search against the configured job sites (LinkedIn, Indeed, France Travail, Welcome to the Jungle, Glassdoor).",
+      "limitsQ": "Is there a limit on how many analyses I can run?",
+      "limitsA": "Yes — there is a daily cap on analyses per account.",
+      "privacyQ": "Who can see my CVs and analyses?",
+      "privacyA": "Only you. Every query is filtered by your account, and CVs and results are never shown to other users.",
+      "modelQ": "What AI model does the analysis use?",
+      "modelA": "A large language model reads the offer and your CV to produce the match. It does not rewrite your CV file for you."
+    },
+    "footer": {
+      "tagline": "Match your CV against real job offers.",
+      "legalHeading": "Legal",
+      "copyright": "Job Hunt Crew"
+    },
+    "placeholders": {
+      "dailyCap": "daily analysis limit: number to be confirmed",
+      "legalLinks": "Legal links (privacy, terms) to be added"
+    }
   },
   "signIn": {
     "title": "Sign in",
     "subtitle": "Sign in to analyse your CV against job offers.",
+    "backToHome": "Back to home",
     "google": "Continue with Google",
     "linkedin": "Continue with LinkedIn",
     "divider": "or",
@@ -23,15 +85,71 @@
   },
   "nav": {
     "dashboard": "Dashboard",
+    "analyses": "Analyses",
     "cvVersions": "CV versions",
+    "settings": "Settings",
     "newAnalysis": "New analysis",
     "openMenu": "Open menu"
+  },
+  "dashboard": {
+    "title": "Overview",
+    "loading": "Loading your dashboard",
+    "loadError": "We couldn't load your dashboard. Please try again.",
+    "stats": {
+      "heading": "Your numbers",
+      "averageScore": "Average match score",
+      "bestScore": "Best match score",
+      "analysisCount": "Analyses run",
+      "cvVersionCount": "CV versions"
+    },
+    "onboarding": {
+      "heading": "Get started in three steps",
+      "importCv": "Import a CV",
+      "importCvHint": "Upload the CV you want to match against job offers.",
+      "runAnalysis": "Run your first analysis",
+      "runAnalysisHint": "Paste a job offer URL and see where you stand.",
+      "compare": "Compare two CVs on one offer",
+      "compareHint": "Analyse the same offer with another CV to see them side by side."
+    },
+    "quickActions": {
+      "heading": "Quick actions",
+      "analyseOne": "Analyse one offer",
+      "analyseSeveral": "Analyse several offers",
+      "importCv": "Import a CV"
+    },
+    "trend": {
+      "heading": "Match score trend"
+    },
+    "recent": {
+      "heading": "Recent analyses"
+    }
   },
   "userMenu": {
     "label": "Account menu",
     "theme": "Theme",
     "language": "Language",
     "signOut": "Sign out"
+  },
+  "settings": {
+    "title": "Settings",
+    "preferences": {
+      "heading": "Preferences",
+      "themeLabel": "Theme",
+      "themeHint": "Light, dark, or match your system.",
+      "languageLabel": "Language",
+      "languageHint": "The language the interface is shown in."
+    },
+    "account": {
+      "heading": "Account",
+      "nameLabel": "Name",
+      "emailLabel": "Email",
+      "unknown": "Not set",
+      "readOnlyNote": "Your name and email come from the account you signed in with and can't be edited here."
+    },
+    "session": {
+      "heading": "Session",
+      "signOut": "Sign out"
+    }
   },
   "theme": {
     "label": "Change theme",
@@ -48,10 +166,22 @@
     "title": "Your analyses",
     "loading": "Loading your analyses",
     "empty": "No analyses requested yet.",
+    "noMatches": "No analyses match your filters.",
     "loadError": "We couldn't load your analyses. Please try again.",
     "jobOfferFallback": "Job offer",
     "vsCv": "vs. {label}",
     "compareLink": "Compare with other CVs",
+    "controls": {
+      "searchLabel": "Search",
+      "searchPlaceholder": "Offer title or company",
+      "statusLabel": "Status",
+      "statusAll": "All statuses",
+      "cvLabel": "CV version",
+      "cvAll": "All CV versions",
+      "sortLabel": "Sort by",
+      "sortRecent": "Most recent",
+      "sortScore": "Highest score"
+    },
     "batch": {
       "siteFallback": "Job site",
       "offers": "{count, plural, one {# offer} other {# offers}}",
@@ -62,14 +192,33 @@
       "loadError": "We couldn't load this analysis. Please try again.",
       "running": "This analysis is still running — this page updates itself.",
       "failed": "This analysis failed.",
+      "retry": "Run it again",
+      "retryStarted": "A new analysis has started — open it",
+      "retryError": "We couldn't start a new analysis. Please try again.",
       "noResult": "No result yet.",
       "none": "None.",
       "matchScore": "Match score",
+      "gaugeLabel": "Match score {score} out of 100",
+      "band": {
+        "strong": "Strong",
+        "partial": "Partial",
+        "weak": "Weak"
+      },
       "matchedSkills": "Matched skills",
       "missingSkills": "Missing skills",
+      "evidenceLabel": "Evidence",
+      "importance": {
+        "required": "Required",
+        "nice_to_have": "Nice to have"
+      },
       "strengths": "Strengths",
       "weaknesses": "Weaknesses",
       "suggestions": "Improvement suggestions",
+      "priority": {
+        "high": "High priority",
+        "medium": "Medium priority",
+        "low": "Low priority"
+      },
       "summary": "Summary"
     },
     "compare": {
@@ -78,6 +227,7 @@
       "empty": "No analyses found for this job offer.",
       "count": "Comparing {count} CV versions",
       "singleNotice": "Only one CV version has been analysed for this offer — request an analysis against another CV version to compare.",
+      "category": "Category",
       "noResult": "No result yet."
     }
   },
@@ -246,6 +396,7 @@
       "discovered": "Discovered",
       "scraped": "Scraped",
       "failedCount": "Failed",
+      "scrapingProgress": "Scraping progress",
       "offersHeading": "Job offers",
       "offersEmpty": "No job offers discovered yet."
     }
