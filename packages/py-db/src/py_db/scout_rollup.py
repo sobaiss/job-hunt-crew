@@ -14,6 +14,11 @@ the two completion points that can move them:
 - each terminal `Analysis` transition (`analysis.persist_analysis_result` on
   COMPLETED, `analysis.handlers.mark_analysis_failed` on FAILED).
 
+It also rolls up the cost-bounded-matching counts the fan-out records per
+`IngestionJob` (issue #55): `alreadySeenCount`, `runLimitSkippedCount`, and
+the daily-cap `quotaSkippedCount` (surfaced on `ScoutRun` as `capSkippedCount`
+— same underlying rule, run-scoped name).
+
 `ScoutRun.status` is left to `dispatch_scout_run` — this only touches the four
 count columns. Hand-written (not sqlacodegen output), like `quota.py` /
 `pipeline_events.py`, so the ingestion and analysis contexts can share it
@@ -51,12 +56,18 @@ async def roll_up_scout_run(session: AsyncSession, scout_run_id: str) -> None:
                 IngestionJob.id,
                 IngestionJob.discoveredCount,
                 IngestionJob.failedCount,
+                IngestionJob.alreadySeenCount,
+                IngestionJob.runLimitSkippedCount,
+                IngestionJob.quotaSkippedCount,
             ).where(IngestionJob.scoutRunId == scout_run_id)
         )
     ).all()
     job_ids = [row.id for row in job_rows]
     offers_discovered = sum(row.discoveredCount or 0 for row in job_rows)
     offers_failed = sum(row.failedCount or 0 for row in job_rows)
+    already_seen = sum(row.alreadySeenCount or 0 for row in job_rows)
+    run_limit_skipped = sum(row.runLimitSkippedCount or 0 for row in job_rows)
+    cap_skipped = sum(row.quotaSkippedCount or 0 for row in job_rows)
 
     offers_analysed = 0
     relevant_count = 0
@@ -81,6 +92,9 @@ async def roll_up_scout_run(session: AsyncSession, scout_run_id: str) -> None:
     scout_run.offersAnalysed = offers_analysed
     scout_run.relevantCount = relevant_count
     scout_run.failedCount = offers_failed + analyses_failed
+    scout_run.alreadySeenCount = already_seen
+    scout_run.runLimitSkippedCount = run_limit_skipped
+    scout_run.capSkippedCount = cap_skipped
     await session.commit()
 
 

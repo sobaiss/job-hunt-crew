@@ -172,6 +172,8 @@ model IngestionJob {
   scrapedCount    Int                @default(0)
   failedCount     Int                @default(0)
   quotaSkippedCount Int              @default(0)
+  alreadySeenCount    Int            @default(0)
+  runLimitSkippedCount Int           @default(0)
   errorMessage    String?
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
@@ -362,6 +364,8 @@ model ScoutRun {
   documentsGeneratedCount Int            @default(0)
   failedCount             Int            @default(0)
   capSkippedCount         Int            @default(0)
+  alreadySeenCount        Int            @default(0)
+  runLimitSkippedCount    Int            @default(0)
   errorMessage            String?
   startedAt               DateTime?
   finishedAt              DateTime?

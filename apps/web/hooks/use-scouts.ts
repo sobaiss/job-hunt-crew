@@ -142,6 +142,9 @@ export type ScoutRun = {
   offersAnalysed: number;
   relevantCount: number;
   failedCount: number;
+  alreadySeenCount: number;
+  runLimitSkippedCount: number;
+  capSkippedCount: number;
   errorMessage: string | null;
   startedAt: string | null;
   finishedAt: string | null;

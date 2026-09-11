@@ -1257,6 +1257,9 @@ class ScoutRunResponse(BaseModel):
     offersAnalysed: int
     relevantCount: int
     failedCount: int
+    alreadySeenCount: int
+    runLimitSkippedCount: int
+    capSkippedCount: int
     errorMessage: str | None
     startedAt: datetime | None
     finishedAt: datetime | None
@@ -1274,6 +1277,9 @@ def _scout_run_response(row: ScoutRun) -> ScoutRunResponse:
         offersAnalysed=row.offersAnalysed,
         relevantCount=row.relevantCount,
         failedCount=row.failedCount,
+        alreadySeenCount=row.alreadySeenCount,
+        runLimitSkippedCount=row.runLimitSkippedCount,
+        capSkippedCount=row.capSkippedCount,
         errorMessage=row.errorMessage,
         startedAt=row.startedAt,
         finishedAt=row.finishedAt,

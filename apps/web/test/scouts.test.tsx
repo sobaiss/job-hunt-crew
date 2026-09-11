@@ -249,6 +249,9 @@ describe("ScoutDetailPage — Run now + run history", () => {
     offersAnalysed: 0,
     relevantCount: 0,
     failedCount: 0,
+    alreadySeenCount: 0,
+    runLimitSkippedCount: 0,
+    capSkippedCount: 0,
     errorMessage: null,
     startedAt: "2026-09-11T00:00:00.000Z",
     finishedAt: "2026-09-11T00:00:05.000Z",
@@ -300,5 +303,28 @@ describe("ScoutDetailPage — Run now + run history", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("This Scout ran within the last hour.");
+  });
+
+  it("surfaces the cost-bounded-matching skip counts when non-zero", async () => {
+    server.use(
+      http.get("/api/scouts/scout-1", () => HttpResponse.json({ scout: scout() })),
+      http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
+      http.get("/api/scouts/scout-1/runs", () =>
+        HttpResponse.json({
+          scoutRuns: [
+            scoutRun({
+              alreadySeenCount: 3,
+              runLimitSkippedCount: 2,
+              capSkippedCount: 1,
+            }),
+          ],
+        }),
+      ),
+    );
+    renderWithProviders(<ScoutDetailPage />);
+
+    expect(await screen.findByText("3 already seen")).toBeInTheDocument();
+    expect(screen.getByText("2 not analysed — run limit")).toBeInTheDocument();
+    expect(screen.getByText("1 not analysed — daily limit")).toBeInTheDocument();
   });
 });

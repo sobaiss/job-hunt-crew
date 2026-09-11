@@ -385,6 +385,9 @@
       "siteUnavailable": "{count, plural, one {# site unavailable} other {# sites unavailable}}",
       "offersDiscovered": "{count, plural, one {# offer found} other {# offers found}}",
       "offersAnalysed": "{count, plural, one {# analysed} other {# analysed}}",
+      "alreadySeen": "{count, plural, one {# already seen} other {# already seen}}",
+      "runLimitSkipped": "{count, plural, one {# not analysed — run limit} other {# not analysed — run limit}}",
+      "capSkipped": "{count, plural, one {# not analysed — daily limit} other {# not analysed — daily limit}}",
       "status": {
         "PENDING": "Queued",
         "RUNNING": "Running",

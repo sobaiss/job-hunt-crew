@@ -79,6 +79,17 @@ function RunHistory({ scoutId }: { scoutId: string }) {
                   <span>
                     {t("offersAnalysed", { count: run.offersAnalysed })}
                   </span>
+                  {run.alreadySeenCount > 0 && (
+                    <span>{t("alreadySeen", { count: run.alreadySeenCount })}</span>
+                  )}
+                  {run.runLimitSkippedCount > 0 && (
+                    <span>
+                      {t("runLimitSkipped", { count: run.runLimitSkippedCount })}
+                    </span>
+                  )}
+                  {run.capSkippedCount > 0 && (
+                    <span>{t("capSkipped", { count: run.capSkippedCount })}</span>
+                  )}
                 </div>
                 {run.errorMessage && (
                   <p className="text-destructive">{run.errorMessage}</p>

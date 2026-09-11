@@ -123,6 +123,10 @@ def test_run_scout_creates_pending_run_and_enqueues_scout_intake(user_id):
         assert run["status"] == "PENDING"
         assert run["scoutId"] == scout_id
         assert run["sitesQueried"] == 0
+        # Cost-bounded matching counts (issue #55) start at 0 like the rest.
+        assert run["alreadySeenCount"] == 0
+        assert run["runLimitSkippedCount"] == 0
+        assert run["capSkippedCount"] == 0
 
     bodies = _drain_scout_intake()
     assert bodies == [{"scoutRunId": run["id"]}]
