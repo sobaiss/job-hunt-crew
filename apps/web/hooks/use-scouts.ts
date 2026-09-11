@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { bff } from "@/lib/bff-client";
+import type { AnalysisDetail } from "@/hooks/use-analyses";
 import {
   POSTED_WITHIN_VALUES,
   REMOTE_VALUES,
@@ -54,6 +55,9 @@ export type Scout = {
   lastRunAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Un-actioned relevant finds (completed Analyses with matchScore >=
+   *  matchThreshold) — issue #56. Backs the Dashboard's cross-Scout count. */
+  relevantFindsCount: number;
 };
 
 export type CreateScoutInput = {
@@ -181,5 +185,24 @@ export function useRunScout(scoutId: string) {
       });
       queryClient.invalidateQueries({ queryKey: [...SCOUTS_KEY, scoutId] });
     },
+  });
+}
+
+// --- Relevant finds (issue #56, Scout slice 4) ---
+// Completed Analyses this Scout has produced, split by matchScore against
+// Scout.matchThreshold into relevant finds and "found — low fit". Each row
+// is the same shape `useAnalysis` returns, so the Scout detail page opens
+// the identical gap report a manual analysis shows.
+
+export type ScoutFinds = {
+  relevantFinds: AnalysisDetail[];
+  lowFitFinds: AnalysisDetail[];
+};
+
+export function useScoutFinds(scoutId: string) {
+  return useQuery({
+    queryKey: [...SCOUTS_KEY, scoutId, "finds"] as const,
+    queryFn: () => bff.get<ScoutFinds>(`/scouts/${scoutId}/finds`),
+    enabled: Boolean(scoutId),
   });
 }

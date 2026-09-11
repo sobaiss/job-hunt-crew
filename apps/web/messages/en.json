@@ -123,6 +123,11 @@
     },
     "recent": {
       "heading": "Recent analyses"
+    },
+    "matches": {
+      "heading": "{count, plural, one {# new match from your agents} other {# new matches from your agents}}",
+      "subtitle": "Your Scouts found offers worth a look.",
+      "cta": "Review matches"
     }
   },
   "userMenu": {
@@ -395,6 +400,12 @@
         "COMPLETED": "Completed",
         "FAILED": "Failed"
       }
+    },
+    "finds": {
+      "loadError": "We couldn't load this Scout's finds. Please try again.",
+      "relevantHeading": "Relevant finds",
+      "relevantEmpty": "No relevant finds yet.",
+      "lowFitHeading": "Found — low fit"
     },
     "siteKeys": {
       "FRANCE_TRAVAIL": "France Travail",

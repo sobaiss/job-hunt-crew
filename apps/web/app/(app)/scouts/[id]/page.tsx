@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 
 import {
   useScout,
+  useScoutFinds,
   useScoutRuns,
   useRunScout,
   useUpdateScout,
@@ -15,6 +16,7 @@ import {
 } from "@/hooks/use-scouts";
 import { useCvVersions } from "@/hooks/use-cv-versions";
 import { BffError } from "@/lib/bff-client";
+import { AnalysisRow } from "@/components/analysis-row";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -100,6 +102,63 @@ function RunHistory({ scoutId }: { scoutId: string }) {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function Finds({ scoutId }: { scoutId: string }) {
+  const t = useTranslations("scouts.finds");
+  const { data, isPending, isError } = useScoutFinds(scoutId);
+
+  if (isPending) {
+    return <Skeleton className="h-16 w-full" />;
+  }
+
+  if (isError || !data) {
+    return (
+      <p role="alert" className="text-sm text-destructive">
+        {t("loadError")}
+      </p>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-6">
+      <Card>
+        <CardContent className="flex flex-col gap-3 py-6 text-sm">
+          <h2 className="font-serif text-lg font-semibold">
+            {t("relevantHeading")}
+          </h2>
+          {data.relevantFinds.length === 0 ? (
+            <p className="text-muted">{t("relevantEmpty")}</p>
+          ) : (
+            <ul className="flex flex-col gap-3">
+              {data.relevantFinds.map((analysis) => (
+                <li key={analysis.id}>
+                  <AnalysisRow analysis={analysis} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      {data.lowFitFinds.length > 0 && (
+        <Card>
+          <CardContent className="flex flex-col gap-3 py-6 text-sm">
+            <h2 className="font-serif text-lg font-semibold">
+              {t("lowFitHeading")}
+            </h2>
+            <ul className="flex flex-col gap-3">
+              {data.lowFitFinds.map((analysis) => (
+                <li key={analysis.id}>
+                  <AnalysisRow analysis={analysis} />
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
+    </div>
   );
 }
 
@@ -267,6 +326,8 @@ export default function ScoutDetailPage() {
       </Card>
 
       <RunHistory scoutId={scout.id} />
+
+      <Finds scoutId={scout.id} />
 
       <Link href="/scouts" className="text-sm text-accent underline">
         {t("detail.back")}

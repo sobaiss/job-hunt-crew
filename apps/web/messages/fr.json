@@ -123,6 +123,11 @@
     },
     "recent": {
       "heading": "Analyses récentes"
+    },
+    "matches": {
+      "heading": "{count, plural, one {# nouveau résultat de vos agents} other {# nouveaux résultats de vos agents}}",
+      "subtitle": "Vos agents ont trouvé des offres qui méritent un coup d'œil.",
+      "cta": "Voir les résultats"
     }
   },
   "userMenu": {
@@ -395,6 +400,12 @@
         "COMPLETED": "Terminé",
         "FAILED": "Échec"
       }
+    },
+    "finds": {
+      "loadError": "Impossible de charger les résultats de cet agent. Veuillez réessayer.",
+      "relevantHeading": "Résultats pertinents",
+      "relevantEmpty": "Aucun résultat pertinent pour l'instant.",
+      "lowFitHeading": "Trouvé — faible pertinence"
     },
     "siteKeys": {
       "FRANCE_TRAVAIL": "France Travail",

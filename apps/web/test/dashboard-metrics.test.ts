@@ -2,10 +2,37 @@ import { describe, expect, it } from "vitest";
 
 import {
   computeStats,
+  newMatchesCount,
   onboardingSteps,
   scoreTrend,
 } from "@/lib/dashboard-metrics";
 import type { AnalysisSummary } from "@/hooks/use-analyses";
+import type { Scout } from "@/hooks/use-scouts";
+
+function scout(overrides: Partial<Scout> = {}): Scout {
+  return {
+    id: "s1",
+    userId: "u1",
+    label: "Scout",
+    cvVersionId: "cv1",
+    targetSiteKeys: ["FRANCE_TRAVAIL"],
+    filters: {
+      keywords: null,
+      location: null,
+      postedWithin: null,
+      contractType: null,
+      remote: null,
+      experienceLevel: null,
+    },
+    matchThreshold: 70,
+    status: "ACTIVE",
+    lastRunAt: null,
+    createdAt: "2026-08-01T00:00:00.000Z",
+    updatedAt: "2026-08-01T00:00:00.000Z",
+    relevantFindsCount: 0,
+    ...overrides,
+  };
+}
 
 function analysis(overrides: Partial<AnalysisSummary> = {}): AnalysisSummary {
   return {
@@ -74,6 +101,21 @@ describe("onboardingSteps", () => {
       1,
     );
     expect(steps.hasComparison).toBe(true);
+  });
+});
+
+describe("newMatchesCount", () => {
+  it("sums relevantFindsCount across all Scouts", () => {
+    expect(
+      newMatchesCount([
+        scout({ id: "s1", relevantFindsCount: 3 }),
+        scout({ id: "s2", relevantFindsCount: 2 }),
+      ]),
+    ).toBe(5);
+  });
+
+  it("is zero-safe with no Scouts", () => {
+    expect(newMatchesCount([])).toBe(0);
   });
 });
 

@@ -12,4 +12,14 @@ export const handlers = [
   // about grouping don't have to stub it; grouping tests override with
   // `server.use`.
   http.get("/api/site-configs", () => HttpResponse.json({ siteConfigs: [] })),
+  // The Dashboard's "new matches from your agents" block (issue #56) reads
+  // the Scout list; default to none so suites that don't care about Scouts
+  // don't have to stub it.
+  http.get("/api/scouts", () => HttpResponse.json({ scouts: [] })),
+  // The Scout detail page's relevant-finds / low-fit lists (issue #56);
+  // default to empty so suites exercising other parts of the page (run
+  // history, actions) don't have to stub it.
+  http.get("/api/scouts/:id/finds", () =>
+    HttpResponse.json({ relevantFinds: [], lowFitFinds: [] }),
+  ),
 ];

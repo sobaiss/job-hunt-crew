@@ -14,8 +14,10 @@ import {
 
 import { useAnalyses } from "@/hooks/use-analyses";
 import { useCvVersions } from "@/hooks/use-cv-versions";
+import { useScouts } from "@/hooks/use-scouts";
 import {
   computeStats,
+  newMatchesCount,
   onboardingSteps,
   scoreTrend,
   type OnboardingSteps,
@@ -96,6 +98,7 @@ export function Dashboard() {
   const t = useTranslations("dashboard");
   const analysesQuery = useAnalyses();
   const cvVersionsQuery = useCvVersions();
+  const scoutsQuery = useScouts();
 
   if (analysesQuery.isPending || cvVersionsQuery.isPending) {
     return (
@@ -133,10 +136,27 @@ export function Dashboard() {
   // The `/api/analyses` list is already recency-ordered.
   const recent = analyses.slice(0, RECENT_LIMIT);
   const showOnboarding = analyses.length === 0;
+  const newMatches = newMatchesCount(scoutsQuery.data ?? []);
 
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-col gap-8 p-8">
       <h1 className="font-serif text-2xl font-semibold">{t("title")}</h1>
+
+      {newMatches > 0 && (
+        <Card>
+          <CardContent className="flex flex-wrap items-center justify-between gap-4 py-5">
+            <div className="flex flex-col gap-1">
+              <h2 className="font-serif text-lg font-semibold">
+                {t("matches.heading", { count: newMatches })}
+              </h2>
+              <p className="text-sm text-muted">{t("matches.subtitle")}</p>
+            </div>
+            <Button asChild>
+              <Link href="/scouts">{t("matches.cta")}</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {showOnboarding ? (
         <OnboardingChecklist steps={steps} />

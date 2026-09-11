@@ -328,3 +328,65 @@ describe("ScoutDetailPage — Run now + run history", () => {
     expect(screen.getByText("1 not analysed — daily limit")).toBeInTheDocument();
   });
 });
+
+describe("ScoutDetailPage — relevant finds (issue #56)", () => {
+  function find(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "a1",
+      status: "COMPLETED",
+      matchScore: 85,
+      requestedAt: "2026-09-11T00:00:00.000Z",
+      cvVersionId: "cv-default",
+      ingestionJobId: "job-1",
+      scoutId: "scout-1",
+      ingestionJob: null,
+      jobOffer: { id: "offer-1", title: "Backend Engineer", company: "Acme" },
+      cvVersion: { label: "Default CV" },
+      resultJSON: null,
+      errorMessage: null,
+      ...overrides,
+    };
+  }
+
+  it("lists relevant finds separately from found — low fit", async () => {
+    server.use(
+      http.get("/api/scouts/scout-1", () => HttpResponse.json({ scout: scout() })),
+      http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
+      http.get("/api/scouts/scout-1/runs", () => HttpResponse.json({ scoutRuns: [] })),
+      http.get("/api/scouts/scout-1/finds", () =>
+        HttpResponse.json({
+          relevantFinds: [find({ id: "a1", jobOffer: { id: "o1", title: "Backend Engineer", company: "Acme" } })],
+          lowFitFinds: [find({ id: "a2", matchScore: 40, jobOffer: { id: "o2", title: "Support Rep", company: "Beta" } })],
+        }),
+      ),
+    );
+
+    renderWithProviders(<ScoutDetailPage />);
+
+    const relevant = within(
+      (await screen.findByText("Relevant finds")).closest("div") as HTMLElement,
+    );
+    expect(relevant.getByText("Backend Engineer")).toBeInTheDocument();
+
+    const lowFit = within(
+      screen.getByText("Found — low fit").closest("div") as HTMLElement,
+    );
+    expect(lowFit.getByText("Support Rep")).toBeInTheDocument();
+  });
+
+  it("shows an empty state when there are no relevant finds yet, and hides the low-fit card", async () => {
+    server.use(
+      http.get("/api/scouts/scout-1", () => HttpResponse.json({ scout: scout() })),
+      http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
+      http.get("/api/scouts/scout-1/runs", () => HttpResponse.json({ scoutRuns: [] })),
+      http.get("/api/scouts/scout-1/finds", () =>
+        HttpResponse.json({ relevantFinds: [], lowFitFinds: [] }),
+      ),
+    );
+
+    renderWithProviders(<ScoutDetailPage />);
+
+    expect(await screen.findByText("No relevant finds yet.")).toBeInTheDocument();
+    expect(screen.queryByText("Found — low fit")).not.toBeInTheDocument();
+  });
+});

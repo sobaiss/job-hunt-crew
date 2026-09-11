@@ -193,6 +193,7 @@ def test_create_scout_defaults_threshold_and_normalizes(user_id):
             "experienceLevel": None,
         }
         assert scout["lastRunAt"] is None
+        assert scout["relevantFindsCount"] == 0
 
 
 def test_create_and_list_scopes_to_user(user_id):

@@ -1050,9 +1050,15 @@ class ScoutResponse(BaseModel):
     lastRunAt: datetime | None
     createdAt: datetime
     updatedAt: datetime
+    # Un-actioned relevant finds (completed Analyses with matchScore >=
+    # matchThreshold) for this Scout — issue #56. There is no "actioned"
+    # tracking yet (Application lands in slice 7 / #59), so every relevant
+    # find currently counts; the field name is kept forward-looking so the
+    # Dashboard block doesn't need a contract change once that lands.
+    relevantFindsCount: int
 
 
-def _scout_response(row: Scout) -> ScoutResponse:
+def _scout_response(row: Scout, relevant_finds_count: int = 0) -> ScoutResponse:
     return ScoutResponse(
         id=row.id,
         userId=row.userId,
@@ -1065,7 +1071,37 @@ def _scout_response(row: Scout) -> ScoutResponse:
         lastRunAt=row.lastRunAt,
         createdAt=row.createdAt,
         updatedAt=row.updatedAt,
+        relevantFindsCount=relevant_finds_count,
     )
+
+
+async def _relevant_finds_count(session: AsyncSession, scout_id: str, threshold: int) -> int:
+    stmt = select(func.count()).select_from(Analysis).where(
+        Analysis.scoutId == scout_id,
+        Analysis.status == Analysisstatus.COMPLETED,
+        Analysis.matchScore >= threshold,
+    )
+    return int((await session.scalar(stmt)) or 0)
+
+
+async def _relevant_finds_counts_by_scout(
+    session: AsyncSession, user_id: str
+) -> dict[str, int]:
+    """One grouped query for the whole list, so `list_scouts` (which backs the
+    Dashboard's cross-Scout "new matches" block, issue #56) avoids an N+1."""
+    stmt = (
+        select(Analysis.scoutId, func.count())
+        .select_from(Analysis)
+        .join(Scout, Scout.id == Analysis.scoutId)
+        .where(
+            Scout.userId == user_id,
+            Analysis.status == Analysisstatus.COMPLETED,
+            Analysis.matchScore >= Scout.matchThreshold,
+        )
+        .group_by(Analysis.scoutId)
+    )
+    rows = (await session.execute(stmt)).all()
+    return {scout_id: count for scout_id, count in rows}
 
 
 class ScoutListResponse(BaseModel):
@@ -1086,7 +1122,10 @@ async def list_scouts(
             select(Scout).where(Scout.userId == user_id).order_by(Scout.createdAt.desc())
         )
     ).all()
-    return ScoutListResponse(scouts=[_scout_response(row) for row in rows])
+    counts = await _relevant_finds_counts_by_scout(session, user_id)
+    return ScoutListResponse(
+        scouts=[_scout_response(row, counts.get(row.id, 0)) for row in rows]
+    )
 
 
 class CreateScoutRequest(BaseModel):
@@ -1157,7 +1196,8 @@ async def get_scout(
     scout = await session.get(Scout, scout_id)
     if scout is None or scout.userId != user_id:
         raise HTTPException(status_code=404, detail="Not found")
-    return GetScoutResponse(scout=_scout_response(scout))
+    count = await _relevant_finds_count(session, scout.id, scout.matchThreshold)
+    return GetScoutResponse(scout=_scout_response(scout, count))
 
 
 class UpdateScoutRequest(BaseModel):
@@ -1234,7 +1274,44 @@ async def update_scout(
     await session.commit()
     await session.refresh(scout)
 
-    return GetScoutResponse(scout=_scout_response(scout))
+    count = await _relevant_finds_count(session, scout.id, scout.matchThreshold)
+    return GetScoutResponse(scout=_scout_response(scout, count))
+
+
+class ScoutFindsResponse(BaseModel):
+    relevantFinds: list[AnalysisResponse]
+    lowFitFinds: list[AnalysisResponse]
+
+
+@router.get("/scouts/{scout_id}/finds", response_model=ScoutFindsResponse)
+async def list_scout_finds(
+    scout_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> ScoutFindsResponse:
+    """Completed Analyses this Scout has produced, split by
+    `matchScore >= Scout.matchThreshold` into relevant finds and "found — low
+    fit" (issue #56). Each row is the same `AnalysisResponse` shape a manual
+    analysis uses, so the web client opens the identical gap report."""
+    scout = await _owned_scout(session, scout_id, user_id)
+    rows = (
+        await session.scalars(
+            select(Analysis)
+            .options(
+                selectinload(Analysis.JobOffer_),
+                selectinload(Analysis.CVVersion_),
+                selectinload(Analysis.IngestionJob_),
+            )
+            .where(Analysis.scoutId == scout.id, Analysis.status == Analysisstatus.COMPLETED)
+            .order_by(Analysis.completedAt.desc())
+        )
+    ).all()
+    relevant = [row for row in rows if (row.matchScore or 0) >= scout.matchThreshold]
+    low_fit = [row for row in rows if (row.matchScore or 0) < scout.matchThreshold]
+    return ScoutFindsResponse(
+        relevantFinds=[_analysis_response(row) for row in relevant],
+        lowFitFinds=[_analysis_response(row) for row in low_fit],
+    )
 
 
 # --- Scout runs (issue #54, Scout slice 2) ---
