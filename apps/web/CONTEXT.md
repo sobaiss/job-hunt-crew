@@ -41,8 +41,25 @@ The list at `/analyses` — every standalone Analysis and every grouped SITE_SEA
 _Avoid_: Dashboard (that's the overview now), analyses page (that's the route), History
 
 **App shell**:
-The persistent frame around every signed-in page: a left **Sidebar** (brand wordmark, the "New analysis" primary action, the Dashboard / Analyses / CV-versions / Settings links, and the user menu with theme, `LocaleSwitch`, sign out) plus a context **Topbar** (page title and page-level actions). Implemented as `app/(app)/layout.tsx` + `components/app-sidebar.tsx` + `components/app-topbar.tsx`; `app/(public)` pages render outside it. Collapses to a drawer on narrow viewports.
+The persistent frame around every signed-in page: a left **Sidebar** (brand wordmark, the "New analysis" primary action, the Dashboard / Analyses / Agents / Applications / CV-versions / Settings links, and the user menu with theme, `LocaleSwitch`, sign out) plus a context **Topbar** (page title and page-level actions). Implemented as `app/(app)/layout.tsx` + `components/app-sidebar.tsx` + `components/app-topbar.tsx`; `app/(public)` pages render outside it. Collapses to a drawer on narrow viewports.
 _Avoid_: Layout (too generic), navbar / header (it's a Sidebar now)
+
+**Agents**:
+The sidebar entry and `/scouts` area where a candidate creates and manages
+Scouts (defined in [API](../../services/api/CONTEXT.md)'s context) — list,
+create/edit form, and a detail page showing config, run history, relevant
+finds, the patterns panel, and per-Scout stats.
+_Avoid_: Scouts (fine in prose for the entity itself; "Agents" is
+specifically the nav label and route area a candidate sees)
+
+**Applications**:
+The sidebar entry and `/applications` area listing every Application
+(defined in [API](../../services/api/CONTEXT.md)'s context) with filter and
+sort by status, Scout, and date, a stats header (all-time / last-30-days),
+and a detail page showing one Application's StatusEvent timeline and
+back-links to its Analysis, Scout, and GeneratedDocuments.
+_Avoid_: Tracker (fine in prose; the nav label and route area is
+"Applications")
 
 **Settings**:
 The `/settings` page — theme, Locale, and read-only account details (name and email from the Session), plus sign out. No account deletion (there is no API for it).
