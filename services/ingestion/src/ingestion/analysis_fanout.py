@@ -36,6 +36,7 @@ from py_db.models import (
     ScoutRun,
 )
 from py_db.quota import analyses_requested_today, daily_analysis_cap
+from py_db.scout_rollup import roll_up_scout_run
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -87,6 +88,10 @@ async def create_analyses_for_ready_offers(
         )
     ).all()
     if not ready_offer_ids:
+        # Nothing to analyse (e.g. every discovered offer failed to scrape),
+        # but a Scout run still needs its offersDiscovered/failedCount to
+        # reflect the completed discovery (issue #54).
+        await _roll_up_scout_run_if_any(session, ingestion_job)
         return result
 
     already_analysed = set(
@@ -98,6 +103,7 @@ async def create_analyses_for_ready_offers(
     )
     pending_offer_ids = [oid for oid in ready_offer_ids if oid not in already_analysed]
     if not pending_offer_ids:
+        await _roll_up_scout_run_if_any(session, ingestion_job)
         return result
 
     # Scout attribution (issue #54): a SITE_SEARCH job fanned out by
@@ -148,4 +154,17 @@ async def create_analyses_for_ready_offers(
                 MessageBody=json.dumps({"analysisId": analysis_id}),
             )
 
+    # Progressive roll-up (issue #54): discovery has run and this Scout run's
+    # Analysis rows now exist, so recompute the ScoutRun's
+    # offersDiscovered/offersAnalysed/relevantCount/failedCount. Each Analysis
+    # completing later re-runs the roll-up from the analysis side.
+    await _roll_up_scout_run_if_any(session, ingestion_job)
+
     return result
+
+
+async def _roll_up_scout_run_if_any(session: AsyncSession, ingestion_job: IngestionJob) -> None:
+    """Recompute the owning `ScoutRun`'s progressive counts when `ingestion_job`
+    belongs to a Scout run; a no-op for a manual job (issue #54)."""
+    if ingestion_job.scoutRunId:
+        await roll_up_scout_run(session, ingestion_job.scoutRunId)

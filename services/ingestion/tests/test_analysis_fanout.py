@@ -497,3 +497,91 @@ async def test_manual_job_leaves_scout_id_null():
     finally:
         await _cleanup(session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id, all_offer_ids=all_offer_ids)
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_scout_run_counts_roll_up_after_fanout():
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id, cv_version_id, ingestion_job_id, offer_ids, all_offer_ids = await _seed(
+        session_factory,
+        offer_statuses=[Jobofferextractionstatus.READY, Jobofferextractionstatus.READY],
+    )
+    scout_id, scout_run_id = await _attach_scout_run(
+        session_factory,
+        user_id=user_id,
+        cv_version_id=cv_version_id,
+        ingestion_job_id=ingestion_job_id,
+    )
+    async with session_factory() as session:
+        job = await session.get(IngestionJob, ingestion_job_id)
+        job.discoveredCount = 2  # what the ingestion aggregate would have recorded
+        await session.commit()
+    fake_sqs = FakeSqs()
+
+    try:
+        async with session_factory() as session:
+            ingestion_job = await session.get(IngestionJob, ingestion_job_id)
+            await create_analyses_for_ready_offers(session, ingestion_job, sqs_client=fake_sqs)
+
+        async with session_factory() as session:
+            run = await session.get(ScoutRun, scout_run_id)
+        # Discovery ran; the run's Analysis rows exist but are still PENDING.
+        assert run.offersDiscovered == 2
+        assert run.offersAnalysed == 0
+        assert run.relevantCount == 0
+        assert run.failedCount == 0
+    finally:
+        await _cleanup_scout(
+            session_factory,
+            scout_id=scout_id,
+            scout_run_id=scout_run_id,
+            ingestion_job_id=ingestion_job_id,
+        )
+        await _cleanup(session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id, all_offer_ids=all_offer_ids)
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_scout_run_rolls_up_failures_when_no_offer_is_analysable():
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id, cv_version_id, ingestion_job_id, _, all_offer_ids = await _seed(
+        session_factory,
+        offer_statuses=[Jobofferextractionstatus.FAILED, Jobofferextractionstatus.FAILED],
+    )
+    scout_id, scout_run_id = await _attach_scout_run(
+        session_factory,
+        user_id=user_id,
+        cv_version_id=cv_version_id,
+        ingestion_job_id=ingestion_job_id,
+    )
+    async with session_factory() as session:
+        job = await session.get(IngestionJob, ingestion_job_id)
+        job.discoveredCount = 2
+        job.failedCount = 2
+        await session.commit()
+    fake_sqs = FakeSqs()
+
+    try:
+        async with session_factory() as session:
+            ingestion_job = await session.get(IngestionJob, ingestion_job_id)
+            result = await create_analyses_for_ready_offers(
+                session, ingestion_job, sqs_client=fake_sqs
+            )
+        assert result.created_analysis_ids == []
+
+        async with session_factory() as session:
+            run = await session.get(ScoutRun, scout_run_id)
+        assert run.offersDiscovered == 2
+        assert run.failedCount == 2
+        assert run.offersAnalysed == 0
+    finally:
+        await _cleanup_scout(
+            session_factory,
+            scout_id=scout_id,
+            scout_run_id=scout_run_id,
+            ingestion_job_id=ingestion_job_id,
+        )
+        await _cleanup(session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id, all_offer_ids=all_offer_ids)
+        await engine.dispose()
