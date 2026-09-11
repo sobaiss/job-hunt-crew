@@ -390,3 +390,80 @@ describe("ScoutDetailPage — relevant finds (issue #56)", () => {
     expect(screen.queryByText("Found — low fit")).not.toBeInTheDocument();
   });
 });
+
+describe("ScoutDetailPage — stats and patterns (issue #60)", () => {
+  it("shows the scoped stats header", async () => {
+    server.use(
+      http.get("/api/scouts/scout-1", () => HttpResponse.json({ scout: scout() })),
+      http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
+      http.get("/api/scouts/scout-1/runs", () => HttpResponse.json({ scoutRuns: [] })),
+      http.get("/api/scouts/scout-1/stats", () =>
+        HttpResponse.json({
+          allTime: {
+            offersDiscovered: 40,
+            relevantFinds: 5,
+            documentsGenerated: 2,
+            applicationsSubmitted: 1,
+            responseRate: 100,
+            interviewRate: 0,
+            offerRate: 0,
+            acceptanceRate: 0,
+            medianDaysToFirstResponse: 4,
+          },
+          last30Days: {
+            offersDiscovered: 40,
+            relevantFinds: 5,
+            documentsGenerated: 2,
+            applicationsSubmitted: 1,
+            responseRate: 100,
+            interviewRate: 0,
+            offerRate: 0,
+            acceptanceRate: 0,
+            medianDaysToFirstResponse: 4,
+          },
+        }),
+      ),
+    );
+
+    renderWithProviders(<ScoutDetailPage />);
+
+    expect(await screen.findByText("Offers discovered")).toBeInTheDocument();
+    expect(screen.getByText("40")).toBeInTheDocument();
+  });
+
+  it("ranks the patterns panel's missing skills by frequency", async () => {
+    server.use(
+      http.get("/api/scouts/scout-1", () => HttpResponse.json({ scout: scout() })),
+      http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
+      http.get("/api/scouts/scout-1/runs", () => HttpResponse.json({ scoutRuns: [] })),
+      http.get("/api/scouts/scout-1/patterns", () =>
+        HttpResponse.json({
+          patterns: [
+            { skill: "Kubernetes", count: 3 },
+            { skill: "GraphQL", count: 1 },
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<ScoutDetailPage />);
+
+    expect(await screen.findByText("Kubernetes")).toBeInTheDocument();
+    expect(screen.getByText("GraphQL")).toBeInTheDocument();
+  });
+
+  it("shows an empty state when there are no patterns yet", async () => {
+    server.use(
+      http.get("/api/scouts/scout-1", () => HttpResponse.json({ scout: scout() })),
+      http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
+      http.get("/api/scouts/scout-1/runs", () => HttpResponse.json({ scoutRuns: [] })),
+      http.get("/api/scouts/scout-1/patterns", () => HttpResponse.json({ patterns: [] })),
+    );
+
+    renderWithProviders(<ScoutDetailPage />);
+
+    expect(
+      await screen.findByText("No patterns yet — they'll appear as relevant finds accumulate."),
+    ).toBeInTheDocument();
+  });
+});

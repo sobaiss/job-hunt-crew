@@ -3,10 +3,16 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 
-import { useApplications, APPLICATION_STATUS_VALUES, type ApplicationStatus } from "@/hooks/use-applications";
+import {
+  useApplications,
+  useApplicationStats,
+  APPLICATION_STATUS_VALUES,
+  type ApplicationStatus,
+} from "@/hooks/use-applications";
 import { useScouts } from "@/hooks/use-scouts";
 import { useEnumLabel } from "@/lib/enum-labels";
 import { ApplicationRow } from "@/components/application-row";
+import { ApplicationStatsHeader } from "@/components/application-stats-header";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -31,6 +37,7 @@ export default function ApplicationsPage() {
     status: status === "all" ? undefined : status,
     scoutId: scoutId === "all" ? undefined : scoutId,
   });
+  const stats = useApplicationStats();
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-col gap-8 p-8">
@@ -38,6 +45,12 @@ export default function ApplicationsPage() {
         <h1 className="font-serif text-2xl font-semibold">{t("title")}</h1>
         <p className="text-sm text-muted">{t("subtitle")}</p>
       </div>
+
+      <ApplicationStatsHeader
+        stats={stats.data}
+        isPending={stats.isPending}
+        isError={stats.isError}
+      />
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="flex flex-col gap-1.5">

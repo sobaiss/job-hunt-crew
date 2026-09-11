@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { bff } from "@/lib/bff-client";
 import type { AnalysisDetail } from "@/hooks/use-analyses";
+import type { ApplicationStats } from "@/hooks/use-applications";
 import {
   POSTED_WITHIN_VALUES,
   REMOTE_VALUES,
@@ -203,6 +204,36 @@ export function useScoutFinds(scoutId: string) {
   return useQuery({
     queryKey: [...SCOUTS_KEY, scoutId, "finds"] as const,
     queryFn: () => bff.get<ScoutFinds>(`/scouts/${scoutId}/finds`),
+    enabled: Boolean(scoutId),
+  });
+}
+
+// --- Stats and patterns (issue #60, Scout slice 8) ---
+// The same stats header shown on the Applications view, scoped to this
+// Scout's own offers/finds/documents/applications, plus the "patterns
+// across your matches" panel ranking required-and-missing skills.
+
+/** This Scout's stats — same shape as `useApplicationStats`, scoped to it. */
+export function useScoutStats(scoutId: string) {
+  return useQuery({
+    queryKey: [...SCOUTS_KEY, scoutId, "stats"] as const,
+    queryFn: () => bff.get<ApplicationStats>(`/scouts/${scoutId}/stats`),
+    enabled: Boolean(scoutId),
+  });
+}
+
+export type SkillPattern = {
+  skill: string;
+  count: number;
+};
+
+/** Skills most often required by this Scout's relevant finds and missing
+ * from the base CV, ranked by frequency among `required`-importance gaps. */
+export function useScoutPatterns(scoutId: string) {
+  return useQuery({
+    queryKey: [...SCOUTS_KEY, scoutId, "patterns"] as const,
+    queryFn: () => bff.get<{ patterns: SkillPattern[] }>(`/scouts/${scoutId}/patterns`),
+    select: (data) => data.patterns,
     enabled: Boolean(scoutId),
   });
 }

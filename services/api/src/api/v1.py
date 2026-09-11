@@ -29,6 +29,7 @@ from py_db.models import (
     SiteConfig,
     StatusEvent,
 )
+from py_db.application_stats import compute_application_stats, stats_window_since
 from py_db.quota import analyses_requested_today, daily_analysis_cap
 from pydantic import BaseModel
 from sqlalchemy import func, select, update
@@ -982,6 +983,42 @@ SCOUT_STATUS_VALUES = ("ACTIVE", "PAUSED", "ARCHIVED")
 DEFAULT_SCOUT_MATCH_THRESHOLD = 70
 
 
+# --- Applications + per-Scout stats (issue #60) ---
+# Shared by GET /applications/stats (global) and GET /scouts/{id}/stats
+# (scoped); defined ahead of both call sites so `response_model=` resolves
+# regardless of which route is declared first in the file.
+
+
+class ApplicationStatsWindowResponse(BaseModel):
+    offersDiscovered: int
+    relevantFinds: int
+    documentsGenerated: int
+    applicationsSubmitted: int
+    responseRate: float
+    interviewRate: float
+    offerRate: float
+    acceptanceRate: float
+    medianDaysToFirstResponse: float | None
+
+
+class ApplicationStatsResponse(BaseModel):
+    allTime: ApplicationStatsWindowResponse
+    last30Days: ApplicationStatsWindowResponse
+
+
+async def _application_stats_response(
+    session: AsyncSession, user_id: str, *, scout_id: str | None = None
+) -> ApplicationStatsResponse:
+    all_time = await compute_application_stats(session, user_id, scout_id=scout_id)
+    last_30_days = await compute_application_stats(
+        session, user_id, scout_id=scout_id, since=stats_window_since()
+    )
+    return ApplicationStatsResponse(
+        allTime=ApplicationStatsWindowResponse(**all_time.__dict__),
+        last30Days=ApplicationStatsWindowResponse(**last_30_days.__dict__),
+    )
+
+
 def _max_scouts_per_user() -> int:
     raw = os.environ.get("MAX_SCOUTS_PER_USER")
     try:
@@ -1337,6 +1374,69 @@ async def list_scout_finds(
     return ScoutFindsResponse(
         relevantFinds=[_analysis_response(row) for row in relevant],
         lowFitFinds=[_analysis_response(row) for row in low_fit],
+    )
+
+
+@router.get("/scouts/{scout_id}/stats", response_model=ApplicationStatsResponse)
+async def get_scout_stats(
+    scout_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> ApplicationStatsResponse:
+    """The same stats header as `GET /applications/stats` (issue #60), scoped
+    to this Scout's own offers/finds/documents/applications."""
+    scout = await _owned_scout(session, scout_id, user_id)
+    return await _application_stats_response(session, user_id, scout_id=scout.id)
+
+
+class SkillPattern(BaseModel):
+    skill: str
+    count: int
+
+
+class ScoutPatternsResponse(BaseModel):
+    patterns: list[SkillPattern]
+
+
+@router.get("/scouts/{scout_id}/patterns", response_model=ScoutPatternsResponse)
+async def get_scout_patterns(
+    scout_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> ScoutPatternsResponse:
+    """"Patterns across your matches" (issue #60): aggregates `missing_skills`
+    across this Scout's completed Analyses, counting only `required`-importance
+    entries (the AC's "ranked by frequency among required skills"), ranked
+    most-frequent first. Skill names are grouped case-insensitively but the
+    most common original casing is shown.
+    """
+    scout = await _owned_scout(session, scout_id, user_id)
+    rows = (
+        await session.scalars(
+            select(Analysis).where(
+                Analysis.scoutId == scout.id,
+                Analysis.status == Analysisstatus.COMPLETED,
+                Analysis.resultJSON.is_not(None),
+            )
+        )
+    ).all()
+
+    counts: dict[str, int] = {}
+    display: dict[str, str] = {}
+    for row in rows:
+        for entry in (row.resultJSON or {}).get("missing_skills", []):
+            if not isinstance(entry, dict) or entry.get("importance") != "required":
+                continue
+            skill = entry.get("skill")
+            if not isinstance(skill, str) or not skill.strip():
+                continue
+            key = skill.strip().lower()
+            counts[key] = counts.get(key, 0) + 1
+            display.setdefault(key, skill.strip())
+
+    ranked = sorted(counts.items(), key=lambda item: (-item[1], display[item[0]]))
+    return ScoutPatternsResponse(
+        patterns=[SkillPattern(skill=display[key], count=count) for key, count in ranked]
     )
 
 
@@ -1804,6 +1904,21 @@ async def list_applications(
 
     rows = (await session.scalars(stmt)).all()
     return ApplicationListResponse(applications=[_application_response(row) for row in rows])
+
+
+@router.get("/applications/stats", response_model=ApplicationStatsResponse)
+async def get_application_stats(
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> ApplicationStatsResponse:
+    """Applications view's stats header (issue #60): offers discovered,
+    relevant finds, documents generated, applications submitted, the funnel
+    rates, and the median days to first response — across every Scout,
+    shown both all-time and for the last 30 days. Registered ahead of
+    `GET /applications/{application_id}` so the literal `stats` path segment
+    is matched first.
+    """
+    return await _application_stats_response(session, user_id)
 
 
 class GetApplicationResponse(BaseModel):

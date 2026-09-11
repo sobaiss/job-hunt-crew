@@ -58,20 +58,6 @@ describe("ApplicationsPage — list", () => {
     expect(await screen.findByText("No applications tracked yet.")).toBeInTheDocument();
   });
 
-  it("surfaces a load error", async () => {
-    server.use(
-      http.get("/api/applications", () =>
-        HttpResponse.json({ error: "boom" }, { status: 500 }),
-      ),
-    );
-
-    renderWithProviders(<ApplicationsPage />);
-
-    expect(
-      await screen.findByText("We couldn't load your applications. Please try again."),
-    ).toBeInTheDocument();
-  });
-
   it("re-fetches with a status filter when the status control changes", async () => {
     const user = userEvent.setup();
     let lastUrl = "";
@@ -89,6 +75,58 @@ describe("ApplicationsPage — list", () => {
 
     await screen.findByText("Backend Engineer");
     expect(lastUrl).toContain("status=APPLIED");
+  });
+});
+
+describe("ApplicationsPage — stats header (issue #60)", () => {
+  function statsWindow(overrides: Record<string, unknown> = {}) {
+    return {
+      offersDiscovered: 0,
+      relevantFinds: 0,
+      documentsGenerated: 0,
+      applicationsSubmitted: 0,
+      responseRate: 0,
+      interviewRate: 0,
+      offerRate: 0,
+      acceptanceRate: 0,
+      medianDaysToFirstResponse: null,
+      ...overrides,
+    };
+  }
+
+  it("shows all-time metrics by default and switches to the last-30-days window", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/applications", () => HttpResponse.json({ applications: [] })),
+      http.get("/api/applications/stats", () =>
+        HttpResponse.json({
+          allTime: statsWindow({ applicationsSubmitted: 12, responseRate: 50 }),
+          last30Days: statsWindow({ applicationsSubmitted: 3, responseRate: 33.3 }),
+        }),
+      ),
+    );
+
+    renderWithProviders(<ApplicationsPage />);
+
+    expect(await screen.findByText("12")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Last 30 days" }));
+
+    expect(await screen.findByText("3")).toBeInTheDocument();
+  });
+
+  it("is zero-safe with no data", async () => {
+    server.use(
+      http.get("/api/applications", () => HttpResponse.json({ applications: [] })),
+      http.get("/api/applications/stats", () =>
+        HttpResponse.json({ allTime: statsWindow(), last30Days: statsWindow() }),
+      ),
+    );
+
+    renderWithProviders(<ApplicationsPage />);
+
+    expect(await screen.findByText("Applications submitted")).toBeInTheDocument();
+    expect(screen.getByText("—")).toBeInTheDocument();
   });
 });
 

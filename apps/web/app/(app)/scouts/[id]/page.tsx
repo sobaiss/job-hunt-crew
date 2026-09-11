@@ -8,6 +8,7 @@ import {
   useScout,
   useScoutFinds,
   useScoutRuns,
+  useScoutStats,
   useRunScout,
   useUpdateScout,
   type ScoutRun,
@@ -17,6 +18,8 @@ import {
 import { useCvVersions } from "@/hooks/use-cv-versions";
 import { BffError } from "@/lib/bff-client";
 import { AnalysisRow } from "@/components/analysis-row";
+import { ApplicationStatsHeader } from "@/components/application-stats-header";
+import { ScoutPatternsPanel } from "@/components/scout-patterns-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -172,6 +175,7 @@ export default function ScoutDetailPage() {
   const { data: cvVersions } = useCvVersions();
   const update = useUpdateScout(params.id);
   const run = useRunScout(params.id);
+  const stats = useScoutStats(params.id);
 
   if (isPending) {
     return (
@@ -325,7 +329,15 @@ export default function ScoutDetailPage() {
         </CardContent>
       </Card>
 
+      <ApplicationStatsHeader
+        stats={stats.data}
+        isPending={stats.isPending}
+        isError={stats.isError}
+      />
+
       <RunHistory scoutId={scout.id} />
+
+      <ScoutPatternsPanel scoutId={scout.id} />
 
       <Finds scoutId={scout.id} />
 

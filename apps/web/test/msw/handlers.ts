@@ -22,4 +22,28 @@ export const handlers = [
   http.get("/api/scouts/:id/finds", () =>
     HttpResponse.json({ relevantFinds: [], lowFitFinds: [] }),
   ),
+  // The stats header (issue #60) on both the Applications view and a Scout's
+  // detail page; default to all-zero so suites exercising other parts of
+  // those pages don't have to stub it.
+  http.get("/api/applications/stats", () => HttpResponse.json(ZERO_APPLICATION_STATS)),
+  http.get("/api/scouts/:id/stats", () => HttpResponse.json(ZERO_APPLICATION_STATS)),
+  // The "patterns across your matches" panel (issue #60); default to none.
+  http.get("/api/scouts/:id/patterns", () => HttpResponse.json({ patterns: [] })),
 ];
+
+const ZERO_APPLICATION_STATS_WINDOW = {
+  offersDiscovered: 0,
+  relevantFinds: 0,
+  documentsGenerated: 0,
+  applicationsSubmitted: 0,
+  responseRate: 0,
+  interviewRate: 0,
+  offerRate: 0,
+  acceptanceRate: 0,
+  medianDaysToFirstResponse: null,
+};
+
+const ZERO_APPLICATION_STATS = {
+  allTime: ZERO_APPLICATION_STATS_WINDOW,
+  last30Days: ZERO_APPLICATION_STATS_WINDOW,
+};

@@ -425,6 +425,12 @@
       "relevantEmpty": "Aucun résultat pertinent pour l'instant.",
       "lowFitHeading": "Trouvé — faible pertinence"
     },
+    "patterns": {
+      "heading": "Tendances de vos correspondances",
+      "empty": "Pas encore de tendances — elles apparaîtront à mesure que les correspondances pertinentes s'accumulent.",
+      "loadError": "Impossible de charger les tendances de ce Scout. Veuillez réessayer.",
+      "count": "{count, plural, one {# correspondance} other {# correspondances}}"
+    },
     "siteKeys": {
       "FRANCE_TRAVAIL": "France Travail",
       "LINKEDIN": "LinkedIn",
@@ -461,6 +467,24 @@
       "timelineHeading": "Historique des statuts",
       "timelineEmpty": "Aucun changement de statut pour l'instant.",
       "back": "Retour aux candidatures"
+    }
+  },
+  "stats": {
+    "loadError": "Impossible de charger ces statistiques. Veuillez réessayer.",
+    "windows": {
+      "allTime": "Depuis toujours",
+      "last30Days": "30 derniers jours"
+    },
+    "metrics": {
+      "offersDiscovered": "Offres découvertes",
+      "relevantFinds": "Correspondances pertinentes",
+      "documentsGenerated": "Documents générés",
+      "applicationsSubmitted": "Candidatures envoyées",
+      "responseRate": "Taux de réponse",
+      "interviewRate": "Taux d'entretien",
+      "offerRate": "Taux d'offre",
+      "acceptanceRate": "Taux d'acceptation",
+      "medianDaysToFirstResponse": "Jours médians avant première réponse"
     }
   },
   "cvVersions": {

@@ -112,6 +112,38 @@ export function useAddStatusEvent(applicationId: string) {
   });
 }
 
+// --- Stats (issue #60, Scout slice 8) ---
+// The Applications view's stats header: offers discovered, relevant finds,
+// documents generated, applications submitted, the funnel rates, and the
+// median days to first response — both all-time and for the last 30 days.
+// `useScoutStats` (use-scouts.ts) hits the scoped sibling endpoint and
+// returns the identical shape, so `<ApplicationStatsHeader>` renders both.
+
+export type ApplicationStatsWindow = {
+  offersDiscovered: number;
+  relevantFinds: number;
+  documentsGenerated: number;
+  applicationsSubmitted: number;
+  responseRate: number;
+  interviewRate: number;
+  offerRate: number;
+  acceptanceRate: number;
+  medianDaysToFirstResponse: number | null;
+};
+
+export type ApplicationStats = {
+  allTime: ApplicationStatsWindow;
+  last30Days: ApplicationStatsWindow;
+};
+
+/** Global stats across every Scout, for the Applications view's header. */
+export function useApplicationStats() {
+  return useQuery({
+    queryKey: [...APPLICATIONS_KEY, "stats"] as const,
+    queryFn: () => bff.get<ApplicationStats>("/applications/stats"),
+  });
+}
+
 /** "Mark as applied" (issue #59): composes the lazy get-or-create with an
  * APPLIED StatusEvent in one action, for the Analysis detail page's action
  * button — the caller doesn't need to know the Application id ahead of time. */

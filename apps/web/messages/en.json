@@ -425,6 +425,12 @@
       "relevantEmpty": "No relevant finds yet.",
       "lowFitHeading": "Found — low fit"
     },
+    "patterns": {
+      "heading": "Patterns across your matches",
+      "empty": "No patterns yet — they'll appear as relevant finds accumulate.",
+      "loadError": "We couldn't load this Scout's patterns. Please try again.",
+      "count": "{count, plural, one {# find} other {# finds}}"
+    },
     "siteKeys": {
       "FRANCE_TRAVAIL": "France Travail",
       "LINKEDIN": "LinkedIn",
@@ -461,6 +467,24 @@
       "timelineHeading": "Status history",
       "timelineEmpty": "No status changes yet.",
       "back": "Back to Applications"
+    }
+  },
+  "stats": {
+    "loadError": "We couldn't load these stats. Please try again.",
+    "windows": {
+      "allTime": "All time",
+      "last30Days": "Last 30 days"
+    },
+    "metrics": {
+      "offersDiscovered": "Offers discovered",
+      "relevantFinds": "Relevant matches",
+      "documentsGenerated": "Documents generated",
+      "applicationsSubmitted": "Applications submitted",
+      "responseRate": "Response rate",
+      "interviewRate": "Interview rate",
+      "offerRate": "Offer rate",
+      "acceptanceRate": "Acceptance rate",
+      "medianDaysToFirstResponse": "Median days to first response"
     }
   },
   "cvVersions": {
