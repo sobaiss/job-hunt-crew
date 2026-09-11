@@ -11,6 +11,7 @@ function analysis(over: Partial<AnalysisDetail> = {}): AnalysisDetail {
     requestedAt: "2026-08-01T00:00:00.000Z",
     cvVersionId: "cv1",
     ingestionJobId: null,
+    scoutId: null,
     jobOffer: { id: "job1", title: "Backend Engineer", company: "Acme" },
     cvVersion: { label: "Grad CV" },
     ingestionJob: null,

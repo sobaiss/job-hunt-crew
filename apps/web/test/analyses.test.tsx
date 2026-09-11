@@ -32,6 +32,7 @@ function summary(overrides: Record<string, unknown> = {}) {
     cvVersionId: "cv1",
     ingestionJobId: null,
     ingestionJob: null,
+    scoutId: null,
     jobOffer: { id: "job1", title: "Backend Engineer", company: "Acme Inc" },
     cvVersion: { label: "Grad CV" },
     ...overrides,
@@ -75,6 +76,34 @@ describe("AnalysesDashboardPage", () => {
     expect(screen.getByText("87")).toBeInTheDocument();
     // "Completed" also appears as a status-filter option, so scope to the list.
     expect(screen.getByRole("list")).toHaveTextContent("Completed");
+  });
+
+  it("tags a Scout-driven analysis row with a Scout badge and leaves manual rows untagged", async () => {
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            summary({ id: "scouted", scoutId: "scout-1" }),
+            summary({
+              id: "manual",
+              jobOffer: { id: "job2", title: "Frontend Engineer", company: "Beta" },
+            }),
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+
+    const scoutedRow = (await screen.findByText("Backend Engineer")).closest(
+      "[data-slot='card']",
+    ) as HTMLElement;
+    const manualRow = screen
+      .getByText("Frontend Engineer")
+      .closest("[data-slot='card']") as HTMLElement;
+
+    expect(scoutedRow).toHaveTextContent("Scout");
+    expect(manualRow).not.toHaveTextContent("Scout");
   });
 
   it("shows an empty state when there are no analyses", async () => {

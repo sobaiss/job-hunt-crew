@@ -754,6 +754,7 @@ class AnalysisResponse(BaseModel):
     jobOfferId: str
     cvVersionId: str
     ingestionJobId: str | None
+    scoutId: str | None
     status: str
     s3ResultKey: str | None
     matchScore: int | None
@@ -776,6 +777,7 @@ def _analysis_response(row: Analysis) -> AnalysisResponse:
         jobOfferId=row.jobOfferId,
         cvVersionId=row.cvVersionId,
         ingestionJobId=row.ingestionJobId,
+        scoutId=row.scoutId,
         status=row.status.value,
         s3ResultKey=row.s3ResultKey,
         matchScore=row.matchScore,

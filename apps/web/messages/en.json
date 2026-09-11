@@ -171,6 +171,7 @@
     "loadError": "We couldn't load your analyses. Please try again.",
     "jobOfferFallback": "Job offer",
     "vsCv": "vs. {label}",
+    "scoutTag": "Scout",
     "compareLink": "Compare with other CVs",
     "controls": {
       "searchLabel": "Search",

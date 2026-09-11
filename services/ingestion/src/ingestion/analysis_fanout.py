@@ -7,6 +7,11 @@ has run for an `IngestionJob`, create one `Analysis` per linked `READY`
 on the `analysis-intake` queue so the existing `AnalysisWorkflow` completes
 it unchanged (PRD Section 8.3 / 8.5, Section 10 step 3).
 
+A job fanned out by a Scout run (`IngestionJob.scoutRunId` set) additionally
+stamps each created `Analysis` with the denormalised `scoutId` so the Scout
+detail view, per-Scout stats, and cross-run dedup can query without a join
+(issue #54).
+
 The per-user daily analysis cap (`DAILY_ANALYSIS_CAP`, default 50, counted
 since 00:00 UTC — the same rule `POST /v1/analyses` enforces) is respected:
 `Analysis` rows are created only up to the owner's remaining budget for the
@@ -28,6 +33,7 @@ from py_db.models import (
     IngestionJobOffer,
     JobOffer,
     Jobofferextractionstatus,
+    ScoutRun,
 )
 from py_db.quota import analyses_requested_today, daily_analysis_cap
 from sqlalchemy import select
@@ -94,6 +100,16 @@ async def create_analyses_for_ready_offers(
     if not pending_offer_ids:
         return result
 
+    # Scout attribution (issue #54): a SITE_SEARCH job fanned out by
+    # `dispatch_scout_run` carries the ScoutRun id — resolve its Scout once and
+    # stamp every Analysis this job produces with the denormalised `scoutId`,
+    # so per-Scout finds/stats and cross-run dedup avoid a two-hop join. A
+    # manual job has no `scoutRunId`, leaving `scoutId` NULL.
+    scout_id: str | None = None
+    if ingestion_job.scoutRunId:
+        scout_run = await session.get(ScoutRun, ingestion_job.scoutRunId)
+        scout_id = scout_run.scoutId if scout_run is not None else None
+
     # Same rule `POST /v1/analyses` enforces, via the shared helper (issue #33).
     cap = daily_analysis_cap()
     remaining = max(cap - await analyses_requested_today(session, ingestion_job.userId), 0)
@@ -108,6 +124,7 @@ async def create_analyses_for_ready_offers(
             jobOfferId=job_offer_id,
             cvVersionId=ingestion_job.cvVersionId,
             ingestionJobId=ingestion_job.id,
+            scoutId=scout_id,
             status=Analysisstatus.PENDING,
         )
         session.add(analysis)

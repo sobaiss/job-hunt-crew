@@ -47,6 +47,9 @@ export function AnalysisRow({ analysis }: { analysis: AnalysisSummary }) {
           </span>
         </Link>
         <div className="flex shrink-0 items-center gap-3">
+          {analysis.scoutId && (
+            <Badge variant="secondary">{t("scoutTag")}</Badge>
+          )}
           {analysis.matchScore !== null && (
             <span className="text-lg font-semibold tabular-nums">
               {analysis.matchScore}

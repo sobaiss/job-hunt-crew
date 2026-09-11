@@ -63,6 +63,10 @@ export type AnalysisSummary = {
   /** The batch this Analysis belongs to, or `null` for one created directly
    *  via `POST /v1/analyses`. */
   ingestionJobId: string | null;
+  /** The Scout that discovered this offer, or `null` for a manual analysis.
+   *  Set by the ingestion fan-out when the parent job carries a `scoutRunId`
+   *  (issue #54). */
+  scoutId: string | null;
   jobOffer: { id: string; title: string | null; company: string | null };
   cvVersion: { label: string };
   /** `{mode, siteConfigId}` of the parent IngestionJob when there is one —

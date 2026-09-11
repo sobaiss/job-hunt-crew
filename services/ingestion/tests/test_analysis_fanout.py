@@ -16,6 +16,10 @@ from py_db.models import (
     JobOffer,
     Jobofferextractionstatus,
     Joboffersourcesite,
+    Scout,
+    ScoutRun,
+    Scoutrunstatus,
+    Scoutstatus,
     User,
 )
 from py_db.session import make_engine, make_session_factory
@@ -369,6 +373,127 @@ async def test_no_cv_version_is_noop():
                 )
             ).all()
         assert rows == []
+    finally:
+        await _cleanup(session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id, all_offer_ids=all_offer_ids)
+        await engine.dispose()
+
+
+async def _attach_scout_run(session_factory, *, user_id, cv_version_id, ingestion_job_id):
+    """Create a Scout + ScoutRun owned by `user_id` and stamp the run id onto
+    `ingestion_job_id.scoutRunId` — mirrors what `dispatch_scout_run` does when
+    it fans a Scout run out to `ingestion-intake`."""
+    scout_id = f"test-scout-{uuid.uuid4()}"
+    scout_run_id = f"test-scout-run-{uuid.uuid4()}"
+    async with session_factory() as session:
+        session.add(
+            Scout(
+                id=scout_id,
+                userId=user_id,
+                label="Backend — Remote",
+                cvVersionId=cv_version_id,
+                targetSiteKeys=["FRANCE_TRAVAIL"],
+                filters={},
+                matchThreshold=70,
+                status=Scoutstatus.ACTIVE,
+                updatedAt=_now(),
+            )
+        )
+        session.add(
+            ScoutRun(
+                id=scout_run_id,
+                scoutId=scout_id,
+                status=Scoutrunstatus.RUNNING,
+            )
+        )
+        job = await session.get(IngestionJob, ingestion_job_id)
+        job.scoutRunId = scout_run_id
+        await session.commit()
+    return scout_id, scout_run_id
+
+
+async def _cleanup_scout(session_factory, *, scout_id, scout_run_id, ingestion_job_id):
+    # Drop the FK from the job to the run first, then the run, then the Scout —
+    # the CVVersion the Scout points at (onDelete: Restrict) is removed by
+    # `_cleanup`, which must run *after* this.
+    async with session_factory() as session:
+        job = await session.get(IngestionJob, ingestion_job_id)
+        if job is not None:
+            job.scoutRunId = None
+        await session.commit()
+
+        run = await session.get(ScoutRun, scout_run_id)
+        if run is not None:
+            await session.delete(run)
+        scout = await session.get(Scout, scout_id)
+        if scout is not None:
+            await session.delete(scout)
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_tags_analyses_with_scout_id_for_a_scout_run():
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id, cv_version_id, ingestion_job_id, offer_ids, all_offer_ids = await _seed(
+        session_factory,
+        offer_statuses=[Jobofferextractionstatus.READY, Jobofferextractionstatus.READY],
+    )
+    scout_id, scout_run_id = await _attach_scout_run(
+        session_factory,
+        user_id=user_id,
+        cv_version_id=cv_version_id,
+        ingestion_job_id=ingestion_job_id,
+    )
+    fake_sqs = FakeSqs()
+
+    try:
+        async with session_factory() as session:
+            ingestion_job = await session.get(IngestionJob, ingestion_job_id)
+            result = await create_analyses_for_ready_offers(
+                session, ingestion_job, sqs_client=fake_sqs
+            )
+
+        assert len(result.created_analysis_ids) == 2
+        async with session_factory() as session:
+            rows = (
+                await session.scalars(
+                    select(Analysis).where(Analysis.ingestionJobId == ingestion_job_id)
+                )
+            ).all()
+        assert {r.scoutId for r in rows} == {scout_id}
+    finally:
+        await _cleanup_scout(
+            session_factory,
+            scout_id=scout_id,
+            scout_run_id=scout_run_id,
+            ingestion_job_id=ingestion_job_id,
+        )
+        await _cleanup(session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id, all_offer_ids=all_offer_ids)
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_manual_job_leaves_scout_id_null():
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id, _, ingestion_job_id, _, all_offer_ids = await _seed(
+        session_factory,
+        offer_statuses=[Jobofferextractionstatus.READY],
+    )
+    fake_sqs = FakeSqs()
+
+    try:
+        async with session_factory() as session:
+            ingestion_job = await session.get(IngestionJob, ingestion_job_id)
+            await create_analyses_for_ready_offers(session, ingestion_job, sqs_client=fake_sqs)
+
+        async with session_factory() as session:
+            rows = (
+                await session.scalars(
+                    select(Analysis).where(Analysis.ingestionJobId == ingestion_job_id)
+                )
+            ).all()
+        assert [r.scoutId for r in rows] == [None]
     finally:
         await _cleanup(session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id, all_offer_ids=all_offer_ids)
         await engine.dispose()

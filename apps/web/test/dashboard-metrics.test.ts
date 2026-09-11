@@ -15,6 +15,7 @@ function analysis(overrides: Partial<AnalysisSummary> = {}): AnalysisSummary {
     requestedAt: "2026-08-01T00:00:00.000Z",
     cvVersionId: "cv1",
     ingestionJobId: null,
+    scoutId: null,
     ingestionJob: null,
     jobOffer: { id: "job1", title: "Role", company: "Co" },
     cvVersion: { label: "CV" },
