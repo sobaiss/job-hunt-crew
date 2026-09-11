@@ -15,6 +15,7 @@ from ingestion.local_worker import (
     QueueSpec,
     UnknownAnalysisModeError,
     UnknownQueueError,
+    _resolve_scout_schedule_tick,
     drain,
     poll_once,
     resolve_analysis_intake_handler_ref,
@@ -242,3 +243,90 @@ def test_run_forever_keeps_going_after_a_transport_error(monkeypatch):
     run_forever(["cv-conversion"], sqs=FakeSqs(), stop=stop)
 
     assert attempts == ["cv-conversion", "cv-conversion"]
+
+
+# --- scout-schedule tick (issue #57) -----------------------------------------
+
+
+def test_resolve_scout_schedule_tick_is_none_without_scout_intake():
+    assert _resolve_scout_schedule_tick(["cv-conversion", "analysis-intake"]) is None
+
+
+def test_resolve_scout_schedule_tick_resolves_the_scheduler_when_selected(monkeypatch):
+    sentinel = object()
+    monkeypatch.setattr("scout.schedule.run_scheduler_tick_once", lambda: sentinel, raising=True)
+
+    tick = _resolve_scout_schedule_tick(["scout-intake"])
+
+    assert tick() is sentinel
+
+
+def test_run_forever_fires_on_tick_on_the_first_sweep(monkeypatch):
+    import threading
+
+    stop = threading.Event()
+    ticks: list[None] = []
+
+    def fake_poll_once(_sqs, spec, handler=None):
+        stop.set()
+        return 0
+
+    monkeypatch.setattr(local_worker, "poll_once", fake_poll_once)
+
+    run_forever(
+        ["scout-intake"],
+        sqs=FakeSqs(),
+        stop=stop,
+        on_tick=lambda: ticks.append(None),
+        tick_interval_seconds=3600,
+    )
+
+    assert ticks == [None]
+
+
+def test_run_forever_does_not_fire_on_tick_again_before_the_interval_elapses(monkeypatch):
+    import threading
+
+    stop = threading.Event()
+    ticks: list[None] = []
+    sweeps = {"n": 0}
+
+    def fake_poll_once(_sqs, spec, handler=None):
+        sweeps["n"] += 1
+        if sweeps["n"] >= 2:
+            stop.set()
+        return 0
+
+    monkeypatch.setattr(local_worker, "poll_once", fake_poll_once)
+
+    run_forever(
+        ["scout-intake"],
+        sqs=FakeSqs(),
+        stop=stop,
+        on_tick=lambda: ticks.append(None),
+        tick_interval_seconds=3600,
+    )
+
+    # Two sweeps happen well within the (mocked long) interval, so the tick
+    # fires once, on the first sweep, not again on the second.
+    assert ticks == [None]
+
+
+def test_run_forever_tick_exception_is_logged_and_does_not_stop_the_loop(monkeypatch):
+    import threading
+
+    stop = threading.Event()
+
+    def fake_poll_once(_sqs, spec, handler=None):
+        stop.set()
+        return 0
+
+    monkeypatch.setattr(local_worker, "poll_once", fake_poll_once)
+
+    def boom():
+        raise RuntimeError("tick blew up")
+
+    # No exception propagates out of run_forever.
+    run_forever(
+        ["scout-intake"], sqs=FakeSqs(), stop=stop, on_tick=boom, tick_interval_seconds=3600
+    )

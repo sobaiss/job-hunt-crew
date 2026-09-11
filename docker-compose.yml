@@ -142,8 +142,8 @@ services:
   # nothing drains them locally otherwise). Polls ElasticMQ and runs the real
   # handlers — see services/ingestion/src/ingestion/local_worker.py.
   #
-  # Drains all three pipeline queues, so "Convert to Markdown", "Analyse one
-  # offer" and "Analyse several offers" all work straight after
+  # Drains all four pipeline queues, so "Convert to Markdown", "Analyse one
+  # offer", "Analyse several offers" and a Scout run all work straight after
   # `docker compose up`:
   #   - cv-conversion    -> analysis.cv_conversion.handle_cv_conversion
   #   - ingestion-intake -> ingestion.intake_handler.handle_ingestion_intake
@@ -154,6 +154,12 @@ services:
   #     the whole AnalysisWorkflow in-process, no host-only `lambda_shim` /
   #     Step Functions execution needed, just an LLM the crew can reach
   #     (LLM_PROVIDER below, ollama by default).
+  #   - scout-intake     -> scout.intake_handler.handle_scout_intake, fed by a
+  #     manual "Run now" (services/api) and, since issue #57, this worker's own
+  #     scout-schedule tick — its local stand-in for the production EventBridge
+  #     Scheduler rule that fires at SCOUT_SCHEDULE_HOUR_UTC (default 6 UTC)
+  #     and enqueues every due, active Scout with no user action. See
+  #     services/scout/src/scout/schedule.py for both.
   # Set WORKER_ANALYSIS_MODE=stepfunctions + run `make worker` on the host to
   # exercise the real Step Functions state machine instead.
   worker:
@@ -167,6 +173,10 @@ services:
       # `local` (in-process AnalysisWorkflow) vs `stepfunctions` (real Step
       # Functions Local execution — needs the host lambda_shim + SFN_* env).
       WORKER_ANALYSIS_MODE: ${WORKER_ANALYSIS_MODE:-local}
+      # Daily UTC hour every active Scout is due (issue #57); how often this
+      # worker checks for due Scouts is separate (SCOUT_SCHEDULE_TICK_SECONDS,
+      # default 60s — fine locally, irrelevant in production's EventBridge rule).
+      SCOUT_SCHEDULE_HOUR_UTC: ${SCOUT_SCHEDULE_HOUR_UTC:-6}
       # S3 is read directly here (no presigning), so unlike `api` this uses the
       # docker-network hostname, not localhost.
       S3_ENDPOINT: http://minio:9000

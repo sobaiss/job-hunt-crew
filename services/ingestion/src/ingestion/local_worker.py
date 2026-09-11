@@ -28,6 +28,13 @@ offer", "Analyse several offers" and a Scout "Run now" all complete on their
 own after `docker compose up`.
 `WORKER_RUN_ONCE=1` drains what is currently queued and exits.
 
+When `scout-intake` is among the drained queues, `run_forever` also fires a
+`scout.schedule.run_scheduler_tick_once` tick every `SCOUT_SCHEDULE_TICK_SECONDS`
+(default 60) — the local stand-in for issue #57's daily EventBridge Scheduler
+rule, enqueuing `scout-intake` for every due, active Scout without any user
+action. `WORKER_RUN_ONCE` skips it: draining an already-queued backlog is a
+different action than an unattended schedule tick.
+
 `analysis-intake` has two drainers, chosen by `WORKER_ANALYSIS_MODE`:
 - `local` (default): `analysis.local_pipeline.handle_analysis_intake_local`
   runs the whole AnalysisWorkflow in-process (the same shape `cv-conversion`
@@ -42,6 +49,7 @@ own after `docker compose up`.
 import os
 import signal
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from importlib import import_module
@@ -53,10 +61,19 @@ from .sqs_client import make_sqs_client
 logger = get_logger(__name__)
 
 Handler = Callable[[dict], None]
+Tick = Callable[[], object]
 
 # SQS long-poll wait per receive_message call (SQS caps this at 20s).
 WAIT_SECONDS = int(os.environ.get("WORKER_WAIT_SECONDS", "5"))
 MAX_MESSAGES = 10
+
+# How often run_forever's scout-schedule tick fires (issue #57's local
+# stand-in for the production EventBridge Scheduler rule). Independent of
+# WAIT_SECONDS: the tick is cheap (a "due?" query, not a long-poll) and its
+# own cadence.
+SCOUT_SCHEDULE_TICK_SECONDS = int(os.environ.get("SCOUT_SCHEDULE_TICK_SECONDS", "60"))
+
+_SCOUT_SCHEDULE_TICK_REF = "scout.schedule:run_scheduler_tick_once"
 
 _DEFAULT_QUEUE_BASE = "http://localhost:9324/000000000000"
 
@@ -232,15 +249,29 @@ def drain(queue_names: list[str], *, sqs=None) -> dict[str, int]:
 
 
 def run_forever(
-    queue_names: list[str], *, sqs=None, stop: threading.Event | None = None
+    queue_names: list[str],
+    *,
+    sqs=None,
+    stop: threading.Event | None = None,
+    on_tick: Tick | None = None,
+    tick_interval_seconds: int | None = None,
 ) -> None:
     """Poll each selected queue in turn until `stop` is set. A transport error
     talking to ElasticMQ is logged and the loop continues (the queue is still
     there once it recovers).
+
+    When `on_tick` is given it fires once per `tick_interval_seconds` (default
+    `SCOUT_SCHEDULE_TICK_SECONDS`) between sweeps of the queues — the local
+    stand-in for the production EventBridge Scheduler rule (issue #57). It
+    fires on the very first sweep so a Scout already due when the worker
+    starts doesn't wait a full interval. A tick exception is logged and never
+    stops the loop, matching the per-queue error handling above.
     """
     client = sqs or make_sqs_client()
     specs = [QUEUE_SPECS[n] for n in queue_names]
     stop = stop or threading.Event()
+    interval = tick_interval_seconds if tick_interval_seconds is not None else SCOUT_SCHEDULE_TICK_SECONDS
+    next_tick = time.monotonic()
     logger.info(
         "worker.start",
         extra={"fields": {"queues": queue_names, "wait_seconds": WAIT_SECONDS}},
@@ -253,7 +284,24 @@ def run_forever(
                 poll_once(client, spec)
             except Exception:
                 logger.exception("worker.poll_failed queue=%s", spec.name)
+        if on_tick is not None and time.monotonic() >= next_tick:
+            try:
+                on_tick()
+            except Exception:
+                logger.exception("worker.tick_failed")
+            next_tick = time.monotonic() + interval
     logger.info("worker.stop", extra={"fields": {"queues": queue_names}})
+
+
+def _resolve_scout_schedule_tick(queue_names: list[str]) -> Tick | None:
+    """The scout-schedule tick only makes sense when this worker is draining
+    `scout-intake` (it enqueues onto that queue) — `None` otherwise, so
+    `run_forever` skips it entirely.
+    """
+    if "scout-intake" not in queue_names:
+        return None
+    module_name, attr = _SCOUT_SCHEDULE_TICK_REF.split(":")
+    return getattr(import_module(module_name), attr)
 
 
 def main() -> int:
@@ -267,7 +315,7 @@ def main() -> int:
     stop = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.set())
-    run_forever(queue_names, stop=stop)
+    run_forever(queue_names, stop=stop, on_tick=_resolve_scout_schedule_tick(queue_names))
     return 0
 
 
