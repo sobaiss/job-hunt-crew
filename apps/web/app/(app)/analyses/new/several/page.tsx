@@ -10,14 +10,17 @@ import { useTranslations } from "next-intl";
 import {
   useCreateIngestionJob,
   INGESTION_MAX_OFFERS,
-  POSTED_WITHIN_VALUES,
-  REMOTE_VALUES,
-  type Remote,
 } from "@/hooks/use-ingestion-jobs";
 import { useAnalysisQuota } from "@/hooks/use-analyses";
 import { useSiteConfigs, siteReliability } from "@/hooks/use-site-configs";
 import { BatchResultView } from "@/components/batch-result-view";
 import { CvVersionPicker } from "@/components/cv-version-picker";
+import {
+  JobFilterFields,
+  EMPTY_JOB_FILTERS,
+  toFilterPayload,
+  type JobFilterValues,
+} from "@/components/job-filter-fields";
 import {
   SUBNAV_CLASS,
   SUBNAV_ACTIVE_CLASS,
@@ -37,7 +40,6 @@ const SELECT_CLASS =
 
 export default function AnalyseSeveralOffersPage() {
   const t = useTranslations("analyseSeveral");
-  const tIng = useTranslations("ingestion");
   const tOne = useTranslations("analyseOne");
   const reliabilityLabel = useTranslations("analyseSeveral.reliability");
 
@@ -46,15 +48,10 @@ export default function AnalyseSeveralOffersPage() {
   const create = useCreateIngestionJob();
   const [cvVersionId, setCvVersionId] = useState("");
   const [ingestionJobId, setIngestionJobId] = useState<string | null>(null);
+  const [filters, setFilters] = useState<JobFilterValues>(EMPTY_JOB_FILTERS);
 
   const schema = z.object({
     siteConfigId: z.string().min(1, t("siteRequired")),
-    keywords: z.string(),
-    location: z.string(),
-    postedWithin: z.enum(POSTED_WITHIN_VALUES),
-    contractType: z.string(),
-    remote: z.string(),
-    experienceLevel: z.string(),
     // Kept lenient here — an out-of-range or blank field is clamped to
     // `1..INGESTION_MAX_OFFERS` on submit (services/api clamps again).
     maxOffers: z.number().catch(INGESTION_MAX_OFFERS),
@@ -69,12 +66,6 @@ export default function AnalyseSeveralOffersPage() {
     resolver: zodResolver(schema),
     defaultValues: {
       siteConfigId: "",
-      keywords: "",
-      location: "",
-      postedWithin: "any",
-      contractType: "",
-      remote: "",
-      experienceLevel: "",
       maxOffers: 10,
     },
   });
@@ -95,14 +86,7 @@ export default function AnalyseSeveralOffersPage() {
         siteConfigId: values.siteConfigId,
         cvVersionId,
         maxOffers,
-        filters: {
-          keywords: values.keywords.trim() || undefined,
-          location: values.location.trim() || undefined,
-          postedWithin: values.postedWithin,
-          contractType: values.contractType.trim() || undefined,
-          remote: (values.remote || undefined) as Remote | undefined,
-          experienceLevel: values.experienceLevel.trim() || undefined,
-        },
+        filters: toFilterPayload(filters),
       },
       { onSuccess: (data) => setIngestionJobId(data.ingestionJob.id) },
     );
@@ -179,78 +163,11 @@ export default function AnalyseSeveralOffersPage() {
                     )}
                   </div>
 
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="keywords">{t("keywordsLabel")}</Label>
-                    <Input
-                      id="keywords"
-                      type="text"
-                      {...register("keywords")}
-                    />
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="location">{t("locationLabel")}</Label>
-                    <Input
-                      id="location"
-                      type="text"
-                      {...register("location")}
-                    />
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="postedWithin">
-                      {t("postedWithinLabel")}
-                    </Label>
-                    <select
-                      id="postedWithin"
-                      className={SELECT_CLASS}
-                      {...register("postedWithin")}
-                    >
-                      {POSTED_WITHIN_VALUES.map((value) => (
-                        <option key={value} value={value}>
-                          {tIng(`postedWithin.${value}`)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="contractType">
-                      {t("contractTypeLabel")}
-                    </Label>
-                    <Input
-                      id="contractType"
-                      type="text"
-                      {...register("contractType")}
-                    />
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="remote">{t("remoteLabel")}</Label>
-                    <select
-                      id="remote"
-                      className={SELECT_CLASS}
-                      {...register("remote")}
-                    >
-                      <option value="">{t("remoteAny")}</option>
-                      {REMOTE_VALUES.map((value) => (
-                        <option key={value} value={value}>
-                          {tIng(`remote.${value}`)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="experienceLevel">
-                      {t("experienceLevelLabel")}
-                    </Label>
-                    <Input
-                      id="experienceLevel"
-                      type="text"
-                      {...register("experienceLevel")}
-                    />
-                  </div>
+                  <JobFilterFields
+                    idPrefix="several"
+                    values={filters}
+                    onChange={setFilters}
+                  />
 
                   <div className="flex flex-col gap-1.5">
                     <Label htmlFor="maxOffers">{t("maxOffersLabel")}</Label>

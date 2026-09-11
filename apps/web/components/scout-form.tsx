@@ -10,17 +10,20 @@ import {
   SCOUT_SITE_KEYS,
   DEFAULT_MATCH_THRESHOLD,
   DEFAULT_POSTED_WITHIN,
-  POSTED_WITHIN_VALUES,
   type Scout,
 } from "@/hooks/use-scouts";
 import { CvVersionPicker } from "@/components/cv-version-picker";
+import {
+  JobFilterFields,
+  EMPTY_JOB_FILTERS,
+  jobFiltersFrom,
+  toFilterPayload,
+  type JobFilterValues,
+} from "@/components/job-filter-fields";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-
-const SELECT_CLASS =
-  "flex h-9 w-full rounded-md border border-border bg-background px-3 py-1 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50";
 
 function clampThreshold(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_MATCH_THRESHOLD;
@@ -36,7 +39,6 @@ function clampThreshold(value: number): number {
 export function ScoutForm({ scout }: { scout?: Scout }) {
   const t = useTranslations("scouts.form");
   const tSites = useTranslations("scouts.siteKeys");
-  const tPosted = useTranslations("ingestion.postedWithin");
   const router = useRouter();
 
   const isEdit = scout != null;
@@ -52,10 +54,11 @@ export function ScoutForm({ scout }: { scout?: Scout }) {
   const [threshold, setThreshold] = useState(
     scout?.matchThreshold ?? DEFAULT_MATCH_THRESHOLD,
   );
-  const [keywords, setKeywords] = useState(scout?.filters.keywords ?? "");
-  const [location, setLocation] = useState(scout?.filters.location ?? "");
-  const [postedWithin, setPostedWithin] = useState<string>(
-    scout?.filters.postedWithin ?? DEFAULT_POSTED_WITHIN,
+  const [filters, setFilters] = useState<JobFilterValues>(() =>
+    jobFiltersFrom(scout?.filters ?? {}, {
+      ...EMPTY_JOB_FILTERS,
+      postedWithin: DEFAULT_POSTED_WITHIN,
+    }),
   );
 
   const [labelError, setLabelError] = useState<string | null>(null);
@@ -92,11 +95,7 @@ export function ScoutForm({ scout }: { scout?: Scout }) {
       cvVersionId,
       targetSiteKeys: siteKeys,
       matchThreshold: clampThreshold(threshold),
-      filters: {
-        keywords: keywords.trim() || undefined,
-        location: location.trim() || undefined,
-        postedWithin,
-      },
+      filters: toFilterPayload(filters),
     };
 
     mutation.mutate(payload, {
@@ -168,41 +167,11 @@ export function ScoutForm({ scout }: { scout?: Scout }) {
             <p className="text-xs text-muted">{t("thresholdHint")}</p>
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="scout-keywords">{t("keywordsLabel")}</Label>
-            <Input
-              id="scout-keywords"
-              type="text"
-              value={keywords}
-              onChange={(e) => setKeywords(e.target.value)}
-            />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="scout-location">{t("locationLabel")}</Label>
-            <Input
-              id="scout-location"
-              type="text"
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-            />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="scout-posted-within">{t("postedWithinLabel")}</Label>
-            <select
-              id="scout-posted-within"
-              className={SELECT_CLASS}
-              value={postedWithin}
-              onChange={(e) => setPostedWithin(e.target.value)}
-            >
-              {POSTED_WITHIN_VALUES.map((value) => (
-                <option key={value} value={value}>
-                  {tPosted(value)}
-                </option>
-              ))}
-            </select>
-          </div>
+          <JobFilterFields
+            idPrefix="scout"
+            values={filters}
+            onChange={setFilters}
+          />
 
           <Button
             type="submit"

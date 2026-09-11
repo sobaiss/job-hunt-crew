@@ -290,13 +290,6 @@
       "mayBeUnreliable": "peu fiable",
       "mayFail": "peut échouer"
     },
-    "keywordsLabel": "Mots-clés",
-    "locationLabel": "Lieu",
-    "postedWithinLabel": "Publiée depuis",
-    "contractTypeLabel": "Type de contrat",
-    "remoteLabel": "Politique de télétravail",
-    "remoteAny": "Indifférent",
-    "experienceLevelLabel": "Niveau d'expérience",
     "maxOffersLabel": "Combien d'offres analyser",
     "maxOffersHint": "Entre 1 et {max}.",
     "quotaEstimate": "{count, plural, one {Jusqu'à # analyse sera lancée} other {Jusqu'à # analyses seront lancées}} — il en reste {remaining} aujourd'hui.",
@@ -312,6 +305,15 @@
     "scrapingDetail": "Détail du scraping",
     "jobOfferFallback": "Offre d'emploi",
     "vsCv": "vs. {label}"
+  },
+  "jobFilters": {
+    "keywordsLabel": "Mots-clés",
+    "locationLabel": "Lieu",
+    "postedWithinLabel": "Publiée depuis",
+    "contractTypeLabel": "Type de contrat",
+    "remoteLabel": "Politique de télétravail",
+    "remoteAny": "Indifférent",
+    "experienceLevelLabel": "Niveau d'expérience"
   },
   "scouts": {
     "title": "Agents",
@@ -349,9 +351,6 @@
       "sitesRequired": "Choisissez au moins un site d'emploi.",
       "thresholdLabel": "Seuil de pertinence",
       "thresholdHint": "Seules les offres atteignant ce score (0–100) comptent comme une trouvaille pertinente.",
-      "keywordsLabel": "Mots-clés",
-      "locationLabel": "Lieu",
-      "postedWithinLabel": "Publiée depuis",
       "submit": "Créer le Scout",
       "submitting": "Création…",
       "save": "Enregistrer",

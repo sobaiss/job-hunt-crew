@@ -182,6 +182,37 @@ describe("NewScoutPage — create form", () => {
     });
   });
 
+  it("submits the shared job-search filters (contract type, remote, experience level)", async () => {
+    const received: unknown[] = [];
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+      http.post("/api/scouts", async ({ request }) => {
+        received.push(await request.json());
+        return HttpResponse.json({ scout: scout() }, { status: 201 });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<NewScoutPage />);
+
+    await user.type(await screen.findByLabelText("Label"), "Filtered Scout");
+    await user.type(screen.getByLabelText("Contract type"), "CDI");
+    await user.selectOptions(screen.getByLabelText("Remote policy"), "remote");
+    await user.type(screen.getByLabelText("Experience level"), "senior");
+    await user.click(screen.getByRole("button", { name: "Create Scout" }));
+
+    await waitFor(() => expect(received).toHaveLength(1));
+    expect(received[0]).toMatchObject({
+      filters: {
+        contractType: "CDI",
+        remote: "remote",
+        experienceLevel: "senior",
+        postedWithin: "7d",
+      },
+    });
+  });
+
   it("shows an error when the server rejects the create (e.g. Scout cap)", async () => {
     server.use(
       http.get("/api/cv-versions", () =>
