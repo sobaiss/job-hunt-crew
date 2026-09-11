@@ -6,6 +6,7 @@ import { renderWithProviders, screen, waitFor, within } from "./test-utils";
 import { server } from "./msw/server";
 import ScoutsPage from "@/app/(app)/scouts/page";
 import NewScoutPage from "@/app/(app)/scouts/new/page";
+import ScoutDetailPage from "@/app/(app)/scouts/[id]/page";
 
 const { push } = vi.hoisted(() => ({ push: vi.fn() }));
 vi.mock("next/navigation", () => ({
@@ -234,5 +235,70 @@ describe("NewScoutPage — create form", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("We couldn't save that Scout.");
     expect(push).not.toHaveBeenCalled();
+  });
+});
+
+describe("ScoutDetailPage — Run now + run history", () => {
+  const scoutRun = (overrides: Record<string, unknown> = {}) => ({
+    id: "run-1",
+    scoutId: "scout-1",
+    status: "COMPLETED",
+    sitesQueried: 2,
+    siteUnavailableCount: 0,
+    offersDiscovered: 0,
+    offersAnalysed: 0,
+    relevantCount: 0,
+    failedCount: 0,
+    errorMessage: null,
+    startedAt: "2026-09-11T00:00:00.000Z",
+    finishedAt: "2026-09-11T00:00:05.000Z",
+    createdAt: "2026-09-11T00:00:00.000Z",
+    ...overrides,
+  });
+
+  it("triggers a run and shows the run history", async () => {
+    const runPosts: unknown[] = [];
+    server.use(
+      http.get("/api/scouts/scout-1", () => HttpResponse.json({ scout: scout() })),
+      http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
+      http.get("/api/scouts/scout-1/runs", () =>
+        HttpResponse.json({ scoutRuns: runPosts.length ? [scoutRun()] : [] }),
+      ),
+      http.post("/api/scouts/scout-1/run", () => {
+        runPosts.push(true);
+        return HttpResponse.json({ scoutRun: scoutRun({ status: "PENDING" }) }, { status: 201 });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<ScoutDetailPage />);
+
+    expect(await screen.findByText("This Scout hasn't run yet.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Run now" }));
+
+    await waitFor(() => expect(runPosts).toHaveLength(1));
+    expect(await screen.findByText("Completed")).toBeInTheDocument();
+    expect(screen.getByText("2 sites queried")).toBeInTheDocument();
+  });
+
+  it("surfaces the once-per-hour rate limit", async () => {
+    server.use(
+      http.get("/api/scouts/scout-1", () => HttpResponse.json({ scout: scout() })),
+      http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
+      http.get("/api/scouts/scout-1/runs", () => HttpResponse.json({ scoutRuns: [] })),
+      http.post("/api/scouts/scout-1/run", () =>
+        HttpResponse.json(
+          { error: "This Scout ran within the last hour. Try again later." },
+          { status: 429 },
+        ),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<ScoutDetailPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Run now" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("This Scout ran within the last hour.");
   });
 });

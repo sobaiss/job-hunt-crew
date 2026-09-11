@@ -118,3 +118,65 @@ export function useUpdateScout(id: string) {
     },
   });
 }
+
+// --- Scout runs (issue #54, slice 2) ---
+// "Run now" creates a ScoutRun that fans out to the ingestion pipeline; the
+// Scout detail page polls the run history while a run is in progress.
+
+export const SCOUT_RUN_STATUS_VALUES = [
+  "PENDING",
+  "RUNNING",
+  "PARTIALLY_COMPLETED",
+  "COMPLETED",
+  "FAILED",
+] as const;
+export type ScoutRunStatus = (typeof SCOUT_RUN_STATUS_VALUES)[number];
+
+export type ScoutRun = {
+  id: string;
+  scoutId: string;
+  status: ScoutRunStatus;
+  sitesQueried: number;
+  siteUnavailableCount: number;
+  offersDiscovered: number;
+  offersAnalysed: number;
+  relevantCount: number;
+  failedCount: number;
+  errorMessage: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  createdAt: string;
+};
+
+const RUN_STILL_GOING: ReadonlySet<ScoutRunStatus> = new Set([
+  "PENDING",
+  "RUNNING",
+]);
+
+/** A Scout's run history, newest first. Polls while any run is still going. */
+export function useScoutRuns(scoutId: string) {
+  return useQuery({
+    queryKey: [...SCOUTS_KEY, scoutId, "runs"] as const,
+    queryFn: () => bff.get<{ scoutRuns: ScoutRun[] }>(`/scouts/${scoutId}/runs`),
+    select: (data) => data.scoutRuns,
+    enabled: Boolean(scoutId),
+    refetchInterval: (query) => {
+      const runs = query.state.data?.scoutRuns ?? [];
+      return runs.some((run) => RUN_STILL_GOING.has(run.status)) ? 3000 : false;
+    },
+  });
+}
+
+/** "Run now": enqueues a ScoutRun. Rate-limited to once per hour per Scout (429). */
+export function useRunScout(scoutId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => bff.post<{ scoutRun: ScoutRun }>(`/scouts/${scoutId}/run`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: [...SCOUTS_KEY, scoutId, "runs"],
+      });
+      queryClient.invalidateQueries({ queryKey: [...SCOUTS_KEY, scoutId] });
+    },
+  });
+}

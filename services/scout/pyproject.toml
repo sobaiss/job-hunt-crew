@@ -1,35 +1,27 @@
 [project]
-name = "ingestion"
+name = "scout"
 version = "0.0.0"
-description = "Job offer ingestion: scrapers, Mode 1/2/3 adapters, Lambda handlers."
+description = "Scout scheduling + run orchestration: fans a ScoutRun out to the ingestion pipeline (issue #54)."
 requires-python = ">=3.11"
 dependencies = [
     "py-db",
-    "analysis",
-    "scout",
-    "httpx>=0.27",
     "boto3>=1.34",
-    "beautifulsoup4>=4.12",
 ]
 
 [tool.uv.sources]
 py-db = { workspace = true }
-analysis = { workspace = true }
-scout = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/ingestion"]
+packages = ["src/scout"]
 
 [dependency-groups]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
-    "respx>=0.21",
-    "moto[s3]>=5.0",
 ]
 
 [tool.pytest.ini_options]

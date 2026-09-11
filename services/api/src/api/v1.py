@@ -2,7 +2,7 @@ import json
 import math
 import os
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -18,6 +18,8 @@ from py_db.models import (
     Ingestionmode,
     JobOffer,
     Scout,
+    ScoutRun,
+    Scoutrunstatus,
     Scoutstatus,
     SiteConfig,
 )
@@ -33,6 +35,7 @@ from .sqs_client import (
     ANALYSIS_INTAKE_QUEUE_URL,
     CV_CONVERSION_QUEUE_URL,
     INGESTION_INTAKE_QUEUE_URL,
+    SCOUT_INTAKE_QUEUE_URL,
     make_sqs_client,
 )
 
@@ -1230,3 +1233,136 @@ async def update_scout(
     await session.refresh(scout)
 
     return GetScoutResponse(scout=_scout_response(scout))
+
+
+# --- Scout runs (issue #54, Scout slice 2) ---
+# "Run now" on a Scout creates a ScoutRun row and enqueues `{"scoutRunId": id}`
+# on `scout-intake`; the scout worker fans it out to one SITE_SEARCH
+# IngestionJob per targeted enabled site. "Run now" is rate-limited to once an
+# hour per Scout. GET returns run history / a single run, user-scoped via the
+# owning Scout (another user's run is a 404).
+
+SCOUT_RUN_RATE_LIMIT = timedelta(hours=1)
+
+
+class ScoutRunResponse(BaseModel):
+    id: str
+    scoutId: str
+    status: str
+    sitesQueried: int
+    siteUnavailableCount: int
+    offersDiscovered: int
+    offersAnalysed: int
+    relevantCount: int
+    failedCount: int
+    errorMessage: str | None
+    startedAt: datetime | None
+    finishedAt: datetime | None
+    createdAt: datetime
+
+
+def _scout_run_response(row: ScoutRun) -> ScoutRunResponse:
+    return ScoutRunResponse(
+        id=row.id,
+        scoutId=row.scoutId,
+        status=row.status.value,
+        sitesQueried=row.sitesQueried,
+        siteUnavailableCount=row.siteUnavailableCount,
+        offersDiscovered=row.offersDiscovered,
+        offersAnalysed=row.offersAnalysed,
+        relevantCount=row.relevantCount,
+        failedCount=row.failedCount,
+        errorMessage=row.errorMessage,
+        startedAt=row.startedAt,
+        finishedAt=row.finishedAt,
+        createdAt=row.createdAt,
+    )
+
+
+class ScoutRunListResponse(BaseModel):
+    scoutRuns: list[ScoutRunResponse]
+
+
+class GetScoutRunResponse(BaseModel):
+    scoutRun: ScoutRunResponse
+
+
+async def _owned_scout(session: AsyncSession, scout_id: str, user_id: str) -> Scout:
+    scout = await session.get(Scout, scout_id)
+    if scout is None or scout.userId != user_id:
+        raise HTTPException(status_code=404, detail="Not found")
+    return scout
+
+
+@router.post(
+    "/scouts/{scout_id}/run", response_model=GetScoutRunResponse, status_code=201
+)
+async def run_scout(
+    scout_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> GetScoutRunResponse:
+    scout = await _owned_scout(session, scout_id, user_id)
+    if scout.status == Scoutstatus.ARCHIVED:
+        raise HTTPException(status_code=409, detail="Archived Scouts cannot be run")
+
+    latest = (
+        await session.scalars(
+            select(ScoutRun)
+            .where(ScoutRun.scoutId == scout.id)
+            .order_by(ScoutRun.createdAt.desc())
+            .limit(1)
+        )
+    ).first()
+    if latest is not None and latest.createdAt > _now() - SCOUT_RUN_RATE_LIMIT:
+        raise HTTPException(
+            status_code=429,
+            detail="This Scout ran within the last hour. Try again later.",
+        )
+
+    scout_run = ScoutRun(
+        id=str(uuid.uuid4()),
+        scoutId=scout.id,
+        status=Scoutrunstatus.PENDING,
+    )
+    session.add(scout_run)
+    await session.commit()
+    await session.refresh(scout_run)
+
+    sqs = make_sqs_client()
+    sqs.send_message(
+        QueueUrl=SCOUT_INTAKE_QUEUE_URL,
+        MessageBody=json.dumps({"scoutRunId": scout_run.id}),
+    )
+
+    return GetScoutRunResponse(scoutRun=_scout_run_response(scout_run))
+
+
+@router.get("/scouts/{scout_id}/runs", response_model=ScoutRunListResponse)
+async def list_scout_runs(
+    scout_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> ScoutRunListResponse:
+    scout = await _owned_scout(session, scout_id, user_id)
+    rows = (
+        await session.scalars(
+            select(ScoutRun)
+            .where(ScoutRun.scoutId == scout.id)
+            .order_by(ScoutRun.createdAt.desc())
+        )
+    ).all()
+    return ScoutRunListResponse(scoutRuns=[_scout_run_response(row) for row in rows])
+
+
+@router.get("/scout-runs/{run_id}", response_model=GetScoutRunResponse)
+async def get_scout_run(
+    run_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> GetScoutRunResponse:
+    run = await session.get(ScoutRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    await _owned_scout(session, run.scoutId, user_id)
+    return GetScoutRunResponse(scoutRun=_scout_run_response(run))

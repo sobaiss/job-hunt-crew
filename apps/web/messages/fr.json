@@ -372,6 +372,26 @@
       "neverRun": "Jamais exécuté",
       "back": "Retour aux Agents"
     },
+    "runs": {
+      "runNow": "Lancer maintenant",
+      "running": "Démarrage…",
+      "rateLimited": "Cet agent a été lancé il y a moins d'une heure. Réessayez plus tard.",
+      "runError": "Impossible de lancer une exécution. Veuillez réessayer.",
+      "heading": "Historique des exécutions",
+      "empty": "Cet agent n'a pas encore été exécuté.",
+      "started": "Démarré le {date}",
+      "sitesQueried": "{count, plural, one {# site interrogé} other {# sites interrogés}}",
+      "siteUnavailable": "{count, plural, one {# site indisponible} other {# sites indisponibles}}",
+      "offersDiscovered": "{count, plural, one {# offre trouvée} other {# offres trouvées}}",
+      "offersAnalysed": "{count, plural, one {# analysée} other {# analysées}}",
+      "status": {
+        "PENDING": "En file",
+        "RUNNING": "En cours",
+        "PARTIALLY_COMPLETED": "Partiellement terminé",
+        "COMPLETED": "Terminé",
+        "FAILED": "Échec"
+      }
+    },
     "siteKeys": {
       "FRANCE_TRAVAIL": "France Travail",
       "LINKEDIN": "LinkedIn",

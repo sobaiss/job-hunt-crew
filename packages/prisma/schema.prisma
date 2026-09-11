@@ -162,6 +162,7 @@ model IngestionJob {
   userId          String
   mode            IngestionMode
   cvVersionId     String?
+  scoutRunId      String?
   inputUrl        String?
   siteConfigId    String?
   filters         Json?
@@ -177,11 +178,13 @@ model IngestionJob {
 
   user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   cvVersion CVVersion?          @relation(fields: [cvVersionId], references: [id], onDelete: Cascade)
+  scoutRun  ScoutRun?          @relation(fields: [scoutRunId], references: [id], onDelete: Cascade)
   jobOffers IngestionJobOffer[]
   analyses  Analysis[]
   pipelineEvents PipelineEvent[]
 
   @@index([userId])
+  @@index([scoutRunId])
 }
 
 model IngestionJobOffer {
@@ -254,6 +257,10 @@ model Analysis {
   jobOfferId               String
   cvVersionId              String
   ingestionJobId           String?
+  // Denormalised (like userId / jobOfferId / cvVersionId) so per-Scout
+  // queries and cross-run dedup avoid a two-hop join. Null for a manual
+  // analysis. See issue #54 / docs/adr/0004.
+  scoutId                  String?
   status                   AnalysisStatus @default(PENDING)
   s3ResultKey              String?
   matchScore               Int?
@@ -274,6 +281,7 @@ model Analysis {
   @@index([jobOfferId])
   @@index([cvVersionId])
   @@index([ingestionJobId])
+  @@index([scoutId])
 }
 
 // Observability/debug trail across the ingestion + analysis pipelines. See
@@ -324,7 +332,43 @@ model Scout {
 
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   cvVersion CVVersion @relation(fields: [cvVersionId], references: [id], onDelete: Restrict)
+  runs      ScoutRun[]
 
   @@index([userId])
   @@index([cvVersionId])
+}
+
+// Mirrors IngestionJobStatus: a Scout run is scheduler/user-triggered, spans
+// one IngestionJob per targeted site, and is the anchor for run history and
+// per-Scout stats. See issue #54 / docs/adr/0004 (why this is a real aggregate
+// row, unlike ADR 0002's derived multi-offer batch).
+enum ScoutRunStatus {
+  PENDING
+  RUNNING
+  PARTIALLY_COMPLETED
+  COMPLETED
+  FAILED
+}
+
+model ScoutRun {
+  id                      String         @id @default(cuid())
+  scoutId                 String
+  status                  ScoutRunStatus @default(PENDING)
+  sitesQueried            Int            @default(0)
+  siteUnavailableCount    Int            @default(0)
+  offersDiscovered        Int            @default(0)
+  offersAnalysed          Int            @default(0)
+  relevantCount           Int            @default(0)
+  documentsGeneratedCount Int            @default(0)
+  failedCount             Int            @default(0)
+  capSkippedCount         Int            @default(0)
+  errorMessage            String?
+  startedAt               DateTime?
+  finishedAt              DateTime?
+  createdAt               DateTime       @default(now())
+
+  scout         Scout          @relation(fields: [scoutId], references: [id], onDelete: Cascade)
+  ingestionJobs IngestionJob[]
+
+  @@index([scoutId])
 }

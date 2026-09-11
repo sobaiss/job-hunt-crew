@@ -66,6 +66,14 @@ class Joboffersourcesite(str, enum.Enum):
     OTHER = 'OTHER'
 
 
+class Scoutrunstatus(str, enum.Enum):
+    PENDING = 'PENDING'
+    RUNNING = 'RUNNING'
+    PARTIALLY_COMPLETED = 'PARTIALLY_COMPLETED'
+    COMPLETED = 'COMPLETED'
+    FAILED = 'FAILED'
+
+
 class Scoutstatus(str, enum.Enum):
     ACTIVE = 'ACTIVE'
     PAUSED = 'PAUSED'
@@ -160,8 +168,8 @@ class User(Base):
     Account: Mapped[list['Account']] = relationship('Account', back_populates='User_')
     CVVersion: Mapped[list['CVVersion']] = relationship('CVVersion', back_populates='User_')
     Session: Mapped[list['Session']] = relationship('Session', back_populates='User_')
-    IngestionJob: Mapped[list['IngestionJob']] = relationship('IngestionJob', back_populates='User_')
     Scout: Mapped[list['Scout']] = relationship('Scout', back_populates='User_')
+    IngestionJob: Mapped[list['IngestionJob']] = relationship('IngestionJob', back_populates='User_')
     Analysis: Mapped[list['Analysis']] = relationship('Analysis', back_populates='User_')
 
 
@@ -238,8 +246,8 @@ class CVVersion(Base):
     markdownContent: Mapped[Optional[str]] = mapped_column(Text)
 
     User_: Mapped['User'] = relationship('User', back_populates='CVVersion')
-    IngestionJob: Mapped[list['IngestionJob']] = relationship('IngestionJob', back_populates='CVVersion_')
     Scout: Mapped[list['Scout']] = relationship('Scout', back_populates='CVVersion_')
+    IngestionJob: Mapped[list['IngestionJob']] = relationship('IngestionJob', back_populates='CVVersion_')
     Analysis: Mapped[list['Analysis']] = relationship('Analysis', back_populates='CVVersion_')
 
 
@@ -257,39 +265,6 @@ class Session(Base):
     expires: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False)
 
     User_: Mapped['User'] = relationship('User', back_populates='Session')
-
-
-class IngestionJob(Base):
-    __tablename__ = 'IngestionJob'
-    __table_args__ = (
-        ForeignKeyConstraint(['cvVersionId'], ['CVVersion.id'], ondelete='CASCADE', onupdate='CASCADE', name='IngestionJob_cvVersionId_fkey'),
-        ForeignKeyConstraint(['userId'], ['User.id'], ondelete='CASCADE', onupdate='CASCADE', name='IngestionJob_userId_fkey'),
-        PrimaryKeyConstraint('id', name='IngestionJob_pkey'),
-        Index('IngestionJob_userId_idx', 'userId')
-    )
-
-    id: Mapped[str] = mapped_column(Text, primary_key=True)
-    userId: Mapped[str] = mapped_column(Text, nullable=False)
-    mode: Mapped[Ingestionmode] = mapped_column(Enum(Ingestionmode, values_callable=lambda cls: [member.value for member in cls], name='IngestionMode'), nullable=False)
-    maxOffers: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text('25'))
-    status: Mapped[Ingestionjobstatus] = mapped_column(Enum(Ingestionjobstatus, values_callable=lambda cls: [member.value for member in cls], name='IngestionJobStatus'), nullable=False, server_default=text('\'PENDING\'::"IngestionJobStatus"'))
-    discoveredCount: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text('0'))
-    scrapedCount: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text('0'))
-    failedCount: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text('0'))
-    createdAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False, server_default=text('CURRENT_TIMESTAMP'))
-    updatedAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False)
-    quotaSkippedCount: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text('0'))
-    inputUrl: Mapped[Optional[str]] = mapped_column(Text)
-    siteConfigId: Mapped[Optional[str]] = mapped_column(Text)
-    filters: Mapped[Optional[dict]] = mapped_column(JSONB)
-    errorMessage: Mapped[Optional[str]] = mapped_column(Text)
-    cvVersionId: Mapped[Optional[str]] = mapped_column(Text)
-
-    CVVersion_: Mapped[Optional['CVVersion']] = relationship('CVVersion', back_populates='IngestionJob')
-    User_: Mapped['User'] = relationship('User', back_populates='IngestionJob')
-    Analysis: Mapped[list['Analysis']] = relationship('Analysis', back_populates='IngestionJob_')
-    IngestionJobOffer: Mapped[list['IngestionJobOffer']] = relationship('IngestionJobOffer', back_populates='IngestionJob_')
-    PipelineEvent: Mapped[list['PipelineEvent']] = relationship('PipelineEvent', back_populates='IngestionJob_')
 
 
 class Scout(Base):
@@ -316,6 +291,72 @@ class Scout(Base):
 
     CVVersion_: Mapped['CVVersion'] = relationship('CVVersion', back_populates='Scout')
     User_: Mapped['User'] = relationship('User', back_populates='Scout')
+    ScoutRun: Mapped[list['ScoutRun']] = relationship('ScoutRun', back_populates='Scout_')
+
+
+class ScoutRun(Base):
+    __tablename__ = 'ScoutRun'
+    __table_args__ = (
+        ForeignKeyConstraint(['scoutId'], ['Scout.id'], ondelete='CASCADE', onupdate='CASCADE', name='ScoutRun_scoutId_fkey'),
+        PrimaryKeyConstraint('id', name='ScoutRun_pkey'),
+        Index('ScoutRun_scoutId_idx', 'scoutId')
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    scoutId: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[Scoutrunstatus] = mapped_column(Enum(Scoutrunstatus, values_callable=lambda cls: [member.value for member in cls], name='ScoutRunStatus'), nullable=False, server_default=text('\'PENDING\'::"ScoutRunStatus"'))
+    sitesQueried: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text('0'))
+    siteUnavailableCount: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text('0'))
+    offersDiscovered: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text('0'))
+    offersAnalysed: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text('0'))
+    relevantCount: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text('0'))
+    documentsGeneratedCount: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text('0'))
+    failedCount: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text('0'))
+    capSkippedCount: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text('0'))
+    createdAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False, server_default=text('CURRENT_TIMESTAMP'))
+    errorMessage: Mapped[Optional[str]] = mapped_column(Text)
+    startedAt: Mapped[Optional[datetime.datetime]] = mapped_column(TIMESTAMP(precision=3))
+    finishedAt: Mapped[Optional[datetime.datetime]] = mapped_column(TIMESTAMP(precision=3))
+
+    Scout_: Mapped['Scout'] = relationship('Scout', back_populates='ScoutRun')
+    IngestionJob: Mapped[list['IngestionJob']] = relationship('IngestionJob', back_populates='ScoutRun_')
+
+
+class IngestionJob(Base):
+    __tablename__ = 'IngestionJob'
+    __table_args__ = (
+        ForeignKeyConstraint(['cvVersionId'], ['CVVersion.id'], ondelete='CASCADE', onupdate='CASCADE', name='IngestionJob_cvVersionId_fkey'),
+        ForeignKeyConstraint(['scoutRunId'], ['ScoutRun.id'], ondelete='CASCADE', onupdate='CASCADE', name='IngestionJob_scoutRunId_fkey'),
+        ForeignKeyConstraint(['userId'], ['User.id'], ondelete='CASCADE', onupdate='CASCADE', name='IngestionJob_userId_fkey'),
+        PrimaryKeyConstraint('id', name='IngestionJob_pkey'),
+        Index('IngestionJob_scoutRunId_idx', 'scoutRunId'),
+        Index('IngestionJob_userId_idx', 'userId')
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    userId: Mapped[str] = mapped_column(Text, nullable=False)
+    mode: Mapped[Ingestionmode] = mapped_column(Enum(Ingestionmode, values_callable=lambda cls: [member.value for member in cls], name='IngestionMode'), nullable=False)
+    maxOffers: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text('25'))
+    status: Mapped[Ingestionjobstatus] = mapped_column(Enum(Ingestionjobstatus, values_callable=lambda cls: [member.value for member in cls], name='IngestionJobStatus'), nullable=False, server_default=text('\'PENDING\'::"IngestionJobStatus"'))
+    discoveredCount: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text('0'))
+    scrapedCount: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text('0'))
+    failedCount: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text('0'))
+    createdAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False, server_default=text('CURRENT_TIMESTAMP'))
+    updatedAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False)
+    quotaSkippedCount: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text('0'))
+    inputUrl: Mapped[Optional[str]] = mapped_column(Text)
+    siteConfigId: Mapped[Optional[str]] = mapped_column(Text)
+    filters: Mapped[Optional[dict]] = mapped_column(JSONB)
+    errorMessage: Mapped[Optional[str]] = mapped_column(Text)
+    cvVersionId: Mapped[Optional[str]] = mapped_column(Text)
+    scoutRunId: Mapped[Optional[str]] = mapped_column(Text)
+
+    CVVersion_: Mapped[Optional['CVVersion']] = relationship('CVVersion', back_populates='IngestionJob')
+    ScoutRun_: Mapped[Optional['ScoutRun']] = relationship('ScoutRun', back_populates='IngestionJob')
+    User_: Mapped['User'] = relationship('User', back_populates='IngestionJob')
+    Analysis: Mapped[list['Analysis']] = relationship('Analysis', back_populates='IngestionJob_')
+    IngestionJobOffer: Mapped[list['IngestionJobOffer']] = relationship('IngestionJobOffer', back_populates='IngestionJob_')
+    PipelineEvent: Mapped[list['PipelineEvent']] = relationship('PipelineEvent', back_populates='IngestionJob_')
 
 
 class Analysis(Base):
@@ -329,6 +370,7 @@ class Analysis(Base):
         Index('Analysis_cvVersionId_idx', 'cvVersionId'),
         Index('Analysis_ingestionJobId_idx', 'ingestionJobId'),
         Index('Analysis_jobOfferId_idx', 'jobOfferId'),
+        Index('Analysis_scoutId_idx', 'scoutId'),
         Index('Analysis_userId_idx', 'userId')
     )
 
@@ -346,6 +388,7 @@ class Analysis(Base):
     startedAt: Mapped[Optional[datetime.datetime]] = mapped_column(TIMESTAMP(precision=3))
     completedAt: Mapped[Optional[datetime.datetime]] = mapped_column(TIMESTAMP(precision=3))
     ingestionJobId: Mapped[Optional[str]] = mapped_column(Text)
+    scoutId: Mapped[Optional[str]] = mapped_column(Text)
 
     CVVersion_: Mapped['CVVersion'] = relationship('CVVersion', back_populates='Analysis')
     IngestionJob_: Mapped[Optional['IngestionJob']] = relationship('IngestionJob', back_populates='Analysis')

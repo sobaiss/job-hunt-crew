@@ -132,5 +132,8 @@ jobs:
       - name: Run services/ingestion tests
         run: uv run --package ingestion pytest services/ingestion/tests -q
 
+      - name: Run services/scout tests
+        run: uv run --package scout pytest services/scout/tests -q
+
       - name: Run services/analysis tests
         run: uv run --package analysis pytest services/analysis/tests -q

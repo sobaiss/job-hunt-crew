@@ -372,6 +372,26 @@
       "neverRun": "Never run",
       "back": "Back to Agents"
     },
+    "runs": {
+      "runNow": "Run now",
+      "running": "Starting…",
+      "rateLimited": "This Scout ran within the last hour. Try again later.",
+      "runError": "We couldn't start a run. Please try again.",
+      "heading": "Run history",
+      "empty": "This Scout hasn't run yet.",
+      "started": "Started {date}",
+      "sitesQueried": "{count, plural, one {# site queried} other {# sites queried}}",
+      "siteUnavailable": "{count, plural, one {# site unavailable} other {# sites unavailable}}",
+      "offersDiscovered": "{count, plural, one {# offer found} other {# offers found}}",
+      "offersAnalysed": "{count, plural, one {# analysed} other {# analysed}}",
+      "status": {
+        "PENDING": "Queued",
+        "RUNNING": "Running",
+        "PARTIALLY_COMPLETED": "Partially completed",
+        "COMPLETED": "Completed",
+        "FAILED": "Failed"
+      }
+    },
     "siteKeys": {
       "FRANCE_TRAVAIL": "France Travail",
       "LINKEDIN": "LinkedIn",

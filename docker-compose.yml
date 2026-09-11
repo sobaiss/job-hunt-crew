@@ -124,6 +124,7 @@ services:
       SQS_ANALYSIS_INTAKE_QUEUE_URL: http://elasticmq:9324/000000000000/analysis-intake
       SQS_CV_CONVERSION_QUEUE_URL: http://elasticmq:9324/000000000000/cv-conversion
       SQS_INGESTION_INTAKE_QUEUE_URL: http://elasticmq:9324/000000000000/ingestion-intake
+      SQS_SCOUT_INTAKE_QUEUE_URL: http://elasticmq:9324/000000000000/scout-intake
       SQS_ACCESS_KEY_ID: x
       SQS_SECRET_ACCESS_KEY: x
     depends_on:
@@ -162,7 +163,7 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/job_hunt_crew
-      WORKER_QUEUES: cv-conversion,ingestion-intake,analysis-intake
+      WORKER_QUEUES: cv-conversion,ingestion-intake,analysis-intake,scout-intake
       # `local` (in-process AnalysisWorkflow) vs `stepfunctions` (real Step
       # Functions Local execution — needs the host lambda_shim + SFN_* env).
       WORKER_ANALYSIS_MODE: ${WORKER_ANALYSIS_MODE:-local}
@@ -179,6 +180,7 @@ services:
       SQS_CV_CONVERSION_QUEUE_URL: http://elasticmq:9324/000000000000/cv-conversion
       SQS_ANALYSIS_INTAKE_QUEUE_URL: http://elasticmq:9324/000000000000/analysis-intake
       SQS_INGESTION_INTAKE_QUEUE_URL: http://elasticmq:9324/000000000000/ingestion-intake
+      SQS_SCOUT_INTAKE_QUEUE_URL: http://elasticmq:9324/000000000000/scout-intake
       SQS_ACCESS_KEY_ID: x
       SQS_SECRET_ACCESS_KEY: x
       # The crew run (analysis-intake) and any PDF/DOCX Conversion call an LLM

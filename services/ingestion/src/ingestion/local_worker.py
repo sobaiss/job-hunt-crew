@@ -1,9 +1,10 @@
 """Local stand-in for the AWS SQS -> Lambda event-source mappings (dev only).
 
-Three queues carry work into the async pipeline — `cv-conversion`,
-`analysis-intake`, `ingestion-intake` — each drained in production by an SQS
-event-source mapping that invokes a Lambda (`handle_cv_conversion`,
-`handle_analysis_intake`, `handle_ingestion_intake`). That wiring is AWS infra,
+Four queues carry work into the async pipeline — `cv-conversion`,
+`analysis-intake`, `ingestion-intake`, `scout-intake` — each drained in
+production by an SQS event-source mapping that invokes a Lambda
+(`handle_cv_conversion`, `handle_analysis_intake`, `handle_ingestion_intake`,
+`handle_scout_intake`). That wiring is AWS infra,
 out of scope per PRD Section 4/15, so nothing drains those queues locally: a
 "Convert to Markdown" click or a submitted IngestionJob just parks a message in
 ElasticMQ and the row never leaves PENDING.
@@ -21,9 +22,10 @@ not the reverse).
 
 Run it via `make worker` (host) or the `worker` service in docker-compose.yml.
 `WORKER_QUEUES` (comma-separated queue names) selects which subset to drain; the
-compose service drains all three (`cv-conversion`, `ingestion-intake`,
-`analysis-intake`), so "Convert to Markdown", "Analyse one offer" and "Analyse
-several offers" all complete on their own after `docker compose up`.
+compose service drains all four (`cv-conversion`, `ingestion-intake`,
+`analysis-intake`, `scout-intake`), so "Convert to Markdown", "Analyse one
+offer", "Analyse several offers" and a Scout "Run now" all complete on their
+own after `docker compose up`.
 `WORKER_RUN_ONCE=1` drains what is currently queued and exits.
 
 `analysis-intake` has two drainers, chosen by `WORKER_ANALYSIS_MODE`:
@@ -120,6 +122,11 @@ QUEUE_SPECS: dict[str, QueueSpec] = {
         "ingestion-intake",
         _queue_url("ingestion-intake", "SQS_INGESTION_INTAKE_QUEUE_URL"),
         "ingestion.intake_handler:handle_ingestion_intake",
+    ),
+    "scout-intake": QueueSpec(
+        "scout-intake",
+        _queue_url("scout-intake", "SQS_SCOUT_INTAKE_QUEUE_URL"),
+        "scout.intake_handler:handle_scout_intake",
     ),
 }
 
