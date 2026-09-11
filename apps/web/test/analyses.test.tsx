@@ -650,4 +650,69 @@ describe("AnalysisDetailPage", () => {
       "We couldn't start generation. Please try again.",
     );
   });
+
+  it("marks a completed analysis as applied and links to the Application", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses/a1", () => HttpResponse.json({ analysis: detail() })),
+      http.post("/api/applications", () =>
+        HttpResponse.json({
+          application: {
+            id: "app-1",
+            userId: "user_1",
+            analysisId: "a1",
+            jobOfferId: "job1",
+            cvVersionId: "cv1",
+            scoutId: null,
+            coverLetterDocId: null,
+            tailoredCvDocId: null,
+            status: "DRAFT",
+            appliedAt: null,
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+            jobOffer: { id: "job1", title: "Backend Engineer", company: "Acme Inc" },
+            cvVersion: { label: "Grad CV" },
+          },
+        }),
+      ),
+      http.post("/api/applications/app-1/status-events", () =>
+        HttpResponse.json({
+          application: {
+            id: "app-1",
+            userId: "user_1",
+            analysisId: "a1",
+            jobOfferId: "job1",
+            cvVersionId: "cv1",
+            scoutId: null,
+            coverLetterDocId: null,
+            tailoredCvDocId: null,
+            status: "APPLIED",
+            appliedAt: "2026-09-11T00:00:00.000Z",
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+            jobOffer: { id: "job1", title: "Backend Engineer", company: "Acme Inc" },
+            cvVersion: { label: "Grad CV" },
+          },
+          statusEvent: {
+            id: "se-1",
+            applicationId: "app-1",
+            status: "APPLIED",
+            note: null,
+            effectiveDate: "2026-09-11T00:00:00.000Z",
+            createdAt: "2026-09-11T00:00:00.000Z",
+          },
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Mark as applied" }));
+
+    expect(await screen.findByText("Applied")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View in Applications" })).toHaveAttribute(
+      "href",
+      "/applications/app-1",
+    );
+  });
 });

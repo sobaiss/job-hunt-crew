@@ -20,6 +20,16 @@ class Analysisstatus(str, enum.Enum):
     FAILED = 'FAILED'
 
 
+class Applicationstatus(str, enum.Enum):
+    DRAFT = 'DRAFT'
+    APPLIED = 'APPLIED'
+    INTERVIEWING = 'INTERVIEWING'
+    OFFER = 'OFFER'
+    ACCEPTED = 'ACCEPTED'
+    REJECTED = 'REJECTED'
+    WITHDRAWN = 'WITHDRAWN'
+
+
 class Cvconversionstatus(str, enum.Enum):
     PENDING = 'PENDING'
     CONVERTING = 'CONVERTING'
@@ -134,6 +144,7 @@ class JobOffer(Base):
 
     Analysis: Mapped[list['Analysis']] = relationship('Analysis', back_populates='JobOffer_')
     IngestionJobOffer: Mapped[list['IngestionJobOffer']] = relationship('IngestionJobOffer', back_populates='JobOffer_')
+    Application: Mapped[list['Application']] = relationship('Application', back_populates='JobOffer_')
     GeneratedDocument: Mapped[list['GeneratedDocument']] = relationship('GeneratedDocument', back_populates='JobOffer_')
 
 
@@ -184,6 +195,7 @@ class User(Base):
     Scout: Mapped[list['Scout']] = relationship('Scout', back_populates='User_')
     IngestionJob: Mapped[list['IngestionJob']] = relationship('IngestionJob', back_populates='User_')
     Analysis: Mapped[list['Analysis']] = relationship('Analysis', back_populates='User_')
+    Application: Mapped[list['Application']] = relationship('Application', back_populates='User_')
 
 
 t_VerificationToken = Table(
@@ -262,6 +274,7 @@ class CVVersion(Base):
     Scout: Mapped[list['Scout']] = relationship('Scout', back_populates='CVVersion_')
     IngestionJob: Mapped[list['IngestionJob']] = relationship('IngestionJob', back_populates='CVVersion_')
     Analysis: Mapped[list['Analysis']] = relationship('Analysis', back_populates='CVVersion_')
+    Application: Mapped[list['Application']] = relationship('Application', back_populates='CVVersion_')
     GeneratedDocument: Mapped[list['GeneratedDocument']] = relationship('GeneratedDocument', back_populates='CVVersion_')
 
 
@@ -412,6 +425,7 @@ class Analysis(Base):
     IngestionJob_: Mapped[Optional['IngestionJob']] = relationship('IngestionJob', back_populates='Analysis')
     JobOffer_: Mapped['JobOffer'] = relationship('JobOffer', back_populates='Analysis')
     User_: Mapped['User'] = relationship('User', back_populates='Analysis')
+    Application: Mapped[list['Application']] = relationship('Application', back_populates='Analysis_')
     GeneratedDocument: Mapped[list['GeneratedDocument']] = relationship('GeneratedDocument', back_populates='Analysis_')
     PipelineEvent: Mapped[list['PipelineEvent']] = relationship('PipelineEvent', back_populates='Analysis_')
 
@@ -433,6 +447,41 @@ class IngestionJobOffer(Base):
 
     IngestionJob_: Mapped['IngestionJob'] = relationship('IngestionJob', back_populates='IngestionJobOffer')
     JobOffer_: Mapped['JobOffer'] = relationship('JobOffer', back_populates='IngestionJobOffer')
+
+
+class Application(Base):
+    __tablename__ = 'Application'
+    __table_args__ = (
+        ForeignKeyConstraint(['analysisId'], ['Analysis.id'], ondelete='CASCADE', onupdate='CASCADE', name='Application_analysisId_fkey'),
+        ForeignKeyConstraint(['cvVersionId'], ['CVVersion.id'], ondelete='RESTRICT', onupdate='CASCADE', name='Application_cvVersionId_fkey'),
+        ForeignKeyConstraint(['jobOfferId'], ['JobOffer.id'], ondelete='CASCADE', onupdate='CASCADE', name='Application_jobOfferId_fkey'),
+        ForeignKeyConstraint(['userId'], ['User.id'], ondelete='CASCADE', onupdate='CASCADE', name='Application_userId_fkey'),
+        PrimaryKeyConstraint('id', name='Application_pkey'),
+        Index('Application_analysisId_key', 'analysisId', unique=True),
+        Index('Application_cvVersionId_idx', 'cvVersionId'),
+        Index('Application_jobOfferId_idx', 'jobOfferId'),
+        Index('Application_scoutId_idx', 'scoutId'),
+        Index('Application_userId_idx', 'userId')
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    userId: Mapped[str] = mapped_column(Text, nullable=False)
+    analysisId: Mapped[str] = mapped_column(Text, nullable=False)
+    jobOfferId: Mapped[str] = mapped_column(Text, nullable=False)
+    cvVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[Applicationstatus] = mapped_column(Enum(Applicationstatus, values_callable=lambda cls: [member.value for member in cls], name='ApplicationStatus'), nullable=False, server_default=text('\'DRAFT\'::"ApplicationStatus"'))
+    createdAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False, server_default=text('CURRENT_TIMESTAMP'))
+    updatedAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False)
+    scoutId: Mapped[Optional[str]] = mapped_column(Text)
+    coverLetterDocId: Mapped[Optional[str]] = mapped_column(Text)
+    tailoredCvDocId: Mapped[Optional[str]] = mapped_column(Text)
+    appliedAt: Mapped[Optional[datetime.datetime]] = mapped_column(TIMESTAMP(precision=3))
+
+    Analysis_: Mapped['Analysis'] = relationship('Analysis', back_populates='Application')
+    CVVersion_: Mapped['CVVersion'] = relationship('CVVersion', back_populates='Application')
+    JobOffer_: Mapped['JobOffer'] = relationship('JobOffer', back_populates='Application')
+    User_: Mapped['User'] = relationship('User', back_populates='Application')
+    StatusEvent: Mapped[list['StatusEvent']] = relationship('StatusEvent', back_populates='Application_')
 
 
 class GeneratedDocument(Base):
@@ -488,3 +537,21 @@ class PipelineEvent(Base):
 
     Analysis_: Mapped[Optional['Analysis']] = relationship('Analysis', back_populates='PipelineEvent')
     IngestionJob_: Mapped[Optional['IngestionJob']] = relationship('IngestionJob', back_populates='PipelineEvent')
+
+
+class StatusEvent(Base):
+    __tablename__ = 'StatusEvent'
+    __table_args__ = (
+        ForeignKeyConstraint(['applicationId'], ['Application.id'], ondelete='CASCADE', onupdate='CASCADE', name='StatusEvent_applicationId_fkey'),
+        PrimaryKeyConstraint('id', name='StatusEvent_pkey'),
+        Index('StatusEvent_applicationId_idx', 'applicationId')
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    applicationId: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[Applicationstatus] = mapped_column(Enum(Applicationstatus, values_callable=lambda cls: [member.value for member in cls], name='ApplicationStatus'), nullable=False)
+    effectiveDate: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False)
+    createdAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False, server_default=text('CURRENT_TIMESTAMP'))
+    note: Mapped[Optional[str]] = mapped_column(Text)
+
+    Application_: Mapped['Application'] = relationship('Application', back_populates='StatusEvent')

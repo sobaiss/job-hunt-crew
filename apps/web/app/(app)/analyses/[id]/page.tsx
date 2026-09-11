@@ -11,6 +11,7 @@ import {
 } from "@/hooks/use-analyses";
 import { useEnumLabel } from "@/lib/enum-labels";
 import { AnalysisResultView } from "@/components/analysis-result";
+import { ApplicationAction } from "@/components/application-action";
 import { GeneratedDocumentsPanel } from "@/components/generated-documents-panel";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -117,7 +118,10 @@ export default function AnalysisDetailPage() {
       )}
 
       {analysis.status === "COMPLETED" && (
-        <GeneratedDocumentsPanel analysisId={analysis.id} />
+        <>
+          <ApplicationAction analysisId={analysis.id} />
+          <GeneratedDocumentsPanel analysisId={analysis.id} />
+        </>
       )}
     </main>
   );

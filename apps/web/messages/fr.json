@@ -87,6 +87,7 @@
     "dashboard": "Tableau de bord",
     "analyses": "Analyses",
     "agents": "Agents",
+    "applications": "Candidatures",
     "cvVersions": "Versions de CV",
     "settings": "Paramètres",
     "newAnalysis": "Nouvelle analyse",
@@ -237,6 +238,12 @@
         "pending": "En file d'attente…",
         "failed": "La génération a échoué.",
         "retry": "Réessayer"
+      },
+      "application": {
+        "markApplied": "Marquer comme candidaté",
+        "markAppliedError": "Impossible d'enregistrer cette candidature. Veuillez réessayer.",
+        "applied": "Candidaté",
+        "viewApplication": "Voir dans Candidatures"
       }
     },
     "compare": {
@@ -426,6 +433,36 @@
       "GLASSDOOR": "Glassdoor"
     }
   },
+  "applications": {
+    "title": "Candidatures",
+    "subtitle": "Chaque offre que vous avez poursuivie, trouvée par un agent ou analysée manuellement, et son statut.",
+    "loading": "Chargement de vos candidatures",
+    "loadError": "Impossible de charger vos candidatures. Veuillez réessayer.",
+    "empty": "Aucune candidature suivie pour l'instant.",
+    "controls": {
+      "statusLabel": "Statut",
+      "statusAll": "Tous les statuts",
+      "scoutLabel": "Agent",
+      "scoutAll": "Tous les agents"
+    },
+    "list": {
+      "jobOfferFallback": "Offre d'emploi",
+      "vsCv": "vs. {label}",
+      "scoutTag": "Agent",
+      "updated": "Mise à jour le {date}"
+    },
+    "detail": {
+      "loading": "Chargement de cette candidature",
+      "loadError": "Impossible de charger cette candidature. Veuillez réessayer.",
+      "viewAnalysis": "Voir l'analyse",
+      "viewScout": "Voir l'agent",
+      "moveTo": "Déplacer vers…",
+      "statusError": "Impossible de mettre à jour le statut. Veuillez réessayer.",
+      "timelineHeading": "Historique des statuts",
+      "timelineEmpty": "Aucun changement de statut pour l'instant.",
+      "back": "Retour aux candidatures"
+    }
+  },
   "cvVersions": {
     "title": "Versions de CV",
     "form": {
@@ -537,6 +574,15 @@
       "CONVERTING": "Conversion en cours",
       "CONVERTED": "Convertie",
       "FAILED": "Échouée"
+    },
+    "applicationStatus": {
+      "DRAFT": "Brouillon",
+      "APPLIED": "Candidaté",
+      "INTERVIEWING": "Entretien",
+      "OFFER": "Offre",
+      "ACCEPTED": "Acceptée",
+      "REJECTED": "Refusée",
+      "WITHDRAWN": "Retirée"
     }
   }
 }

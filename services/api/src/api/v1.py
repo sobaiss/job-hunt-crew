@@ -5,10 +5,12 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from py_db.models import (
     Analysis,
     Analysisstatus,
+    Application,
+    Applicationstatus,
     CVVersion,
     Cvconversionstatus,
     Cvfiletype,
@@ -25,6 +27,7 @@ from py_db.models import (
     Scoutrunstatus,
     Scoutstatus,
     SiteConfig,
+    StatusEvent,
 )
 from py_db.quota import analyses_requested_today, daily_analysis_cap
 from pydantic import BaseModel
@@ -354,6 +357,25 @@ async def delete_cv_version(
             status_code=409,
             detail=f"This CV version is used by {len(referencing)} Scout(s): {labels}. "
             "Point those Scouts at another CV first.",
+        )
+
+    # Application.cvVersionId is also onDelete: Restrict (issue #59) — a CV
+    # backing a tracked Application can't be deleted either.
+    application_count = int(
+        (
+            await session.scalar(
+                select(func.count())
+                .select_from(Application)
+                .where(Application.cvVersionId == cv_version_id)
+            )
+        )
+        or 0
+    )
+    if application_count:
+        raise HTTPException(
+            status_code=409,
+            detail=f"This CV version is used by {application_count} Application(s). "
+            "It cannot be deleted while those Applications reference it.",
         )
 
     await session.delete(existing)
@@ -1575,3 +1597,324 @@ async def get_generated_document(
         raise HTTPException(status_code=404, detail="Not found")
     await _owned_analysis(session, document.analysisId, user_id)
     return GetGeneratedDocumentResponse(generatedDocument=_generated_document_response(document))
+
+
+# --- Applications (issue #59, Scout slice 7) ---
+# An Application tracks a Candidate's pursuit of one Analysis's offer through
+# a status pipeline (DRAFT -> APPLIED -> INTERVIEWING -> OFFER -> ACCEPTED /
+# REJECTED / WITHDRAWN). Created lazily: `POST /v1/applications` is
+# idempotent per `analysisId` (DB-unique) — the first call for a given
+# Analysis creates the row (DRAFT), every later call returns the existing
+# row unchanged, so "Generate documents" and "Mark as applied" can both call
+# it without risking a duplicate. The append-only StatusEvent list is the
+# timeline's source of truth; `Application.status`/`appliedAt` are
+# denormalised onto the row and kept in sync on every append (mirrors
+# Scout.lastRunAt) so list/detail reads don't need a per-row subquery.
+# User-scoped via `Application.userId` directly — another user's Application
+# is a 404. The "Apply" web action (open the posting, download the document
+# package, set APPLIED) is a client-side composition of this endpoint plus
+# window.open — there is no server-side package/download endpoint yet since
+# PDF rendering (#58's deferred item) isn't built; "Apply" and "Mark as
+# applied" both currently just record the status change.
+
+APPLICATION_STATUS_VALUES = (
+    "DRAFT",
+    "APPLIED",
+    "INTERVIEWING",
+    "OFFER",
+    "ACCEPTED",
+    "REJECTED",
+    "WITHDRAWN",
+)
+
+
+class StatusEventResponse(BaseModel):
+    id: str
+    applicationId: str
+    status: str
+    note: str | None
+    effectiveDate: datetime
+    createdAt: datetime
+
+
+def _status_event_response(row: StatusEvent) -> StatusEventResponse:
+    return StatusEventResponse(
+        id=row.id,
+        applicationId=row.applicationId,
+        status=row.status.value,
+        note=row.note,
+        effectiveDate=row.effectiveDate,
+        createdAt=row.createdAt,
+    )
+
+
+class ApplicationJobOfferSummary(BaseModel):
+    id: str
+    title: str | None
+    company: str | None
+
+
+class ApplicationCvVersionSummary(BaseModel):
+    label: str
+
+
+class ApplicationResponse(BaseModel):
+    id: str
+    userId: str
+    analysisId: str
+    jobOfferId: str
+    cvVersionId: str
+    scoutId: str | None
+    coverLetterDocId: str | None
+    tailoredCvDocId: str | None
+    status: str
+    appliedAt: datetime | None
+    createdAt: datetime
+    updatedAt: datetime
+    # Embedded summaries (issue #59's "offer, CV version used" list AC) — the
+    # caller must eager-load `Application.JobOffer_`/`CVVersion_` before
+    # calling this; every endpoint below does via `selectinload`.
+    jobOffer: ApplicationJobOfferSummary
+    cvVersion: ApplicationCvVersionSummary
+
+
+def _application_response(row: Application) -> ApplicationResponse:
+    return ApplicationResponse(
+        id=row.id,
+        userId=row.userId,
+        analysisId=row.analysisId,
+        jobOfferId=row.jobOfferId,
+        cvVersionId=row.cvVersionId,
+        scoutId=row.scoutId,
+        coverLetterDocId=row.coverLetterDocId,
+        tailoredCvDocId=row.tailoredCvDocId,
+        status=row.status.value,
+        appliedAt=row.appliedAt,
+        createdAt=row.createdAt,
+        updatedAt=row.updatedAt,
+        jobOffer=ApplicationJobOfferSummary(
+            id=row.JobOffer_.id, title=row.JobOffer_.title, company=row.JobOffer_.company
+        ),
+        cvVersion=ApplicationCvVersionSummary(label=row.CVVersion_.label),
+    )
+
+
+class ApplicationDetailResponse(ApplicationResponse):
+    jobOffer: JobOfferResponse  # type: ignore[assignment]
+    statusEvents: list[StatusEventResponse]
+
+
+async def _owned_application(session: AsyncSession, application_id: str, user_id: str) -> Application:
+    application = await session.get(Application, application_id)
+    if application is None or application.userId != user_id:
+        raise HTTPException(status_code=404, detail="Not found")
+    return application
+
+
+class CreateApplicationRequest(BaseModel):
+    analysisId: Any = None
+
+
+class CreateApplicationResponse(BaseModel):
+    application: ApplicationResponse
+
+
+@router.post("/applications", response_model=CreateApplicationResponse)
+async def create_application(
+    req: CreateApplicationRequest,
+    response: Response,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> CreateApplicationResponse:
+    """Lazily get-or-creates the Application for an Analysis the caller owns.
+    A second call for the same analysisId returns the existing row (200)
+    rather than erroring or duplicating; the first call creates it (201).
+    """
+    analysis_id = _optional_string(req.analysisId)
+    if not analysis_id:
+        raise HTTPException(status_code=400, detail="analysisId is required")
+
+    analysis = await _owned_analysis(session, analysis_id, user_id)
+
+    application_options = (
+        selectinload(Application.JobOffer_),
+        selectinload(Application.CVVersion_),
+    )
+
+    existing = await session.scalar(
+        select(Application).options(*application_options).where(Application.analysisId == analysis_id)
+    )
+    if existing is not None:
+        response.status_code = 200
+        return CreateApplicationResponse(application=_application_response(existing))
+
+    application = Application(
+        id=str(uuid.uuid4()),
+        userId=user_id,
+        analysisId=analysis.id,
+        jobOfferId=analysis.jobOfferId,
+        cvVersionId=analysis.cvVersionId,
+        scoutId=analysis.scoutId,
+        status=Applicationstatus.DRAFT,
+        updatedAt=_now(),
+    )
+    session.add(application)
+    await session.commit()
+
+    application = await session.scalar(
+        select(Application).options(*application_options).where(Application.id == application.id)
+    )
+    assert application is not None
+
+    response.status_code = 201
+    return CreateApplicationResponse(application=_application_response(application))
+
+
+class ApplicationListResponse(BaseModel):
+    applications: list[ApplicationResponse]
+
+
+@router.get("/applications", response_model=ApplicationListResponse)
+async def list_applications(
+    status: str | None = None,
+    scoutId: str | None = None,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> ApplicationListResponse:
+    """Lists the caller's Applications, newest-activity-first. `status` and
+    `scoutId` are optional equality filters backing the Applications tracker's
+    filter controls; sorting by date is the default order (`updatedAt desc`).
+    """
+    if status is not None and status not in APPLICATION_STATUS_VALUES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"status must be one of: {', '.join(APPLICATION_STATUS_VALUES)}",
+        )
+
+    stmt = (
+        select(Application)
+        .options(selectinload(Application.JobOffer_), selectinload(Application.CVVersion_))
+        .where(Application.userId == user_id)
+    )
+    if status is not None:
+        stmt = stmt.where(Application.status == Applicationstatus(status))
+    if scoutId is not None:
+        stmt = stmt.where(Application.scoutId == scoutId)
+    stmt = stmt.order_by(Application.updatedAt.desc())
+
+    rows = (await session.scalars(stmt)).all()
+    return ApplicationListResponse(applications=[_application_response(row) for row in rows])
+
+
+class GetApplicationResponse(BaseModel):
+    application: ApplicationDetailResponse
+
+
+@router.get("/applications/{application_id}", response_model=GetApplicationResponse)
+async def get_application(
+    application_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> GetApplicationResponse:
+    stmt = (
+        select(Application)
+        .options(
+            selectinload(Application.JobOffer_),
+            selectinload(Application.CVVersion_),
+            selectinload(Application.StatusEvent),
+        )
+        .where(Application.id == application_id)
+    )
+    application = (await session.scalars(stmt)).first()
+    if application is None or application.userId != user_id:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    events = sorted(application.StatusEvent, key=lambda e: (e.effectiveDate, e.createdAt))
+    return GetApplicationResponse(
+        application=ApplicationDetailResponse(
+            **_application_response(application).model_dump(exclude={"jobOffer"}),
+            jobOffer=_job_offer_response(application.JobOffer_),
+            statusEvents=[_status_event_response(e) for e in events],
+        )
+    )
+
+
+class AddStatusEventRequest(BaseModel):
+    status: Any = None
+    note: Any = None
+    effectiveDate: Any = None
+
+
+class AddStatusEventResponse(BaseModel):
+    application: ApplicationResponse
+    statusEvent: StatusEventResponse
+
+
+@router.post(
+    "/applications/{application_id}/status-events",
+    response_model=AddStatusEventResponse,
+    status_code=201,
+)
+async def add_status_event(
+    application_id: str,
+    req: AddStatusEventRequest,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> AddStatusEventResponse:
+    """Appends a StatusEvent and updates the Application's denormalised
+    `status`/`appliedAt` to match — the Application's current status is
+    always the latest event's status. Also how "Apply" (status=APPLIED),
+    "Mark as applied", advancing the pipeline, and "undo" (append a event
+    back to the previous status) are all implemented — there is no separate
+    undo endpoint, undo is just another status-events append.
+    """
+    application = await _owned_application(session, application_id, user_id)
+
+    status_value = _optional_string(req.status)
+    if not status_value or status_value not in APPLICATION_STATUS_VALUES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"status must be one of: {', '.join(APPLICATION_STATUS_VALUES)}",
+        )
+
+    note = _optional_string(req.note)
+
+    effective_date = _now()
+    if req.effectiveDate is not None:
+        raw_date = _optional_string(req.effectiveDate)
+        if raw_date:
+            try:
+                effective_date = datetime.fromisoformat(raw_date).replace(tzinfo=None)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400, detail="effectiveDate must be an ISO-8601 date"
+                ) from None
+
+    event = StatusEvent(
+        id=str(uuid.uuid4()),
+        applicationId=application.id,
+        status=Applicationstatus(status_value),
+        note=note,
+        effectiveDate=effective_date,
+    )
+    session.add(event)
+
+    application.status = Applicationstatus(status_value)
+    application.updatedAt = _now()
+    if status_value == "APPLIED" and application.appliedAt is None:
+        application.appliedAt = effective_date
+
+    await session.commit()
+    await session.refresh(event)
+
+    application = await session.scalar(
+        select(Application)
+        .options(selectinload(Application.JobOffer_), selectinload(Application.CVVersion_))
+        .where(Application.id == application_id)
+    )
+    assert application is not None
+
+    return AddStatusEventResponse(
+        application=_application_response(application),
+        statusEvent=_status_event_response(event),
+    )

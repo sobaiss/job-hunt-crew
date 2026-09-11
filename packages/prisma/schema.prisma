@@ -25,6 +25,7 @@ model User {
   ingestionJobs IngestionJob[]
   analyses      Analysis[]
   scouts        Scout[]
+  applications  Application[]
 }
 
 model Account {
@@ -101,6 +102,7 @@ model CVVersion {
   ingestionJobs      IngestionJob[]
   scouts             Scout[]
   generatedDocuments GeneratedDocument[]
+  applications       Application[]
 
   @@index([userId])
 }
@@ -142,6 +144,7 @@ model JobOffer {
   ingestionJobOffers IngestionJobOffer[]
   analyses           Analysis[]
   generatedDocuments GeneratedDocument[]
+  applications       Application[]
 }
 
 enum IngestionMode {
@@ -281,6 +284,7 @@ model Analysis {
   ingestionJob       IngestionJob?       @relation(fields: [ingestionJobId], references: [id], onDelete: Cascade)
   pipelineEvents     PipelineEvent[]
   generatedDocuments GeneratedDocument[]
+  application        Application?
 
   @@index([userId])
   @@index([jobOfferId])
@@ -425,4 +429,70 @@ model GeneratedDocument {
   @@index([jobOfferId])
   @@index([cvVersionId])
   @@index([scoutRunId])
+}
+
+enum ApplicationStatus {
+  DRAFT
+  APPLIED
+  INTERVIEWING
+  OFFER
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+}
+
+// Created lazily — on the first "Generate documents" or "Mark as applied" for
+// a given Analysis — never eagerly for every relevant find. See issue #59 /
+// docs/adr/0004. `analysisId` is unique: at most one Application per
+// Analysis, so two Scouts finding the same offer (each with its own
+// Analysis) can each become their own Application. `status`/`appliedAt` are
+// denormalised onto the row and kept in sync on every StatusEvent append
+// (mirrors Scout.lastRunAt) rather than derived by query on every read; the
+// StatusEvent list remains the append-only source of truth for the timeline.
+// `cvVersionId` FK is `onDelete: Restrict`, like GeneratedDocument's.
+model Application {
+  id               String            @id @default(cuid())
+  userId           String
+  analysisId       String            @unique
+  jobOfferId       String
+  cvVersionId      String
+  // Denormalised, like Analysis.scoutId; null for a manually-tracked Analysis.
+  scoutId          String?
+  // Denormalised references to the GeneratedDocument rows used for this
+  // Application, if any were generated before applying. Not a DB-enforced FK
+  // (GeneratedDocument.supersededById already makes the "latest" row a
+  // moving target) — the API resolves and validates ownership on write.
+  coverLetterDocId String?
+  tailoredCvDocId  String?
+  status           ApplicationStatus @default(DRAFT)
+  appliedAt        DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  analysis     Analysis      @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  jobOffer     JobOffer      @relation(fields: [jobOfferId], references: [id], onDelete: Cascade)
+  cvVersion    CVVersion     @relation(fields: [cvVersionId], references: [id], onDelete: Restrict)
+  statusEvents StatusEvent[]
+
+  @@index([userId])
+  @@index([jobOfferId])
+  @@index([cvVersionId])
+  @@index([scoutId])
+}
+
+// Append-only child of Application — one row per status transition, with an
+// optional note and an effective date the Candidate can back-date. The
+// Application's current `status` is always the latest event's status.
+model StatusEvent {
+  id            String            @id @default(cuid())
+  applicationId String
+  status        ApplicationStatus
+  note          String?
+  effectiveDate DateTime
+  createdAt     DateTime          @default(now())
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
 }

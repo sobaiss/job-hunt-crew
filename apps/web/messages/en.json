@@ -87,6 +87,7 @@
     "dashboard": "Dashboard",
     "analyses": "Analyses",
     "agents": "Agents",
+    "applications": "Applications",
     "cvVersions": "CV versions",
     "settings": "Settings",
     "newAnalysis": "New analysis",
@@ -237,6 +238,12 @@
         "pending": "Queued…",
         "failed": "Generation failed.",
         "retry": "Try again"
+      },
+      "application": {
+        "markApplied": "Mark as applied",
+        "markAppliedError": "We couldn't record that application. Please try again.",
+        "applied": "Applied",
+        "viewApplication": "View in Applications"
       }
     },
     "compare": {
@@ -426,6 +433,36 @@
       "GLASSDOOR": "Glassdoor"
     }
   },
+  "applications": {
+    "title": "Applications",
+    "subtitle": "Every offer you've pursued, from a Scout find or a manual analysis, and where it stands.",
+    "loading": "Loading your applications",
+    "loadError": "We couldn't load your applications. Please try again.",
+    "empty": "No applications tracked yet.",
+    "controls": {
+      "statusLabel": "Status",
+      "statusAll": "All statuses",
+      "scoutLabel": "Scout",
+      "scoutAll": "All Scouts"
+    },
+    "list": {
+      "jobOfferFallback": "Job offer",
+      "vsCv": "vs. {label}",
+      "scoutTag": "Scout",
+      "updated": "Updated {date}"
+    },
+    "detail": {
+      "loading": "Loading this application",
+      "loadError": "We couldn't load this application. Please try again.",
+      "viewAnalysis": "View the analysis",
+      "viewScout": "View the Scout",
+      "moveTo": "Move to…",
+      "statusError": "We couldn't update the status. Please try again.",
+      "timelineHeading": "Status history",
+      "timelineEmpty": "No status changes yet.",
+      "back": "Back to Applications"
+    }
+  },
   "cvVersions": {
     "title": "CV versions",
     "form": {
@@ -537,6 +574,15 @@
       "CONVERTING": "Converting",
       "CONVERTED": "Converted",
       "FAILED": "Failed"
+    },
+    "applicationStatus": {
+      "DRAFT": "Draft",
+      "APPLIED": "Applied",
+      "INTERVIEWING": "Interviewing",
+      "OFFER": "Offer",
+      "ACCEPTED": "Accepted",
+      "REJECTED": "Rejected",
+      "WITHDRAWN": "Withdrawn"
     }
   }
 }
