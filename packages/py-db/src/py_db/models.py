@@ -34,6 +34,18 @@ class Cvfiletype(str, enum.Enum):
     TXT = 'TXT'
 
 
+class Generateddocumentstatus(str, enum.Enum):
+    PENDING = 'PENDING'
+    GENERATING = 'GENERATING'
+    READY = 'READY'
+    FAILED = 'FAILED'
+
+
+class Generateddocumenttype(str, enum.Enum):
+    COVER_LETTER = 'COVER_LETTER'
+    TAILORED_CV = 'TAILORED_CV'
+
+
 class Ingestionjobstatus(str, enum.Enum):
     PENDING = 'PENDING'
     RUNNING = 'RUNNING'
@@ -122,6 +134,7 @@ class JobOffer(Base):
 
     Analysis: Mapped[list['Analysis']] = relationship('Analysis', back_populates='JobOffer_')
     IngestionJobOffer: Mapped[list['IngestionJobOffer']] = relationship('IngestionJobOffer', back_populates='JobOffer_')
+    GeneratedDocument: Mapped[list['GeneratedDocument']] = relationship('GeneratedDocument', back_populates='JobOffer_')
 
 
 class SiteConfig(Base):
@@ -249,6 +262,7 @@ class CVVersion(Base):
     Scout: Mapped[list['Scout']] = relationship('Scout', back_populates='CVVersion_')
     IngestionJob: Mapped[list['IngestionJob']] = relationship('IngestionJob', back_populates='CVVersion_')
     Analysis: Mapped[list['Analysis']] = relationship('Analysis', back_populates='CVVersion_')
+    GeneratedDocument: Mapped[list['GeneratedDocument']] = relationship('GeneratedDocument', back_populates='CVVersion_')
 
 
 class Session(Base):
@@ -398,6 +412,7 @@ class Analysis(Base):
     IngestionJob_: Mapped[Optional['IngestionJob']] = relationship('IngestionJob', back_populates='Analysis')
     JobOffer_: Mapped['JobOffer'] = relationship('JobOffer', back_populates='Analysis')
     User_: Mapped['User'] = relationship('User', back_populates='Analysis')
+    GeneratedDocument: Mapped[list['GeneratedDocument']] = relationship('GeneratedDocument', back_populates='Analysis_')
     PipelineEvent: Mapped[list['PipelineEvent']] = relationship('PipelineEvent', back_populates='Analysis_')
 
 
@@ -418,6 +433,39 @@ class IngestionJobOffer(Base):
 
     IngestionJob_: Mapped['IngestionJob'] = relationship('IngestionJob', back_populates='IngestionJobOffer')
     JobOffer_: Mapped['JobOffer'] = relationship('JobOffer', back_populates='IngestionJobOffer')
+
+
+class GeneratedDocument(Base):
+    __tablename__ = 'GeneratedDocument'
+    __table_args__ = (
+        ForeignKeyConstraint(['analysisId'], ['Analysis.id'], ondelete='CASCADE', onupdate='CASCADE', name='GeneratedDocument_analysisId_fkey'),
+        ForeignKeyConstraint(['cvVersionId'], ['CVVersion.id'], ondelete='RESTRICT', onupdate='CASCADE', name='GeneratedDocument_cvVersionId_fkey'),
+        ForeignKeyConstraint(['jobOfferId'], ['JobOffer.id'], ondelete='CASCADE', onupdate='CASCADE', name='GeneratedDocument_jobOfferId_fkey'),
+        PrimaryKeyConstraint('id', name='GeneratedDocument_pkey'),
+        Index('GeneratedDocument_analysisId_idx', 'analysisId'),
+        Index('GeneratedDocument_cvVersionId_idx', 'cvVersionId'),
+        Index('GeneratedDocument_jobOfferId_idx', 'jobOfferId'),
+        Index('GeneratedDocument_scoutRunId_idx', 'scoutRunId'),
+        Index('GeneratedDocument_supersededById_key', 'supersededById', unique=True)
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    type: Mapped[Generateddocumenttype] = mapped_column(Enum(Generateddocumenttype, values_callable=lambda cls: [member.value for member in cls], name='GeneratedDocumentType'), nullable=False)
+    analysisId: Mapped[str] = mapped_column(Text, nullable=False)
+    jobOfferId: Mapped[str] = mapped_column(Text, nullable=False)
+    cvVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[Generateddocumentstatus] = mapped_column(Enum(Generateddocumentstatus, values_callable=lambda cls: [member.value for member in cls], name='GeneratedDocumentStatus'), nullable=False, server_default=text('\'PENDING\'::"GeneratedDocumentStatus"'))
+    createdAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False, server_default=text('CURRENT_TIMESTAMP'))
+    updatedAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False)
+    scoutRunId: Mapped[Optional[str]] = mapped_column(Text)
+    markdownContent: Mapped[Optional[str]] = mapped_column(Text)
+    s3Key: Mapped[Optional[str]] = mapped_column(Text)
+    errorMessage: Mapped[Optional[str]] = mapped_column(Text)
+    supersededById: Mapped[Optional[str]] = mapped_column(Text)
+
+    Analysis_: Mapped['Analysis'] = relationship('Analysis', back_populates='GeneratedDocument')
+    CVVersion_: Mapped['CVVersion'] = relationship('CVVersion', back_populates='GeneratedDocument')
+    JobOffer_: Mapped['JobOffer'] = relationship('JobOffer', back_populates='GeneratedDocument')
 
 
 class PipelineEvent(Base):

@@ -24,3 +24,7 @@ def raw_scrape_key(job_offer_id: str) -> str:
 
 def analysis_result_key(analysis_id: str) -> str:
     return f"analysis-results/{analysis_id}.json"
+
+
+def generated_document_key(user_id: str, analysis_id: str, doc_type: str) -> str:
+    return f"generated/{user_id}/{analysis_id}/{doc_type.lower()}.md"

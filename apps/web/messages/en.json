@@ -226,7 +226,18 @@
         "medium": "Medium priority",
         "low": "Low priority"
       },
-      "summary": "Summary"
+      "summary": "Summary",
+      "generatedDocuments": {
+        "heading": "Generated documents",
+        "generate": "Generate documents",
+        "generating": "Generating your cover letter and tailored CV…",
+        "generateError": "We couldn't start generation. Please try again.",
+        "coverLetter": "Cover letter",
+        "tailoredCv": "Tailored CV",
+        "pending": "Queued…",
+        "failed": "Generation failed.",
+        "retry": "Try again"
+      }
     },
     "compare": {
       "loading": "Loading the comparison",

@@ -11,6 +11,7 @@ import {
 } from "@/hooks/use-analyses";
 import { useEnumLabel } from "@/lib/enum-labels";
 import { AnalysisResultView } from "@/components/analysis-result";
+import { GeneratedDocumentsPanel } from "@/components/generated-documents-panel";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -113,6 +114,10 @@ export default function AnalysisDetailPage() {
         <AnalysisResultView result={analysis.resultJSON} />
       ) : (
         !isFailed && <p className="text-sm text-muted">{t("detail.noResult")}</p>
+      )}
+
+      {analysis.status === "COMPLETED" && (
+        <GeneratedDocumentsPanel analysisId={analysis.id} />
       )}
     </main>
   );

@@ -1,13 +1,14 @@
 """Local stand-in for the AWS SQS -> Lambda event-source mappings (dev only).
 
-Four queues carry work into the async pipeline — `cv-conversion`,
-`analysis-intake`, `ingestion-intake`, `scout-intake` — each drained in
-production by an SQS event-source mapping that invokes a Lambda
-(`handle_cv_conversion`, `handle_analysis_intake`, `handle_ingestion_intake`,
-`handle_scout_intake`). That wiring is AWS infra,
-out of scope per PRD Section 4/15, so nothing drains those queues locally: a
-"Convert to Markdown" click or a submitted IngestionJob just parks a message in
-ElasticMQ and the row never leaves PENDING.
+Five queues carry work into the async pipeline — `cv-conversion`,
+`analysis-intake`, `ingestion-intake`, `scout-intake`, `generation-intake` —
+each drained in production by an SQS event-source mapping that invokes a
+Lambda (`handle_cv_conversion`, `handle_analysis_intake`,
+`handle_ingestion_intake`, `handle_scout_intake`,
+`handle_generation_intake_local`'s production analogue). That wiring is AWS
+infra, out of scope per PRD Section 4/15, so nothing drains those queues
+locally: a "Convert to Markdown" click or a submitted IngestionJob just parks
+a message in ElasticMQ and the row never leaves PENDING.
 
 This module is the local equivalent of what `analysis.lambda_shim` does for the
 Step Functions Lambda invoke API: a plain polling loop that receives from each
@@ -22,10 +23,10 @@ not the reverse).
 
 Run it via `make worker` (host) or the `worker` service in docker-compose.yml.
 `WORKER_QUEUES` (comma-separated queue names) selects which subset to drain; the
-compose service drains all four (`cv-conversion`, `ingestion-intake`,
-`analysis-intake`, `scout-intake`), so "Convert to Markdown", "Analyse one
-offer", "Analyse several offers" and a Scout "Run now" all complete on their
-own after `docker compose up`.
+compose service drains all five (`cv-conversion`, `ingestion-intake`,
+`analysis-intake`, `scout-intake`, `generation-intake`), so "Convert to
+Markdown", "Analyse one offer", "Analyse several offers", a Scout "Run now",
+and "Generate documents" all complete on their own after `docker compose up`.
 `WORKER_RUN_ONCE=1` drains what is currently queued and exits.
 
 When `scout-intake` is among the drained queues, `run_forever` also fires a
@@ -144,6 +145,11 @@ QUEUE_SPECS: dict[str, QueueSpec] = {
         "scout-intake",
         _queue_url("scout-intake", "SQS_SCOUT_INTAKE_QUEUE_URL"),
         "scout.intake_handler:handle_scout_intake",
+    ),
+    "generation-intake": QueueSpec(
+        "generation-intake",
+        _queue_url("generation-intake", "SQS_GENERATION_INTAKE_QUEUE_URL"),
+        "analysis.generation_pipeline:handle_generation_intake_local",
     ),
 }
 

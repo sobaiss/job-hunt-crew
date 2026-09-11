@@ -226,7 +226,18 @@
         "medium": "Priorité moyenne",
         "low": "Priorité basse"
       },
-      "summary": "Résumé"
+      "summary": "Résumé",
+      "generatedDocuments": {
+        "heading": "Documents générés",
+        "generate": "Générer les documents",
+        "generating": "Génération de votre lettre de motivation et de votre CV adapté…",
+        "generateError": "Impossible de démarrer la génération. Veuillez réessayer.",
+        "coverLetter": "Lettre de motivation",
+        "tailoredCv": "CV adapté",
+        "pending": "En file d'attente…",
+        "failed": "La génération a échoué.",
+        "retry": "Réessayer"
+      }
     },
     "compare": {
       "loading": "Chargement de la comparaison",

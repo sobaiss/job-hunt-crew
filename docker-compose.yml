@@ -125,6 +125,7 @@ services:
       SQS_CV_CONVERSION_QUEUE_URL: http://elasticmq:9324/000000000000/cv-conversion
       SQS_INGESTION_INTAKE_QUEUE_URL: http://elasticmq:9324/000000000000/ingestion-intake
       SQS_SCOUT_INTAKE_QUEUE_URL: http://elasticmq:9324/000000000000/scout-intake
+      SQS_GENERATION_INTAKE_QUEUE_URL: http://elasticmq:9324/000000000000/generation-intake
       SQS_ACCESS_KEY_ID: x
       SQS_SECRET_ACCESS_KEY: x
     depends_on:
@@ -142,9 +143,9 @@ services:
   # nothing drains them locally otherwise). Polls ElasticMQ and runs the real
   # handlers — see services/ingestion/src/ingestion/local_worker.py.
   #
-  # Drains all four pipeline queues, so "Convert to Markdown", "Analyse one
-  # offer", "Analyse several offers" and a Scout run all work straight after
-  # `docker compose up`:
+  # Drains all five pipeline queues, so "Convert to Markdown", "Analyse one
+  # offer", "Analyse several offers", a Scout run, and "Generate documents"
+  # all work straight after `docker compose up`:
   #   - cv-conversion    -> analysis.cv_conversion.handle_cv_conversion
   #   - ingestion-intake -> ingestion.intake_handler.handle_ingestion_intake
   #     (the ADR 0002 fan-out worker: runs discover/scrape/extract for the
@@ -160,6 +161,10 @@ services:
   #     Scheduler rule that fires at SCOUT_SCHEDULE_HOUR_UTC (default 6 UTC)
   #     and enqueues every due, active Scout with no user action. See
   #     services/scout/src/scout/schedule.py for both.
+  #   - generation-intake -> analysis.generation_pipeline.handle_generation_intake_local
+  #     (issue #58): fed by "Generate documents" on a find (services/api),
+  #     runs the CoverLetterWriterAgent / CVTailoringAgent in-process, the
+  #     same simplification analysis-intake's local mode uses.
   # Set WORKER_ANALYSIS_MODE=stepfunctions + run `make worker` on the host to
   # exercise the real Step Functions state machine instead.
   worker:
@@ -169,7 +174,7 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/job_hunt_crew
-      WORKER_QUEUES: cv-conversion,ingestion-intake,analysis-intake,scout-intake
+      WORKER_QUEUES: cv-conversion,ingestion-intake,analysis-intake,scout-intake,generation-intake
       # `local` (in-process AnalysisWorkflow) vs `stepfunctions` (real Step
       # Functions Local execution — needs the host lambda_shim + SFN_* env).
       WORKER_ANALYSIS_MODE: ${WORKER_ANALYSIS_MODE:-local}
@@ -191,6 +196,7 @@ services:
       SQS_ANALYSIS_INTAKE_QUEUE_URL: http://elasticmq:9324/000000000000/analysis-intake
       SQS_INGESTION_INTAKE_QUEUE_URL: http://elasticmq:9324/000000000000/ingestion-intake
       SQS_SCOUT_INTAKE_QUEUE_URL: http://elasticmq:9324/000000000000/scout-intake
+      SQS_GENERATION_INTAKE_QUEUE_URL: http://elasticmq:9324/000000000000/generation-intake
       SQS_ACCESS_KEY_ID: x
       SQS_SECRET_ACCESS_KEY: x
       # The crew run (analysis-intake) and any PDF/DOCX Conversion call an LLM

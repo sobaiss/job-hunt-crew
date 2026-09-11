@@ -1,0 +1,250 @@
+import asyncio
+import json
+import uuid
+from datetime import UTC, datetime
+
+import pytest
+from fastapi.testclient import TestClient
+from py_db.models import (
+    Analysis,
+    Analysisstatus,
+    CVVersion,
+    GeneratedDocument,
+    JobOffer,
+    Joboffersourcesite,
+    User,
+)
+from py_db.session import make_engine, make_session_factory
+from sqlalchemy import delete, select
+
+from api.main import app
+from api.sqs_client import GENERATION_INTAKE_QUEUE_URL, make_sqs_client
+
+INTERNAL_SECRET_HEADERS = {"X-Internal-Api-Secret": "test-secret"}
+
+
+@pytest.fixture(autouse=True)
+def _secret(monkeypatch):
+    monkeypatch.setenv("INTERNAL_API_SECRET", "test-secret")
+
+
+def _headers(user_id: str) -> dict[str, str]:
+    return {**INTERNAL_SECRET_HEADERS, "X-User-Id": user_id}
+
+
+def _now() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
+async def _create_user() -> str:
+    user_id = str(uuid.uuid4())
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            session.add(User(id=user_id, email=f"{user_id}@example.com", updatedAt=_now()))
+            await session.commit()
+    finally:
+        await engine.dispose()
+    return user_id
+
+
+async def _delete_user(user_id: str) -> None:
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            # GeneratedDocument.cvVersionId is onDelete: Restrict — clear any
+            # rows this test created before the CVVersion cascade from User.
+            cv_version_ids = (
+                await session.scalars(select(CVVersion.id).where(CVVersion.userId == user_id))
+            ).all()
+            if cv_version_ids:
+                await session.execute(
+                    delete(GeneratedDocument).where(
+                        GeneratedDocument.cvVersionId.in_(cv_version_ids)
+                    )
+                )
+            await session.execute(delete(User).where(User.id == user_id))
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+
+@pytest.fixture
+def user_id():
+    uid = asyncio.run(_create_user())
+    yield uid
+    asyncio.run(_delete_user(uid))
+
+
+def _drain_generation_intake() -> list[dict]:
+    sqs = make_sqs_client()
+    bodies: list[dict] = []
+    while True:
+        received = sqs.receive_message(QueueUrl=GENERATION_INTAKE_QUEUE_URL, MaxNumberOfMessages=10)
+        messages = received.get("Messages", [])
+        if not messages:
+            break
+        for message in messages:
+            bodies.append(json.loads(message["Body"]))
+            sqs.delete_message(
+                QueueUrl=GENERATION_INTAKE_QUEUE_URL, ReceiptHandle=message["ReceiptHandle"]
+            )
+    return bodies
+
+
+@pytest.fixture(autouse=True)
+def _clean_generation_intake_queue():
+    _drain_generation_intake()
+    yield
+    _drain_generation_intake()
+
+
+def _make_cv_version(client: TestClient, user_id: str) -> str:
+    response = client.post(
+        "/v1/cv-versions",
+        headers=_headers(user_id),
+        json={
+            "label": "Base CV",
+            "fileName": "cv.pdf",
+            "contentType": "application/pdf",
+            "fileSizeBytes": 1024,
+        },
+    )
+    assert response.status_code == 201
+    return response.json()["cvVersionId"]
+
+
+async def _seed_analysis(*, user_id: str, cv_version_id: str, status: Analysisstatus) -> str:
+    job_offer_id = str(uuid.uuid4())
+    analysis_id = str(uuid.uuid4())
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            session.add(
+                JobOffer(
+                    id=job_offer_id,
+                    sourceUrl=f"https://example.com/jobs/{job_offer_id}",
+                    sourceSite=Joboffersourcesite.OTHER,
+                    updatedAt=_now(),
+                )
+            )
+            session.add(
+                Analysis(
+                    id=analysis_id,
+                    userId=user_id,
+                    jobOfferId=job_offer_id,
+                    cvVersionId=cv_version_id,
+                    status=status,
+                    resultJSON={"matched_skills": [], "missing_skills": []}
+                    if status == Analysisstatus.COMPLETED
+                    else None,
+                    matchScore=80 if status == Analysisstatus.COMPLETED else None,
+                    completedAt=_now() if status == Analysisstatus.COMPLETED else None,
+                )
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+    return analysis_id
+
+
+def test_create_generated_documents_creates_both_types_and_enqueues(user_id):
+    with TestClient(app) as client:
+        cv = _make_cv_version(client, user_id)
+        analysis_id = asyncio.run(
+            _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.COMPLETED)
+        )
+
+        response = client.post(
+            f"/v1/analyses/{analysis_id}/generated-documents", headers=_headers(user_id)
+        )
+        assert response.status_code == 202
+        body = response.json()
+        types = {doc["type"] for doc in body["generatedDocuments"]}
+        assert types == {"COVER_LETTER", "TAILORED_CV"}
+        for doc in body["generatedDocuments"]:
+            assert doc["status"] == "PENDING"
+            assert doc["analysisId"] == analysis_id
+
+        enqueued = _drain_generation_intake()
+        assert {b["generatedDocumentId"] for b in enqueued} == {
+            doc["id"] for doc in body["generatedDocuments"]
+        }
+
+
+def test_create_generated_documents_rejects_a_non_completed_analysis(user_id):
+    with TestClient(app) as client:
+        cv = _make_cv_version(client, user_id)
+        analysis_id = asyncio.run(
+            _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.PENDING)
+        )
+
+        response = client.post(
+            f"/v1/analyses/{analysis_id}/generated-documents", headers=_headers(user_id)
+        )
+        assert response.status_code == 400
+        assert _drain_generation_intake() == []
+
+
+def test_create_generated_documents_is_user_scoped(user_id):
+    other = asyncio.run(_create_user())
+    try:
+        with TestClient(app) as client:
+            cv = _make_cv_version(client, user_id)
+            analysis_id = asyncio.run(
+                _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.COMPLETED)
+            )
+            response = client.post(
+                f"/v1/analyses/{analysis_id}/generated-documents", headers=_headers(other)
+            )
+        assert response.status_code == 404
+    finally:
+        asyncio.run(_delete_user(other))
+
+
+def test_get_generated_document_returns_the_row(user_id):
+    with TestClient(app) as client:
+        cv = _make_cv_version(client, user_id)
+        analysis_id = asyncio.run(
+            _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.COMPLETED)
+        )
+        created = client.post(
+            f"/v1/analyses/{analysis_id}/generated-documents", headers=_headers(user_id)
+        ).json()
+        document_id = created["generatedDocuments"][0]["id"]
+
+        response = client.get(f"/v1/generated-documents/{document_id}", headers=_headers(user_id))
+        assert response.status_code == 200
+        assert response.json()["generatedDocument"]["id"] == document_id
+
+
+def test_get_generated_document_is_user_scoped(user_id):
+    other = asyncio.run(_create_user())
+    try:
+        with TestClient(app) as client:
+            cv = _make_cv_version(client, user_id)
+            analysis_id = asyncio.run(
+                _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.COMPLETED)
+            )
+            created = client.post(
+                f"/v1/analyses/{analysis_id}/generated-documents", headers=_headers(user_id)
+            ).json()
+            document_id = created["generatedDocuments"][0]["id"]
+
+            response = client.get(
+                f"/v1/generated-documents/{document_id}", headers=_headers(other)
+            )
+        assert response.status_code == 404
+    finally:
+        asyncio.run(_delete_user(other))
+
+
+def test_get_generated_document_missing_id_is_404(user_id):
+    with TestClient(app) as client:
+        response = client.get(
+            f"/v1/generated-documents/{uuid.uuid4()}", headers=_headers(user_id)
+        )
+        assert response.status_code == 404

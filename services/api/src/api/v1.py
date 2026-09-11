@@ -12,6 +12,9 @@ from py_db.models import (
     CVVersion,
     Cvconversionstatus,
     Cvfiletype,
+    GeneratedDocument,
+    Generateddocumentstatus,
+    Generateddocumenttype,
     IngestionJob,
     IngestionJobOffer,
     Ingestionjobstatus,
@@ -34,6 +37,7 @@ from .s3_client import S3_BUCKET, cv_file_key, make_s3_client
 from .sqs_client import (
     ANALYSIS_INTAKE_QUEUE_URL,
     CV_CONVERSION_QUEUE_URL,
+    GENERATION_INTAKE_QUEUE_URL,
     INGESTION_INTAKE_QUEUE_URL,
     SCOUT_INTAKE_QUEUE_URL,
     make_sqs_client,
@@ -1451,3 +1455,123 @@ async def get_scout_run(
         raise HTTPException(status_code=404, detail="Not found")
     await _owned_scout(session, run.scoutId, user_id)
     return GetScoutRunResponse(scoutRun=_scout_run_response(run))
+
+
+# --- Generated documents (issue #58, Scout slice 6) ---
+# "Generate documents" on a find creates one COVER_LETTER + one TAILORED_CV
+# GeneratedDocument (both PENDING) and enqueues one generation-intake message
+# per row; the generation worker (analysis.generation_pipeline, in-process
+# for local dev — see its module docstring) runs the matching agent and
+# writes the resulting Markdown back onto the row. User-scoped via the
+# owning Analysis — another user's analysis/document is a 404. Regenerate
+# and the PDF download endpoint are not wired up yet (deferred: see the
+# commit notes for this slice).
+
+
+async def _owned_analysis(session: AsyncSession, analysis_id: str, user_id: str) -> Analysis:
+    analysis = await session.get(Analysis, analysis_id)
+    if analysis is None or analysis.userId != user_id:
+        raise HTTPException(status_code=404, detail="Not found")
+    return analysis
+
+
+class GeneratedDocumentResponse(BaseModel):
+    id: str
+    type: str
+    analysisId: str
+    status: str
+    markdownContent: str | None
+    errorMessage: str | None
+    createdAt: datetime
+    updatedAt: datetime
+
+
+def _generated_document_response(row: GeneratedDocument) -> GeneratedDocumentResponse:
+    return GeneratedDocumentResponse(
+        id=row.id,
+        type=row.type.value,
+        analysisId=row.analysisId,
+        status=row.status.value,
+        markdownContent=row.markdownContent,
+        errorMessage=row.errorMessage,
+        createdAt=row.createdAt,
+        updatedAt=row.updatedAt,
+    )
+
+
+class CreateGeneratedDocumentsResponse(BaseModel):
+    generatedDocuments: list[GeneratedDocumentResponse]
+
+
+@router.post(
+    "/analyses/{analysis_id}/generated-documents",
+    response_model=CreateGeneratedDocumentsResponse,
+    status_code=202,
+)
+async def create_generated_documents(
+    analysis_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> CreateGeneratedDocumentsResponse:
+    """Creates a COVER_LETTER and a TAILORED_CV GeneratedDocument (PENDING)
+    for a completed Analysis and enqueues one generation-intake message per
+    row. Requires the Analysis to be COMPLETED — its resultJSON's
+    matched/missing skills steer the generation agents.
+    """
+    analysis = await _owned_analysis(session, analysis_id, user_id)
+    if analysis.status != Analysisstatus.COMPLETED:
+        raise HTTPException(
+            status_code=400,
+            detail="Analysis must be COMPLETED before generating documents",
+        )
+
+    scout_run_id: str | None = None
+    if analysis.ingestionJobId:
+        ingestion_job = await session.get(IngestionJob, analysis.ingestionJobId)
+        if ingestion_job is not None:
+            scout_run_id = ingestion_job.scoutRunId
+
+    now = _now()
+    documents = [
+        GeneratedDocument(
+            id=str(uuid.uuid4()),
+            type=doc_type,
+            analysisId=analysis.id,
+            jobOfferId=analysis.jobOfferId,
+            cvVersionId=analysis.cvVersionId,
+            scoutRunId=scout_run_id,
+            status=Generateddocumentstatus.PENDING,
+            updatedAt=now,
+        )
+        for doc_type in (Generateddocumenttype.COVER_LETTER, Generateddocumenttype.TAILORED_CV)
+    ]
+    session.add_all(documents)
+    await session.commit()
+
+    sqs = make_sqs_client()
+    for document in documents:
+        sqs.send_message(
+            QueueUrl=GENERATION_INTAKE_QUEUE_URL,
+            MessageBody=json.dumps({"generatedDocumentId": document.id}),
+        )
+
+    return CreateGeneratedDocumentsResponse(
+        generatedDocuments=[_generated_document_response(row) for row in documents]
+    )
+
+
+class GetGeneratedDocumentResponse(BaseModel):
+    generatedDocument: GeneratedDocumentResponse
+
+
+@router.get("/generated-documents/{document_id}", response_model=GetGeneratedDocumentResponse)
+async def get_generated_document(
+    document_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> GetGeneratedDocumentResponse:
+    document = await session.get(GeneratedDocument, document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    await _owned_analysis(session, document.analysisId, user_id)
+    return GetGeneratedDocumentResponse(generatedDocument=_generated_document_response(document))
