@@ -190,6 +190,47 @@ def test_create_generated_documents_rejects_a_non_completed_analysis(user_id):
         assert _drain_generation_intake() == []
 
 
+def test_create_generated_documents_creates_an_application(user_id):
+    with TestClient(app) as client:
+        cv = _make_cv_version(client, user_id)
+        analysis_id = asyncio.run(
+            _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.COMPLETED)
+        )
+
+        response = client.post(
+            f"/v1/analyses/{analysis_id}/generated-documents", headers=_headers(user_id)
+        )
+        assert response.status_code == 202
+
+        applications = client.get("/v1/applications", headers=_headers(user_id)).json()[
+            "applications"
+        ]
+        matching = [a for a in applications if a["analysisId"] == analysis_id]
+        assert len(matching) == 1
+        assert matching[0]["status"] == "DRAFT"
+
+
+def test_create_generated_documents_does_not_duplicate_an_existing_application(user_id):
+    with TestClient(app) as client:
+        cv = _make_cv_version(client, user_id)
+        analysis_id = asyncio.run(
+            _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.COMPLETED)
+        )
+
+        created = client.post(
+            "/v1/applications", headers=_headers(user_id), json={"analysisId": analysis_id}
+        ).json()["application"]
+
+        client.post(f"/v1/analyses/{analysis_id}/generated-documents", headers=_headers(user_id))
+
+        applications = client.get("/v1/applications", headers=_headers(user_id)).json()[
+            "applications"
+        ]
+        matching = [a for a in applications if a["analysisId"] == analysis_id]
+        assert len(matching) == 1
+        assert matching[0]["id"] == created["id"]
+
+
 def test_create_generated_documents_is_user_scoped(user_id):
     other = asyncio.run(_create_user())
     try:

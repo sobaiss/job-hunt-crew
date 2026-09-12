@@ -1598,6 +1598,35 @@ async def _owned_analysis(session: AsyncSession, analysis_id: str, user_id: str)
     return analysis
 
 
+async def _get_or_create_application(
+    session: AsyncSession, analysis: Analysis, user_id: str
+) -> Application:
+    """Lazily get-or-creates the Application for an Analysis — called from
+    both `POST /applications` and `POST /analyses/{id}/generated-documents`
+    (issue #59's "and from now on also when documents are generated" AC), so
+    neither path can create a duplicate row for the same analysisId.
+    """
+    existing = await session.scalar(
+        select(Application).where(Application.analysisId == analysis.id)
+    )
+    if existing is not None:
+        return existing
+
+    application = Application(
+        id=str(uuid.uuid4()),
+        userId=user_id,
+        analysisId=analysis.id,
+        jobOfferId=analysis.jobOfferId,
+        cvVersionId=analysis.cvVersionId,
+        scoutId=analysis.scoutId,
+        status=Applicationstatus.DRAFT,
+        updatedAt=_now(),
+    )
+    session.add(application)
+    await session.commit()
+    return application
+
+
 class GeneratedDocumentResponse(BaseModel):
     id: str
     type: str
@@ -1647,6 +1676,8 @@ async def create_generated_documents(
             status_code=400,
             detail="Analysis must be COMPLETED before generating documents",
         )
+
+    await _get_or_create_application(session, analysis, user_id)
 
     scout_run_id: str | None = None
     if analysis.ingestionJobId:
@@ -1917,21 +1948,10 @@ async def create_application(
         response.status_code = 200
         return CreateApplicationResponse(application=_application_response(existing))
 
-    application = Application(
-        id=str(uuid.uuid4()),
-        userId=user_id,
-        analysisId=analysis.id,
-        jobOfferId=analysis.jobOfferId,
-        cvVersionId=analysis.cvVersionId,
-        scoutId=analysis.scoutId,
-        status=Applicationstatus.DRAFT,
-        updatedAt=_now(),
-    )
-    session.add(application)
-    await session.commit()
+    created = await _get_or_create_application(session, analysis, user_id)
 
     application = await session.scalar(
-        select(Application).options(*application_options).where(Application.id == application.id)
+        select(Application).options(*application_options).where(Application.id == created.id)
     )
     assert application is not None
 
