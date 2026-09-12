@@ -410,3 +410,101 @@ def test_get_generated_document_pdf_is_user_scoped(user_id):
         assert response.status_code == 404
     finally:
         asyncio.run(_delete_user(other))
+
+
+def test_regenerate_generated_document_supersedes_and_enqueues(user_id):
+    with TestClient(app) as client:
+        cv = _make_cv_version(client, user_id)
+        analysis_id = asyncio.run(
+            _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.COMPLETED)
+        )
+        created = client.post(
+            f"/v1/analyses/{analysis_id}/generated-documents", headers=_headers(user_id)
+        ).json()
+        document_id = created["generatedDocuments"][0]["id"]
+        doc_type = created["generatedDocuments"][0]["type"]
+        asyncio.run(_mark_document_ready(document_id, "# Cover Letter\n\nDear hiring manager."))
+        _drain_generation_intake()
+
+        response = client.post(
+            f"/v1/generated-documents/{document_id}/regenerate", headers=_headers(user_id)
+        )
+        assert response.status_code == 202
+        new_document = response.json()["generatedDocument"]
+        assert new_document["id"] != document_id
+        assert new_document["type"] == doc_type
+        assert new_document["status"] == "PENDING"
+
+        enqueued = _drain_generation_intake()
+        assert {b["generatedDocumentId"] for b in enqueued} == {new_document["id"]}
+
+        listed = client.get(
+            f"/v1/analyses/{analysis_id}/generated-documents", headers=_headers(user_id)
+        ).json()["generatedDocuments"]
+        listed_ids = {doc["id"] for doc in listed}
+        assert new_document["id"] in listed_ids
+        assert document_id not in listed_ids
+
+
+def test_regenerate_generated_document_rejects_one_already_in_progress(user_id):
+    with TestClient(app) as client:
+        cv = _make_cv_version(client, user_id)
+        analysis_id = asyncio.run(
+            _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.COMPLETED)
+        )
+        created = client.post(
+            f"/v1/analyses/{analysis_id}/generated-documents", headers=_headers(user_id)
+        ).json()
+        document_id = created["generatedDocuments"][0]["id"]
+        _drain_generation_intake()
+
+        response = client.post(
+            f"/v1/generated-documents/{document_id}/regenerate", headers=_headers(user_id)
+        )
+        assert response.status_code == 409
+        assert _drain_generation_intake() == []
+
+
+def test_regenerate_generated_document_is_user_scoped(user_id):
+    other = asyncio.run(_create_user())
+    try:
+        with TestClient(app) as client:
+            cv = _make_cv_version(client, user_id)
+            analysis_id = asyncio.run(
+                _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.COMPLETED)
+            )
+            created = client.post(
+                f"/v1/analyses/{analysis_id}/generated-documents", headers=_headers(user_id)
+            ).json()
+            document_id = created["generatedDocuments"][0]["id"]
+            asyncio.run(_mark_document_ready(document_id, "Some content."))
+
+            response = client.post(
+                f"/v1/generated-documents/{document_id}/regenerate", headers=_headers(other)
+            )
+        assert response.status_code == 404
+    finally:
+        asyncio.run(_delete_user(other))
+
+
+def test_regenerate_generated_document_respects_daily_generation_cap(user_id, monkeypatch):
+    monkeypatch.setenv("DAILY_GENERATION_CAP", "2")
+    with TestClient(app) as client:
+        cv = _make_cv_version(client, user_id)
+        analysis_id = asyncio.run(
+            _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.COMPLETED)
+        )
+        created = client.post(
+            f"/v1/analyses/{analysis_id}/generated-documents", headers=_headers(user_id)
+        ).json()
+        # The initial create already produced 2 rows (COVER_LETTER + TAILORED_CV),
+        # exhausting a cap of 2 for the day.
+        document_id = created["generatedDocuments"][0]["id"]
+        asyncio.run(_mark_document_ready(document_id, "Some content."))
+        _drain_generation_intake()
+
+        response = client.post(
+            f"/v1/generated-documents/{document_id}/regenerate", headers=_headers(user_id)
+        )
+        assert response.status_code == 429
+        assert _drain_generation_intake() == []

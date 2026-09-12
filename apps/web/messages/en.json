@@ -238,7 +238,10 @@
         "pending": "Queued…",
         "failed": "Generation failed.",
         "retry": "Try again",
-        "downloadPdf": "Download PDF"
+        "downloadPdf": "Download PDF",
+        "regenerate": "Regenerate",
+        "regenerateError": "We couldn't regenerate this document. Please try again.",
+        "regenerateCapReached": "You've reached today's document generation limit. Please try again tomorrow."
       },
       "application": {
         "apply": "Apply",

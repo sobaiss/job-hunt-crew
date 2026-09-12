@@ -8,8 +8,7 @@ import { bff } from "@/lib/bff-client";
 // creates a COVER_LETTER + a TAILORED_CV GeneratedDocument for a completed
 // Analysis and polls each until it leaves PENDING/GENERATING. The PDF
 // download itself is a plain link to /api/generated-documents/{id}/pdf
-// (see generated-documents-panel.tsx), not a hook. Regenerate is not wired
-// up yet.
+// (see generated-documents-panel.tsx), not a hook.
 
 export type GeneratedDocumentType = "COVER_LETTER" | "TAILORED_CV";
 export type GeneratedDocumentStatus = "PENDING" | "GENERATING" | "READY" | "FAILED";
@@ -54,6 +53,20 @@ export function useAnalysisGeneratedDocuments(analysisId: string) {
         `/analyses/${analysisId}/generated-documents`,
       ),
     select: (data) => data.generatedDocuments,
+  });
+}
+
+/** Regenerates a READY/FAILED GeneratedDocument (`POST
+ * /api/generated-documents/{id}/regenerate`): the API creates a fresh
+ * PENDING row of the same type and supersedes this one, so the caller
+ * should swap to polling the returned row's id. 409 if the document is
+ * still PENDING/GENERATING; 429 if DAILY_GENERATION_CAP is exhausted. */
+export function useRegenerateGeneratedDocument(id: string) {
+  return useMutation({
+    mutationFn: () =>
+      bff.post<{ generatedDocument: GeneratedDocument }>(
+        `/generated-documents/${id}/regenerate`,
+      ),
   });
 }
 

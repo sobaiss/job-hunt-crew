@@ -30,7 +30,12 @@ from py_db.models import (
     StatusEvent,
 )
 from py_db.application_stats import compute_application_stats, stats_window_since
-from py_db.quota import analyses_requested_today, daily_analysis_cap
+from py_db.quota import (
+    analyses_requested_today,
+    daily_analysis_cap,
+    daily_generation_cap,
+    generated_documents_created_today,
+)
 from pydantic import BaseModel
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1586,9 +1591,7 @@ async def get_scout_run(
 # per row; the generation worker (analysis.generation_pipeline, in-process
 # for local dev — see its module docstring) runs the matching agent and
 # writes the resulting Markdown back onto the row. User-scoped via the
-# owning Analysis — another user's analysis/document is a 404. Regenerate
-# and the PDF download endpoint are not wired up yet (deferred: see the
-# commit notes for this slice).
+# owning Analysis — another user's analysis/document is a 404.
 
 
 async def _owned_analysis(session: AsyncSession, analysis_id: str, user_id: str) -> Analysis:
@@ -1762,6 +1765,70 @@ async def get_generated_document(
         raise HTTPException(status_code=404, detail="Not found")
     await _owned_analysis(session, document.analysisId, user_id)
     return GetGeneratedDocumentResponse(generatedDocument=_generated_document_response(document))
+
+
+@router.post(
+    "/generated-documents/{document_id}/regenerate",
+    response_model=GetGeneratedDocumentResponse,
+    status_code=202,
+)
+async def regenerate_generated_document(
+    document_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> GetGeneratedDocumentResponse:
+    """Regenerates a GeneratedDocument: creates a fresh PENDING row of the
+    same type and enqueues a generation-intake message for it, then points
+    the superseded row's supersededById at the new one so only the latest
+    shows in `GET /analyses/{id}/generated-documents` (issue #58). A document
+    already PENDING/GENERATING is 409 (nothing to regenerate yet); bounded by
+    `DAILY_GENERATION_CAP` (default 20), separate from the analysis cap.
+    """
+    document = await session.get(GeneratedDocument, document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    await _owned_analysis(session, document.analysisId, user_id)
+
+    if document.status in (
+        Generateddocumentstatus.PENDING,
+        Generateddocumentstatus.GENERATING,
+    ):
+        raise HTTPException(
+            status_code=409, detail="Document generation is already in progress"
+        )
+
+    cap = daily_generation_cap()
+    if await generated_documents_created_today(session, user_id) >= cap:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Daily document generation limit of {cap} reached. Try again tomorrow.",
+        )
+
+    now = _now()
+    new_document = GeneratedDocument(
+        id=str(uuid.uuid4()),
+        type=document.type,
+        analysisId=document.analysisId,
+        jobOfferId=document.jobOfferId,
+        cvVersionId=document.cvVersionId,
+        scoutRunId=document.scoutRunId,
+        status=Generateddocumentstatus.PENDING,
+        updatedAt=now,
+    )
+    session.add(new_document)
+    document.supersededById = new_document.id
+    document.updatedAt = now
+    await session.commit()
+
+    sqs = make_sqs_client()
+    sqs.send_message(
+        QueueUrl=GENERATION_INTAKE_QUEUE_URL,
+        MessageBody=json.dumps({"generatedDocumentId": new_document.id}),
+    )
+
+    return GetGeneratedDocumentResponse(
+        generatedDocument=_generated_document_response(new_document)
+    )
 
 
 _GENERATED_DOCUMENT_LABELS = {

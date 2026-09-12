@@ -635,6 +635,153 @@ describe("AnalysisDetailPage", () => {
     expect(downloadLinks[1]).toHaveAttribute("href", "/api/generated-documents/gd-cv/pdf");
   });
 
+  it("regenerates a document and switches to polling the fresh row", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses/a1", () =>
+        HttpResponse.json({ analysis: detail() }),
+      ),
+      http.post("/api/analyses/a1/generated-documents", () =>
+        HttpResponse.json({
+          generatedDocuments: [
+            { id: "gd-cl", type: "COVER_LETTER", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
+            { id: "gd-cv", type: "TAILORED_CV", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
+          ],
+        }),
+      ),
+      http.get("/api/generated-documents/gd-cl", () =>
+        HttpResponse.json({
+          generatedDocument: {
+            id: "gd-cl",
+            type: "COVER_LETTER",
+            analysisId: "a1",
+            status: "READY",
+            markdownContent: "Dear Hiring Manager, ...",
+            errorMessage: null,
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+          },
+        }),
+      ),
+      http.get("/api/generated-documents/gd-cv", () =>
+        HttpResponse.json({
+          generatedDocument: {
+            id: "gd-cv",
+            type: "TAILORED_CV",
+            analysisId: "a1",
+            status: "READY",
+            markdownContent: "# Jane Doe tailored",
+            errorMessage: null,
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+          },
+        }),
+      ),
+      http.post("/api/generated-documents/gd-cl/regenerate", () =>
+        HttpResponse.json({
+          generatedDocument: {
+            id: "gd-cl-2",
+            type: "COVER_LETTER",
+            analysisId: "a1",
+            status: "PENDING",
+            markdownContent: null,
+            errorMessage: null,
+            createdAt: "2026-09-11T01:00:00.000Z",
+            updatedAt: "2026-09-11T01:00:00.000Z",
+          },
+        }),
+      ),
+      http.get("/api/generated-documents/gd-cl-2", () =>
+        HttpResponse.json({
+          generatedDocument: {
+            id: "gd-cl-2",
+            type: "COVER_LETTER",
+            analysisId: "a1",
+            status: "READY",
+            markdownContent: "Dear Hiring Manager, regenerated.",
+            errorMessage: null,
+            createdAt: "2026-09-11T01:00:00.000Z",
+            updatedAt: "2026-09-11T01:00:00.000Z",
+          },
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Generate documents" }),
+    );
+    await screen.findByText("Dear Hiring Manager, ...");
+
+    const regenerateButtons = screen.getAllByRole("button", { name: "Regenerate" });
+    await user.click(regenerateButtons[0]);
+
+    expect(await screen.findByText("Dear Hiring Manager, regenerated.")).toBeInTheDocument();
+  });
+
+  it("shows a cap-reached message when regenerating exhausts the daily limit", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses/a1", () =>
+        HttpResponse.json({ analysis: detail() }),
+      ),
+      http.post("/api/analyses/a1/generated-documents", () =>
+        HttpResponse.json({
+          generatedDocuments: [
+            { id: "gd-cl", type: "COVER_LETTER", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
+            { id: "gd-cv", type: "TAILORED_CV", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
+          ],
+        }),
+      ),
+      http.get("/api/generated-documents/gd-cl", () =>
+        HttpResponse.json({
+          generatedDocument: {
+            id: "gd-cl",
+            type: "COVER_LETTER",
+            analysisId: "a1",
+            status: "READY",
+            markdownContent: "Dear Hiring Manager, ...",
+            errorMessage: null,
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+          },
+        }),
+      ),
+      http.get("/api/generated-documents/gd-cv", () =>
+        HttpResponse.json({
+          generatedDocument: {
+            id: "gd-cv",
+            type: "TAILORED_CV",
+            analysisId: "a1",
+            status: "READY",
+            markdownContent: "# Jane Doe tailored",
+            errorMessage: null,
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+          },
+        }),
+      ),
+      http.post("/api/generated-documents/gd-cl/regenerate", () =>
+        HttpResponse.json({ error: "Daily document generation limit of 20 reached." }, { status: 429 }),
+      ),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Generate documents" }),
+    );
+    await screen.findByText("Dear Hiring Manager, ...");
+
+    const regenerateButtons = screen.getAllByRole("button", { name: "Regenerate" });
+    await user.click(regenerateButtons[0]);
+
+    expect(
+      await screen.findByText(/reached today's document generation limit/i),
+    ).toBeInTheDocument();
+  });
+
   it("shows an error when generation fails to start", async () => {
     const user = userEvent.setup();
     server.use(
