@@ -17,7 +17,7 @@ import openai
 
 DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5"
 DEFAULT_OPENAI_MODEL = "gpt-4o"
-DEFAULT_OLLAMA_MODEL = "qwen2.5:7b"
+DEFAULT_OLLAMA_MODEL = "qwen3.5:latest"
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434/v1"
 
 # Response cap used when a caller does not ask for a specific one.
@@ -28,7 +28,9 @@ class LLMProvider(ABC):
     """Single interface every supported LLM backend implements."""
 
     @abstractmethod
-    def generate(self, *, system: str, prompt: str, max_tokens: int | None = None) -> str:
+    def generate(
+        self, *, system: str, prompt: str, max_tokens: int | None = None
+    ) -> str:
         """Run one prompt through the configured model and return the text
         response. `max_tokens` overrides the provider's default response cap —
         used by the CV Conversion normalisation pass, whose faithful Markdown
@@ -36,11 +38,15 @@ class LLMProvider(ABC):
 
 
 class AnthropicProvider(LLMProvider):
-    def __init__(self, *, model: str | None = None, client: anthropic.Anthropic | None = None) -> None:
+    def __init__(
+        self, *, model: str | None = None, client: anthropic.Anthropic | None = None
+    ) -> None:
         self.model = model or os.environ.get("LLM_MODEL") or DEFAULT_ANTHROPIC_MODEL
         self.client = client or anthropic.Anthropic()
 
-    def generate(self, *, system: str, prompt: str, max_tokens: int | None = None) -> str:
+    def generate(
+        self, *, system: str, prompt: str, max_tokens: int | None = None
+    ) -> str:
         response = self.client.messages.create(
             model=self.model,
             max_tokens=max_tokens or DEFAULT_MAX_TOKENS,
@@ -51,11 +57,15 @@ class AnthropicProvider(LLMProvider):
 
 
 class OpenAIProvider(LLMProvider):
-    def __init__(self, *, model: str | None = None, client: openai.OpenAI | None = None) -> None:
+    def __init__(
+        self, *, model: str | None = None, client: openai.OpenAI | None = None
+    ) -> None:
         self.model = model or os.environ.get("LLM_MODEL") or DEFAULT_OPENAI_MODEL
         self.client = client or openai.OpenAI()
 
-    def generate(self, *, system: str, prompt: str, max_tokens: int | None = None) -> str:
+    def generate(
+        self, *, system: str, prompt: str, max_tokens: int | None = None
+    ) -> str:
         optional = {"max_tokens": max_tokens} if max_tokens is not None else {}
         response = self.client.chat.completions.create(
             model=self.model,
@@ -83,7 +93,9 @@ class OllamaProvider(LLMProvider):
     like a hosted-provider outage.
     """
 
-    def __init__(self, *, model: str | None = None, client: openai.OpenAI | None = None) -> None:
+    def __init__(
+        self, *, model: str | None = None, client: openai.OpenAI | None = None
+    ) -> None:
         self.model = model or os.environ.get("LLM_MODEL") or DEFAULT_OLLAMA_MODEL
         # `or` (not get's default arg): docker-compose injects OLLAMA_BASE_URL as
         # an empty string via `${OLLAMA_BASE_URL:-}` when the host env is unset,
@@ -94,7 +106,9 @@ class OllamaProvider(LLMProvider):
             api_key="ollama",
         )
 
-    def generate(self, *, system: str, prompt: str, max_tokens: int | None = None) -> str:
+    def generate(
+        self, *, system: str, prompt: str, max_tokens: int | None = None
+    ) -> str:
         optional = {"max_tokens": max_tokens} if max_tokens is not None else {}
         response = self.client.chat.completions.create(
             model=self.model,
