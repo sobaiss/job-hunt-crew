@@ -8,6 +8,7 @@ import {
   useApplicationStats,
   APPLICATION_STATUS_VALUES,
   type ApplicationStatus,
+  type ApplicationSortDir,
 } from "@/hooks/use-applications";
 import { useScouts } from "@/hooks/use-scouts";
 import { useEnumLabel } from "@/lib/enum-labels";
@@ -24,18 +25,20 @@ const SELECT_CLASS =
 /**
  * The Applications tracker (issue #59, Scout slice 7): every Application the
  * Candidate has recorded — from a Scout find or a manual analysis — filtered
- * by status and Scout. Sorted newest-activity-first, the API's default order.
+ * by status and Scout, and sorted by last-update date in either direction.
  */
 export default function ApplicationsPage() {
   const t = useTranslations("applications");
   const statusLabel = useEnumLabel("applicationStatus");
   const [status, setStatus] = useState<ApplicationStatus | "all">("all");
   const [scoutId, setScoutId] = useState<string>("all");
+  const [sortDir, setSortDir] = useState<ApplicationSortDir>("desc");
   const { data: scouts } = useScouts();
 
   const { data: applications, isPending, isError } = useApplications({
     status: status === "all" ? undefined : status,
     scoutId: scoutId === "all" ? undefined : scoutId,
+    sortDir,
   });
   const stats = useApplicationStats();
 
@@ -52,7 +55,7 @@ export default function ApplicationsPage() {
         isError={stats.isError}
       />
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-3">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="applications-status">{t("controls.statusLabel")}</Label>
           <select
@@ -83,6 +86,18 @@ export default function ApplicationsPage() {
                 {scout.label}
               </option>
             ))}
+          </select>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="applications-sort">{t("controls.sortLabel")}</Label>
+          <select
+            id="applications-sort"
+            className={SELECT_CLASS}
+            value={sortDir}
+            onChange={(event) => setSortDir(event.target.value as ApplicationSortDir)}
+          >
+            <option value="desc">{t("controls.sortNewest")}</option>
+            <option value="asc">{t("controls.sortOldest")}</option>
           </select>
         </div>
       </div>

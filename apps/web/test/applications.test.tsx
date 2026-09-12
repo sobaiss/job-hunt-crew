@@ -76,6 +76,26 @@ describe("ApplicationsPage — list", () => {
     await screen.findByText("Backend Engineer");
     expect(lastUrl).toContain("status=APPLIED");
   });
+
+  it("re-fetches oldest-first when the sort control changes, and omits sortDir for the default", async () => {
+    const user = userEvent.setup();
+    let lastUrl = "";
+    server.use(
+      http.get("/api/applications", ({ request }) => {
+        lastUrl = request.url;
+        return HttpResponse.json({ applications: [application()] });
+      }),
+    );
+
+    renderWithProviders(<ApplicationsPage />);
+    await screen.findByText("Backend Engineer");
+    expect(lastUrl).not.toContain("sortDir");
+
+    await user.selectOptions(screen.getByLabelText("Sort by"), "asc");
+
+    await screen.findByText("Backend Engineer");
+    expect(lastUrl).toContain("sortDir=asc");
+  });
 });
 
 describe("ApplicationsPage — stats header (issue #60)", () => {

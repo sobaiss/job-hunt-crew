@@ -451,7 +451,10 @@
       "statusLabel": "Status",
       "statusAll": "All statuses",
       "scoutLabel": "Scout",
-      "scoutAll": "All Scouts"
+      "scoutAll": "All Scouts",
+      "sortLabel": "Sort by",
+      "sortNewest": "Last updated",
+      "sortOldest": "Oldest updated"
     },
     "list": {
       "jobOfferFallback": "Job offer",

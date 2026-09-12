@@ -451,7 +451,10 @@
       "statusLabel": "Statut",
       "statusAll": "Tous les statuts",
       "scoutLabel": "Agent",
-      "scoutAll": "Tous les agents"
+      "scoutAll": "Tous les agents",
+      "sortLabel": "Trier par",
+      "sortNewest": "Dernière mise à jour",
+      "sortOldest": "Mise à jour la plus ancienne"
     },
     "list": {
       "jobOfferFallback": "Offre d'emploi",

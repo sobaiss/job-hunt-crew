@@ -1967,18 +1967,22 @@ class ApplicationListResponse(BaseModel):
 async def list_applications(
     status: str | None = None,
     scoutId: str | None = None,
+    sortDir: str = "desc",
     user_id: str = Depends(require_user_id),
     session: AsyncSession = Depends(get_session),
 ) -> ApplicationListResponse:
-    """Lists the caller's Applications, newest-activity-first. `status` and
+    """Lists the caller's Applications, sorted by `updatedAt`. `status` and
     `scoutId` are optional equality filters backing the Applications tracker's
-    filter controls; sorting by date is the default order (`updatedAt desc`).
+    filter controls; `sortDir` (`desc`, the default, or `asc`) backs its sort
+    control.
     """
     if status is not None and status not in APPLICATION_STATUS_VALUES:
         raise HTTPException(
             status_code=400,
             detail=f"status must be one of: {', '.join(APPLICATION_STATUS_VALUES)}",
         )
+    if sortDir not in ("asc", "desc"):
+        raise HTTPException(status_code=400, detail="sortDir must be one of: asc, desc")
 
     stmt = (
         select(Application)
@@ -1989,7 +1993,9 @@ async def list_applications(
         stmt = stmt.where(Application.status == Applicationstatus(status))
     if scoutId is not None:
         stmt = stmt.where(Application.scoutId == scoutId)
-    stmt = stmt.order_by(Application.updatedAt.desc())
+    stmt = stmt.order_by(
+        Application.updatedAt.asc() if sortDir == "asc" else Application.updatedAt.desc()
+    )
 
     rows = (await session.scalars(stmt)).all()
     return ApplicationListResponse(applications=[_application_response(row) for row in rows])

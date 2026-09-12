@@ -224,6 +224,58 @@ def test_list_applications_filters_by_status_and_scout(user_id):
         assert [a["id"] for a in by_scout.json()["applications"]] == [app_scouted["id"]]
 
 
+def test_list_applications_sorts_by_updated_at_direction(user_id):
+    with TestClient(app) as client:
+        cv = _make_cv_version(client, user_id)
+        analysis_first = asyncio.run(
+            _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.COMPLETED)
+        )
+        analysis_second = asyncio.run(
+            _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.COMPLETED)
+        )
+        app_first = client.post(
+            "/v1/applications", headers=_headers(user_id), json={"analysisId": analysis_first}
+        ).json()["application"]
+        app_second = client.post(
+            "/v1/applications", headers=_headers(user_id), json={"analysisId": analysis_second}
+        ).json()["application"]
+
+        # Touch app_first last, so it becomes the most recently updated row —
+        # this is what a `sortDir=desc`/`asc` toggle should distinguish.
+        client.post(
+            f"/v1/applications/{app_first['id']}/status-events",
+            headers=_headers(user_id),
+            json={"status": "APPLIED", "effectiveDate": _now().isoformat()},
+        )
+
+        default_response = client.get("/v1/applications", headers=_headers(user_id))
+        assert [a["id"] for a in default_response.json()["applications"]] == [
+            app_first["id"],
+            app_second["id"],
+        ]
+
+        desc_response = client.get(
+            "/v1/applications", headers=_headers(user_id), params={"sortDir": "desc"}
+        )
+        assert [a["id"] for a in desc_response.json()["applications"]] == [
+            app_first["id"],
+            app_second["id"],
+        ]
+
+        asc_response = client.get(
+            "/v1/applications", headers=_headers(user_id), params={"sortDir": "asc"}
+        )
+        assert [a["id"] for a in asc_response.json()["applications"]] == [
+            app_second["id"],
+            app_first["id"],
+        ]
+
+        invalid_response = client.get(
+            "/v1/applications", headers=_headers(user_id), params={"sortDir": "sideways"}
+        )
+        assert invalid_response.status_code == 400
+
+
 def test_list_applications_is_user_scoped(user_id):
     other = asyncio.run(_create_user())
     try:

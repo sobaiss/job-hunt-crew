@@ -54,18 +54,27 @@ export type ApplicationDetail = Application & {
 
 const APPLICATIONS_KEY = ["applications"] as const;
 
-/** The caller's Applications, optionally filtered by status and/or Scout. */
-export function useApplications(filters?: { status?: ApplicationStatus; scoutId?: string }) {
+export type ApplicationSortDir = "asc" | "desc";
+
+/** The caller's Applications, optionally filtered by status and/or Scout and
+ * sorted by last-update date (`sortDir`, default `desc` — newest first). */
+export function useApplications(filters?: {
+  status?: ApplicationStatus;
+  scoutId?: string;
+  sortDir?: ApplicationSortDir;
+}) {
   const status = filters?.status;
   const scoutId = filters?.scoutId;
+  const sortDir = filters?.sortDir ?? "desc";
 
   const query = new URLSearchParams();
   if (status) query.set("status", status);
   if (scoutId) query.set("scoutId", scoutId);
+  if (sortDir !== "desc") query.set("sortDir", sortDir);
   const search = query.toString() ? `?${query.toString()}` : "";
 
   return useQuery({
-    queryKey: [...APPLICATIONS_KEY, status ?? null, scoutId ?? null] as const,
+    queryKey: [...APPLICATIONS_KEY, status ?? null, scoutId ?? null, sortDir] as const,
     queryFn: () => bff.get<{ applications: Application[] }>(`/applications${search}`),
     select: (data) => data.applications,
   });
