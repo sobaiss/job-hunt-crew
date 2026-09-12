@@ -63,6 +63,10 @@ export type AnalysisSummary = {
   /** The batch this Analysis belongs to, or `null` for one created directly
    *  via `POST /v1/analyses`. */
   ingestionJobId: string | null;
+  /** The Scout that discovered this offer, or `null` for a manual analysis.
+   *  Set by the ingestion fan-out when the parent job carries a `scoutRunId`
+   *  (issue #54). */
+  scoutId: string | null;
   jobOffer: { id: string; title: string | null; company: string | null };
   cvVersion: { label: string };
   /** `{mode, siteConfigId}` of the parent IngestionJob when there is one —
@@ -71,9 +75,13 @@ export type AnalysisSummary = {
   ingestionJob: { mode: IngestionMode; siteConfigId: string | null } | null;
 };
 
-export type AnalysisDetail = AnalysisSummary & {
+export type AnalysisDetail = Omit<AnalysisSummary, "jobOffer"> & {
   resultJSON: AnalysisResult | null;
   errorMessage: string | null;
+  /** `sourceUrl` is only needed by the detail page's "Apply" action (issue
+   *  #59) — the list/summary shape omits it to match what the API actually
+   *  returns for each surface. */
+  jobOffer: AnalysisSummary["jobOffer"] & { sourceUrl: string };
 };
 
 /**

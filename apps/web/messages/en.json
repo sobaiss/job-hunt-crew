@@ -86,6 +86,8 @@
   "nav": {
     "dashboard": "Dashboard",
     "analyses": "Analyses",
+    "agents": "Agents",
+    "applications": "Applications",
     "cvVersions": "CV versions",
     "settings": "Settings",
     "newAnalysis": "New analysis",
@@ -122,6 +124,11 @@
     },
     "recent": {
       "heading": "Recent analyses"
+    },
+    "matches": {
+      "heading": "{count, plural, one {# new match from your agents} other {# new matches from your agents}}",
+      "subtitle": "Your Scouts found offers worth a look.",
+      "cta": "Review matches"
     }
   },
   "userMenu": {
@@ -170,6 +177,7 @@
     "loadError": "We couldn't load your analyses. Please try again.",
     "jobOfferFallback": "Job offer",
     "vsCv": "vs. {label}",
+    "scoutTag": "Scout",
     "compareLink": "Compare with other CVs",
     "controls": {
       "searchLabel": "Search",
@@ -219,7 +227,30 @@
         "medium": "Medium priority",
         "low": "Low priority"
       },
-      "summary": "Summary"
+      "summary": "Summary",
+      "generatedDocuments": {
+        "heading": "Generated documents",
+        "generate": "Generate documents",
+        "generating": "Generating your cover letter and tailored CV…",
+        "generateError": "We couldn't start generation. Please try again.",
+        "coverLetter": "Cover letter",
+        "tailoredCv": "Tailored CV",
+        "pending": "Queued…",
+        "failed": "Generation failed.",
+        "retry": "Try again",
+        "downloadPdf": "Download PDF",
+        "downloadBoth": "Download both",
+        "regenerate": "Regenerate",
+        "regenerateError": "We couldn't regenerate this document. Please try again.",
+        "regenerateCapReached": "You've reached today's document generation limit. Please try again tomorrow."
+      },
+      "application": {
+        "apply": "Apply",
+        "markApplied": "Mark as applied",
+        "markAppliedError": "We couldn't record that application. Please try again.",
+        "applied": "Applied",
+        "viewApplication": "View in Applications"
+      }
     },
     "compare": {
       "loading": "Loading the comparison",
@@ -289,13 +320,6 @@
       "mayBeUnreliable": "may be unreliable",
       "mayFail": "may fail"
     },
-    "keywordsLabel": "Keywords",
-    "locationLabel": "Location",
-    "postedWithinLabel": "Posted within",
-    "contractTypeLabel": "Contract type",
-    "remoteLabel": "Remote policy",
-    "remoteAny": "Any",
-    "experienceLevelLabel": "Experience level",
     "maxOffersLabel": "How many offers to analyse",
     "maxOffersHint": "Between 1 and {max}.",
     "quotaEstimate": "{count, plural, one {Up to # analysis will run} other {Up to # analyses will run}} — {remaining} left today.",
@@ -311,6 +335,168 @@
     "scrapingDetail": "Scraping progress",
     "jobOfferFallback": "Job offer",
     "vsCv": "vs. {label}"
+  },
+  "jobFilters": {
+    "keywordsLabel": "Keywords",
+    "locationLabel": "Location",
+    "postedWithinLabel": "Posted within",
+    "contractTypeLabel": "Contract type",
+    "remoteLabel": "Remote policy",
+    "remoteAny": "Any",
+    "experienceLevelLabel": "Experience level"
+  },
+  "scouts": {
+    "title": "Agents",
+    "list": {
+      "subtitle": "Saved searches that match new job offers against your CV. Create one and it runs for you.",
+      "loading": "Loading your Scouts",
+      "loadError": "We couldn't load your Scouts. Please try again.",
+      "empty": "You don't have any Scouts yet.",
+      "new": "New Scout",
+      "baseCv": "Base CV",
+      "lastRun": "Last run",
+      "neverRun": "Never run",
+      "sites": "{count, plural, one {# site} other {# sites}}"
+    },
+    "status": {
+      "ACTIVE": "Active",
+      "PAUSED": "Paused",
+      "ARCHIVED": "Archived"
+    },
+    "actions": {
+      "pause": "Pause",
+      "resume": "Resume",
+      "archive": "Archive",
+      "edit": "Edit",
+      "updateError": "We couldn't update that Scout. Please try again."
+    },
+    "form": {
+      "newHeading": "New Scout",
+      "editHeading": "Edit Scout",
+      "labelLabel": "Label",
+      "labelPlaceholder": "Senior Backend — Remote EU",
+      "labelRequired": "Give this Scout a label.",
+      "sitesLabel": "Job sites to search",
+      "sitesHint": "France Travail is the most reliable source for an unattended search; the scraping-based sites may be less dependable.",
+      "sitesRequired": "Choose at least one job site.",
+      "thresholdLabel": "Relevance threshold",
+      "thresholdHint": "Only offers scoring at or above this (0–100) count as a relevant find.",
+      "submit": "Create Scout",
+      "submitting": "Creating…",
+      "save": "Save changes",
+      "saving": "Saving…",
+      "error": "We couldn't save that Scout. Please try again.",
+      "cancel": "Cancel"
+    },
+    "detail": {
+      "loading": "Loading this Scout",
+      "loadError": "We couldn't load this Scout. Please try again.",
+      "configHeading": "Configuration",
+      "baseCv": "Base CV",
+      "sites": "Job sites",
+      "threshold": "Relevance threshold",
+      "filters": "Filters",
+      "noFilters": "No filters set",
+      "status": "Status",
+      "lastRun": "Last run",
+      "neverRun": "Never run",
+      "back": "Back to Agents"
+    },
+    "runs": {
+      "runNow": "Run now",
+      "running": "Starting…",
+      "rateLimited": "This Scout ran within the last hour. Try again later.",
+      "runError": "We couldn't start a run. Please try again.",
+      "heading": "Run history",
+      "empty": "This Scout hasn't run yet.",
+      "started": "Started {date}",
+      "sitesQueried": "{count, plural, one {# site queried} other {# sites queried}}",
+      "siteUnavailable": "{count, plural, one {# site unavailable} other {# sites unavailable}}",
+      "offersDiscovered": "{count, plural, one {# offer found} other {# offers found}}",
+      "offersAnalysed": "{count, plural, one {# analysed} other {# analysed}}",
+      "alreadySeen": "{count, plural, one {# already seen} other {# already seen}}",
+      "runLimitSkipped": "{count, plural, one {# not analysed — run limit} other {# not analysed — run limit}}",
+      "capSkipped": "{count, plural, one {# not analysed — daily limit} other {# not analysed — daily limit}}",
+      "status": {
+        "PENDING": "Queued",
+        "RUNNING": "Running",
+        "PARTIALLY_COMPLETED": "Partially completed",
+        "COMPLETED": "Completed",
+        "FAILED": "Failed"
+      }
+    },
+    "finds": {
+      "loadError": "We couldn't load this Scout's finds. Please try again.",
+      "relevantHeading": "Relevant finds",
+      "relevantEmpty": "No relevant finds yet.",
+      "lowFitHeading": "Found — low fit"
+    },
+    "patterns": {
+      "heading": "Patterns across your matches",
+      "empty": "No patterns yet — they'll appear as relevant finds accumulate.",
+      "loadError": "We couldn't load this Scout's patterns. Please try again.",
+      "count": "{count, plural, one {# find} other {# finds}}",
+      "weaknessesHeading": "Recurring weaknesses across your matches",
+      "weaknessesEmpty": "No recurring weaknesses yet — they'll appear as relevant finds accumulate."
+    },
+    "siteKeys": {
+      "FRANCE_TRAVAIL": "France Travail",
+      "LINKEDIN": "LinkedIn",
+      "INDEED": "Indeed",
+      "WTTJ": "Welcome to the Jungle",
+      "GLASSDOOR": "Glassdoor"
+    }
+  },
+  "applications": {
+    "title": "Applications",
+    "subtitle": "Every offer you've pursued, from a Scout find or a manual analysis, and where it stands.",
+    "loading": "Loading your applications",
+    "loadError": "We couldn't load your applications. Please try again.",
+    "empty": "No applications tracked yet.",
+    "controls": {
+      "statusLabel": "Status",
+      "statusAll": "All statuses",
+      "scoutLabel": "Scout",
+      "scoutAll": "All Scouts",
+      "sortLabel": "Sort by",
+      "sortNewest": "Last updated",
+      "sortOldest": "Oldest updated"
+    },
+    "list": {
+      "jobOfferFallback": "Job offer",
+      "vsCv": "vs. {label}",
+      "scoutTag": "Scout",
+      "updated": "Updated {date}"
+    },
+    "detail": {
+      "loading": "Loading this application",
+      "loadError": "We couldn't load this application. Please try again.",
+      "viewAnalysis": "View the analysis",
+      "viewScout": "View the Scout",
+      "moveTo": "Move to…",
+      "statusError": "We couldn't update the status. Please try again.",
+      "timelineHeading": "Status history",
+      "timelineEmpty": "No status changes yet.",
+      "back": "Back to Applications"
+    }
+  },
+  "stats": {
+    "loadError": "We couldn't load these stats. Please try again.",
+    "windows": {
+      "allTime": "All time",
+      "last30Days": "Last 30 days"
+    },
+    "metrics": {
+      "offersDiscovered": "Offers discovered",
+      "relevantFinds": "Relevant matches",
+      "documentsGenerated": "Documents generated",
+      "applicationsSubmitted": "Applications submitted",
+      "responseRate": "Response rate",
+      "interviewRate": "Interview rate",
+      "offerRate": "Offer rate",
+      "acceptanceRate": "Acceptance rate",
+      "medianDaysToFirstResponse": "Median days to first response"
+    }
   },
   "cvVersions": {
     "title": "CV versions",
@@ -423,6 +609,15 @@
       "CONVERTING": "Converting",
       "CONVERTED": "Converted",
       "FAILED": "Failed"
+    },
+    "applicationStatus": {
+      "DRAFT": "Draft",
+      "APPLIED": "Applied",
+      "INTERVIEWING": "Interviewing",
+      "OFFER": "Offer",
+      "ACCEPTED": "Accepted",
+      "REJECTED": "Rejected",
+      "WITHDRAWN": "Withdrawn"
     }
   }
 }

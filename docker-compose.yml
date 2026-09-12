@@ -19,7 +19,9 @@ services:
   # S3-compatible object storage for local dev, standing in for AWS S3
   # (see PRD Section 4). Bucket layout/keys match the real S3 target 1:1.
   minio:
-    image: minio/minio:RELEASE.2025-04-08T15-41-24Z
+    # minio/minio no longer accepts pulls from Docker Hub (MinIO moved
+    # publishing to Quay) — quay.io/minio/minio is the same image/tags.
+    image: quay.io/minio/minio:RELEASE.2025-04-08T15-41-24Z
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
@@ -37,7 +39,7 @@ services:
       retries: 10
 
   minio-createbucket:
-    image: minio/mc:RELEASE.2025-04-08T15-39-49Z
+    image: quay.io/minio/mc:RELEASE.2025-04-08T15-39-49Z
     depends_on:
       minio:
         condition: service_healthy
@@ -124,6 +126,8 @@ services:
       SQS_ANALYSIS_INTAKE_QUEUE_URL: http://elasticmq:9324/000000000000/analysis-intake
       SQS_CV_CONVERSION_QUEUE_URL: http://elasticmq:9324/000000000000/cv-conversion
       SQS_INGESTION_INTAKE_QUEUE_URL: http://elasticmq:9324/000000000000/ingestion-intake
+      SQS_SCOUT_INTAKE_QUEUE_URL: http://elasticmq:9324/000000000000/scout-intake
+      SQS_GENERATION_INTAKE_QUEUE_URL: http://elasticmq:9324/000000000000/generation-intake
       SQS_ACCESS_KEY_ID: x
       SQS_SECRET_ACCESS_KEY: x
     depends_on:
@@ -141,9 +145,9 @@ services:
   # nothing drains them locally otherwise). Polls ElasticMQ and runs the real
   # handlers — see services/ingestion/src/ingestion/local_worker.py.
   #
-  # Drains all three pipeline queues, so "Convert to Markdown", "Analyse one
-  # offer" and "Analyse several offers" all work straight after
-  # `docker compose up`:
+  # Drains all five pipeline queues, so "Convert to Markdown", "Analyse one
+  # offer", "Analyse several offers", a Scout run, and "Generate documents"
+  # all work straight after `docker compose up`:
   #   - cv-conversion    -> analysis.cv_conversion.handle_cv_conversion
   #   - ingestion-intake -> ingestion.intake_handler.handle_ingestion_intake
   #     (the ADR 0002 fan-out worker: runs discover/scrape/extract for the
@@ -153,6 +157,16 @@ services:
   #     the whole AnalysisWorkflow in-process, no host-only `lambda_shim` /
   #     Step Functions execution needed, just an LLM the crew can reach
   #     (LLM_PROVIDER below, ollama by default).
+  #   - scout-intake     -> scout.intake_handler.handle_scout_intake, fed by a
+  #     manual "Run now" (services/api) and, since issue #57, this worker's own
+  #     scout-schedule tick — its local stand-in for the production EventBridge
+  #     Scheduler rule that fires at SCOUT_SCHEDULE_HOUR_UTC (default 6 UTC)
+  #     and enqueues every due, active Scout with no user action. See
+  #     services/scout/src/scout/schedule.py for both.
+  #   - generation-intake -> analysis.generation_pipeline.handle_generation_intake_local
+  #     (issue #58): fed by "Generate documents" on a find (services/api),
+  #     runs the CoverLetterWriterAgent / CVTailoringAgent in-process, the
+  #     same simplification analysis-intake's local mode uses.
   # Set WORKER_ANALYSIS_MODE=stepfunctions + run `make worker` on the host to
   # exercise the real Step Functions state machine instead.
   worker:
@@ -162,10 +176,14 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/job_hunt_crew
-      WORKER_QUEUES: cv-conversion,ingestion-intake,analysis-intake
+      WORKER_QUEUES: cv-conversion,ingestion-intake,analysis-intake,scout-intake,generation-intake
       # `local` (in-process AnalysisWorkflow) vs `stepfunctions` (real Step
       # Functions Local execution — needs the host lambda_shim + SFN_* env).
       WORKER_ANALYSIS_MODE: ${WORKER_ANALYSIS_MODE:-local}
+      # Daily UTC hour every active Scout is due (issue #57); how often this
+      # worker checks for due Scouts is separate (SCOUT_SCHEDULE_TICK_SECONDS,
+      # default 60s — fine locally, irrelevant in production's EventBridge rule).
+      SCOUT_SCHEDULE_HOUR_UTC: ${SCOUT_SCHEDULE_HOUR_UTC:-6}
       # S3 is read directly here (no presigning), so unlike `api` this uses the
       # docker-network hostname, not localhost.
       S3_ENDPOINT: http://minio:9000
@@ -179,6 +197,8 @@ services:
       SQS_CV_CONVERSION_QUEUE_URL: http://elasticmq:9324/000000000000/cv-conversion
       SQS_ANALYSIS_INTAKE_QUEUE_URL: http://elasticmq:9324/000000000000/analysis-intake
       SQS_INGESTION_INTAKE_QUEUE_URL: http://elasticmq:9324/000000000000/ingestion-intake
+      SQS_SCOUT_INTAKE_QUEUE_URL: http://elasticmq:9324/000000000000/scout-intake
+      SQS_GENERATION_INTAKE_QUEUE_URL: http://elasticmq:9324/000000000000/generation-intake
       SQS_ACCESS_KEY_ID: x
       SQS_SECRET_ACCESS_KEY: x
       # The crew run (analysis-intake) and any PDF/DOCX Conversion call an LLM

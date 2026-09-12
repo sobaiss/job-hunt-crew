@@ -12,4 +12,46 @@ export const handlers = [
   // about grouping don't have to stub it; grouping tests override with
   // `server.use`.
   http.get("/api/site-configs", () => HttpResponse.json({ siteConfigs: [] })),
+  // The Dashboard's "new matches from your agents" block (issue #56) reads
+  // the Scout list; default to none so suites that don't care about Scouts
+  // don't have to stub it.
+  http.get("/api/scouts", () => HttpResponse.json({ scouts: [] })),
+  // The Scout detail page's relevant-finds / low-fit lists (issue #56);
+  // default to empty so suites exercising other parts of the page (run
+  // history, actions) don't have to stub it.
+  http.get("/api/scouts/:id/finds", () =>
+    HttpResponse.json({ relevantFinds: [], lowFitFinds: [] }),
+  ),
+  // The stats header (issue #60) on both the Applications view and a Scout's
+  // detail page; default to all-zero so suites exercising other parts of
+  // those pages don't have to stub it.
+  http.get("/api/applications/stats", () => HttpResponse.json(ZERO_APPLICATION_STATS)),
+  http.get("/api/scouts/:id/stats", () => HttpResponse.json(ZERO_APPLICATION_STATS)),
+  // The "patterns across your matches" panel (issue #60); default to none.
+  http.get("/api/scouts/:id/patterns", () =>
+    HttpResponse.json({ patterns: [], weaknesses: [] }),
+  ),
+  // The Analysis detail page's GeneratedDocumentsPanel and "Apply" action
+  // (issue #59) check for already-generated documents on load; default to
+  // none so suites exercising other parts of the page don't have to stub it.
+  http.get("/api/analyses/:id/generated-documents", () =>
+    HttpResponse.json({ generatedDocuments: [] }),
+  ),
 ];
+
+const ZERO_APPLICATION_STATS_WINDOW = {
+  offersDiscovered: 0,
+  relevantFinds: 0,
+  documentsGenerated: 0,
+  applicationsSubmitted: 0,
+  responseRate: 0,
+  interviewRate: 0,
+  offerRate: 0,
+  acceptanceRate: 0,
+  medianDaysToFirstResponse: null,
+};
+
+const ZERO_APPLICATION_STATS = {
+  allTime: ZERO_APPLICATION_STATS_WINDOW,
+  last30Days: ZERO_APPLICATION_STATS_WINDOW,
+};

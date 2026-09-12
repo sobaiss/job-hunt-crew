@@ -26,6 +26,21 @@ INGESTION_INTAKE_QUEUE_URL = os.environ.get(
     "SQS_INGESTION_INTAKE_QUEUE_URL", "http://localhost:9324/000000000000/ingestion-intake"
 )
 
+# POST /v1/scouts/{id}/run (and, from slice 5, the daily scheduler tick)
+# enqueues `{"scoutRunId": id}` here; the scout-intake worker loads the
+# ScoutRun and fans out one SITE_SEARCH IngestionJob per targeted site.
+SCOUT_INTAKE_QUEUE_URL = os.environ.get(
+    "SQS_SCOUT_INTAKE_QUEUE_URL", "http://localhost:9324/000000000000/scout-intake"
+)
+
+# POST /v1/analyses/{id}/generated-documents enqueues one
+# `{"generatedDocumentId": id}` message here per created row (COVER_LETTER +
+# TAILORED_CV); the generation-intake worker runs the matching agent and
+# writes the resulting Markdown back onto the row (issue #58).
+GENERATION_INTAKE_QUEUE_URL = os.environ.get(
+    "SQS_GENERATION_INTAKE_QUEUE_URL", "http://localhost:9324/000000000000/generation-intake"
+)
+
 
 def make_sqs_client():
     return boto3.client(

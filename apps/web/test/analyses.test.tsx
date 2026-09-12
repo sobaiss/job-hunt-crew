@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 
-import { renderWithProviders, screen } from "./test-utils";
+import { renderWithProviders, screen, waitFor } from "./test-utils";
 import { server } from "./msw/server";
 import AnalysesDashboardPage from "@/app/(app)/analyses/page";
 import AnalysisDetailPage from "@/app/(app)/analyses/[id]/page";
@@ -32,6 +32,7 @@ function summary(overrides: Record<string, unknown> = {}) {
     cvVersionId: "cv1",
     ingestionJobId: null,
     ingestionJob: null,
+    scoutId: null,
     jobOffer: { id: "job1", title: "Backend Engineer", company: "Acme Inc" },
     cvVersion: { label: "Grad CV" },
     ...overrides,
@@ -52,6 +53,7 @@ function batchRow(
 function detail(overrides: Record<string, unknown> = {}) {
   return {
     ...summary(),
+    jobOffer: { id: "job1", title: "Backend Engineer", company: "Acme Inc", sourceUrl: "https://example.com/jobs/job1" },
     resultJSON: RESULT,
     errorMessage: null,
     ...overrides,
@@ -75,6 +77,34 @@ describe("AnalysesDashboardPage", () => {
     expect(screen.getByText("87")).toBeInTheDocument();
     // "Completed" also appears as a status-filter option, so scope to the list.
     expect(screen.getByRole("list")).toHaveTextContent("Completed");
+  });
+
+  it("tags a Scout-driven analysis row with a Scout badge and leaves manual rows untagged", async () => {
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            summary({ id: "scouted", scoutId: "scout-1" }),
+            summary({
+              id: "manual",
+              jobOffer: { id: "job2", title: "Frontend Engineer", company: "Beta" },
+            }),
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+
+    const scoutedRow = (await screen.findByText("Backend Engineer")).closest(
+      "[data-slot='card']",
+    ) as HTMLElement;
+    const manualRow = screen
+      .getByText("Frontend Engineer")
+      .closest("[data-slot='card']") as HTMLElement;
+
+    expect(scoutedRow).toHaveTextContent("Scout");
+    expect(manualRow).not.toHaveTextContent("Scout");
   });
 
   it("shows an empty state when there are no analyses", async () => {
@@ -544,5 +574,509 @@ describe("AnalysisDetailPage", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("generates and renders both documents for a completed analysis", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses/a1", () =>
+        HttpResponse.json({ analysis: detail() }),
+      ),
+      http.post("/api/analyses/a1/generated-documents", () =>
+        HttpResponse.json({
+          generatedDocuments: [
+            { id: "gd-cl", type: "COVER_LETTER", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
+            { id: "gd-cv", type: "TAILORED_CV", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
+          ],
+        }),
+      ),
+      http.get("/api/generated-documents/gd-cl", () =>
+        HttpResponse.json({
+          generatedDocument: {
+            id: "gd-cl",
+            type: "COVER_LETTER",
+            analysisId: "a1",
+            status: "READY",
+            markdownContent: "Dear Hiring Manager, ...",
+            errorMessage: null,
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+          },
+        }),
+      ),
+      http.get("/api/generated-documents/gd-cv", () =>
+        HttpResponse.json({
+          generatedDocument: {
+            id: "gd-cv",
+            type: "TAILORED_CV",
+            analysisId: "a1",
+            status: "READY",
+            markdownContent: "# Jane Doe tailored",
+            errorMessage: null,
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+          },
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Generate documents" }),
+    );
+
+    expect(await screen.findByText("Dear Hiring Manager, ...")).toBeInTheDocument();
+    expect(screen.getByText("# Jane Doe tailored")).toBeInTheDocument();
+
+    const downloadLinks = screen.getAllByRole("link", { name: /download pdf/i });
+    expect(downloadLinks).toHaveLength(2);
+    expect(downloadLinks[0]).toHaveAttribute("href", "/api/generated-documents/gd-cl/pdf");
+    expect(downloadLinks[1]).toHaveAttribute("href", "/api/generated-documents/gd-cv/pdf");
+  });
+
+  it("shows a Download both action once both documents are ready, downloading both PDFs", async () => {
+    const user = userEvent.setup();
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    server.use(
+      http.get("/api/analyses/a1", () =>
+        HttpResponse.json({ analysis: detail() }),
+      ),
+      http.post("/api/analyses/a1/generated-documents", () =>
+        HttpResponse.json({
+          generatedDocuments: [
+            { id: "gd-cl", type: "COVER_LETTER", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
+            { id: "gd-cv", type: "TAILORED_CV", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
+          ],
+        }),
+      ),
+      http.get("/api/generated-documents/gd-cl", () =>
+        HttpResponse.json({
+          generatedDocument: {
+            id: "gd-cl",
+            type: "COVER_LETTER",
+            analysisId: "a1",
+            status: "READY",
+            markdownContent: "Dear Hiring Manager, ...",
+            errorMessage: null,
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+          },
+        }),
+      ),
+      http.get("/api/generated-documents/gd-cv", () =>
+        HttpResponse.json({
+          generatedDocument: {
+            id: "gd-cv",
+            type: "TAILORED_CV",
+            analysisId: "a1",
+            status: "READY",
+            markdownContent: "# Jane Doe tailored",
+            errorMessage: null,
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+          },
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Generate documents" }),
+    );
+    await screen.findByText("Dear Hiring Manager, ...");
+
+    await user.click(await screen.findByRole("button", { name: "Download both" }));
+
+    expect(openSpy).toHaveBeenCalledWith(
+      "/api/generated-documents/gd-cl/pdf",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(openSpy).toHaveBeenCalledWith(
+      "/api/generated-documents/gd-cv/pdf",
+      "_blank",
+      "noopener,noreferrer",
+    );
+
+    openSpy.mockRestore();
+  });
+
+  it("regenerates a document and switches to polling the fresh row", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses/a1", () =>
+        HttpResponse.json({ analysis: detail() }),
+      ),
+      http.post("/api/analyses/a1/generated-documents", () =>
+        HttpResponse.json({
+          generatedDocuments: [
+            { id: "gd-cl", type: "COVER_LETTER", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
+            { id: "gd-cv", type: "TAILORED_CV", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
+          ],
+        }),
+      ),
+      http.get("/api/generated-documents/gd-cl", () =>
+        HttpResponse.json({
+          generatedDocument: {
+            id: "gd-cl",
+            type: "COVER_LETTER",
+            analysisId: "a1",
+            status: "READY",
+            markdownContent: "Dear Hiring Manager, ...",
+            errorMessage: null,
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+          },
+        }),
+      ),
+      http.get("/api/generated-documents/gd-cv", () =>
+        HttpResponse.json({
+          generatedDocument: {
+            id: "gd-cv",
+            type: "TAILORED_CV",
+            analysisId: "a1",
+            status: "READY",
+            markdownContent: "# Jane Doe tailored",
+            errorMessage: null,
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+          },
+        }),
+      ),
+      http.post("/api/generated-documents/gd-cl/regenerate", () =>
+        HttpResponse.json({
+          generatedDocument: {
+            id: "gd-cl-2",
+            type: "COVER_LETTER",
+            analysisId: "a1",
+            status: "PENDING",
+            markdownContent: null,
+            errorMessage: null,
+            createdAt: "2026-09-11T01:00:00.000Z",
+            updatedAt: "2026-09-11T01:00:00.000Z",
+          },
+        }),
+      ),
+      http.get("/api/generated-documents/gd-cl-2", () =>
+        HttpResponse.json({
+          generatedDocument: {
+            id: "gd-cl-2",
+            type: "COVER_LETTER",
+            analysisId: "a1",
+            status: "READY",
+            markdownContent: "Dear Hiring Manager, regenerated.",
+            errorMessage: null,
+            createdAt: "2026-09-11T01:00:00.000Z",
+            updatedAt: "2026-09-11T01:00:00.000Z",
+          },
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Generate documents" }),
+    );
+    await screen.findByText("Dear Hiring Manager, ...");
+
+    const regenerateButtons = screen.getAllByRole("button", { name: "Regenerate" });
+    await user.click(regenerateButtons[0]);
+
+    expect(await screen.findByText("Dear Hiring Manager, regenerated.")).toBeInTheDocument();
+  });
+
+  it("shows a cap-reached message when regenerating exhausts the daily limit", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses/a1", () =>
+        HttpResponse.json({ analysis: detail() }),
+      ),
+      http.post("/api/analyses/a1/generated-documents", () =>
+        HttpResponse.json({
+          generatedDocuments: [
+            { id: "gd-cl", type: "COVER_LETTER", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
+            { id: "gd-cv", type: "TAILORED_CV", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
+          ],
+        }),
+      ),
+      http.get("/api/generated-documents/gd-cl", () =>
+        HttpResponse.json({
+          generatedDocument: {
+            id: "gd-cl",
+            type: "COVER_LETTER",
+            analysisId: "a1",
+            status: "READY",
+            markdownContent: "Dear Hiring Manager, ...",
+            errorMessage: null,
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+          },
+        }),
+      ),
+      http.get("/api/generated-documents/gd-cv", () =>
+        HttpResponse.json({
+          generatedDocument: {
+            id: "gd-cv",
+            type: "TAILORED_CV",
+            analysisId: "a1",
+            status: "READY",
+            markdownContent: "# Jane Doe tailored",
+            errorMessage: null,
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+          },
+        }),
+      ),
+      http.post("/api/generated-documents/gd-cl/regenerate", () =>
+        HttpResponse.json({ error: "Daily document generation limit of 20 reached." }, { status: 429 }),
+      ),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Generate documents" }),
+    );
+    await screen.findByText("Dear Hiring Manager, ...");
+
+    const regenerateButtons = screen.getAllByRole("button", { name: "Regenerate" });
+    await user.click(regenerateButtons[0]);
+
+    expect(
+      await screen.findByText(/reached today's document generation limit/i),
+    ).toBeInTheDocument();
+  });
+
+  it("shows an error when generation fails to start", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses/a1", () =>
+        HttpResponse.json({ analysis: detail() }),
+      ),
+      http.post("/api/analyses/a1/generated-documents", () =>
+        HttpResponse.json({ error: "boom" }, { status: 500 }),
+      ),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Generate documents" }),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "We couldn't start generation. Please try again.",
+    );
+  });
+
+  it("marks a completed analysis as applied and links to the Application", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses/a1", () => HttpResponse.json({ analysis: detail() })),
+      http.post("/api/applications", () =>
+        HttpResponse.json({
+          application: {
+            id: "app-1",
+            userId: "user_1",
+            analysisId: "a1",
+            jobOfferId: "job1",
+            cvVersionId: "cv1",
+            scoutId: null,
+            coverLetterDocId: null,
+            tailoredCvDocId: null,
+            status: "DRAFT",
+            appliedAt: null,
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+            jobOffer: { id: "job1", title: "Backend Engineer", company: "Acme Inc" },
+            cvVersion: { label: "Grad CV" },
+          },
+        }),
+      ),
+      http.post("/api/applications/app-1/status-events", () =>
+        HttpResponse.json({
+          application: {
+            id: "app-1",
+            userId: "user_1",
+            analysisId: "a1",
+            jobOfferId: "job1",
+            cvVersionId: "cv1",
+            scoutId: null,
+            coverLetterDocId: null,
+            tailoredCvDocId: null,
+            status: "APPLIED",
+            appliedAt: "2026-09-11T00:00:00.000Z",
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+            jobOffer: { id: "job1", title: "Backend Engineer", company: "Acme Inc" },
+            cvVersion: { label: "Grad CV" },
+          },
+          statusEvent: {
+            id: "se-1",
+            applicationId: "app-1",
+            status: "APPLIED",
+            note: null,
+            effectiveDate: "2026-09-11T00:00:00.000Z",
+            createdAt: "2026-09-11T00:00:00.000Z",
+          },
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Mark as applied" }));
+
+    expect(await screen.findByText("Applied")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View in Applications" })).toHaveAttribute(
+      "href",
+      "/applications/app-1",
+    );
+  });
+
+  it("disables Apply until both generated documents are ready", async () => {
+    server.use(
+      http.get("/api/analyses/a1", () => HttpResponse.json({ analysis: detail() })),
+      http.get("/api/analyses/a1/generated-documents", () =>
+        HttpResponse.json({
+          generatedDocuments: [
+            {
+              id: "gd-cl",
+              type: "COVER_LETTER",
+              analysisId: "a1",
+              status: "READY",
+              markdownContent: "Dear Hiring Manager, ...",
+              errorMessage: null,
+              createdAt: "2026-09-11T00:00:00.000Z",
+              updatedAt: "2026-09-11T00:00:00.000Z",
+            },
+            {
+              id: "gd-cv",
+              type: "TAILORED_CV",
+              analysisId: "a1",
+              status: "GENERATING",
+              markdownContent: null,
+              errorMessage: null,
+              createdAt: "2026-09-11T00:00:00.000Z",
+              updatedAt: "2026-09-11T00:00:00.000Z",
+            },
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />);
+
+    expect(await screen.findByRole("button", { name: "Apply" })).toBeDisabled();
+  });
+
+  it("applies once both documents are ready: opens the posting, downloads both PDFs, and marks applied", async () => {
+    const user = userEvent.setup();
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    server.use(
+      http.get("/api/analyses/a1", () => HttpResponse.json({ analysis: detail() })),
+      http.get("/api/analyses/a1/generated-documents", () =>
+        HttpResponse.json({
+          generatedDocuments: [
+            {
+              id: "gd-cl",
+              type: "COVER_LETTER",
+              analysisId: "a1",
+              status: "READY",
+              markdownContent: "Dear Hiring Manager, ...",
+              errorMessage: null,
+              createdAt: "2026-09-11T00:00:00.000Z",
+              updatedAt: "2026-09-11T00:00:00.000Z",
+            },
+            {
+              id: "gd-cv",
+              type: "TAILORED_CV",
+              analysisId: "a1",
+              status: "READY",
+              markdownContent: "# Jane Doe tailored",
+              errorMessage: null,
+              createdAt: "2026-09-11T00:00:00.000Z",
+              updatedAt: "2026-09-11T00:00:00.000Z",
+            },
+          ],
+        }),
+      ),
+      http.post("/api/applications", () =>
+        HttpResponse.json({
+          application: {
+            id: "app-1",
+            userId: "user_1",
+            analysisId: "a1",
+            jobOfferId: "job1",
+            cvVersionId: "cv1",
+            scoutId: null,
+            coverLetterDocId: null,
+            tailoredCvDocId: null,
+            status: "DRAFT",
+            appliedAt: null,
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+            jobOffer: { id: "job1", title: "Backend Engineer", company: "Acme Inc" },
+            cvVersion: { label: "Grad CV" },
+          },
+        }),
+      ),
+      http.post("/api/applications/app-1/status-events", () =>
+        HttpResponse.json({
+          application: {
+            id: "app-1",
+            userId: "user_1",
+            analysisId: "a1",
+            jobOfferId: "job1",
+            cvVersionId: "cv1",
+            scoutId: null,
+            coverLetterDocId: null,
+            tailoredCvDocId: null,
+            status: "APPLIED",
+            appliedAt: "2026-09-11T00:00:00.000Z",
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+            jobOffer: { id: "job1", title: "Backend Engineer", company: "Acme Inc" },
+            cvVersion: { label: "Grad CV" },
+          },
+          statusEvent: {
+            id: "se-1",
+            applicationId: "app-1",
+            status: "APPLIED",
+            note: null,
+            effectiveDate: "2026-09-11T00:00:00.000Z",
+            createdAt: "2026-09-11T00:00:00.000Z",
+          },
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />);
+
+    const applyButton = await screen.findByRole("button", { name: "Apply" });
+    await waitFor(() => expect(applyButton).toBeEnabled());
+    await user.click(applyButton);
+
+    expect(openSpy).toHaveBeenCalledWith(
+      "https://example.com/jobs/job1",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(openSpy).toHaveBeenCalledWith(
+      "/api/generated-documents/gd-cl/pdf",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(openSpy).toHaveBeenCalledWith(
+      "/api/generated-documents/gd-cv/pdf",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(await screen.findByText("Applied")).toBeInTheDocument();
+
+    openSpy.mockRestore();
   });
 });

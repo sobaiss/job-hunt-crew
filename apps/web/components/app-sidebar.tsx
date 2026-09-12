@@ -6,7 +6,9 @@ import { usePathname } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
 import { useTranslations } from "next-intl";
 import {
+  Bot,
   ChevronsUpDown,
+  ClipboardList,
   FileText,
   LayoutDashboard,
   ListChecks,
@@ -33,6 +35,8 @@ import { LocaleSwitch } from "@/components/locale-switch";
 export const NAV_ITEMS = [
   { href: "/", key: "dashboard", Icon: LayoutDashboard },
   { href: "/analyses", key: "analyses", Icon: ListChecks },
+  { href: "/scouts", key: "agents", Icon: Bot },
+  { href: "/applications", key: "applications", Icon: ClipboardList },
   { href: "/cv-versions", key: "cvVersions", Icon: FileText },
   { href: "/settings", key: "settings", Icon: Settings },
 ] as const;

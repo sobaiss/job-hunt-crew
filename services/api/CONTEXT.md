@@ -1,6 +1,6 @@
 # API
 
-The FastAPI service that is the sole owner of Postgres, S3, and SQS for synchronous, user-facing data — CRUD, presigned uploads, SQS enqueue. Reachable only from the [Web](../../apps/web/CONTEXT.md) context's BFF proxy, authenticated by a shared internal secret. Defines the core entities the [Ingestion](../ingestion/CONTEXT.md) and [Analysis](../analysis/CONTEXT.md) contexts read and write directly against the same tables.
+The FastAPI service that is the sole owner of Postgres, S3, and SQS for synchronous, user-facing data — CRUD, presigned uploads, SQS enqueue. Reachable only from the [Web](../../apps/web/CONTEXT.md) context's BFF proxy, authenticated by a shared internal secret. Defines the core entities the [Ingestion](../ingestion/CONTEXT.md), [Analysis](../analysis/CONTEXT.md), and [Scout](../scout/CONTEXT.md) contexts read and write directly against the same tables.
 
 ## Language
 
@@ -38,6 +38,70 @@ _Avoid_: Match run, matching job — there is deliberately no dedicated entity, 
 
 **Match score**:
 An Analysis result's 0-100 fit rating between a CVVersion and a JobOffer.
+
+**Scout**:
+A candidate's saved, self-running search-plus-match configuration — a
+label, one base CVVersion, the target SiteConfig keys to search, the same
+filter shape an IngestionJob carries, a relevance threshold, and a
+lifecycle `status` (`ACTIVE` | `PAUSED` | `ARCHIVED`). Runs once a day while
+`ACTIVE`, or on demand via "Run now"; orchestrated by the
+[Scout](../scout/CONTEXT.md) context, not by this one.
+_Avoid_: Agent — "Agents" is the nav label a candidate sees in
+[Web](../../apps/web/CONTEXT.md); `Scout` is the row.
+
+**ScoutRun**:
+One execution of a Scout — a real aggregate row, deliberately unlike the
+derived Analysis batch above (see docs/adr/0004 for why). Tracks status
+(mirroring IngestionJobStatus: `PENDING` | `RUNNING` | `PARTIALLY_COMPLETED`
+| `COMPLETED` | `FAILED`) and per-run counts (sites queried, site
+unavailable, offers discovered/analysed, relevant finds, documents
+generated, and three skip counts: already seen, run-limit, daily-cap). The
+anchor `GET /v1/scouts/{id}/stats` and the run-history view query against.
+_Avoid_: Match run, Scout job.
+
+**Relevance threshold**:
+A Scout's `matchThreshold` (0-100, default 70) — the Match score an Analysis
+must meet or exceed to count as a relevant find for that Scout.
+
+**Relevant find**:
+A `COMPLETED` Analysis, created by one of a Scout's IngestionJobs, whose
+Match score is at or above that Scout's relevance threshold. An Analysis
+below the threshold is still visible, as "found — low fit," never
+discarded. `Analysis.scoutId` (denormalised, nullable) links it back to its
+Scout.
+_Avoid_: Match — "match" is the generic comparison result; "relevant find"
+specifically means it cleared the threshold.
+
+**GeneratedDocument**:
+A generated cover letter (`COVER_LETTER`) or tailored CV (`TAILORED_CV`)
+produced from one Analysis — a new row, never a mutation of the base
+CVVersion (see docs/adr/0003). Carries its own `markdownContent`,
+denormalised `jobOfferId`/`cvVersionId`, an optional `scoutRunId` for
+attribution, a `status` (`PENDING` | `GENERATING` | `READY` | `FAILED`),
+and a `supersededById` self-link a regenerate sets on the row it replaces.
+Produced by the [Analysis](../analysis/CONTEXT.md) context's
+GenerationWorkflow, triggered only by an explicit "Generate documents"
+action — never automatically.
+_Avoid_: Tailored CV file, generated PDF — no PDF is stored, only rendered
+on demand from `markdownContent`.
+
+**Application**:
+The record of a candidate pursuing one Analysis's offer — user-scoped,
+created lazily on the first "Generate documents" or "Mark as applied" for
+that Analysis, and unique per `analysisId`. Carries denormalised
+`jobOfferId`/`cvVersionId`/`scoutId` (nullable — a manually-tracked
+Analysis has none) and a `status` derived as its latest StatusEvent's
+status.
+_Avoid_: Job application, tracked offer.
+
+**StatusEvent**:
+One append-only entry in an Application's status history — a `status`, an
+optional `note`, and an `effectiveDate`. There is no separate "undo"
+endpoint; undoing a status change is appending a StatusEvent for the prior
+status.
+_Avoid_: Status change, audit entry — PipelineEvent (below) is the
+unrelated pipeline-observability log; StatusEvent is Application-specific
+and user-visible as a timeline.
 
 **PipelineEvent**:
 One append-only log row recording a single pipeline stage's start, success, or failure — the one observability trail shared by the Ingestion and Analysis contexts.

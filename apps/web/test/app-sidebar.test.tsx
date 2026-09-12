@@ -41,6 +41,14 @@ describe("AppSidebar", () => {
       "href",
       "/analyses",
     );
+    expect(screen.getByRole("link", { name: "Agents" })).toHaveAttribute(
+      "href",
+      "/scouts",
+    );
+    expect(screen.getByRole("link", { name: "Applications" })).toHaveAttribute(
+      "href",
+      "/applications",
+    );
     expect(screen.getByRole("link", { name: "CV versions" })).toHaveAttribute(
       "href",
       "/cv-versions",

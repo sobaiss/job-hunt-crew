@@ -1,0 +1,88 @@
+"use client";
+
+import { useMutation, useQuery } from "@tanstack/react-query";
+
+import { bff } from "@/lib/bff-client";
+
+// "Generate documents" on a relevant find (issue #58, Scout slice 6):
+// creates a COVER_LETTER + a TAILORED_CV GeneratedDocument for a completed
+// Analysis and polls each until it leaves PENDING/GENERATING. The PDF
+// download itself is a plain link to /api/generated-documents/{id}/pdf
+// (see generated-documents-panel.tsx), not a hook.
+
+export type GeneratedDocumentType = "COVER_LETTER" | "TAILORED_CV";
+export type GeneratedDocumentStatus = "PENDING" | "GENERATING" | "READY" | "FAILED";
+
+export type GeneratedDocument = {
+  id: string;
+  type: GeneratedDocumentType;
+  analysisId: string;
+  status: GeneratedDocumentStatus;
+  markdownContent: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+const TERMINAL_GENERATED_DOCUMENT_STATUSES: ReadonlySet<GeneratedDocumentStatus> = new Set([
+  "READY",
+  "FAILED",
+]);
+
+const GENERATED_DOCUMENT_POLL_INTERVAL_MS = 3000;
+
+/** Kicks off generation for an Analysis (`POST /api/analyses/{id}/generated-documents`),
+ * returning the two freshly created PENDING rows. */
+export function useCreateGeneratedDocuments(analysisId: string) {
+  return useMutation({
+    mutationFn: () =>
+      bff.post<{ generatedDocuments: GeneratedDocument[] }>(
+        `/analyses/${analysisId}/generated-documents`,
+      ),
+  });
+}
+
+/** The Analysis's current GeneratedDocuments, if generation has already run —
+ * lets the panel and the "Apply" action know what's ready after a reload,
+ * without re-triggering generation. Empty array before generation starts. */
+export function useAnalysisGeneratedDocuments(analysisId: string) {
+  return useQuery({
+    queryKey: ["analysis-generated-documents", analysisId],
+    queryFn: () =>
+      bff.get<{ generatedDocuments: GeneratedDocument[] }>(
+        `/analyses/${analysisId}/generated-documents`,
+      ),
+    select: (data) => data.generatedDocuments,
+  });
+}
+
+/** Regenerates a READY/FAILED GeneratedDocument (`POST
+ * /api/generated-documents/{id}/regenerate`): the API creates a fresh
+ * PENDING row of the same type and supersedes this one, so the caller
+ * should swap to polling the returned row's id. 409 if the document is
+ * still PENDING/GENERATING; 429 if DAILY_GENERATION_CAP is exhausted. */
+export function useRegenerateGeneratedDocument(id: string) {
+  return useMutation({
+    mutationFn: () =>
+      bff.post<{ generatedDocument: GeneratedDocument }>(
+        `/generated-documents/${id}/regenerate`,
+      ),
+  });
+}
+
+/** One GeneratedDocument, polled while it is PENDING/GENERATING. `id` may be
+ * `null` before generation has been triggered — the query stays disabled. */
+export function useGeneratedDocument(id: string | null) {
+  return useQuery({
+    queryKey: ["generated-document", id],
+    queryFn: () => bff.get<{ generatedDocument: GeneratedDocument }>(`/generated-documents/${id}`),
+    select: (data) => data.generatedDocument,
+    enabled: id !== null,
+    refetchInterval: (query) => {
+      const status = query.state.data?.generatedDocument.status;
+      return status && TERMINAL_GENERATED_DOCUMENT_STATUSES.has(status)
+        ? false
+        : GENERATED_DOCUMENT_POLL_INTERVAL_MS;
+    },
+  });
+}

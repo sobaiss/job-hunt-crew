@@ -2,35 +2,54 @@ import json
 import math
 import os
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from py_db.models import (
     Analysis,
     Analysisstatus,
+    Application,
+    Applicationstatus,
     CVVersion,
     Cvconversionstatus,
     Cvfiletype,
+    GeneratedDocument,
+    Generateddocumentstatus,
+    Generateddocumenttype,
     IngestionJob,
     IngestionJobOffer,
     Ingestionjobstatus,
     Ingestionmode,
     JobOffer,
+    Scout,
+    ScoutRun,
+    Scoutrunstatus,
+    Scoutstatus,
     SiteConfig,
+    StatusEvent,
 )
-from py_db.quota import analyses_requested_today, daily_analysis_cap
+from py_db.application_stats import compute_application_stats, stats_window_since
+from py_db.quota import (
+    analyses_requested_today,
+    daily_analysis_cap,
+    daily_generation_cap,
+    generated_documents_created_today,
+)
 from pydantic import BaseModel
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from .db import get_session
+from .pdf_render import render_markdown_to_pdf
 from .s3_client import S3_BUCKET, cv_file_key, make_s3_client
 from .sqs_client import (
     ANALYSIS_INTAKE_QUEUE_URL,
     CV_CONVERSION_QUEUE_URL,
+    GENERATION_INTAKE_QUEUE_URL,
     INGESTION_INTAKE_QUEUE_URL,
+    SCOUT_INTAKE_QUEUE_URL,
     make_sqs_client,
 )
 
@@ -317,6 +336,64 @@ async def update_cv_version(
     await session.refresh(existing)
 
     return UpdateCVVersionResponse(cvVersion=_cv_version_response(existing))
+
+
+@router.delete("/cv-versions/{cv_version_id}", status_code=204)
+async def delete_cv_version(
+    cv_version_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """Delete a CV version the caller owns. Rejected with a 409 naming the
+    referencing Scouts while any Scout still uses it as its base CV — the
+    `Scout.cvVersionId` FK is `onDelete: Restrict` (issue #53). User-scoped:
+    another user's CV is a 404, not a 403.
+    """
+    existing = await session.get(CVVersion, cv_version_id)
+    if existing is None or existing.userId != user_id:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    referencing = (
+        await session.scalars(
+            select(Scout).where(Scout.cvVersionId == cv_version_id).order_by(Scout.createdAt)
+        )
+    ).all()
+    if referencing:
+        labels = ", ".join(f'"{scout.label}"' for scout in referencing)
+        raise HTTPException(
+            status_code=409,
+            detail=f"This CV version is used by {len(referencing)} Scout(s): {labels}. "
+            "Point those Scouts at another CV first.",
+        )
+
+    # Application.cvVersionId is also onDelete: Restrict (issue #59) — a CV
+    # backing a tracked Application can't be deleted either.
+    application_count = int(
+        (
+            await session.scalar(
+                select(func.count())
+                .select_from(Application)
+                .where(Application.cvVersionId == cv_version_id)
+            )
+        )
+        or 0
+    )
+    if application_count:
+        raise HTTPException(
+            status_code=409,
+            detail=f"This CV version is used by {application_count} Application(s). "
+            "It cannot be deleted while those Applications reference it.",
+        )
+
+    file_key = existing.fileKey
+    await session.delete(existing)
+    await session.commit()
+
+    # S3 delete_object is idempotent (no error when the key is already gone,
+    # e.g. the browser upload to the presigned URL never completed), so no
+    # existence check is needed before this call.
+    s3 = make_s3_client()
+    s3.delete_object(Bucket=S3_BUCKET, Key=file_key)
 
 
 class CVVersionMarkdownResponse(BaseModel):
@@ -717,6 +794,7 @@ class AnalysisResponse(BaseModel):
     jobOfferId: str
     cvVersionId: str
     ingestionJobId: str | None
+    scoutId: str | None
     status: str
     s3ResultKey: str | None
     matchScore: int | None
@@ -739,6 +817,7 @@ def _analysis_response(row: Analysis) -> AnalysisResponse:
         jobOfferId=row.jobOfferId,
         cvVersionId=row.cvVersionId,
         ingestionJobId=row.ingestionJobId,
+        scoutId=row.scoutId,
         status=row.status.value,
         s3ResultKey=row.s3ResultKey,
         matchScore=row.matchScore,
@@ -902,3 +981,1250 @@ async def get_analysis(
         raise HTTPException(status_code=404, detail="Not found")
 
     return GetAnalysisResponse(analysis=_analysis_response(analysis))
+
+
+# --- Scouts (issue #53, Scout slice 1) ---
+# CRUD for the saved, self-running search + match configs a Candidate manages
+# from the "Agents" area. Scouts do not run yet — this slice is create / list /
+# get / patch (relabel, reconfigure, pause / resume / archive) plus the
+# MAX_SCOUTS_PER_USER guard. Every route is user-scoped: another user's Scout is
+# a 404, never a 403 (same convention as cv-versions / analyses).
+
+DEFAULT_MAX_SCOUTS_PER_USER = 5
+VALID_SITE_KEYS = ("LINKEDIN", "INDEED", "FRANCE_TRAVAIL", "WTTJ", "GLASSDOOR")
+SCOUT_STATUS_VALUES = ("ACTIVE", "PAUSED", "ARCHIVED")
+DEFAULT_SCOUT_MATCH_THRESHOLD = 70
+
+
+# --- Applications + per-Scout stats (issue #60) ---
+# Shared by GET /applications/stats (global) and GET /scouts/{id}/stats
+# (scoped); defined ahead of both call sites so `response_model=` resolves
+# regardless of which route is declared first in the file.
+
+
+class ApplicationStatsWindowResponse(BaseModel):
+    offersDiscovered: int
+    relevantFinds: int
+    documentsGenerated: int
+    applicationsSubmitted: int
+    responseRate: float
+    interviewRate: float
+    offerRate: float
+    acceptanceRate: float
+    medianDaysToFirstResponse: float | None
+
+
+class ApplicationStatsResponse(BaseModel):
+    allTime: ApplicationStatsWindowResponse
+    last30Days: ApplicationStatsWindowResponse
+
+
+async def _application_stats_response(
+    session: AsyncSession, user_id: str, *, scout_id: str | None = None
+) -> ApplicationStatsResponse:
+    all_time = await compute_application_stats(session, user_id, scout_id=scout_id)
+    last_30_days = await compute_application_stats(
+        session, user_id, scout_id=scout_id, since=stats_window_since()
+    )
+    return ApplicationStatsResponse(
+        allTime=ApplicationStatsWindowResponse(**all_time.__dict__),
+        last30Days=ApplicationStatsWindowResponse(**last_30_days.__dict__),
+    )
+
+
+def _max_scouts_per_user() -> int:
+    raw = os.environ.get("MAX_SCOUTS_PER_USER")
+    try:
+        parsed = int(raw) if raw else None
+    except ValueError:
+        parsed = None
+    return parsed if parsed is not None and parsed > 0 else DEFAULT_MAX_SCOUTS_PER_USER
+
+
+def _normalize_site_keys(value: Any) -> list[str]:
+    if not isinstance(value, list) or not value:
+        raise HTTPException(status_code=400, detail="targetSiteKeys must be a non-empty array")
+    keys: list[str] = []
+    for entry in value:
+        if not isinstance(entry, str) or entry not in VALID_SITE_KEYS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"targetSiteKeys entries must be one of: {', '.join(VALID_SITE_KEYS)}",
+            )
+        if entry not in keys:
+            keys.append(entry)
+    return keys
+
+
+def _normalize_scout_filters(value: Any) -> dict[str, Any]:
+    filters_in = value if isinstance(value, dict) else {}
+
+    posted_within = _optional_string(filters_in.get("postedWithin"))
+    if posted_within is not None and posted_within not in POSTED_WITHIN_VALUES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"filters.postedWithin must be one of: {', '.join(POSTED_WITHIN_VALUES)}",
+        )
+
+    remote = _optional_string(filters_in.get("remote"))
+    if remote is not None and remote not in REMOTE_VALUES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"filters.remote must be one of: {', '.join(REMOTE_VALUES)}",
+        )
+
+    return {
+        "keywords": _optional_string(filters_in.get("keywords")),
+        "location": _optional_string(filters_in.get("location")),
+        "postedWithin": posted_within,
+        "contractType": _optional_string(filters_in.get("contractType")),
+        "remote": remote,
+        "experienceLevel": _optional_string(filters_in.get("experienceLevel")),
+    }
+
+
+def _normalize_threshold(value: Any) -> int:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int | float)
+        or not math.isfinite(value)
+    ):
+        raise HTTPException(
+            status_code=400, detail="matchThreshold must be a number between 0 and 100"
+        )
+    parsed = int(value)
+    if parsed < 0 or parsed > 100:
+        raise HTTPException(status_code=400, detail="matchThreshold must be between 0 and 100")
+    return parsed
+
+
+async def _active_scout_count(session: AsyncSession, user_id: str, *, exclude_id: str | None = None) -> int:
+    stmt = select(func.count()).select_from(Scout).where(
+        Scout.userId == user_id, Scout.status == Scoutstatus.ACTIVE
+    )
+    if exclude_id is not None:
+        stmt = stmt.where(Scout.id != exclude_id)
+    return int((await session.scalar(stmt)) or 0)
+
+
+async def _owned_cv_version(session: AsyncSession, cv_version_id: str, user_id: str) -> CVVersion:
+    cv_version = await session.get(CVVersion, cv_version_id)
+    if cv_version is None or cv_version.userId != user_id:
+        raise HTTPException(status_code=400, detail="Unknown cvVersionId")
+    return cv_version
+
+
+class ScoutResponse(BaseModel):
+    id: str
+    userId: str
+    label: str
+    cvVersionId: str
+    targetSiteKeys: list[str]
+    filters: dict[str, Any]
+    matchThreshold: int
+    status: str
+    lastRunAt: datetime | None
+    createdAt: datetime
+    updatedAt: datetime
+    # Un-actioned relevant finds (completed Analyses with matchScore >=
+    # matchThreshold) for this Scout — issue #56. There is no "actioned"
+    # tracking yet (Application lands in slice 7 / #59), so every relevant
+    # find currently counts; the field name is kept forward-looking so the
+    # Dashboard block doesn't need a contract change once that lands.
+    relevantFindsCount: int
+
+
+def _scout_response(row: Scout, relevant_finds_count: int = 0) -> ScoutResponse:
+    return ScoutResponse(
+        id=row.id,
+        userId=row.userId,
+        label=row.label,
+        cvVersionId=row.cvVersionId,
+        targetSiteKeys=list(row.targetSiteKeys or []),
+        filters=dict(row.filters or {}),
+        matchThreshold=row.matchThreshold,
+        status=row.status.value,
+        lastRunAt=row.lastRunAt,
+        createdAt=row.createdAt,
+        updatedAt=row.updatedAt,
+        relevantFindsCount=relevant_finds_count,
+    )
+
+
+async def _relevant_finds_count(session: AsyncSession, scout_id: str, threshold: int) -> int:
+    stmt = select(func.count()).select_from(Analysis).where(
+        Analysis.scoutId == scout_id,
+        Analysis.status == Analysisstatus.COMPLETED,
+        Analysis.matchScore >= threshold,
+    )
+    return int((await session.scalar(stmt)) or 0)
+
+
+async def _relevant_finds_counts_by_scout(
+    session: AsyncSession, user_id: str
+) -> dict[str, int]:
+    """One grouped query for the whole list, so `list_scouts` (which backs the
+    Dashboard's cross-Scout "new matches" block, issue #56) avoids an N+1."""
+    stmt = (
+        select(Analysis.scoutId, func.count())
+        .select_from(Analysis)
+        .join(Scout, Scout.id == Analysis.scoutId)
+        .where(
+            Scout.userId == user_id,
+            Analysis.status == Analysisstatus.COMPLETED,
+            Analysis.matchScore >= Scout.matchThreshold,
+        )
+        .group_by(Analysis.scoutId)
+    )
+    rows = (await session.execute(stmt)).all()
+    return {scout_id: count for scout_id, count in rows}
+
+
+class ScoutListResponse(BaseModel):
+    scouts: list[ScoutResponse]
+
+
+class GetScoutResponse(BaseModel):
+    scout: ScoutResponse
+
+
+@router.get("/scouts", response_model=ScoutListResponse)
+async def list_scouts(
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> ScoutListResponse:
+    rows = (
+        await session.scalars(
+            select(Scout).where(Scout.userId == user_id).order_by(Scout.createdAt.desc())
+        )
+    ).all()
+    counts = await _relevant_finds_counts_by_scout(session, user_id)
+    return ScoutListResponse(
+        scouts=[_scout_response(row, counts.get(row.id, 0)) for row in rows]
+    )
+
+
+class CreateScoutRequest(BaseModel):
+    label: Any = None
+    cvVersionId: Any = None
+    targetSiteKeys: Any = None
+    filters: Any = None
+    matchThreshold: Any = None
+
+
+@router.post("/scouts", response_model=GetScoutResponse, status_code=201)
+async def create_scout(
+    req: CreateScoutRequest,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> GetScoutResponse:
+    label = req.label.strip() if isinstance(req.label, str) else ""
+    if not label:
+        raise HTTPException(status_code=400, detail="label is required")
+
+    cv_version_id = _optional_string(req.cvVersionId)
+    if not cv_version_id:
+        raise HTTPException(status_code=400, detail="cvVersionId is required")
+    await _owned_cv_version(session, cv_version_id, user_id)
+
+    target_site_keys = _normalize_site_keys(req.targetSiteKeys)
+    filters = _normalize_scout_filters(req.filters)
+    match_threshold = (
+        DEFAULT_SCOUT_MATCH_THRESHOLD
+        if req.matchThreshold is None
+        else _normalize_threshold(req.matchThreshold)
+    )
+
+    cap = _max_scouts_per_user()
+    if await _active_scout_count(session, user_id) >= cap:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"You can have at most {cap} active Scouts. "
+                "Pause or archive one before creating another."
+            ),
+        )
+
+    scout = Scout(
+        id=str(uuid.uuid4()),
+        userId=user_id,
+        label=label,
+        cvVersionId=cv_version_id,
+        targetSiteKeys=target_site_keys,
+        filters=filters,
+        matchThreshold=match_threshold,
+        status=Scoutstatus.ACTIVE,
+        updatedAt=_now(),
+    )
+    session.add(scout)
+    await session.commit()
+    await session.refresh(scout)
+
+    return GetScoutResponse(scout=_scout_response(scout))
+
+
+@router.get("/scouts/{scout_id}", response_model=GetScoutResponse)
+async def get_scout(
+    scout_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> GetScoutResponse:
+    scout = await session.get(Scout, scout_id)
+    if scout is None or scout.userId != user_id:
+        raise HTTPException(status_code=404, detail="Not found")
+    count = await _relevant_finds_count(session, scout.id, scout.matchThreshold)
+    return GetScoutResponse(scout=_scout_response(scout, count))
+
+
+class UpdateScoutRequest(BaseModel):
+    label: Any = None
+    cvVersionId: Any = None
+    targetSiteKeys: Any = None
+    filters: Any = None
+    matchThreshold: Any = None
+    status: Any = None
+
+
+@router.patch("/scouts/{scout_id}", response_model=GetScoutResponse)
+async def update_scout(
+    scout_id: str,
+    req: UpdateScoutRequest,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> GetScoutResponse:
+    scout = await session.get(Scout, scout_id)
+    if scout is None or scout.userId != user_id:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    if scout.status == Scoutstatus.ARCHIVED:
+        raise HTTPException(status_code=409, detail="Archived Scouts are read-only")
+
+    provided = req.model_dump(exclude_unset=True)
+    if not provided:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+
+    if "label" in provided:
+        if not isinstance(req.label, str) or not req.label.strip():
+            raise HTTPException(status_code=400, detail="label must not be empty")
+        scout.label = req.label.strip()
+
+    if "cvVersionId" in provided:
+        cv_version_id = _optional_string(req.cvVersionId)
+        if not cv_version_id:
+            raise HTTPException(status_code=400, detail="cvVersionId must not be empty")
+        await _owned_cv_version(session, cv_version_id, user_id)
+        scout.cvVersionId = cv_version_id
+
+    if "targetSiteKeys" in provided:
+        scout.targetSiteKeys = _normalize_site_keys(req.targetSiteKeys)
+
+    if "filters" in provided:
+        scout.filters = _normalize_scout_filters(req.filters)
+
+    if "matchThreshold" in provided:
+        scout.matchThreshold = _normalize_threshold(req.matchThreshold)
+
+    if "status" in provided:
+        if req.status not in SCOUT_STATUS_VALUES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"status must be one of: {', '.join(SCOUT_STATUS_VALUES)}",
+            )
+        new_status = Scoutstatus(req.status)
+        if (
+            new_status == Scoutstatus.ACTIVE
+            and scout.status != Scoutstatus.ACTIVE
+        ):
+            cap = _max_scouts_per_user()
+            if await _active_scout_count(session, user_id, exclude_id=scout.id) >= cap:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"You can have at most {cap} active Scouts. "
+                        "Pause or archive one before resuming this one."
+                    ),
+                )
+        scout.status = new_status
+
+    scout.updatedAt = _now()
+    await session.commit()
+    await session.refresh(scout)
+
+    count = await _relevant_finds_count(session, scout.id, scout.matchThreshold)
+    return GetScoutResponse(scout=_scout_response(scout, count))
+
+
+class ScoutFindsResponse(BaseModel):
+    relevantFinds: list[AnalysisResponse]
+    lowFitFinds: list[AnalysisResponse]
+
+
+@router.get("/scouts/{scout_id}/finds", response_model=ScoutFindsResponse)
+async def list_scout_finds(
+    scout_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> ScoutFindsResponse:
+    """Completed Analyses this Scout has produced, split by
+    `matchScore >= Scout.matchThreshold` into relevant finds and "found — low
+    fit" (issue #56). Each row is the same `AnalysisResponse` shape a manual
+    analysis uses, so the web client opens the identical gap report."""
+    scout = await _owned_scout(session, scout_id, user_id)
+    rows = (
+        await session.scalars(
+            select(Analysis)
+            .options(
+                selectinload(Analysis.JobOffer_),
+                selectinload(Analysis.CVVersion_),
+                selectinload(Analysis.IngestionJob_),
+            )
+            .where(Analysis.scoutId == scout.id, Analysis.status == Analysisstatus.COMPLETED)
+            .order_by(Analysis.completedAt.desc())
+        )
+    ).all()
+    relevant = [row for row in rows if (row.matchScore or 0) >= scout.matchThreshold]
+    low_fit = [row for row in rows if (row.matchScore or 0) < scout.matchThreshold]
+    return ScoutFindsResponse(
+        relevantFinds=[_analysis_response(row) for row in relevant],
+        lowFitFinds=[_analysis_response(row) for row in low_fit],
+    )
+
+
+@router.get("/scouts/{scout_id}/stats", response_model=ApplicationStatsResponse)
+async def get_scout_stats(
+    scout_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> ApplicationStatsResponse:
+    """The same stats header as `GET /applications/stats` (issue #60), scoped
+    to this Scout's own offers/finds/documents/applications."""
+    scout = await _owned_scout(session, scout_id, user_id)
+    return await _application_stats_response(session, user_id, scout_id=scout.id)
+
+
+class SkillPattern(BaseModel):
+    skill: str
+    count: int
+
+
+class WeaknessPattern(BaseModel):
+    weakness: str
+    count: int
+
+
+class ScoutPatternsResponse(BaseModel):
+    patterns: list[SkillPattern]
+    weaknesses: list[WeaknessPattern]
+
+
+def _rank_by_frequency(values: list[str]) -> list[tuple[str, int]]:
+    """Case-insensitive frequency ranking of free-text values, most-frequent
+    first, showing the most common original casing for each group."""
+    counts: dict[str, int] = {}
+    display: dict[str, str] = {}
+    for value in values:
+        if not isinstance(value, str) or not value.strip():
+            continue
+        key = value.strip().lower()
+        counts[key] = counts.get(key, 0) + 1
+        display.setdefault(key, value.strip())
+    ranked = sorted(counts.items(), key=lambda item: (-item[1], display[item[0]]))
+    return [(display[key], count) for key, count in ranked]
+
+
+@router.get("/scouts/{scout_id}/patterns", response_model=ScoutPatternsResponse)
+async def get_scout_patterns(
+    scout_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> ScoutPatternsResponse:
+    """"Patterns across your matches" (issue #60): aggregates `missing_skills`
+    and `weaknesses` across this Scout's completed Analyses. `missing_skills`
+    counts only `required`-importance entries (the AC's "ranked by frequency
+    among required skills"). `weaknesses` is free text with no importance
+    field, so it is ranked by exact (case-insensitive) text frequency instead
+    — the same no-NLP, lexical-only precedent used elsewhere in this
+    codebase (e.g. issue #55's pre-rank). Both lists are most-frequent first.
+    """
+    scout = await _owned_scout(session, scout_id, user_id)
+    rows = (
+        await session.scalars(
+            select(Analysis).where(
+                Analysis.scoutId == scout.id,
+                Analysis.status == Analysisstatus.COMPLETED,
+                Analysis.resultJSON.is_not(None),
+            )
+        )
+    ).all()
+
+    required_skills = [
+        entry.get("skill")
+        for row in rows
+        for entry in (row.resultJSON or {}).get("missing_skills", [])
+        if isinstance(entry, dict) and entry.get("importance") == "required"
+    ]
+    all_weaknesses = [
+        weakness for row in rows for weakness in (row.resultJSON or {}).get("weaknesses", [])
+    ]
+
+    return ScoutPatternsResponse(
+        patterns=[
+            SkillPattern(skill=skill, count=count)
+            for skill, count in _rank_by_frequency(required_skills)
+        ],
+        weaknesses=[
+            WeaknessPattern(weakness=weakness, count=count)
+            for weakness, count in _rank_by_frequency(all_weaknesses)
+        ],
+    )
+
+
+# --- Scout runs (issue #54, Scout slice 2) ---
+# "Run now" on a Scout creates a ScoutRun row and enqueues `{"scoutRunId": id}`
+# on `scout-intake`; the scout worker fans it out to one SITE_SEARCH
+# IngestionJob per targeted enabled site. "Run now" is rate-limited to once an
+# hour per Scout. GET returns run history / a single run, user-scoped via the
+# owning Scout (another user's run is a 404).
+
+SCOUT_RUN_RATE_LIMIT = timedelta(hours=1)
+
+
+class ScoutRunResponse(BaseModel):
+    id: str
+    scoutId: str
+    status: str
+    sitesQueried: int
+    siteUnavailableCount: int
+    offersDiscovered: int
+    offersAnalysed: int
+    relevantCount: int
+    failedCount: int
+    alreadySeenCount: int
+    runLimitSkippedCount: int
+    capSkippedCount: int
+    errorMessage: str | None
+    startedAt: datetime | None
+    finishedAt: datetime | None
+    createdAt: datetime
+
+
+def _scout_run_response(row: ScoutRun) -> ScoutRunResponse:
+    return ScoutRunResponse(
+        id=row.id,
+        scoutId=row.scoutId,
+        status=row.status.value,
+        sitesQueried=row.sitesQueried,
+        siteUnavailableCount=row.siteUnavailableCount,
+        offersDiscovered=row.offersDiscovered,
+        offersAnalysed=row.offersAnalysed,
+        relevantCount=row.relevantCount,
+        failedCount=row.failedCount,
+        alreadySeenCount=row.alreadySeenCount,
+        runLimitSkippedCount=row.runLimitSkippedCount,
+        capSkippedCount=row.capSkippedCount,
+        errorMessage=row.errorMessage,
+        startedAt=row.startedAt,
+        finishedAt=row.finishedAt,
+        createdAt=row.createdAt,
+    )
+
+
+class ScoutRunListResponse(BaseModel):
+    scoutRuns: list[ScoutRunResponse]
+
+
+class GetScoutRunResponse(BaseModel):
+    scoutRun: ScoutRunResponse
+
+
+async def _owned_scout(session: AsyncSession, scout_id: str, user_id: str) -> Scout:
+    scout = await session.get(Scout, scout_id)
+    if scout is None or scout.userId != user_id:
+        raise HTTPException(status_code=404, detail="Not found")
+    return scout
+
+
+@router.post(
+    "/scouts/{scout_id}/run", response_model=GetScoutRunResponse, status_code=201
+)
+async def run_scout(
+    scout_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> GetScoutRunResponse:
+    scout = await _owned_scout(session, scout_id, user_id)
+    if scout.status == Scoutstatus.ARCHIVED:
+        raise HTTPException(status_code=409, detail="Archived Scouts cannot be run")
+
+    latest = (
+        await session.scalars(
+            select(ScoutRun)
+            .where(ScoutRun.scoutId == scout.id)
+            .order_by(ScoutRun.createdAt.desc())
+            .limit(1)
+        )
+    ).first()
+    if latest is not None and latest.createdAt > _now() - SCOUT_RUN_RATE_LIMIT:
+        raise HTTPException(
+            status_code=429,
+            detail="This Scout ran within the last hour. Try again later.",
+        )
+
+    scout_run = ScoutRun(
+        id=str(uuid.uuid4()),
+        scoutId=scout.id,
+        status=Scoutrunstatus.PENDING,
+    )
+    session.add(scout_run)
+    await session.commit()
+    await session.refresh(scout_run)
+
+    sqs = make_sqs_client()
+    sqs.send_message(
+        QueueUrl=SCOUT_INTAKE_QUEUE_URL,
+        MessageBody=json.dumps({"scoutRunId": scout_run.id}),
+    )
+
+    return GetScoutRunResponse(scoutRun=_scout_run_response(scout_run))
+
+
+@router.get("/scouts/{scout_id}/runs", response_model=ScoutRunListResponse)
+async def list_scout_runs(
+    scout_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> ScoutRunListResponse:
+    scout = await _owned_scout(session, scout_id, user_id)
+    rows = (
+        await session.scalars(
+            select(ScoutRun)
+            .where(ScoutRun.scoutId == scout.id)
+            .order_by(ScoutRun.createdAt.desc())
+        )
+    ).all()
+    return ScoutRunListResponse(scoutRuns=[_scout_run_response(row) for row in rows])
+
+
+@router.get("/scout-runs/{run_id}", response_model=GetScoutRunResponse)
+async def get_scout_run(
+    run_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> GetScoutRunResponse:
+    run = await session.get(ScoutRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    await _owned_scout(session, run.scoutId, user_id)
+    return GetScoutRunResponse(scoutRun=_scout_run_response(run))
+
+
+# --- Generated documents (issue #58, Scout slice 6) ---
+# "Generate documents" on a find creates one COVER_LETTER + one TAILORED_CV
+# GeneratedDocument (both PENDING) and enqueues one generation-intake message
+# per row; the generation worker (analysis.generation_pipeline, in-process
+# for local dev — see its module docstring) runs the matching agent and
+# writes the resulting Markdown back onto the row. User-scoped via the
+# owning Analysis — another user's analysis/document is a 404.
+
+
+async def _owned_analysis(session: AsyncSession, analysis_id: str, user_id: str) -> Analysis:
+    analysis = await session.get(Analysis, analysis_id)
+    if analysis is None or analysis.userId != user_id:
+        raise HTTPException(status_code=404, detail="Not found")
+    return analysis
+
+
+async def _get_or_create_application(
+    session: AsyncSession, analysis: Analysis, user_id: str
+) -> Application:
+    """Lazily get-or-creates the Application for an Analysis — called from
+    both `POST /applications` and `POST /analyses/{id}/generated-documents`
+    (issue #59's "and from now on also when documents are generated" AC), so
+    neither path can create a duplicate row for the same analysisId.
+    """
+    existing = await session.scalar(
+        select(Application).where(Application.analysisId == analysis.id)
+    )
+    if existing is not None:
+        return existing
+
+    application = Application(
+        id=str(uuid.uuid4()),
+        userId=user_id,
+        analysisId=analysis.id,
+        jobOfferId=analysis.jobOfferId,
+        cvVersionId=analysis.cvVersionId,
+        scoutId=analysis.scoutId,
+        status=Applicationstatus.DRAFT,
+        updatedAt=_now(),
+    )
+    session.add(application)
+    await session.commit()
+    return application
+
+
+class GeneratedDocumentResponse(BaseModel):
+    id: str
+    type: str
+    analysisId: str
+    status: str
+    markdownContent: str | None
+    errorMessage: str | None
+    createdAt: datetime
+    updatedAt: datetime
+
+
+def _generated_document_response(row: GeneratedDocument) -> GeneratedDocumentResponse:
+    return GeneratedDocumentResponse(
+        id=row.id,
+        type=row.type.value,
+        analysisId=row.analysisId,
+        status=row.status.value,
+        markdownContent=row.markdownContent,
+        errorMessage=row.errorMessage,
+        createdAt=row.createdAt,
+        updatedAt=row.updatedAt,
+    )
+
+
+class CreateGeneratedDocumentsResponse(BaseModel):
+    generatedDocuments: list[GeneratedDocumentResponse]
+
+
+@router.post(
+    "/analyses/{analysis_id}/generated-documents",
+    response_model=CreateGeneratedDocumentsResponse,
+    status_code=202,
+)
+async def create_generated_documents(
+    analysis_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> CreateGeneratedDocumentsResponse:
+    """Creates a COVER_LETTER and a TAILORED_CV GeneratedDocument (PENDING)
+    for a completed Analysis and enqueues one generation-intake message per
+    row. Requires the Analysis to be COMPLETED — its resultJSON's
+    matched/missing skills steer the generation agents.
+    """
+    analysis = await _owned_analysis(session, analysis_id, user_id)
+    if analysis.status != Analysisstatus.COMPLETED:
+        raise HTTPException(
+            status_code=400,
+            detail="Analysis must be COMPLETED before generating documents",
+        )
+
+    await _get_or_create_application(session, analysis, user_id)
+
+    scout_run_id: str | None = None
+    if analysis.ingestionJobId:
+        ingestion_job = await session.get(IngestionJob, analysis.ingestionJobId)
+        if ingestion_job is not None:
+            scout_run_id = ingestion_job.scoutRunId
+
+    now = _now()
+    documents = [
+        GeneratedDocument(
+            id=str(uuid.uuid4()),
+            type=doc_type,
+            analysisId=analysis.id,
+            jobOfferId=analysis.jobOfferId,
+            cvVersionId=analysis.cvVersionId,
+            scoutRunId=scout_run_id,
+            status=Generateddocumentstatus.PENDING,
+            updatedAt=now,
+        )
+        for doc_type in (Generateddocumenttype.COVER_LETTER, Generateddocumenttype.TAILORED_CV)
+    ]
+    session.add_all(documents)
+    await session.commit()
+
+    sqs = make_sqs_client()
+    for document in documents:
+        sqs.send_message(
+            QueueUrl=GENERATION_INTAKE_QUEUE_URL,
+            MessageBody=json.dumps({"generatedDocumentId": document.id}),
+        )
+
+    return CreateGeneratedDocumentsResponse(
+        generatedDocuments=[_generated_document_response(row) for row in documents]
+    )
+
+
+class ListGeneratedDocumentsResponse(BaseModel):
+    generatedDocuments: list[GeneratedDocumentResponse]
+
+
+@router.get(
+    "/analyses/{analysis_id}/generated-documents",
+    response_model=ListGeneratedDocumentsResponse,
+)
+async def list_generated_documents(
+    analysis_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> ListGeneratedDocumentsResponse:
+    """The Analysis's current (non-superseded) GeneratedDocuments, at most one
+    per type — lets the UI know what's ready to apply with after a reload,
+    without re-triggering generation.
+    """
+    await _owned_analysis(session, analysis_id, user_id)
+    rows = (
+        await session.scalars(
+            select(GeneratedDocument)
+            .where(
+                GeneratedDocument.analysisId == analysis_id,
+                GeneratedDocument.supersededById.is_(None),
+            )
+            .order_by(GeneratedDocument.createdAt)
+        )
+    ).all()
+    return ListGeneratedDocumentsResponse(
+        generatedDocuments=[_generated_document_response(row) for row in rows]
+    )
+
+
+class GetGeneratedDocumentResponse(BaseModel):
+    generatedDocument: GeneratedDocumentResponse
+
+
+@router.get("/generated-documents/{document_id}", response_model=GetGeneratedDocumentResponse)
+async def get_generated_document(
+    document_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> GetGeneratedDocumentResponse:
+    document = await session.get(GeneratedDocument, document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    await _owned_analysis(session, document.analysisId, user_id)
+    return GetGeneratedDocumentResponse(generatedDocument=_generated_document_response(document))
+
+
+@router.post(
+    "/generated-documents/{document_id}/regenerate",
+    response_model=GetGeneratedDocumentResponse,
+    status_code=202,
+)
+async def regenerate_generated_document(
+    document_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> GetGeneratedDocumentResponse:
+    """Regenerates a GeneratedDocument: creates a fresh PENDING row of the
+    same type and enqueues a generation-intake message for it, then points
+    the superseded row's supersededById at the new one so only the latest
+    shows in `GET /analyses/{id}/generated-documents` (issue #58). A document
+    already PENDING/GENERATING is 409 (nothing to regenerate yet); bounded by
+    `DAILY_GENERATION_CAP` (default 20), separate from the analysis cap.
+    """
+    document = await session.get(GeneratedDocument, document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    await _owned_analysis(session, document.analysisId, user_id)
+
+    if document.status in (
+        Generateddocumentstatus.PENDING,
+        Generateddocumentstatus.GENERATING,
+    ):
+        raise HTTPException(
+            status_code=409, detail="Document generation is already in progress"
+        )
+
+    cap = daily_generation_cap()
+    if await generated_documents_created_today(session, user_id) >= cap:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Daily document generation limit of {cap} reached. Try again tomorrow.",
+        )
+
+    now = _now()
+    new_document = GeneratedDocument(
+        id=str(uuid.uuid4()),
+        type=document.type,
+        analysisId=document.analysisId,
+        jobOfferId=document.jobOfferId,
+        cvVersionId=document.cvVersionId,
+        scoutRunId=document.scoutRunId,
+        status=Generateddocumentstatus.PENDING,
+        updatedAt=now,
+    )
+    session.add(new_document)
+    document.supersededById = new_document.id
+    document.updatedAt = now
+    await session.commit()
+
+    sqs = make_sqs_client()
+    sqs.send_message(
+        QueueUrl=GENERATION_INTAKE_QUEUE_URL,
+        MessageBody=json.dumps({"generatedDocumentId": new_document.id}),
+    )
+
+    return GetGeneratedDocumentResponse(
+        generatedDocument=_generated_document_response(new_document)
+    )
+
+
+_GENERATED_DOCUMENT_LABELS = {
+    Generateddocumenttype.COVER_LETTER: "Cover Letter",
+    Generateddocumenttype.TAILORED_CV: "Tailored CV",
+}
+
+
+@router.get("/generated-documents/{document_id}/pdf")
+async def get_generated_document_pdf(
+    document_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """Renders a READY GeneratedDocument's Markdown to PDF on demand (no PDF
+    is stored — see pdf_render.render_markdown_to_pdf).
+    """
+    document = await session.get(GeneratedDocument, document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    await _owned_analysis(session, document.analysisId, user_id)
+    if document.status != Generateddocumentstatus.READY or document.markdownContent is None:
+        raise HTTPException(status_code=400, detail="Document is not ready")
+
+    label = _GENERATED_DOCUMENT_LABELS[document.type]
+    job_offer = await session.get(JobOffer, document.jobOfferId)
+    title = f"{label} — {job_offer.title}" if job_offer and job_offer.title else label
+    pdf_bytes = render_markdown_to_pdf(title=title, markdown_content=document.markdownContent)
+
+    filename = f"{label.lower().replace(' ', '-')}-{document.id}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# --- Applications (issue #59, Scout slice 7) ---
+# An Application tracks a Candidate's pursuit of one Analysis's offer through
+# a status pipeline (DRAFT -> APPLIED -> INTERVIEWING -> OFFER -> ACCEPTED /
+# REJECTED / WITHDRAWN). Created lazily: `POST /v1/applications` is
+# idempotent per `analysisId` (DB-unique) — the first call for a given
+# Analysis creates the row (DRAFT), every later call returns the existing
+# row unchanged, so "Generate documents" and "Mark as applied" can both call
+# it without risking a duplicate. The append-only StatusEvent list is the
+# timeline's source of truth; `Application.status`/`appliedAt` are
+# denormalised onto the row and kept in sync on every append (mirrors
+# Scout.lastRunAt) so list/detail reads don't need a per-row subquery.
+# User-scoped via `Application.userId` directly — another user's Application
+# is a 404. The "Apply" web action (open the posting, download the document
+# package, set APPLIED) is a client-side composition of this endpoint plus
+# window.open — there is no server-side package/download endpoint yet since
+# PDF rendering (#58's deferred item) isn't built; "Apply" and "Mark as
+# applied" both currently just record the status change.
+
+APPLICATION_STATUS_VALUES = (
+    "DRAFT",
+    "APPLIED",
+    "INTERVIEWING",
+    "OFFER",
+    "ACCEPTED",
+    "REJECTED",
+    "WITHDRAWN",
+)
+
+
+class StatusEventResponse(BaseModel):
+    id: str
+    applicationId: str
+    status: str
+    note: str | None
+    effectiveDate: datetime
+    createdAt: datetime
+
+
+def _status_event_response(row: StatusEvent) -> StatusEventResponse:
+    return StatusEventResponse(
+        id=row.id,
+        applicationId=row.applicationId,
+        status=row.status.value,
+        note=row.note,
+        effectiveDate=row.effectiveDate,
+        createdAt=row.createdAt,
+    )
+
+
+class ApplicationJobOfferSummary(BaseModel):
+    id: str
+    title: str | None
+    company: str | None
+
+
+class ApplicationCvVersionSummary(BaseModel):
+    label: str
+
+
+class ApplicationResponse(BaseModel):
+    id: str
+    userId: str
+    analysisId: str
+    jobOfferId: str
+    cvVersionId: str
+    scoutId: str | None
+    coverLetterDocId: str | None
+    tailoredCvDocId: str | None
+    status: str
+    appliedAt: datetime | None
+    createdAt: datetime
+    updatedAt: datetime
+    # Embedded summaries (issue #59's "offer, CV version used" list AC) — the
+    # caller must eager-load `Application.JobOffer_`/`CVVersion_` before
+    # calling this; every endpoint below does via `selectinload`.
+    jobOffer: ApplicationJobOfferSummary
+    cvVersion: ApplicationCvVersionSummary
+
+
+def _application_response(row: Application) -> ApplicationResponse:
+    return ApplicationResponse(
+        id=row.id,
+        userId=row.userId,
+        analysisId=row.analysisId,
+        jobOfferId=row.jobOfferId,
+        cvVersionId=row.cvVersionId,
+        scoutId=row.scoutId,
+        coverLetterDocId=row.coverLetterDocId,
+        tailoredCvDocId=row.tailoredCvDocId,
+        status=row.status.value,
+        appliedAt=row.appliedAt,
+        createdAt=row.createdAt,
+        updatedAt=row.updatedAt,
+        jobOffer=ApplicationJobOfferSummary(
+            id=row.JobOffer_.id, title=row.JobOffer_.title, company=row.JobOffer_.company
+        ),
+        cvVersion=ApplicationCvVersionSummary(label=row.CVVersion_.label),
+    )
+
+
+class ApplicationDetailResponse(ApplicationResponse):
+    jobOffer: JobOfferResponse  # type: ignore[assignment]
+    statusEvents: list[StatusEventResponse]
+
+
+async def _owned_application(session: AsyncSession, application_id: str, user_id: str) -> Application:
+    application = await session.get(Application, application_id)
+    if application is None or application.userId != user_id:
+        raise HTTPException(status_code=404, detail="Not found")
+    return application
+
+
+class CreateApplicationRequest(BaseModel):
+    analysisId: Any = None
+
+
+class CreateApplicationResponse(BaseModel):
+    application: ApplicationResponse
+
+
+@router.post("/applications", response_model=CreateApplicationResponse)
+async def create_application(
+    req: CreateApplicationRequest,
+    response: Response,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> CreateApplicationResponse:
+    """Lazily get-or-creates the Application for an Analysis the caller owns.
+    A second call for the same analysisId returns the existing row (200)
+    rather than erroring or duplicating; the first call creates it (201).
+    """
+    analysis_id = _optional_string(req.analysisId)
+    if not analysis_id:
+        raise HTTPException(status_code=400, detail="analysisId is required")
+
+    analysis = await _owned_analysis(session, analysis_id, user_id)
+
+    application_options = (
+        selectinload(Application.JobOffer_),
+        selectinload(Application.CVVersion_),
+    )
+
+    existing = await session.scalar(
+        select(Application).options(*application_options).where(Application.analysisId == analysis_id)
+    )
+    if existing is not None:
+        response.status_code = 200
+        return CreateApplicationResponse(application=_application_response(existing))
+
+    created = await _get_or_create_application(session, analysis, user_id)
+
+    application = await session.scalar(
+        select(Application).options(*application_options).where(Application.id == created.id)
+    )
+    assert application is not None
+
+    response.status_code = 201
+    return CreateApplicationResponse(application=_application_response(application))
+
+
+class ApplicationListResponse(BaseModel):
+    applications: list[ApplicationResponse]
+
+
+@router.get("/applications", response_model=ApplicationListResponse)
+async def list_applications(
+    status: str | None = None,
+    scoutId: str | None = None,
+    sortDir: str = "desc",
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> ApplicationListResponse:
+    """Lists the caller's Applications, sorted by `updatedAt`. `status` and
+    `scoutId` are optional equality filters backing the Applications tracker's
+    filter controls; `sortDir` (`desc`, the default, or `asc`) backs its sort
+    control.
+    """
+    if status is not None and status not in APPLICATION_STATUS_VALUES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"status must be one of: {', '.join(APPLICATION_STATUS_VALUES)}",
+        )
+    if sortDir not in ("asc", "desc"):
+        raise HTTPException(status_code=400, detail="sortDir must be one of: asc, desc")
+
+    stmt = (
+        select(Application)
+        .options(selectinload(Application.JobOffer_), selectinload(Application.CVVersion_))
+        .where(Application.userId == user_id)
+    )
+    if status is not None:
+        stmt = stmt.where(Application.status == Applicationstatus(status))
+    if scoutId is not None:
+        stmt = stmt.where(Application.scoutId == scoutId)
+    stmt = stmt.order_by(
+        Application.updatedAt.asc() if sortDir == "asc" else Application.updatedAt.desc()
+    )
+
+    rows = (await session.scalars(stmt)).all()
+    return ApplicationListResponse(applications=[_application_response(row) for row in rows])
+
+
+@router.get("/applications/stats", response_model=ApplicationStatsResponse)
+async def get_application_stats(
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> ApplicationStatsResponse:
+    """Applications view's stats header (issue #60): offers discovered,
+    relevant finds, documents generated, applications submitted, the funnel
+    rates, and the median days to first response — across every Scout,
+    shown both all-time and for the last 30 days. Registered ahead of
+    `GET /applications/{application_id}` so the literal `stats` path segment
+    is matched first.
+    """
+    return await _application_stats_response(session, user_id)
+
+
+class GetApplicationResponse(BaseModel):
+    application: ApplicationDetailResponse
+
+
+@router.get("/applications/{application_id}", response_model=GetApplicationResponse)
+async def get_application(
+    application_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> GetApplicationResponse:
+    stmt = (
+        select(Application)
+        .options(
+            selectinload(Application.JobOffer_),
+            selectinload(Application.CVVersion_),
+            selectinload(Application.StatusEvent),
+        )
+        .where(Application.id == application_id)
+    )
+    application = (await session.scalars(stmt)).first()
+    if application is None or application.userId != user_id:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    events = sorted(application.StatusEvent, key=lambda e: (e.effectiveDate, e.createdAt))
+    return GetApplicationResponse(
+        application=ApplicationDetailResponse(
+            **_application_response(application).model_dump(exclude={"jobOffer"}),
+            jobOffer=_job_offer_response(application.JobOffer_),
+            statusEvents=[_status_event_response(e) for e in events],
+        )
+    )
+
+
+class AddStatusEventRequest(BaseModel):
+    status: Any = None
+    note: Any = None
+    effectiveDate: Any = None
+
+
+class AddStatusEventResponse(BaseModel):
+    application: ApplicationResponse
+    statusEvent: StatusEventResponse
+
+
+@router.post(
+    "/applications/{application_id}/status-events",
+    response_model=AddStatusEventResponse,
+    status_code=201,
+)
+async def add_status_event(
+    application_id: str,
+    req: AddStatusEventRequest,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> AddStatusEventResponse:
+    """Appends a StatusEvent and updates the Application's denormalised
+    `status`/`appliedAt` to match — the Application's current status is
+    always the latest event's status. Also how "Apply" (status=APPLIED),
+    "Mark as applied", advancing the pipeline, and "undo" (append a event
+    back to the previous status) are all implemented — there is no separate
+    undo endpoint, undo is just another status-events append.
+    """
+    application = await _owned_application(session, application_id, user_id)
+
+    status_value = _optional_string(req.status)
+    if not status_value or status_value not in APPLICATION_STATUS_VALUES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"status must be one of: {', '.join(APPLICATION_STATUS_VALUES)}",
+        )
+
+    note = _optional_string(req.note)
+
+    effective_date = _now()
+    if req.effectiveDate is not None:
+        raw_date = _optional_string(req.effectiveDate)
+        if raw_date:
+            try:
+                effective_date = datetime.fromisoformat(raw_date).replace(tzinfo=None)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400, detail="effectiveDate must be an ISO-8601 date"
+                ) from None
+
+    event = StatusEvent(
+        id=str(uuid.uuid4()),
+        applicationId=application.id,
+        status=Applicationstatus(status_value),
+        note=note,
+        effectiveDate=effective_date,
+    )
+    session.add(event)
+
+    application.status = Applicationstatus(status_value)
+    application.updatedAt = _now()
+    if status_value == "APPLIED" and application.appliedAt is None:
+        application.appliedAt = effective_date
+
+    await session.commit()
+    await session.refresh(event)
+
+    application = await session.scalar(
+        select(Application)
+        .options(selectinload(Application.JobOffer_), selectinload(Application.CVVersion_))
+        .where(Application.id == application_id)
+    )
+    assert application is not None
+
+    return AddStatusEventResponse(
+        application=_application_response(application),
+        statusEvent=_status_event_response(event),
+    )

@@ -1,4 +1,5 @@
 import type { AnalysisSummary } from "@/hooks/use-analyses";
+import type { Scout } from "@/hooks/use-scouts";
 
 // Pure, framework-free helpers behind the Dashboard (`components/dashboard.tsx`).
 // Every number the Dashboard shows is derived here from the payload the
@@ -78,6 +79,17 @@ export type TrendPoint = {
   score: number;
   movingAverage: number;
 };
+
+/**
+ * The Dashboard's "N new matches from your agents" block (issue #56): the
+ * cross-Scout count of un-actioned relevant finds. There is no "actioned"
+ * tracking yet (Application lands in slice 7 / #59), so this is currently
+ * just the sum of every Scout's `relevantFindsCount` — zero-safe with no
+ * Scouts.
+ */
+export function newMatchesCount(scouts: Scout[]): number {
+  return scouts.reduce((sum, scout) => sum + scout.relevantFindsCount, 0);
+}
 
 export function scoreTrend(analyses: AnalysisSummary[]): TrendPoint[] {
   const ordered = analyses

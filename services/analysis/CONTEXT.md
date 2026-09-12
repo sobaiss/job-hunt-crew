@@ -1,6 +1,6 @@
 # Analysis
 
-The CrewAI pipeline that compares one CVVersion against one JobOffer and produces a structured verdict — the agents, the async workflow that sequences them, and the LLM provider abstraction they run on. `CVVersion`, `JobOffer`, and `Analysis` are defined in [API](../api/CONTEXT.md)'s context; this glossary covers the pipeline vocabulary specific to this context.
+The CrewAI pipeline that compares one CVVersion against one JobOffer and produces a structured verdict — the agents, the async workflow that sequences them, and the LLM provider abstraction they run on. It also owns document generation: turning one relevant find into a cover letter and a tailored CV. `CVVersion`, `JobOffer`, `Analysis`, and `GeneratedDocument` are defined in [API](../api/CONTEXT.md)'s context; this glossary covers the pipeline vocabulary specific to this context.
 
 ## Language
 
@@ -30,3 +30,29 @@ _Avoid_: Result writer
 
 **LLM provider**:
 The swappable interface every agent in this context calls through, so no agent imports an LLM SDK directly. Chosen by configuration: Anthropic or OpenAI (hosted, API key required — the only options supported in production) or a local Ollama runtime (no key, dev-local only).
+
+**GenerationWorkflow**:
+The workflow that turns one Analysis into its GeneratedDocument rows —
+deliberately separate from AnalysisWorkflow (docs/adr/0004), with its own
+`generation-intake` queue, triggered only by an explicit "Generate
+documents" action, never automatically when an Analysis completes.
+`run_generation_pipeline` (`generation_pipeline.py`) is the dev-only
+in-process equivalent `local_pipeline` already established for
+AnalysisWorkflow: the same steps in the same order, chained directly with
+no Step Functions.
+_Avoid_: Document pipeline — this names the workflow specifically,
+mirroring how AnalysisWorkflow is named rather than "the pipeline."
+
+**CoverLetterWriterAgent** / **CvTailoringAgent**:
+The two agents that produce a GeneratedDocument's `markdownContent` —
+prose Markdown, not JSON, unlike ComparisonAnalysisAgent and
+RecommendationWriterAgent. Each takes the base CVVersion's Markdown
+rendition, the JobOffer's structured data, and the Analysis's matched/
+missing-skill lists as input, and is bound by the truthfulness constraint
+(docs/adr/0003): reorder, re-emphasise, and re-word only what the base CV
+already contains, never fabricate employers, dates, titles, or
+credentials. Output language follows the offer's detected language, falling
+back to the candidate's Locale (defined in [Web](../../apps/web/CONTEXT.md)'s
+context).
+_Avoid_: CV rewriter — the output is a new GeneratedDocument, never a
+rewrite of the CVVersion itself.

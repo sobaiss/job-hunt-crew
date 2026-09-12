@@ -8,7 +8,8 @@ import { useTranslations } from "next-intl";
 type EnumNamespace =
   | "analysisStatus"
   | "ingestionStatus"
-  | "cvConversionStatus";
+  | "cvConversionStatus"
+  | "applicationStatus";
 
 /**
  * Returns a `label(value)` function for one server enum. An unmapped value

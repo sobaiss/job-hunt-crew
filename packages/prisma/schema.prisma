@@ -24,6 +24,8 @@ model User {
   cvVersions    CVVersion[]
   ingestionJobs IngestionJob[]
   analyses      Analysis[]
+  scouts        Scout[]
+  applications  Application[]
 }
 
 model Account {
@@ -81,23 +83,26 @@ enum CVConversionStatus {
 }
 
 model CVVersion {
-  id                String             @id @default(cuid())
-  userId            String
-  label             String
-  fileKey           String
-  fileName          String
-  fileType          CVFileType
-  fileSizeBytes     Int
-  isDefault         Boolean            @default(false)
-  markdownContent   String?
-  conversionStatus  CVConversionStatus @default(PENDING)
-  conversionError   String?
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
+  id               String             @id @default(cuid())
+  userId           String
+  label            String
+  fileKey          String
+  fileName         String
+  fileType         CVFileType
+  fileSizeBytes    Int
+  isDefault        Boolean            @default(false)
+  markdownContent  String?
+  conversionStatus CVConversionStatus @default(PENDING)
+  conversionError  String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
 
-  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  analyses      Analysis[]
-  ingestionJobs IngestionJob[]
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  analyses           Analysis[]
+  ingestionJobs      IngestionJob[]
+  scouts             Scout[]
+  generatedDocuments GeneratedDocument[]
+  applications       Application[]
 
   @@index([userId])
 }
@@ -138,6 +143,8 @@ model JobOffer {
 
   ingestionJobOffers IngestionJobOffer[]
   analyses           Analysis[]
+  generatedDocuments GeneratedDocument[]
+  applications       Application[]
 }
 
 enum IngestionMode {
@@ -156,30 +163,36 @@ enum IngestionJobStatus {
 
 // User-scoped access-control boundary. See PRD Section 6.
 model IngestionJob {
-  id              String             @id @default(cuid())
-  userId          String
-  mode            IngestionMode
-  cvVersionId     String?
-  inputUrl        String?
-  siteConfigId    String?
-  filters         Json?
-  maxOffers       Int                @default(25)
-  status          IngestionJobStatus @default(PENDING)
-  discoveredCount Int                @default(0)
-  scrapedCount    Int                @default(0)
-  failedCount     Int                @default(0)
-  quotaSkippedCount Int              @default(0)
-  errorMessage    String?
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
+  id                     String             @id @default(cuid())
+  userId                 String
+  mode                   IngestionMode
+  cvVersionId            String?
+  scoutRunId             String?
+  inputUrl               String?
+  siteConfigId           String?
+  filters                Json?
+  maxOffers              Int                @default(25)
+  status                 IngestionJobStatus @default(PENDING)
+  discoveredCount        Int                @default(0)
+  scrapedCount           Int                @default(0)
+  failedCount            Int                @default(0)
+  quotaSkippedCount      Int                @default(0)
+  alreadySeenCount       Int                @default(0)
+  runLimitSkippedCount   Int                @default(0)
+  extractionSkippedCount Int                @default(0)
+  errorMessage           String?
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
 
-  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  cvVersion CVVersion?          @relation(fields: [cvVersionId], references: [id], onDelete: Cascade)
-  jobOffers IngestionJobOffer[]
-  analyses  Analysis[]
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cvVersion      CVVersion?          @relation(fields: [cvVersionId], references: [id], onDelete: Cascade)
+  scoutRun       ScoutRun?           @relation(fields: [scoutRunId], references: [id], onDelete: Cascade)
+  jobOffers      IngestionJobOffer[]
+  analyses       Analysis[]
   pipelineEvents PipelineEvent[]
 
   @@index([userId])
+  @@index([scoutRunId])
 }
 
 model IngestionJobOffer {
@@ -252,6 +265,10 @@ model Analysis {
   jobOfferId               String
   cvVersionId              String
   ingestionJobId           String?
+  // Denormalised (like userId / jobOfferId / cvVersionId) so per-Scout
+  // queries and cross-run dedup avoid a two-hop join. Null for a manual
+  // analysis. See issue #54 / docs/adr/0004.
+  scoutId                  String?
   status                   AnalysisStatus @default(PENDING)
   s3ResultKey              String?
   matchScore               Int?
@@ -262,16 +279,19 @@ model Analysis {
   startedAt                DateTime?
   completedAt              DateTime?
 
-  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  jobOffer     JobOffer      @relation(fields: [jobOfferId], references: [id], onDelete: Cascade)
-  cvVersion    CVVersion     @relation(fields: [cvVersionId], references: [id], onDelete: Cascade)
-  ingestionJob IngestionJob? @relation(fields: [ingestionJobId], references: [id], onDelete: Cascade)
-  pipelineEvents PipelineEvent[]
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobOffer           JobOffer            @relation(fields: [jobOfferId], references: [id], onDelete: Cascade)
+  cvVersion          CVVersion           @relation(fields: [cvVersionId], references: [id], onDelete: Cascade)
+  ingestionJob       IngestionJob?       @relation(fields: [ingestionJobId], references: [id], onDelete: Cascade)
+  pipelineEvents     PipelineEvent[]
+  generatedDocuments GeneratedDocument[]
+  application        Application?
 
   @@index([userId])
   @@index([jobOfferId])
   @@index([cvVersionId])
   @@index([ingestionJobId])
+  @@index([scoutId])
 }
 
 // Observability/debug trail across the ingestion + analysis pipelines. See
@@ -292,4 +312,188 @@ model PipelineEvent {
 
   @@index([analysisId])
   @@index([ingestionJobId])
+}
+
+enum ScoutStatus {
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+// A saved, self-running search + match configuration owned by one Candidate.
+// See issue #52 / docs/adr/0004. Slice 1 (#53) is CRUD only — Scouts do not run
+// yet. The base-CV FK is `onDelete: Restrict`: services/api rejects deleting a
+// CVVersion any Scout still references, naming the referencing Scouts.
+model Scout {
+  id             String      @id @default(cuid())
+  userId         String
+  label          String
+  cvVersionId    String
+  // string[] of SiteConfigSiteKey values — the sites this Scout searches.
+  targetSiteKeys Json
+  // Same shape as IngestionJob.filters: keywords, location, postedWithin,
+  // contractType, remote, experienceLevel.
+  filters        Json
+  matchThreshold Int         @default(70)
+  status         ScoutStatus @default(ACTIVE)
+  lastRunAt      DateTime?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cvVersion CVVersion  @relation(fields: [cvVersionId], references: [id], onDelete: Restrict)
+  runs      ScoutRun[]
+
+  @@index([userId])
+  @@index([cvVersionId])
+}
+
+// Mirrors IngestionJobStatus: a Scout run is scheduler/user-triggered, spans
+// one IngestionJob per targeted site, and is the anchor for run history and
+// per-Scout stats. See issue #54 / docs/adr/0004 (why this is a real aggregate
+// row, unlike ADR 0002's derived multi-offer batch).
+enum ScoutRunStatus {
+  PENDING
+  RUNNING
+  PARTIALLY_COMPLETED
+  COMPLETED
+  FAILED
+}
+
+model ScoutRun {
+  id                      String         @id @default(cuid())
+  scoutId                 String
+  status                  ScoutRunStatus @default(PENDING)
+  sitesQueried            Int            @default(0)
+  siteUnavailableCount    Int            @default(0)
+  offersDiscovered        Int            @default(0)
+  offersAnalysed          Int            @default(0)
+  relevantCount           Int            @default(0)
+  documentsGeneratedCount Int            @default(0)
+  failedCount             Int            @default(0)
+  capSkippedCount         Int            @default(0)
+  alreadySeenCount        Int            @default(0)
+  runLimitSkippedCount    Int            @default(0)
+  errorMessage            String?
+  startedAt               DateTime?
+  finishedAt              DateTime?
+  createdAt               DateTime       @default(now())
+
+  scout         Scout          @relation(fields: [scoutId], references: [id], onDelete: Cascade)
+  ingestionJobs IngestionJob[]
+
+  @@index([scoutId])
+}
+
+enum GeneratedDocumentType {
+  COVER_LETTER
+  TAILORED_CV
+}
+
+enum GeneratedDocumentStatus {
+  PENDING
+  GENERATING
+  READY
+  FAILED
+}
+
+// A derived artifact of an Analysis — a cover letter or a tailored CV — never
+// a mutation of the base CVVersion. See issue #58 / docs/adr/0003 (a future
+// slice). "Generate documents" on a relevant find creates one row per type;
+// "Regenerate" will create a fresh row and set the old row's
+// supersededById, so only the newest non-superseded row per
+// (analysisId, type) is shown — that flow is not wired up yet.
+model GeneratedDocument {
+  id              String                  @id @default(cuid())
+  type            GeneratedDocumentType
+  analysisId      String
+  // Denormalised (like Analysis.jobOfferId/cvVersionId) so generation/
+  // download queries avoid a join through Analysis.
+  jobOfferId      String
+  cvVersionId     String
+  // Denormalised attribution to the Scout run that produced the underlying
+  // find; null for a document generated off a manual analysis.
+  scoutRunId      String?
+  status          GeneratedDocumentStatus @default(PENDING)
+  markdownContent String?
+  s3Key           String?
+  errorMessage    String?
+  supersededById  String?                 @unique
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  analysis  Analysis  @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  jobOffer  JobOffer  @relation(fields: [jobOfferId], references: [id], onDelete: Cascade)
+  cvVersion CVVersion @relation(fields: [cvVersionId], references: [id], onDelete: Restrict)
+
+  @@index([analysisId])
+  @@index([jobOfferId])
+  @@index([cvVersionId])
+  @@index([scoutRunId])
+}
+
+enum ApplicationStatus {
+  DRAFT
+  APPLIED
+  INTERVIEWING
+  OFFER
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+}
+
+// Created lazily — on the first "Generate documents" or "Mark as applied" for
+// a given Analysis — never eagerly for every relevant find. See issue #59 /
+// docs/adr/0004. `analysisId` is unique: at most one Application per
+// Analysis, so two Scouts finding the same offer (each with its own
+// Analysis) can each become their own Application. `status`/`appliedAt` are
+// denormalised onto the row and kept in sync on every StatusEvent append
+// (mirrors Scout.lastRunAt) rather than derived by query on every read; the
+// StatusEvent list remains the append-only source of truth for the timeline.
+// `cvVersionId` FK is `onDelete: Restrict`, like GeneratedDocument's.
+model Application {
+  id               String            @id @default(cuid())
+  userId           String
+  analysisId       String            @unique
+  jobOfferId       String
+  cvVersionId      String
+  // Denormalised, like Analysis.scoutId; null for a manually-tracked Analysis.
+  scoutId          String?
+  // Denormalised references to the GeneratedDocument rows used for this
+  // Application, if any were generated before applying. Not a DB-enforced FK
+  // (GeneratedDocument.supersededById already makes the "latest" row a
+  // moving target) — the API resolves and validates ownership on write.
+  coverLetterDocId String?
+  tailoredCvDocId  String?
+  status           ApplicationStatus @default(DRAFT)
+  appliedAt        DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  analysis     Analysis      @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  jobOffer     JobOffer      @relation(fields: [jobOfferId], references: [id], onDelete: Cascade)
+  cvVersion    CVVersion     @relation(fields: [cvVersionId], references: [id], onDelete: Restrict)
+  statusEvents StatusEvent[]
+
+  @@index([userId])
+  @@index([jobOfferId])
+  @@index([cvVersionId])
+  @@index([scoutId])
+}
+
+// Append-only child of Application — one row per status transition, with an
+// optional note and an effective date the Candidate can back-date. The
+// Application's current `status` is always the latest event's status.
+model StatusEvent {
+  id            String            @id @default(cuid())
+  applicationId String
+  status        ApplicationStatus
+  note          String?
+  effectiveDate DateTime
+  createdAt     DateTime          @default(now())
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
 }

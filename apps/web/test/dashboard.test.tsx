@@ -26,6 +26,7 @@ function stub(options: {
   analyses?: unknown[];
   analysesStatus?: number;
   cvVersions?: unknown[];
+  scouts?: unknown[];
 }) {
   server.use(
     http.get("/api/analyses", () =>
@@ -35,6 +36,9 @@ function stub(options: {
     ),
     http.get("/api/cv-versions", () =>
       HttpResponse.json({ cvVersions: options.cvVersions ?? [] }),
+    ),
+    http.get("/api/scouts", () =>
+      HttpResponse.json({ scouts: options.scouts ?? [] }),
     ),
   );
 }
@@ -122,6 +126,39 @@ describe("Dashboard", () => {
     renderWithProviders(<Dashboard />);
 
     expect(await screen.findByText("Match score trend")).toBeInTheDocument();
+  });
+
+  it("shows the cross-Scout new-matches block and links to Agents", async () => {
+    stub({
+      analyses: [analysis()],
+      cvVersions: [{ id: "cv1" }],
+      scouts: [
+        { id: "s1", relevantFindsCount: 3 },
+        { id: "s2", relevantFindsCount: 2 },
+      ],
+    });
+
+    renderWithProviders(<Dashboard />);
+
+    expect(
+      await screen.findByText("5 new matches from your agents"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Review matches" }),
+    ).toHaveAttribute("href", "/scouts");
+  });
+
+  it("is zero-safe and hides the block when there are no relevant finds", async () => {
+    stub({
+      analyses: [analysis()],
+      cvVersions: [{ id: "cv1" }],
+      scouts: [{ id: "s1", relevantFindsCount: 0 }],
+    });
+
+    renderWithProviders(<Dashboard />);
+    await screen.findByText("Backend Engineer");
+
+    expect(screen.queryByText(/new matches from your agents/)).not.toBeInTheDocument();
   });
 
   it("shows an error state when a request fails", async () => {

@@ -12,10 +12,17 @@ from py_db.models import (
     Cvconversionstatus,
     CVVersion,
     Cvfiletype,
+    IngestionJob,
+    Ingestionjobstatus,
+    Ingestionmode,
     JobOffer,
     Jobofferextractionstatus,
     Joboffersourcesite,
     PipelineEvent,
+    Scout,
+    ScoutRun,
+    Scoutrunstatus,
+    Scoutstatus,
     User,
 )
 from py_db.session import make_engine, make_session_factory
@@ -371,4 +378,89 @@ async def test_persist_analysis_result_fails_on_schema_violation_without_partial
             assert reloaded.resultJSON is None
     finally:
         s3.delete_object(Bucket=S3_BUCKET, Key=key)
+        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+
+
+@pytest.mark.asyncio
+async def test_persist_result_rolls_up_owning_scout_run():
+    """A Scout-driven Analysis reaching COMPLETED bumps its ScoutRun's
+    offersAnalysed / relevantCount (issue #54)."""
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id = f"test-{uuid.uuid4()}"
+    job_offer_id = f"test-{uuid.uuid4()}"
+    cv_version_id = f"test-{uuid.uuid4()}"
+    analysis_id = f"test-{uuid.uuid4()}"
+    scout_id = f"test-scout-{uuid.uuid4()}"
+    scout_run_id = f"test-scout-run-{uuid.uuid4()}"
+    ingestion_job_id = f"test-job-{uuid.uuid4()}"
+
+    await _make_fixture(
+        session_factory, user_id, job_offer_id, cv_version_id, analysis_id, status=Analysisstatus.QUEUED
+    )
+    async with session_factory() as session:
+        session.add(
+            Scout(
+                id=scout_id,
+                userId=user_id,
+                label="Backend — Remote",
+                cvVersionId=cv_version_id,
+                targetSiteKeys=["FRANCE_TRAVAIL"],
+                filters={},
+                matchThreshold=70,
+                status=Scoutstatus.ACTIVE,
+                updatedAt=_now(),
+            )
+        )
+        session.add(ScoutRun(id=scout_run_id, scoutId=scout_id, status=Scoutrunstatus.RUNNING))
+        session.add(
+            IngestionJob(
+                id=ingestion_job_id,
+                userId=user_id,
+                mode=Ingestionmode.SITE_SEARCH,
+                cvVersionId=cv_version_id,
+                scoutRunId=scout_run_id,
+                discoveredCount=1,
+                status=Ingestionjobstatus.COMPLETED,
+                updatedAt=_now(),
+            )
+        )
+        analysis = await session.get(Analysis, analysis_id)
+        analysis.ingestionJobId = ingestion_job_id
+        analysis.scoutId = scout_id
+        await session.commit()
+
+    provider = StubLLMProvider([VALID_COMPARISON_OUTPUT, VALID_RECOMMENDATION_OUTPUT])
+    s3 = _s3_client()
+    key = analysis_result_key(analysis_id)
+
+    try:
+        async with session_factory() as session:
+            await run_crew_task(session, analysis_id, llm_provider=provider, s3_client=s3)
+        async with session_factory() as session:
+            await persist_analysis_result(session, analysis_id, s3_client=s3)
+
+        async with session_factory() as session:
+            run = await session.get(ScoutRun, scout_run_id)
+        assert run.offersDiscovered == 1
+        assert run.offersAnalysed == 1
+        assert run.relevantCount == 1  # match_score 82 >= threshold 70
+        assert run.failedCount == 0
+    finally:
+        s3.delete_object(Bucket=S3_BUCKET, Key=key)
+        async with session_factory() as session:
+            row = await session.get(Analysis, analysis_id)
+            if row is not None:
+                await session.delete(row)
+            await session.commit()
+        async with session_factory() as session:
+            for model, row_id in (
+                (IngestionJob, ingestion_job_id),
+                (ScoutRun, scout_run_id),
+                (Scout, scout_id),
+            ):
+                row = await session.get(model, row_id)
+                if row is not None:
+                    await session.delete(row)
+            await session.commit()
         await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)

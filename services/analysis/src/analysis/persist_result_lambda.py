@@ -23,6 +23,7 @@ from datetime import UTC, datetime
 
 from py_db.models import Analysis, Analysisstatus
 from py_db.pipeline_events import record_pipeline_event
+from py_db.scout_rollup import roll_up_scout_run_for_analysis
 from py_db.session import make_engine, make_session_factory
 from py_db.structured_logging import get_logger, log_stage_event
 from pydantic import ValidationError
@@ -87,6 +88,7 @@ async def persist_analysis_result(
         analysis.status = Analysisstatus.FAILED
         analysis.errorMessage = message
         await session.commit()
+        await roll_up_scout_run_for_analysis(session, analysis_id)
         log_stage_event(
             logger, stage=STAGE, status="FAILED", analysis_id=analysis_id, message=message
         )
@@ -101,6 +103,10 @@ async def persist_analysis_result(
     analysis.errorMessage = None
     analysis.completedAt = _now()
     await session.commit()
+
+    # A Scout-driven Analysis reaching terminal state moves its ScoutRun's
+    # offersAnalysed / relevantCount (issue #54); a no-op for a manual one.
+    await roll_up_scout_run_for_analysis(session, analysis_id)
 
     log_stage_event(logger, stage=STAGE, status="SUCCEEDED", analysis_id=analysis_id)
     await record_pipeline_event(session, stage=STAGE, status="SUCCEEDED", analysis_id=analysis_id)

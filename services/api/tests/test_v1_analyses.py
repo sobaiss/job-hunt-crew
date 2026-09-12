@@ -437,3 +437,47 @@ def test_get_analysis_returns_404_for_unknown_id(user_id):
     with TestClient(app) as client:
         response = client.get(f"/v1/analyses/{uuid.uuid4()}", headers=_headers(user_id))
     assert response.status_code == 404
+
+
+async def _stamp_scout_id(analysis_id: str, scout_id: str) -> None:
+    """Denormalised `Analysis.scoutId` (no FK) — the ingestion fan-out sets this
+    for a Scout-driven analysis; stamp it directly here."""
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            analysis = await session.get(Analysis, analysis_id)
+            analysis.scoutId = scout_id
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+
+def test_list_and_get_analyses_expose_scout_id(user_id, job_offer_id, cv_version_id):
+    """A Scout-driven Analysis shows in `/analyses` tagged with its Scout
+    (issue #54); a manual one carries `scoutId: null`."""
+    with TestClient(app) as client:
+        scouted_id = client.post(
+            "/v1/analyses",
+            headers=_headers(user_id),
+            json={"jobOfferId": job_offer_id, "cvVersionId": cv_version_id},
+        ).json()["analysisId"]
+        manual_id = client.post(
+            "/v1/analyses",
+            headers=_headers(user_id),
+            json={"jobOfferId": job_offer_id, "cvVersionId": cv_version_id},
+        ).json()["analysisId"]
+
+        asyncio.run(_stamp_scout_id(scouted_id, "scout-xyz"))
+
+        rows = {
+            a["id"]: a
+            for a in client.get("/v1/analyses", headers=_headers(user_id)).json()["analyses"]
+        }
+        assert rows[scouted_id]["scoutId"] == "scout-xyz"
+        assert rows[manual_id]["scoutId"] is None
+
+        detail = client.get(
+            f"/v1/analyses/{scouted_id}", headers=_headers(user_id)
+        ).json()["analysis"]
+        assert detail["scoutId"] == "scout-xyz"

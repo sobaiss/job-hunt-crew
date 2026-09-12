@@ -18,6 +18,7 @@ from py_db.models import (
     JobOffer,
     Jobofferextractionstatus,
 )
+from py_db.scout_rollup import roll_up_scout_run_for_analysis
 from py_db.session import make_engine, make_session_factory
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -148,6 +149,10 @@ async def mark_analysis_failed(session: AsyncSession, analysis_id: str, error: d
     analysis.status = Analysisstatus.FAILED
     analysis.errorMessage = _error_message_from_catch(error)
     await session.commit()
+
+    # Keep the owning ScoutRun's failedCount moving (issue #54); no-op for a
+    # manual Analysis.
+    await roll_up_scout_run_for_analysis(session, analysis_id)
 
 
 def mark_analysis_failed_handler(event: dict, context=None) -> dict:

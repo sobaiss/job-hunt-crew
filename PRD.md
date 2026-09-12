@@ -42,6 +42,22 @@ and concrete steps to close the gap.
 features; payments/billing; native mobile apps; guaranteed successful scraping of
 every listed site (best-effort, see Section 14 Risks); actual Terraform/CDK IaC code.
 
+**Amendment (issue #52 — Scouts):** the non-goal above is clarified, not
+reversed: it was always "no silent mutation of the stored CV, not a general
+CV builder," and generating a new, disposable, offer-specific artifact the
+candidate reviews and downloads was compatible with that boundary all
+along (see [docs/adr/0003](./docs/adr/0003-generated-documents-not-cv-edits.md)).
+An offer-tailored cover letter and CV are new `GeneratedDocument` rows, and
+the stored `CVVersion` is never written to by generation. This amendment
+also adds the **Scout** capability to the MVP goals: a candidate can create
+one or more saved search-plus-match configurations (Scouts) that run once a
+day unattended, surface relevant finds against a relevance threshold, and —
+on request — generate those documents and track the resulting Application
+through a status pipeline. See the `services/scout` and Scout-related
+`services/api` sections of [CONTEXT-MAP.md](./CONTEXT-MAP.md) for the
+owning contexts and [docs/adr/0004](./docs/adr/0004-scout-context-and-scoutrun-aggregate.md)
+for the scheduling and orchestration design.
+
 ## 3. Personas & User Stories
 
 **Persona:** Job-seeking candidate, applies to multiple roles, tailors CV per role
@@ -210,7 +226,15 @@ externally-visible route path or the async pipeline described above.
 - Every `CVVersion`, `IngestionJob`, `Analysis` row is scoped to `userId`; all
   reads/writes must filter by the authenticated session's user — no
   cross-user access, enforced at the API/query layer (Postgres RLS deferred,
-  see Section 13).
+  see Section 13). `Scout`, `ScoutRun`, `GeneratedDocument`, and
+  `Application` follow the same rule once introduced (see the Section 2
+  amendment) — every new table scoped to `userId` (or reachable only through
+  a row that is), cross-user access rejected the same way.
+
+> **Amendment (issue #52 — Scouts):** the non-goal reversal and the Scout
+> capability itself are recorded in [Section 2](#2-goals--non-goals)'s
+> amendment, not here — this section's own auth/multi-tenancy scope is
+> otherwise unchanged.
 
 ### 8.2 CV Management (Upload, Parsing, Versioning)
 - Candidate uploads a CV file (PDF or DOCX, max 10MB) with a label.
