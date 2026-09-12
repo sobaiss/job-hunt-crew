@@ -9,7 +9,10 @@ from py_db.models import CVVersion, Cvconversionstatus, User
 from py_db.session import make_engine, make_session_factory
 from sqlalchemy import delete
 
+from botocore.exceptions import ClientError
+
 from api.main import app
+from api.s3_client import S3_BUCKET, make_s3_client
 from api.sqs_client import CV_CONVERSION_QUEUE_URL, make_sqs_client
 
 INTERNAL_SECRET_HEADERS = {"X-Internal-Api-Secret": "test-secret"}
@@ -98,6 +101,17 @@ def _drain_cv_conversion_queue() -> list[str]:
             sqs.delete_message(
                 QueueUrl=CV_CONVERSION_QUEUE_URL, ReceiptHandle=message["ReceiptHandle"]
             )
+
+
+def _object_exists(key: str) -> bool:
+    s3 = make_s3_client()
+    try:
+        s3.head_object(Bucket=S3_BUCKET, Key=key)
+        return True
+    except ClientError as exc:
+        if exc.response["Error"]["Code"] in ("404", "NoSuchKey"):
+            return False
+        raise
 
 
 @pytest.fixture
@@ -443,3 +457,47 @@ def test_convert_returns_404_for_other_users_cv(user_id):
             assert _drain_cv_conversion_queue() == []
         finally:
             asyncio.run(_delete_user(other_user_id))
+
+
+def test_delete_cv_version_removes_the_s3_object(user_id):
+    with TestClient(app) as client:
+        create_response = client.post(
+            "/v1/cv-versions",
+            headers=_headers(user_id),
+            json={
+                "label": "CV 1",
+                "fileName": "cv1.pdf",
+                "contentType": "application/pdf",
+                "fileSizeBytes": 1024,
+            },
+        )
+        cv_id = create_response.json()["cvVersionId"]
+        file_key = create_response.json()["fileKey"]
+
+        s3 = make_s3_client()
+        s3.put_object(Bucket=S3_BUCKET, Key=file_key, Body=b"pdf-bytes")
+        assert _object_exists(file_key)
+
+        response = client.delete(f"/v1/cv-versions/{cv_id}", headers=_headers(user_id))
+        assert response.status_code == 204
+        assert not _object_exists(file_key)
+
+
+def test_delete_cv_version_does_not_fail_when_the_s3_object_is_already_gone(user_id):
+    with TestClient(app) as client:
+        create_response = client.post(
+            "/v1/cv-versions",
+            headers=_headers(user_id),
+            json={
+                "label": "CV 1",
+                "fileName": "cv1.pdf",
+                "contentType": "application/pdf",
+                "fileSizeBytes": 1024,
+            },
+        )
+        cv_id = create_response.json()["cvVersionId"]
+
+        # No object was ever uploaded to this fileKey (e.g. the browser upload
+        # never completed) — deleting the row must still succeed.
+        response = client.delete(f"/v1/cv-versions/{cv_id}", headers=_headers(user_id))
+        assert response.status_code == 204

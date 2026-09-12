@@ -385,8 +385,15 @@ async def delete_cv_version(
             "It cannot be deleted while those Applications reference it.",
         )
 
+    file_key = existing.fileKey
     await session.delete(existing)
     await session.commit()
+
+    # S3 delete_object is idempotent (no error when the key is already gone,
+    # e.g. the browser upload to the presigned URL never completed), so no
+    # existence check is needed before this call.
+    s3 = make_s3_client()
+    s3.delete_object(Bucket=S3_BUCKET, Key=file_key)
 
 
 class CVVersionMarkdownResponse(BaseModel):
