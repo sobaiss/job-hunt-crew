@@ -37,6 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from .db import get_session
+from .pdf_render import render_markdown_to_pdf
 from .s3_client import S3_BUCKET, cv_file_key, make_s3_client
 from .sqs_client import (
     ANALYSIS_INTAKE_QUEUE_URL,
@@ -1697,6 +1698,41 @@ async def get_generated_document(
         raise HTTPException(status_code=404, detail="Not found")
     await _owned_analysis(session, document.analysisId, user_id)
     return GetGeneratedDocumentResponse(generatedDocument=_generated_document_response(document))
+
+
+_GENERATED_DOCUMENT_LABELS = {
+    Generateddocumenttype.COVER_LETTER: "Cover Letter",
+    Generateddocumenttype.TAILORED_CV: "Tailored CV",
+}
+
+
+@router.get("/generated-documents/{document_id}/pdf")
+async def get_generated_document_pdf(
+    document_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """Renders a READY GeneratedDocument's Markdown to PDF on demand (no PDF
+    is stored — see pdf_render.render_markdown_to_pdf).
+    """
+    document = await session.get(GeneratedDocument, document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    await _owned_analysis(session, document.analysisId, user_id)
+    if document.status != Generateddocumentstatus.READY or document.markdownContent is None:
+        raise HTTPException(status_code=400, detail="Document is not ready")
+
+    label = _GENERATED_DOCUMENT_LABELS[document.type]
+    job_offer = await session.get(JobOffer, document.jobOfferId)
+    title = f"{label} — {job_offer.title}" if job_offer and job_offer.title else label
+    pdf_bytes = render_markdown_to_pdf(title=title, markdown_content=document.markdownContent)
+
+    filename = f"{label.lower().replace(' ', '-')}-{document.id}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # --- Applications (issue #59, Scout slice 7) ---

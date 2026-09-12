@@ -31,7 +31,9 @@ export async function proxyToApi(path: string, init?: RequestInit): Promise<Resp
       headers: { "Content-Type": "application/json" },
     });
   }
-  const body = await res.text();
+  // arrayBuffer (not text) so binary bodies (e.g. the PDF-on-demand route)
+  // pass through byte-for-byte instead of being mangled by a UTF-8 round-trip.
+  const body = await res.arrayBuffer();
   return new Response(body, {
     status: res.status,
     headers: { "Content-Type": res.headers.get("Content-Type") || "application/json" },

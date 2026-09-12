@@ -14,8 +14,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 // "Generate documents" on a completed Analysis (issue #58, Scout slice 6):
 // creates a COVER_LETTER + a TAILORED_CV GeneratedDocument and polls each
-// until it leaves PENDING/GENERATING. Regenerate and PDF download are not
-// wired up yet — read-only Markdown preview only, for this slice.
+// until it leaves PENDING/GENERATING, then offers a PDF download rendered
+// on demand (services/api/src/api/pdf_render.py). Regenerate is not wired
+// up yet.
 
 function DocumentCard({ id, title }: { id: string; title: string }) {
   const t = useTranslations("analyses.detail.generatedDocuments");
@@ -35,9 +36,20 @@ function DocumentCard({ id, title }: { id: string; title: string }) {
             {document.errorMessage || t("failed")}
           </p>
         ) : (
-          <pre className="whitespace-pre-wrap text-sm text-foreground">
-            {document.markdownContent}
-          </pre>
+          <>
+            <pre className="whitespace-pre-wrap text-sm text-foreground">
+              {document.markdownContent}
+            </pre>
+            {document.status === "READY" && (
+              <a
+                href={`/api/generated-documents/${id}/pdf`}
+                download
+                className="w-fit text-sm font-medium text-primary underline underline-offset-2"
+              >
+                {t("downloadPdf")}
+              </a>
+            )}
+          </>
         )}
       </CardContent>
     </Card>

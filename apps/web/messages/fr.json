@@ -237,7 +237,8 @@
         "tailoredCv": "CV adapté",
         "pending": "En file d'attente…",
         "failed": "La génération a échoué.",
-        "retry": "Réessayer"
+        "retry": "Réessayer",
+        "downloadPdf": "Télécharger le PDF"
       },
       "application": {
         "markApplied": "Marquer comme candidaté",

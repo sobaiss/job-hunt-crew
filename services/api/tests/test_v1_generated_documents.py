@@ -10,6 +10,7 @@ from py_db.models import (
     Analysisstatus,
     CVVersion,
     GeneratedDocument,
+    Generateddocumentstatus,
     JobOffer,
     Joboffersourcesite,
     User,
@@ -248,3 +249,75 @@ def test_get_generated_document_missing_id_is_404(user_id):
             f"/v1/generated-documents/{uuid.uuid4()}", headers=_headers(user_id)
         )
         assert response.status_code == 404
+
+
+async def _mark_document_ready(document_id: str, markdown_content: str) -> None:
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            document = await session.get(GeneratedDocument, document_id)
+            document.status = Generateddocumentstatus.READY
+            document.markdownContent = markdown_content
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+
+def test_get_generated_document_pdf_returns_rendered_pdf_bytes(user_id):
+    with TestClient(app) as client:
+        cv = _make_cv_version(client, user_id)
+        analysis_id = asyncio.run(
+            _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.COMPLETED)
+        )
+        created = client.post(
+            f"/v1/analyses/{analysis_id}/generated-documents", headers=_headers(user_id)
+        ).json()
+        document_id = created["generatedDocuments"][0]["id"]
+        asyncio.run(_mark_document_ready(document_id, "# Cover Letter\n\nDear hiring manager."))
+
+        response = client.get(
+            f"/v1/generated-documents/{document_id}/pdf", headers=_headers(user_id)
+        )
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/pdf"
+        assert response.content.startswith(b"%PDF")
+
+
+def test_get_generated_document_pdf_rejects_a_document_not_yet_ready(user_id):
+    with TestClient(app) as client:
+        cv = _make_cv_version(client, user_id)
+        analysis_id = asyncio.run(
+            _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.COMPLETED)
+        )
+        created = client.post(
+            f"/v1/analyses/{analysis_id}/generated-documents", headers=_headers(user_id)
+        ).json()
+        document_id = created["generatedDocuments"][0]["id"]
+
+        response = client.get(
+            f"/v1/generated-documents/{document_id}/pdf", headers=_headers(user_id)
+        )
+        assert response.status_code == 400
+
+
+def test_get_generated_document_pdf_is_user_scoped(user_id):
+    other = asyncio.run(_create_user())
+    try:
+        with TestClient(app) as client:
+            cv = _make_cv_version(client, user_id)
+            analysis_id = asyncio.run(
+                _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.COMPLETED)
+            )
+            created = client.post(
+                f"/v1/analyses/{analysis_id}/generated-documents", headers=_headers(user_id)
+            ).json()
+            document_id = created["generatedDocuments"][0]["id"]
+            asyncio.run(_mark_document_ready(document_id, "Some content."))
+
+            response = client.get(
+                f"/v1/generated-documents/{document_id}/pdf", headers=_headers(other)
+            )
+        assert response.status_code == 404
+    finally:
+        asyncio.run(_delete_user(other))

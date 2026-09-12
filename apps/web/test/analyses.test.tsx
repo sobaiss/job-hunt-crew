@@ -627,6 +627,11 @@ describe("AnalysisDetailPage", () => {
 
     expect(await screen.findByText("Dear Hiring Manager, ...")).toBeInTheDocument();
     expect(screen.getByText("# Jane Doe tailored")).toBeInTheDocument();
+
+    const downloadLinks = screen.getAllByRole("link", { name: /download pdf/i });
+    expect(downloadLinks).toHaveLength(2);
+    expect(downloadLinks[0]).toHaveAttribute("href", "/api/generated-documents/gd-cl/pdf");
+    expect(downloadLinks[1]).toHaveAttribute("href", "/api/generated-documents/gd-cv/pdf");
   });
 
   it("shows an error when generation fails to start", async () => {

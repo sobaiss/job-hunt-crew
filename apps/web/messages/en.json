@@ -237,7 +237,8 @@
         "tailoredCv": "Tailored CV",
         "pending": "Queued…",
         "failed": "Generation failed.",
-        "retry": "Try again"
+        "retry": "Try again",
+        "downloadPdf": "Download PDF"
       },
       "application": {
         "markApplied": "Mark as applied",

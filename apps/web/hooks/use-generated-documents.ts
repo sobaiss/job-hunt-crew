@@ -6,8 +6,10 @@ import { bff } from "@/lib/bff-client";
 
 // "Generate documents" on a relevant find (issue #58, Scout slice 6):
 // creates a COVER_LETTER + a TAILORED_CV GeneratedDocument for a completed
-// Analysis and polls each until it leaves PENDING/GENERATING. Regenerate and
-// PDF download are not wired up yet (see the commit notes for this slice).
+// Analysis and polls each until it leaves PENDING/GENERATING. The PDF
+// download itself is a plain link to /api/generated-documents/{id}/pdf
+// (see generated-documents-panel.tsx), not a hook. Regenerate is not wired
+// up yet.
 
 export type GeneratedDocumentType = "COVER_LETTER" | "TAILORED_CV";
 export type GeneratedDocumentStatus = "PENDING" | "GENERATING" | "READY" | "FAILED";
