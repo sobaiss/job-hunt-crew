@@ -635,6 +635,74 @@ describe("AnalysisDetailPage", () => {
     expect(downloadLinks[1]).toHaveAttribute("href", "/api/generated-documents/gd-cv/pdf");
   });
 
+  it("shows a Download both action once both documents are ready, downloading both PDFs", async () => {
+    const user = userEvent.setup();
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    server.use(
+      http.get("/api/analyses/a1", () =>
+        HttpResponse.json({ analysis: detail() }),
+      ),
+      http.post("/api/analyses/a1/generated-documents", () =>
+        HttpResponse.json({
+          generatedDocuments: [
+            { id: "gd-cl", type: "COVER_LETTER", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
+            { id: "gd-cv", type: "TAILORED_CV", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
+          ],
+        }),
+      ),
+      http.get("/api/generated-documents/gd-cl", () =>
+        HttpResponse.json({
+          generatedDocument: {
+            id: "gd-cl",
+            type: "COVER_LETTER",
+            analysisId: "a1",
+            status: "READY",
+            markdownContent: "Dear Hiring Manager, ...",
+            errorMessage: null,
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+          },
+        }),
+      ),
+      http.get("/api/generated-documents/gd-cv", () =>
+        HttpResponse.json({
+          generatedDocument: {
+            id: "gd-cv",
+            type: "TAILORED_CV",
+            analysisId: "a1",
+            status: "READY",
+            markdownContent: "# Jane Doe tailored",
+            errorMessage: null,
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+          },
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Generate documents" }),
+    );
+    await screen.findByText("Dear Hiring Manager, ...");
+
+    await user.click(await screen.findByRole("button", { name: "Download both" }));
+
+    expect(openSpy).toHaveBeenCalledWith(
+      "/api/generated-documents/gd-cl/pdf",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(openSpy).toHaveBeenCalledWith(
+      "/api/generated-documents/gd-cv/pdf",
+      "_blank",
+      "noopener,noreferrer",
+    );
+
+    openSpy.mockRestore();
+  });
+
   it("regenerates a document and switches to polling the fresh row", async () => {
     const user = userEvent.setup();
     server.use(

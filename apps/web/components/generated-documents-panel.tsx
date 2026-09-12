@@ -25,11 +25,24 @@ import { BffError } from "@/lib/bff-client";
 // returns — the old row is superseded server-side and drops out of the
 // analysis's generated-documents list.
 
-function DocumentCard({ id: initialId, title }: { id: string; title: string }) {
+function DocumentCard({
+  id: initialId,
+  title,
+  onIdChange,
+}: {
+  id: string;
+  title: string;
+  onIdChange: (id: string) => void;
+}) {
   const t = useTranslations("analyses.detail.generatedDocuments");
   const [id, setId] = useState(initialId);
   const { data: document } = useGeneratedDocument(id);
   const regenerate = useRegenerateGeneratedDocument(id);
+
+  function handleRegenerated(newId: string) {
+    setId(newId);
+    onIdChange(newId);
+  }
 
   const regenerateErrorMessage =
     regenerate.error instanceof BffError && regenerate.error.status === 429
@@ -55,7 +68,7 @@ function DocumentCard({ id: initialId, title }: { id: string; title: string }) {
               size="sm"
               onClick={() =>
                 regenerate.mutate(undefined, {
-                  onSuccess: (data) => setId(data.generatedDocument.id),
+                  onSuccess: (data) => handleRegenerated(data.generatedDocument.id),
                 })
               }
               disabled={regenerate.isPending}
@@ -83,7 +96,7 @@ function DocumentCard({ id: initialId, title }: { id: string; title: string }) {
                   size="sm"
                   onClick={() =>
                     regenerate.mutate(undefined, {
-                      onSuccess: (data) => setId(data.generatedDocument.id),
+                      onSuccess: (data) => handleRegenerated(data.generatedDocument.id),
                     })
                   }
                   disabled={regenerate.isPending}
@@ -109,10 +122,24 @@ export function GeneratedDocumentsPanel({ analysisId }: { analysisId: string }) 
   const create = useCreateGeneratedDocuments(analysisId);
   const { data: existing } = useAnalysisGeneratedDocuments(analysisId);
   const [created, setCreated] = useState<GeneratedDocument[] | null>(null);
+  const [coverLetterId, setCoverLetterId] = useState<string | null>(null);
+  const [tailoredCvId, setTailoredCvId] = useState<string | null>(null);
 
   const documents = created ?? (existing && existing.length > 0 ? existing : null);
   const coverLetter = documents?.find((d) => d.type === "COVER_LETTER") ?? null;
   const tailoredCv = documents?.find((d) => d.type === "TAILORED_CV") ?? null;
+  const activeCoverLetterId = coverLetterId ?? coverLetter?.id ?? null;
+  const activeTailoredCvId = tailoredCvId ?? tailoredCv?.id ?? null;
+
+  const { data: coverLetterDoc } = useGeneratedDocument(activeCoverLetterId);
+  const { data: tailoredCvDoc } = useGeneratedDocument(activeTailoredCvId);
+  const bothReady = coverLetterDoc?.status === "READY" && tailoredCvDoc?.status === "READY";
+
+  function downloadBoth() {
+    if (!activeCoverLetterId || !activeTailoredCvId) return;
+    window.open(`/api/generated-documents/${activeCoverLetterId}/pdf`, "_blank", "noopener,noreferrer");
+    window.open(`/api/generated-documents/${activeTailoredCvId}/pdf`, "_blank", "noopener,noreferrer");
+  }
 
   return (
     <section className="flex flex-col gap-3">
@@ -140,10 +167,21 @@ export function GeneratedDocumentsPanel({ analysisId }: { analysisId: string }) 
       )}
 
       {documents && (
-        <div className="grid gap-4 sm:grid-cols-2">
-          {coverLetter && <DocumentCard id={coverLetter.id} title={t("coverLetter")} />}
-          {tailoredCv && <DocumentCard id={tailoredCv.id} title={t("tailoredCv")} />}
-        </div>
+        <>
+          {bothReady && (
+            <Button variant="outline" size="sm" onClick={downloadBoth} className="w-fit">
+              {t("downloadBoth")}
+            </Button>
+          )}
+          <div className="grid gap-4 sm:grid-cols-2">
+            {coverLetter && (
+              <DocumentCard id={coverLetter.id} title={t("coverLetter")} onIdChange={setCoverLetterId} />
+            )}
+            {tailoredCv && (
+              <DocumentCard id={tailoredCv.id} title={t("tailoredCv")} onIdChange={setTailoredCvId} />
+            )}
+          </div>
+        </>
       )}
     </section>
   );

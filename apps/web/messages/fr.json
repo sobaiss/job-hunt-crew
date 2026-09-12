@@ -239,6 +239,7 @@
         "failed": "La génération a échoué.",
         "retry": "Réessayer",
         "downloadPdf": "Télécharger le PDF",
+        "downloadBoth": "Télécharger les deux",
         "regenerate": "Régénérer",
         "regenerateError": "Impossible de régénérer ce document. Veuillez réessayer.",
         "regenerateCapReached": "Vous avez atteint la limite quotidienne de génération de documents. Veuillez réessayer demain."
