@@ -1683,6 +1683,39 @@ async def create_generated_documents(
     )
 
 
+class ListGeneratedDocumentsResponse(BaseModel):
+    generatedDocuments: list[GeneratedDocumentResponse]
+
+
+@router.get(
+    "/analyses/{analysis_id}/generated-documents",
+    response_model=ListGeneratedDocumentsResponse,
+)
+async def list_generated_documents(
+    analysis_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> ListGeneratedDocumentsResponse:
+    """The Analysis's current (non-superseded) GeneratedDocuments, at most one
+    per type — lets the UI know what's ready to apply with after a reload,
+    without re-triggering generation.
+    """
+    await _owned_analysis(session, analysis_id, user_id)
+    rows = (
+        await session.scalars(
+            select(GeneratedDocument)
+            .where(
+                GeneratedDocument.analysisId == analysis_id,
+                GeneratedDocument.supersededById.is_(None),
+            )
+            .order_by(GeneratedDocument.createdAt)
+        )
+    ).all()
+    return ListGeneratedDocumentsResponse(
+        generatedDocuments=[_generated_document_response(row) for row in rows]
+    )
+
+
 class GetGeneratedDocumentResponse(BaseModel):
     generatedDocument: GeneratedDocumentResponse
 

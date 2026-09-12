@@ -75,9 +75,13 @@ export type AnalysisSummary = {
   ingestionJob: { mode: IngestionMode; siteConfigId: string | null } | null;
 };
 
-export type AnalysisDetail = AnalysisSummary & {
+export type AnalysisDetail = Omit<AnalysisSummary, "jobOffer"> & {
   resultJSON: AnalysisResult | null;
   errorMessage: string | null;
+  /** `sourceUrl` is only needed by the detail page's "Apply" action (issue
+   *  #59) — the list/summary shape omits it to match what the API actually
+   *  returns for each surface. */
+  jobOffer: AnalysisSummary["jobOffer"] & { sourceUrl: string };
 };
 
 /**

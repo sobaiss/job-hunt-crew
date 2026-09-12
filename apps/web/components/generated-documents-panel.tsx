@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 
 import {
+  useAnalysisGeneratedDocuments,
   useCreateGeneratedDocuments,
   useGeneratedDocument,
   type GeneratedDocument,
@@ -15,8 +16,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 // "Generate documents" on a completed Analysis (issue #58, Scout slice 6):
 // creates a COVER_LETTER + a TAILORED_CV GeneratedDocument and polls each
 // until it leaves PENDING/GENERATING, then offers a PDF download rendered
-// on demand (services/api/src/api/pdf_render.py). Regenerate is not wired
-// up yet.
+// on demand (services/api/src/api/pdf_render.py). Existing documents survive
+// a page reload via `useAnalysisGeneratedDocuments` (GET .../generated-
+// documents), which also backs the "Apply" action's readiness check.
+// Regenerate is not wired up yet.
 
 function DocumentCard({ id, title }: { id: string; title: string }) {
   const t = useTranslations("analyses.detail.generatedDocuments");
@@ -59,8 +62,10 @@ function DocumentCard({ id, title }: { id: string; title: string }) {
 export function GeneratedDocumentsPanel({ analysisId }: { analysisId: string }) {
   const t = useTranslations("analyses.detail.generatedDocuments");
   const create = useCreateGeneratedDocuments(analysisId);
-  const [documents, setDocuments] = useState<GeneratedDocument[] | null>(null);
+  const { data: existing } = useAnalysisGeneratedDocuments(analysisId);
+  const [created, setCreated] = useState<GeneratedDocument[] | null>(null);
 
+  const documents = created ?? (existing && existing.length > 0 ? existing : null);
   const coverLetter = documents?.find((d) => d.type === "COVER_LETTER") ?? null;
   const tailoredCv = documents?.find((d) => d.type === "TAILORED_CV") ?? null;
 
@@ -74,7 +79,7 @@ export function GeneratedDocumentsPanel({ analysisId }: { analysisId: string }) 
           size="sm"
           onClick={() =>
             create.mutate(undefined, {
-              onSuccess: (data) => setDocuments(data.generatedDocuments),
+              onSuccess: (data) => setCreated(data.generatedDocuments),
             })
           }
           disabled={create.isPending}

@@ -119,7 +119,7 @@ export default function AnalysisDetailPage() {
 
       {analysis.status === "COMPLETED" && (
         <>
-          <ApplicationAction analysisId={analysis.id} />
+          <ApplicationAction analysisId={analysis.id} sourceUrl={analysis.jobOffer.sourceUrl} />
           <GeneratedDocumentsPanel analysisId={analysis.id} />
         </>
       )}

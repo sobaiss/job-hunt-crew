@@ -206,6 +206,54 @@ def test_create_generated_documents_is_user_scoped(user_id):
         asyncio.run(_delete_user(other))
 
 
+def test_list_generated_documents_returns_current_documents_for_the_analysis(user_id):
+    with TestClient(app) as client:
+        cv = _make_cv_version(client, user_id)
+        analysis_id = asyncio.run(
+            _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.COMPLETED)
+        )
+        created = client.post(
+            f"/v1/analyses/{analysis_id}/generated-documents", headers=_headers(user_id)
+        ).json()
+
+        response = client.get(
+            f"/v1/analyses/{analysis_id}/generated-documents", headers=_headers(user_id)
+        )
+        assert response.status_code == 200
+        ids = {doc["id"] for doc in response.json()["generatedDocuments"]}
+        assert ids == {doc["id"] for doc in created["generatedDocuments"]}
+
+
+def test_list_generated_documents_is_empty_before_generation(user_id):
+    with TestClient(app) as client:
+        cv = _make_cv_version(client, user_id)
+        analysis_id = asyncio.run(
+            _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.COMPLETED)
+        )
+
+        response = client.get(
+            f"/v1/analyses/{analysis_id}/generated-documents", headers=_headers(user_id)
+        )
+        assert response.status_code == 200
+        assert response.json()["generatedDocuments"] == []
+
+
+def test_list_generated_documents_is_user_scoped(user_id):
+    other = asyncio.run(_create_user())
+    try:
+        with TestClient(app) as client:
+            cv = _make_cv_version(client, user_id)
+            analysis_id = asyncio.run(
+                _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.COMPLETED)
+            )
+            response = client.get(
+                f"/v1/analyses/{analysis_id}/generated-documents", headers=_headers(other)
+            )
+        assert response.status_code == 404
+    finally:
+        asyncio.run(_delete_user(other))
+
+
 def test_get_generated_document_returns_the_row(user_id):
     with TestClient(app) as client:
         cv = _make_cv_version(client, user_id)

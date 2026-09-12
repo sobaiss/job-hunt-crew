@@ -241,6 +241,7 @@
         "downloadPdf": "Download PDF"
       },
       "application": {
+        "apply": "Apply",
         "markApplied": "Mark as applied",
         "markAppliedError": "We couldn't record that application. Please try again.",
         "applied": "Applied",

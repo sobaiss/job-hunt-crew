@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 
-import { renderWithProviders, screen } from "./test-utils";
+import { renderWithProviders, screen, waitFor } from "./test-utils";
 import { server } from "./msw/server";
 import AnalysesDashboardPage from "@/app/(app)/analyses/page";
 import AnalysisDetailPage from "@/app/(app)/analyses/[id]/page";
@@ -53,6 +53,7 @@ function batchRow(
 function detail(overrides: Record<string, unknown> = {}) {
   return {
     ...summary(),
+    jobOffer: { id: "job1", title: "Backend Engineer", company: "Acme Inc", sourceUrl: "https://example.com/jobs/job1" },
     resultJSON: RESULT,
     errorMessage: null,
     ...overrides,
@@ -719,5 +720,148 @@ describe("AnalysisDetailPage", () => {
       "href",
       "/applications/app-1",
     );
+  });
+
+  it("disables Apply until both generated documents are ready", async () => {
+    server.use(
+      http.get("/api/analyses/a1", () => HttpResponse.json({ analysis: detail() })),
+      http.get("/api/analyses/a1/generated-documents", () =>
+        HttpResponse.json({
+          generatedDocuments: [
+            {
+              id: "gd-cl",
+              type: "COVER_LETTER",
+              analysisId: "a1",
+              status: "READY",
+              markdownContent: "Dear Hiring Manager, ...",
+              errorMessage: null,
+              createdAt: "2026-09-11T00:00:00.000Z",
+              updatedAt: "2026-09-11T00:00:00.000Z",
+            },
+            {
+              id: "gd-cv",
+              type: "TAILORED_CV",
+              analysisId: "a1",
+              status: "GENERATING",
+              markdownContent: null,
+              errorMessage: null,
+              createdAt: "2026-09-11T00:00:00.000Z",
+              updatedAt: "2026-09-11T00:00:00.000Z",
+            },
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />);
+
+    expect(await screen.findByRole("button", { name: "Apply" })).toBeDisabled();
+  });
+
+  it("applies once both documents are ready: opens the posting, downloads both PDFs, and marks applied", async () => {
+    const user = userEvent.setup();
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    server.use(
+      http.get("/api/analyses/a1", () => HttpResponse.json({ analysis: detail() })),
+      http.get("/api/analyses/a1/generated-documents", () =>
+        HttpResponse.json({
+          generatedDocuments: [
+            {
+              id: "gd-cl",
+              type: "COVER_LETTER",
+              analysisId: "a1",
+              status: "READY",
+              markdownContent: "Dear Hiring Manager, ...",
+              errorMessage: null,
+              createdAt: "2026-09-11T00:00:00.000Z",
+              updatedAt: "2026-09-11T00:00:00.000Z",
+            },
+            {
+              id: "gd-cv",
+              type: "TAILORED_CV",
+              analysisId: "a1",
+              status: "READY",
+              markdownContent: "# Jane Doe tailored",
+              errorMessage: null,
+              createdAt: "2026-09-11T00:00:00.000Z",
+              updatedAt: "2026-09-11T00:00:00.000Z",
+            },
+          ],
+        }),
+      ),
+      http.post("/api/applications", () =>
+        HttpResponse.json({
+          application: {
+            id: "app-1",
+            userId: "user_1",
+            analysisId: "a1",
+            jobOfferId: "job1",
+            cvVersionId: "cv1",
+            scoutId: null,
+            coverLetterDocId: null,
+            tailoredCvDocId: null,
+            status: "DRAFT",
+            appliedAt: null,
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+            jobOffer: { id: "job1", title: "Backend Engineer", company: "Acme Inc" },
+            cvVersion: { label: "Grad CV" },
+          },
+        }),
+      ),
+      http.post("/api/applications/app-1/status-events", () =>
+        HttpResponse.json({
+          application: {
+            id: "app-1",
+            userId: "user_1",
+            analysisId: "a1",
+            jobOfferId: "job1",
+            cvVersionId: "cv1",
+            scoutId: null,
+            coverLetterDocId: null,
+            tailoredCvDocId: null,
+            status: "APPLIED",
+            appliedAt: "2026-09-11T00:00:00.000Z",
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+            jobOffer: { id: "job1", title: "Backend Engineer", company: "Acme Inc" },
+            cvVersion: { label: "Grad CV" },
+          },
+          statusEvent: {
+            id: "se-1",
+            applicationId: "app-1",
+            status: "APPLIED",
+            note: null,
+            effectiveDate: "2026-09-11T00:00:00.000Z",
+            createdAt: "2026-09-11T00:00:00.000Z",
+          },
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />);
+
+    const applyButton = await screen.findByRole("button", { name: "Apply" });
+    await waitFor(() => expect(applyButton).toBeEnabled());
+    await user.click(applyButton);
+
+    expect(openSpy).toHaveBeenCalledWith(
+      "https://example.com/jobs/job1",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(openSpy).toHaveBeenCalledWith(
+      "/api/generated-documents/gd-cl/pdf",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(openSpy).toHaveBeenCalledWith(
+      "/api/generated-documents/gd-cv/pdf",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(await screen.findByText("Applied")).toBeInTheDocument();
+
+    openSpy.mockRestore();
   });
 });

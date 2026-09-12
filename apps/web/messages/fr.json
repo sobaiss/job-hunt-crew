@@ -241,6 +241,7 @@
         "downloadPdf": "Télécharger le PDF"
       },
       "application": {
+        "apply": "Postuler",
         "markApplied": "Marquer comme candidaté",
         "markAppliedError": "Impossible d'enregistrer cette candidature. Veuillez réessayer.",
         "applied": "Candidaté",

@@ -43,6 +43,20 @@ export function useCreateGeneratedDocuments(analysisId: string) {
   });
 }
 
+/** The Analysis's current GeneratedDocuments, if generation has already run —
+ * lets the panel and the "Apply" action know what's ready after a reload,
+ * without re-triggering generation. Empty array before generation starts. */
+export function useAnalysisGeneratedDocuments(analysisId: string) {
+  return useQuery({
+    queryKey: ["analysis-generated-documents", analysisId],
+    queryFn: () =>
+      bff.get<{ generatedDocuments: GeneratedDocument[] }>(
+        `/analyses/${analysisId}/generated-documents`,
+      ),
+    select: (data) => data.generatedDocuments,
+  });
+}
+
 /** One GeneratedDocument, polled while it is PENDING/GENERATING. `id` may be
  * `null` before generation has been triggered — the query stays disabled. */
 export function useGeneratedDocument(id: string | null) {
