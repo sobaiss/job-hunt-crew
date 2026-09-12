@@ -170,8 +170,20 @@ async def test_due_scouts_selects_only_active_and_due():
         await engine.dispose()
 
 
+async def _scout_run_ids(session_factory, scout_id: str) -> set[str]:
+    async with session_factory() as session:
+        rows = (await session.scalars(select(ScoutRun.id).where(ScoutRun.scoutId == scout_id))).all()
+    return set(rows)
+
+
 @pytest.mark.asyncio
 async def test_run_scheduler_tick_creates_a_run_and_enqueues_for_each_due_scout():
+    # Scoped to this test's own scout throughout: `due_scouts` scans the whole
+    # `Scout` table by design (production has one shared schedule tick for
+    # every user), so a shared dev/test Postgres can carry other ACTIVE Scout
+    # rows (e.g. left over from manual UI testing) that would also be due and
+    # inflate `run_ids`/`fake_sqs.messages` — asserting global counts here is
+    # what made this test flaky, not the scheduler logic itself.
     engine = make_engine()
     session_factory = make_session_factory(engine)
     now = datetime(2026, 9, 11, 7, 0)
@@ -182,15 +194,16 @@ async def test_run_scheduler_tick_creates_a_run_and_enqueues_for_each_due_scout(
         async with session_factory() as session:
             run_ids = await run_scheduler_tick(session, sqs_client=fake_sqs, now=now)
 
-        assert len(run_ids) == 1
+        this_scout_runs = await _scout_run_ids(session_factory, scout_id)
+        assert len(this_scout_runs) == 1
+        (this_run_id,) = this_scout_runs
+        assert this_run_id in run_ids
         async with session_factory() as session:
-            run = await session.get(ScoutRun, run_ids[0])
+            run = await session.get(ScoutRun, this_run_id)
         assert run is not None
-        assert run.scoutId == scout_id
         assert run.status == Scoutrunstatus.PENDING
-        assert len(fake_sqs.messages) == 1
-        queue_url, body = fake_sqs.messages[0]
-        assert body == {"scoutRunId": run_ids[0]}
+        matching_messages = [body for _, body in fake_sqs.messages if body == {"scoutRunId": this_run_id}]
+        assert len(matching_messages) == 1
     finally:
         await _cleanup(session_factory, user_id=user_id, scout_id=scout_id)
         await engine.dispose()
@@ -203,15 +216,19 @@ async def test_run_scheduler_tick_skips_a_scout_with_a_running_run():
     now = datetime(2026, 9, 11, 7, 0)
     async with session_factory() as session:
         user_id, cv_id, scout_id = await _make_scout(session, status=Scoutstatus.ACTIVE, last_run_at=None)
-        session.add(ScoutRun(id=f"run-{uuid.uuid4()}", scoutId=scout_id, status=Scoutrunstatus.RUNNING))
+        running_run_id = f"run-{uuid.uuid4()}"
+        session.add(ScoutRun(id=running_run_id, scoutId=scout_id, status=Scoutrunstatus.RUNNING))
         await session.commit()
     fake_sqs = FakeSqs()
     try:
         async with session_factory() as session:
             run_ids = await run_scheduler_tick(session, sqs_client=fake_sqs, now=now)
 
-        assert run_ids == []
-        assert fake_sqs.messages == []
+        assert running_run_id not in run_ids
+        this_scout_runs = await _scout_run_ids(session_factory, scout_id)
+        assert this_scout_runs == {running_run_id}
+        assert not any(body.get("scoutRunId") == running_run_id for _, body in fake_sqs.messages)
+        assert not any(body.get("scoutRunId") in this_scout_runs - {running_run_id} for _, body in fake_sqs.messages)
     finally:
         await _cleanup(session_factory, user_id=user_id, scout_id=scout_id)
         await engine.dispose()
@@ -232,8 +249,9 @@ async def test_run_scheduler_tick_does_not_re_enqueue_a_scout_that_already_ran_t
         async with session_factory() as session:
             run_ids = await run_scheduler_tick(session, sqs_client=fake_sqs, now=now)
 
-        assert run_ids == []
-        assert fake_sqs.messages == []
+        this_scout_runs = await _scout_run_ids(session_factory, scout_id)
+        assert this_scout_runs == set()
+        assert not (this_scout_runs & set(run_ids))
     finally:
         await _cleanup(session_factory, user_id=user_id, scout_id=scout_id)
         await engine.dispose()
