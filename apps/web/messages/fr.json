@@ -435,7 +435,9 @@
       "heading": "Tendances de vos correspondances",
       "empty": "Pas encore de tendances — elles apparaîtront à mesure que les correspondances pertinentes s'accumulent.",
       "loadError": "Impossible de charger les tendances de ce Scout. Veuillez réessayer.",
-      "count": "{count, plural, one {# correspondance} other {# correspondances}}"
+      "count": "{count, plural, one {# correspondance} other {# correspondances}}",
+      "weaknessesHeading": "Faiblesses récurrentes dans vos correspondances",
+      "weaknessesEmpty": "Pas encore de faiblesses récurrentes — elles apparaîtront à mesure que les correspondances pertinentes s'accumulent."
     },
     "siteKeys": {
       "FRANCE_TRAVAIL": "France Travail",

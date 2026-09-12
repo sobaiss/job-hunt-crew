@@ -227,13 +227,24 @@ export type SkillPattern = {
   count: number;
 };
 
+export type WeaknessPattern = {
+  weakness: string;
+  count: number;
+};
+
+export type ScoutPatterns = {
+  patterns: SkillPattern[];
+  weaknesses: WeaknessPattern[];
+};
+
 /** Skills most often required by this Scout's relevant finds and missing
- * from the base CV, ranked by frequency among `required`-importance gaps. */
+ * from the base CV (ranked by frequency among `required`-importance gaps),
+ * plus recurring weaknesses (ranked by exact-text frequency — free text has
+ * no importance field to filter on). */
 export function useScoutPatterns(scoutId: string) {
   return useQuery({
     queryKey: [...SCOUTS_KEY, scoutId, "patterns"] as const,
-    queryFn: () => bff.get<{ patterns: SkillPattern[] }>(`/scouts/${scoutId}/patterns`),
-    select: (data) => data.patterns,
+    queryFn: () => bff.get<ScoutPatterns>(`/scouts/${scoutId}/patterns`),
     enabled: Boolean(scoutId),
   });
 }

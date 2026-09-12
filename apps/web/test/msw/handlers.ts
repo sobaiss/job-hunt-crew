@@ -28,7 +28,9 @@ export const handlers = [
   http.get("/api/applications/stats", () => HttpResponse.json(ZERO_APPLICATION_STATS)),
   http.get("/api/scouts/:id/stats", () => HttpResponse.json(ZERO_APPLICATION_STATS)),
   // The "patterns across your matches" panel (issue #60); default to none.
-  http.get("/api/scouts/:id/patterns", () => HttpResponse.json({ patterns: [] })),
+  http.get("/api/scouts/:id/patterns", () =>
+    HttpResponse.json({ patterns: [], weaknesses: [] }),
+  ),
   // The Analysis detail page's GeneratedDocumentsPanel and "Apply" action
   // (issue #59) check for already-generated documents on load; default to
   // none so suites exercising other parts of the page don't have to stub it.

@@ -435,7 +435,9 @@
       "heading": "Patterns across your matches",
       "empty": "No patterns yet — they'll appear as relevant finds accumulate.",
       "loadError": "We couldn't load this Scout's patterns. Please try again.",
-      "count": "{count, plural, one {# find} other {# finds}}"
+      "count": "{count, plural, one {# find} other {# finds}}",
+      "weaknessesHeading": "Recurring weaknesses across your matches",
+      "weaknessesEmpty": "No recurring weaknesses yet — they'll appear as relevant finds accumulate."
     },
     "siteKeys": {
       "FRANCE_TRAVAIL": "France Travail",

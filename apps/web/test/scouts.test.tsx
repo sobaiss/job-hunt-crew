@@ -442,6 +442,7 @@ describe("ScoutDetailPage — stats and patterns (issue #60)", () => {
             { skill: "Kubernetes", count: 3 },
             { skill: "GraphQL", count: 1 },
           ],
+          weaknesses: [],
         }),
       ),
     );
@@ -452,18 +453,47 @@ describe("ScoutDetailPage — stats and patterns (issue #60)", () => {
     expect(screen.getByText("GraphQL")).toBeInTheDocument();
   });
 
+  it("ranks the patterns panel's recurring weaknesses by frequency", async () => {
+    server.use(
+      http.get("/api/scouts/scout-1", () => HttpResponse.json({ scout: scout() })),
+      http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
+      http.get("/api/scouts/scout-1/runs", () => HttpResponse.json({ scoutRuns: [] })),
+      http.get("/api/scouts/scout-1/patterns", () =>
+        HttpResponse.json({
+          patterns: [],
+          weaknesses: [
+            { weakness: "Limited cloud experience", count: 2 },
+            { weakness: "No team leadership", count: 1 },
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<ScoutDetailPage />);
+
+    expect(await screen.findByText("Limited cloud experience")).toBeInTheDocument();
+    expect(screen.getByText("No team leadership")).toBeInTheDocument();
+  });
+
   it("shows an empty state when there are no patterns yet", async () => {
     server.use(
       http.get("/api/scouts/scout-1", () => HttpResponse.json({ scout: scout() })),
       http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
       http.get("/api/scouts/scout-1/runs", () => HttpResponse.json({ scoutRuns: [] })),
-      http.get("/api/scouts/scout-1/patterns", () => HttpResponse.json({ patterns: [] })),
+      http.get("/api/scouts/scout-1/patterns", () =>
+        HttpResponse.json({ patterns: [], weaknesses: [] }),
+      ),
     );
 
     renderWithProviders(<ScoutDetailPage />);
 
     expect(
       await screen.findByText("No patterns yet — they'll appear as relevant finds accumulate."),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        "No recurring weaknesses yet — they'll appear as relevant finds accumulate.",
+      ),
     ).toBeInTheDocument();
   });
 });

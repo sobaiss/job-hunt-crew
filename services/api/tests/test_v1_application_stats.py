@@ -402,6 +402,57 @@ def test_scout_patterns_ranks_required_missing_skills_by_frequency(user_id):
         assert not any(p["skill"].lower() == "terraform" for p in patterns)
 
 
+def test_scout_patterns_ranks_weaknesses_by_exact_text_frequency(user_id):
+    with TestClient(app) as client:
+        cv = _make_cv_version(client, user_id)
+        scout_id = _make_scout(client, user_id, cv)
+        now = _now()
+
+        async def _seed_with_result(result_json: dict) -> None:
+            job_offer_id = str(uuid.uuid4())
+            engine = make_engine()
+            try:
+                session_factory = make_session_factory(engine)
+                async with session_factory() as session:
+                    session.add(
+                        JobOffer(
+                            id=job_offer_id,
+                            sourceUrl=f"https://example.com/jobs/{job_offer_id}",
+                            sourceSite=Joboffersourcesite.OTHER,
+                            updatedAt=_now(),
+                        )
+                    )
+                    session.add(
+                        Analysis(
+                            id=str(uuid.uuid4()),
+                            userId=user_id,
+                            jobOfferId=job_offer_id,
+                            cvVersionId=cv,
+                            scoutId=scout_id,
+                            status=Analysisstatus.COMPLETED,
+                            matchScore=50,
+                            completedAt=now,
+                            resultJSON=result_json,
+                        )
+                    )
+                    await session.commit()
+            finally:
+                await engine.dispose()
+
+        asyncio.run(
+            _seed_with_result({"weaknesses": ["Limited cloud experience", "No team leadership"]})
+        )
+        asyncio.run(_seed_with_result({"weaknesses": ["limited cloud experience"]}))
+        asyncio.run(_seed_with_result({"weaknesses": ["Weak in system design"]}))
+
+        response = client.get(f"/v1/scouts/{scout_id}/patterns", headers=_headers(user_id))
+        assert response.status_code == 200
+        weaknesses = response.json()["weaknesses"]
+        assert weaknesses[0] == {"weakness": "Limited cloud experience", "count": 2}
+        assert {"weakness": "No team leadership", "count": 1} in weaknesses
+        assert {"weakness": "Weak in system design", "count": 1} in weaknesses
+
+
 def test_scout_patterns_empty_with_no_finds(user_id):
     with TestClient(app) as client:
         cv = _make_cv_version(client, user_id)
@@ -409,6 +460,7 @@ def test_scout_patterns_empty_with_no_finds(user_id):
         response = client.get(f"/v1/scouts/{scout_id}/patterns", headers=_headers(user_id))
         assert response.status_code == 200
         assert response.json()["patterns"] == []
+        assert response.json()["weaknesses"] == []
 
 
 def test_scout_patterns_is_user_scoped(user_id):

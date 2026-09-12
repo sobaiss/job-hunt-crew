@@ -1400,8 +1400,29 @@ class SkillPattern(BaseModel):
     count: int
 
 
+class WeaknessPattern(BaseModel):
+    weakness: str
+    count: int
+
+
 class ScoutPatternsResponse(BaseModel):
     patterns: list[SkillPattern]
+    weaknesses: list[WeaknessPattern]
+
+
+def _rank_by_frequency(values: list[str]) -> list[tuple[str, int]]:
+    """Case-insensitive frequency ranking of free-text values, most-frequent
+    first, showing the most common original casing for each group."""
+    counts: dict[str, int] = {}
+    display: dict[str, str] = {}
+    for value in values:
+        if not isinstance(value, str) or not value.strip():
+            continue
+        key = value.strip().lower()
+        counts[key] = counts.get(key, 0) + 1
+        display.setdefault(key, value.strip())
+    ranked = sorted(counts.items(), key=lambda item: (-item[1], display[item[0]]))
+    return [(display[key], count) for key, count in ranked]
 
 
 @router.get("/scouts/{scout_id}/patterns", response_model=ScoutPatternsResponse)
@@ -1411,10 +1432,12 @@ async def get_scout_patterns(
     session: AsyncSession = Depends(get_session),
 ) -> ScoutPatternsResponse:
     """"Patterns across your matches" (issue #60): aggregates `missing_skills`
-    across this Scout's completed Analyses, counting only `required`-importance
-    entries (the AC's "ranked by frequency among required skills"), ranked
-    most-frequent first. Skill names are grouped case-insensitively but the
-    most common original casing is shown.
+    and `weaknesses` across this Scout's completed Analyses. `missing_skills`
+    counts only `required`-importance entries (the AC's "ranked by frequency
+    among required skills"). `weaknesses` is free text with no importance
+    field, so it is ranked by exact (case-insensitive) text frequency instead
+    — the same no-NLP, lexical-only precedent used elsewhere in this
+    codebase (e.g. issue #55's pre-rank). Both lists are most-frequent first.
     """
     scout = await _owned_scout(session, scout_id, user_id)
     rows = (
@@ -1427,22 +1450,25 @@ async def get_scout_patterns(
         )
     ).all()
 
-    counts: dict[str, int] = {}
-    display: dict[str, str] = {}
-    for row in rows:
-        for entry in (row.resultJSON or {}).get("missing_skills", []):
-            if not isinstance(entry, dict) or entry.get("importance") != "required":
-                continue
-            skill = entry.get("skill")
-            if not isinstance(skill, str) or not skill.strip():
-                continue
-            key = skill.strip().lower()
-            counts[key] = counts.get(key, 0) + 1
-            display.setdefault(key, skill.strip())
+    required_skills = [
+        entry.get("skill")
+        for row in rows
+        for entry in (row.resultJSON or {}).get("missing_skills", [])
+        if isinstance(entry, dict) and entry.get("importance") == "required"
+    ]
+    all_weaknesses = [
+        weakness for row in rows for weakness in (row.resultJSON or {}).get("weaknesses", [])
+    ]
 
-    ranked = sorted(counts.items(), key=lambda item: (-item[1], display[item[0]]))
     return ScoutPatternsResponse(
-        patterns=[SkillPattern(skill=display[key], count=count) for key, count in ranked]
+        patterns=[
+            SkillPattern(skill=skill, count=count)
+            for skill, count in _rank_by_frequency(required_skills)
+        ],
+        weaknesses=[
+            WeaknessPattern(weakness=weakness, count=count)
+            for weakness, count in _rank_by_frequency(all_weaknesses)
+        ],
     )
 
 
