@@ -4,7 +4,10 @@ Produces an offer-tailored copy of a candidate's CV as Markdown — reordered
 and re-emphasised toward the target job offer — without ever mutating the
 base CVVersion (ADR 0003, a future slice). Mirrors
 cover_letter_writer_agent's design: prose Markdown output, so MAX_ATTEMPTS
-only guards an empty/whitespace response.
+only guards an empty/whitespace response, and a raw provider exception is
+retried with exponential backoff rather than propagating immediately — see
+that module's docstring for why this diverges from the comparison/extraction
+agents' convention.
 
 Truthfulness constraint: the agent may reorder, re-emphasise, and re-word
 only content the base CV already contains, and must never invent employers,
@@ -12,10 +15,17 @@ dates, titles, or credentials.
 """
 
 import json
+import time
 
 from .llm_provider import LLMProvider, get_llm_provider
 
 MAX_ATTEMPTS = 3
+RETRY_BASE_SECONDS = 2
+RETRY_BACKOFF_RATE = 2.0
+
+
+def _sleep(seconds: float) -> None:
+    time.sleep(seconds)
 
 SYSTEM_PROMPT = (
     "You produce an offer-tailored copy of a candidate's CV. You are given the "
@@ -61,8 +71,14 @@ def run_cv_tailoring(
     )
 
     last_error: Exception | None = None
-    for _attempt in range(1, MAX_ATTEMPTS + 1):
-        raw = provider.generate(system=system, prompt=prompt)
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            raw = provider.generate(system=system, prompt=prompt)
+        except Exception as exc:  # noqa: BLE001 - any provider error is retried with backoff
+            last_error = exc
+            if attempt < MAX_ATTEMPTS:
+                _sleep(RETRY_BASE_SECONDS * (RETRY_BACKOFF_RATE ** (attempt - 1)))
+            continue
         text = (raw or "").strip()
         if text:
             return text
