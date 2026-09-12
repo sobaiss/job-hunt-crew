@@ -375,6 +375,7 @@ class IngestionJob(Base):
     quotaSkippedCount: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text('0'))
     alreadySeenCount: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text('0'))
     runLimitSkippedCount: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text('0'))
+    extractionSkippedCount: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text('0'))
     inputUrl: Mapped[Optional[str]] = mapped_column(Text)
     siteConfigId: Mapped[Optional[str]] = mapped_column(Text)
     filters: Mapped[Optional[dict]] = mapped_column(JSONB)

@@ -15,9 +15,13 @@ the two completion points that can move them:
   COMPLETED, `analysis.handlers.mark_analysis_failed` on FAILED).
 
 It also rolls up the cost-bounded-matching counts the fan-out records per
-`IngestionJob` (issue #55): `alreadySeenCount`, `runLimitSkippedCount`, and
-the daily-cap `quotaSkippedCount` (surfaced on `ScoutRun` as `capSkippedCount`
-— same underlying rule, run-scoped name).
+`IngestionJob` (issue #55): `alreadySeenCount`, `runLimitSkippedCount` (now
+the sum of two distinct gates — offers never extracted because the
+pre-extraction ceiling was already spent, `IngestionJob.extractionSkippedCount`,
+plus already-extracted offers the post-extraction ceiling still turned away,
+`IngestionJob.runLimitSkippedCount` itself), and the daily-cap
+`quotaSkippedCount` (surfaced on `ScoutRun` as `capSkippedCount` — same
+underlying rule, run-scoped name).
 
 `ScoutRun.status` is left to `dispatch_scout_run` — this only touches the four
 count columns. Hand-written (not sqlacodegen output), like `quota.py` /
@@ -58,6 +62,7 @@ async def roll_up_scout_run(session: AsyncSession, scout_run_id: str) -> None:
                 IngestionJob.failedCount,
                 IngestionJob.alreadySeenCount,
                 IngestionJob.runLimitSkippedCount,
+                IngestionJob.extractionSkippedCount,
                 IngestionJob.quotaSkippedCount,
             ).where(IngestionJob.scoutRunId == scout_run_id)
         )
@@ -66,7 +71,9 @@ async def roll_up_scout_run(session: AsyncSession, scout_run_id: str) -> None:
     offers_discovered = sum(row.discoveredCount or 0 for row in job_rows)
     offers_failed = sum(row.failedCount or 0 for row in job_rows)
     already_seen = sum(row.alreadySeenCount or 0 for row in job_rows)
-    run_limit_skipped = sum(row.runLimitSkippedCount or 0 for row in job_rows)
+    run_limit_skipped = sum(
+        (row.runLimitSkippedCount or 0) + (row.extractionSkippedCount or 0) for row in job_rows
+    )
     cap_skipped = sum(row.quotaSkippedCount or 0 for row in job_rows)
 
     offers_analysed = 0

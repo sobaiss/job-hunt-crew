@@ -31,11 +31,17 @@ manual flows (no `scoutRunId` -> skip straight to the unchanged path):
   (`py_db.scout_matching.lexical_similarity`), then cut to whatever remains
   of `SCOUT_MAX_ANALYSES_PER_RUN` across every `IngestionJob` (site) the run
   has fanned out to so far; the overflow is counted
-  `IngestionJob.runLimitSkippedCount` ("not analysed - run limit"). Ranking
-  runs after extraction (on `JobOffer.structuredData`), not before it — an
-  offer beyond the ceiling is still fully scraped and extracted this slice,
-  a simplification over the PRD's "scrape all, extract only the top N"
-  deferred to a follow-up (see the module docstring's issue history).
+  `IngestionJob.runLimitSkippedCount` ("not analysed - run limit").
+
+Extraction gating (issue #55 follow-up): `ingestion.fanout`'s
+`_scrape_all_then_extract_within_ceiling` now applies this same ranking
+*before* extraction runs — an offer beyond what's left of the ceiling is
+scraped but never extracted, saving the extraction-LLM call, and is counted
+on `IngestionJob.extractionSkippedCount`. By the time this module runs, most
+Scout offers were already gated there, so the ranking here mostly re-confirms
+an already-bounded set; it still matters for a `JobOffer` that reached
+`READY` via a different job/run entirely (globally deduped by `sourceUrl`)
+and so never passed through this run's own extraction gate.
 """
 
 import json

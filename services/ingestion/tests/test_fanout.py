@@ -8,7 +8,24 @@ import respx
 from analysis.llm_provider import LLMProvider
 from botocore.client import Config
 from httpx import Response
-from py_db.models import IngestionJob, IngestionJobOffer, JobOffer, PipelineEvent, Ingestionjobstatus, Ingestionmode, Jobofferextractionstatus, Joboffersourcesite, User
+from py_db.models import (
+    CVVersion,
+    Cvconversionstatus,
+    Cvfiletype,
+    IngestionJob,
+    IngestionJobOffer,
+    Ingestionjobstatus,
+    Ingestionmode,
+    JobOffer,
+    Jobofferextractionstatus,
+    Joboffersourcesite,
+    PipelineEvent,
+    Scout,
+    ScoutRun,
+    Scoutrunstatus,
+    Scoutstatus,
+    User,
+)
 from py_db.session import make_engine, make_session_factory
 from sqlalchemy import select
 
@@ -550,4 +567,210 @@ async def test_update_ingestion_job_aggregate_completed_when_all_ready():
             if user is not None:
                 await session.delete(user)
             await session.commit()
+        await engine.dispose()
+
+
+async def _seed_scout_job(session_factory, *, with_cv_version=True):
+    user_id = f"test-user-{uuid.uuid4()}"
+    # Scout.cvVersionId is a required FK, so a real CVVersion row always
+    # exists; `with_cv_version=False` only omits it from the IngestionJob,
+    # mirroring the legacy-row case `create_analyses_for_ready_offers` also
+    # no-ops on.
+    scout_cv_version_id = f"test-cv-{uuid.uuid4()}"
+    ingestion_job_cv_version_id = scout_cv_version_id if with_cv_version else None
+    ingestion_job_id = f"test-job-{uuid.uuid4()}"
+    scout_id = f"test-scout-{uuid.uuid4()}"
+    scout_run_id = f"test-scout-run-{uuid.uuid4()}"
+
+    async with session_factory() as session:
+        session.add(User(id=user_id, updatedAt=_now()))
+        session.add(
+            CVVersion(
+                id=scout_cv_version_id,
+                userId=user_id,
+                label="CV",
+                fileKey="cv/x.pdf",
+                fileName="x.pdf",
+                fileType=Cvfiletype.PDF,
+                fileSizeBytes=1234,
+                conversionStatus=Cvconversionstatus.CONVERTED,
+                markdownContent="Senior Python Backend Engineer with AWS Kubernetes experience",
+                updatedAt=_now(),
+            )
+        )
+        session.add(
+            IngestionJob(
+                id=ingestion_job_id,
+                userId=user_id,
+                mode=Ingestionmode.SITE_SEARCH,
+                cvVersionId=ingestion_job_cv_version_id,
+                scoutRunId=scout_run_id,
+                maxOffers=25,
+                status=Ingestionjobstatus.RUNNING,
+                updatedAt=_now(),
+            )
+        )
+        session.add(
+            Scout(
+                id=scout_id,
+                userId=user_id,
+                label="Backend — Remote",
+                cvVersionId=scout_cv_version_id,
+                targetSiteKeys=["FRANCE_TRAVAIL"],
+                filters={},
+                matchThreshold=70,
+                status=Scoutstatus.ACTIVE,
+                updatedAt=_now(),
+            )
+        )
+        session.add(ScoutRun(id=scout_run_id, scoutId=scout_id, status=Scoutrunstatus.RUNNING))
+        await session.commit()
+
+    return user_id, scout_cv_version_id, ingestion_job_id, scout_id, scout_run_id
+
+
+async def _cleanup_scout_job(session_factory, *, user_id, cv_version_id, ingestion_job_id, scout_id, scout_run_id, urls):
+    async with session_factory() as session:
+        links = (
+            await session.scalars(
+                select(IngestionJobOffer).where(IngestionJobOffer.ingestionJobId == ingestion_job_id)
+            )
+        ).all()
+        for link in links:
+            await session.delete(link)
+        await session.commit()
+
+        offers = (await session.scalars(select(JobOffer).where(JobOffer.sourceUrl.in_(urls)))).all()
+        for offer in offers:
+            await session.delete(offer)
+        events = (
+            await session.scalars(select(PipelineEvent).where(PipelineEvent.ingestionJobId == ingestion_job_id))
+        ).all()
+        for event in events:
+            await session.delete(event)
+        job = await session.get(IngestionJob, ingestion_job_id)
+        if job is not None:
+            await session.delete(job)
+        run = await session.get(ScoutRun, scout_run_id)
+        if run is not None:
+            await session.delete(run)
+        scout = await session.get(Scout, scout_id)
+        if scout is not None:
+            await session.delete(scout)
+        if cv_version_id:
+            cv = await session.get(CVVersion, cv_version_id)
+            if cv is not None:
+                await session.delete(cv)
+        user = await session.get(User, user_id)
+        if user is not None:
+            await session.delete(user)
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_scout_job_extraction_ceiling_skips_low_similarity_offer(monkeypatch):
+    """issue #55 follow-up: a Scout job's extraction ceiling now gates
+    extraction itself, not just Analysis creation — the offer least similar
+    to the base CV is scraped but never extracted (no extraction-LLM call
+    spent on it), and the job still reaches a terminal COMPLETED status
+    rather than getting stuck RUNNING on the un-extracted offer."""
+    monkeypatch.setenv("SCOUT_MAX_ANALYSES_PER_RUN", "1")
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id, cv_version_id, ingestion_job_id, scout_id, scout_run_id = await _seed_scout_job(session_factory)
+    good_url = f"https://example.com/jobs/{uuid.uuid4()}"
+    bad_url = f"https://example.com/jobs/{uuid.uuid4()}"
+    urls = [good_url, bad_url]
+    good_html = "<html><body>Senior Python Backend Engineer AWS Kubernetes</body></html>"
+    bad_html = "<html><body>Pastry Chef cake decoration dessert plating</body></html>"
+    s3 = _s3_client()
+    processed: list[JobOffer] = []
+
+    try:
+        with respx.mock(assert_all_called=True) as mock:
+            mock.get(good_url).mock(return_value=Response(200, text=good_html))
+            mock.get(bad_url).mock(return_value=Response(200, text=bad_html))
+
+            async with session_factory() as session:
+                ingestion_job = await session.get(IngestionJob, ingestion_job_id)
+                provider = StubLLMProvider()
+                processed = await link_and_process_offers(session, ingestion_job, urls, llm_provider=provider)
+
+        assert provider.calls == 1
+
+        by_url = {offer.sourceUrl: offer for offer in processed}
+        assert by_url[good_url].extractionStatus == Jobofferextractionstatus.READY
+        assert by_url[good_url].structuredData is not None
+        assert by_url[bad_url].extractionStatus == Jobofferextractionstatus.SCRAPED
+        assert by_url[bad_url].structuredData is None
+
+        async with session_factory() as session:
+            ingestion_job = await session.get(IngestionJob, ingestion_job_id)
+        assert ingestion_job.extractionSkippedCount == 1
+        assert ingestion_job.status == Ingestionjobstatus.COMPLETED
+    finally:
+        for job_offer in processed:
+            try:
+                s3.delete_object(Bucket=S3_BUCKET, Key=raw_scrape_key(job_offer.id))
+            except Exception:
+                pass
+        await _cleanup_scout_job(
+            session_factory,
+            user_id=user_id,
+            cv_version_id=cv_version_id,
+            ingestion_job_id=ingestion_job_id,
+            scout_id=scout_id,
+            scout_run_id=scout_run_id,
+            urls=urls,
+        )
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_scout_job_without_cv_version_extracts_every_offer_unchanged(monkeypatch):
+    """A Scout job with no cvVersionId (legacy row / bad state) has nothing
+    to rank against, so it falls back to the manual flow's extract-everyone
+    behaviour rather than skipping offers it can't rank."""
+    monkeypatch.setenv("SCOUT_MAX_ANALYSES_PER_RUN", "1")
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id, cv_version_id, ingestion_job_id, scout_id, scout_run_id = await _seed_scout_job(
+        session_factory, with_cv_version=False
+    )
+    urls = [f"https://example.com/jobs/{uuid.uuid4()}" for _ in range(2)]
+    s3 = _s3_client()
+    processed: list[JobOffer] = []
+
+    try:
+        with respx.mock(assert_all_called=True) as mock:
+            for url in urls:
+                mock.get(url).mock(return_value=Response(200, text=FIXTURE_HTML))
+
+            async with session_factory() as session:
+                ingestion_job = await session.get(IngestionJob, ingestion_job_id)
+                provider = StubLLMProvider()
+                processed = await link_and_process_offers(session, ingestion_job, urls, llm_provider=provider)
+
+        assert provider.calls == 2
+        assert all(offer.extractionStatus == Jobofferextractionstatus.READY for offer in processed)
+
+        async with session_factory() as session:
+            ingestion_job = await session.get(IngestionJob, ingestion_job_id)
+        assert ingestion_job.extractionSkippedCount == 0
+        assert ingestion_job.status == Ingestionjobstatus.COMPLETED
+    finally:
+        for job_offer in processed:
+            try:
+                s3.delete_object(Bucket=S3_BUCKET, Key=raw_scrape_key(job_offer.id))
+            except Exception:
+                pass
+        await _cleanup_scout_job(
+            session_factory,
+            user_id=user_id,
+            cv_version_id=cv_version_id,
+            ingestion_job_id=ingestion_job_id,
+            scout_id=scout_id,
+            scout_run_id=scout_run_id,
+            urls=urls,
+        )
         await engine.dispose()
