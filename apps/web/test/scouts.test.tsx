@@ -129,6 +129,26 @@ describe("NewScoutPage — create form", () => {
     expect(screen.getByLabelText("Relevance threshold")).toHaveValue(70);
   });
 
+  it("styles the site checkboxes with the design system's accent and a visible focus ring", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+    );
+
+    renderWithProviders(<NewScoutPage />);
+
+    const franceTravail = await screen.findByRole("checkbox", {
+      name: "France Travail",
+    });
+    // Bare native checkboxes render with browser-default chrome that ignores
+    // the app's dark theme and has no visible focus indicator — issue #53's
+    // deferred a11y/dark-mode pass. Both the checked fill and the focus ring
+    // must come from design tokens, not browser defaults.
+    expect(franceTravail.className).toMatch(/accent-accent/);
+    expect(franceTravail.className).toMatch(/focus-visible:ring-2/);
+  });
+
   it("validates an empty label and at least one site", async () => {
     server.use(
       http.get("/api/cv-versions", () =>

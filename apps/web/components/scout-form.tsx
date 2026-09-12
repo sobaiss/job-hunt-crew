@@ -140,6 +140,7 @@ export function ScoutForm({ scout }: { scout?: Scout }) {
                 <label key={key} className="flex items-center gap-2 text-sm">
                   <input
                     type="checkbox"
+                    className="h-4 w-4 rounded border-border accent-accent outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                     checked={siteKeys.includes(key)}
                     onChange={() => toggleSite(key)}
                   />
