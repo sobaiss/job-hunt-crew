@@ -1,7 +1,6 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from analysis.llm_provider import (
     AnthropicProvider,
     OllamaProvider,
@@ -19,7 +18,9 @@ def test_get_llm_provider_anthropic_calls_anthropic_sdk(monkeypatch):
     fake_client.messages.create.return_value = fake_response
 
     with (
-        patch("analysis.llm_provider.anthropic.Anthropic", return_value=fake_client) as anthropic_ctor,
+        patch(
+            "analysis.llm_provider.anthropic.Anthropic", return_value=fake_client
+        ) as anthropic_ctor,
         patch("analysis.llm_provider.openai.OpenAI") as openai_ctor,
     ):
         provider = get_llm_provider()
@@ -45,7 +46,9 @@ def test_get_llm_provider_openai_calls_openai_sdk(monkeypatch):
     fake_client.chat.completions.create.return_value = fake_response
 
     with (
-        patch("analysis.llm_provider.openai.OpenAI", return_value=fake_client) as openai_ctor,
+        patch(
+            "analysis.llm_provider.openai.OpenAI", return_value=fake_client
+        ) as openai_ctor,
         patch("analysis.llm_provider.anthropic.Anthropic") as anthropic_ctor,
     ):
         provider = get_llm_provider()
@@ -74,7 +77,7 @@ def test_get_llm_provider_ollama_returns_ollama_provider(monkeypatch):
     openai_ctor.assert_called_once_with(
         base_url="http://localhost:11434/v1", api_key="ollama"
     )
-    assert provider.model == "qwen2.5:7b"
+    assert provider.model == "qwen3.5:latest"
 
 
 def test_ollama_llm_model_env_var_overrides_default(monkeypatch):
