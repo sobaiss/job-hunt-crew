@@ -153,6 +153,34 @@ export function useApplicationStats() {
   });
 }
 
+/** Lazily gets-or-creates the Application, then appends a StatusEvent for an
+ * arbitrary status in one action — the same composition as `useMarkAsApplied`,
+ * generalized for the Analyses Quick view's Tracking-status buttons (issue
+ * #66), which also need to write REJECTED/ACCEPTED/WITHDRAWN. */
+export function useSetApplicationStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      analysisId,
+      status,
+    }: {
+      analysisId: string;
+      status: ApplicationStatus;
+    }) => {
+      const { application } = await bff.post<{ application: Application }>("/applications", {
+        analysisId,
+      });
+      return bff.post<{ application: Application; statusEvent: StatusEvent }>(
+        `/applications/${application.id}/status-events`,
+        { status, effectiveDate: new Date().toISOString() },
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: APPLICATIONS_KEY });
+    },
+  });
+}
+
 /** "Mark as applied" (issue #59): composes the lazy get-or-create with an
  * APPLIED StatusEvent in one action, for the Analysis detail page's action
  * button — the caller doesn't need to know the Application id ahead of time. */

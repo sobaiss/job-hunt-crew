@@ -555,6 +555,178 @@ describe("AnalysesDashboardPage", () => {
     );
     expect(document.activeElement).toBe(row);
   });
+
+  it("opens the offer in a new tab from the Quick view's \"View job offer\" link (issue #66)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () => HttpResponse.json({ analyses: [detail()] })),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await user.click(await screen.findByText("Backend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    const offerLink = quickView.getByRole("link", { name: "View job offer" });
+    expect(offerLink).toHaveAttribute("href", "https://example.com/jobs/job1");
+    expect(offerLink).toHaveAttribute("target", "_blank");
+  });
+
+  it("does not offer a \"To apply\" Tracking status transition from the Quick view (issue #66)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () => HttpResponse.json({ analyses: [detail()] })),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await user.click(await screen.findByText("Backend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    await quickView.findByText("To apply");
+    expect(
+      quickView.queryByRole("button", { name: "To apply" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("changes the Tracking status from the Quick view, lazily creating the Application, and updates the badge (issue #66)", async () => {
+    const user = userEvent.setup();
+    let applicationStatus: string | null = null;
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({ analyses: [detail({ applicationStatus })] }),
+      ),
+      http.post("/api/applications", () =>
+        HttpResponse.json({
+          application: {
+            id: "app-1",
+            userId: "user_1",
+            analysisId: "a1",
+            jobOfferId: "job1",
+            cvVersionId: "cv1",
+            scoutId: null,
+            coverLetterDocId: null,
+            tailoredCvDocId: null,
+            status: "DRAFT",
+            appliedAt: null,
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+            jobOffer: { id: "job1", title: "Backend Engineer", company: "Acme Inc" },
+            cvVersion: { label: "Grad CV" },
+          },
+        }),
+      ),
+      http.post("/api/applications/app-1/status-events", () => {
+        applicationStatus = "APPLIED";
+        return HttpResponse.json({
+          application: {
+            id: "app-1",
+            userId: "user_1",
+            analysisId: "a1",
+            jobOfferId: "job1",
+            cvVersionId: "cv1",
+            scoutId: null,
+            coverLetterDocId: null,
+            tailoredCvDocId: null,
+            status: "APPLIED",
+            appliedAt: "2026-09-11T00:00:00.000Z",
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+            jobOffer: { id: "job1", title: "Backend Engineer", company: "Acme Inc" },
+            cvVersion: { label: "Grad CV" },
+          },
+          statusEvent: {
+            id: "se-1",
+            applicationId: "app-1",
+            status: "APPLIED",
+            note: null,
+            effectiveDate: "2026-09-11T00:00:00.000Z",
+            createdAt: "2026-09-11T00:00:00.000Z",
+          },
+        });
+      }),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await user.click(await screen.findByText("Backend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    await quickView.findByText("To apply");
+
+    await user.click(quickView.getByRole("button", { name: "In progress" }));
+
+    await waitFor(() => expect(quickView.getByText("In progress")).toBeInTheDocument());
+    expect(quickView.queryByText("To apply")).not.toBeInTheDocument();
+  });
+
+  it("triggers document generation from the Quick view, reflecting pending status (issue #66)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () => HttpResponse.json({ analyses: [detail()] })),
+      http.post("/api/analyses/a1/generated-documents", () =>
+        HttpResponse.json({
+          generatedDocuments: [
+            {
+              id: "gd-cl",
+              type: "COVER_LETTER",
+              analysisId: "a1",
+              status: "PENDING",
+              markdownContent: null,
+              errorMessage: null,
+              createdAt: "2026-09-11T00:00:00.000Z",
+              updatedAt: "2026-09-11T00:00:00.000Z",
+            },
+            {
+              id: "gd-cv",
+              type: "TAILORED_CV",
+              analysisId: "a1",
+              status: "PENDING",
+              markdownContent: null,
+              errorMessage: null,
+              createdAt: "2026-09-11T00:00:00.000Z",
+              updatedAt: "2026-09-11T00:00:00.000Z",
+            },
+          ],
+        }),
+      ),
+      http.get("/api/generated-documents/gd-cl", () =>
+        HttpResponse.json({
+          generatedDocument: {
+            id: "gd-cl",
+            type: "COVER_LETTER",
+            analysisId: "a1",
+            status: "PENDING",
+            markdownContent: null,
+            errorMessage: null,
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+          },
+        }),
+      ),
+      http.get("/api/generated-documents/gd-cv", () =>
+        HttpResponse.json({
+          generatedDocument: {
+            id: "gd-cv",
+            type: "TAILORED_CV",
+            analysisId: "a1",
+            status: "PENDING",
+            markdownContent: null,
+            errorMessage: null,
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+          },
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await user.click(await screen.findByText("Backend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    await user.click(
+      quickView.getByRole("button", { name: "Generate documents" }),
+    );
+
+    expect(await quickView.findAllByText("Queued…")).toHaveLength(2);
+  });
 });
 
 describe("AnalysisDetailPage", () => {

@@ -180,7 +180,9 @@
     "scoutTag": "Scout",
     "compareLink": "Comparer avec d'autres CV",
     "quickView": {
-      "viewFullAnalysis": "Voir l'analyse complète"
+      "viewFullAnalysis": "Voir l'analyse complète",
+      "viewOffer": "Voir l'offre",
+      "statusError": "Impossible de mettre à jour le statut de suivi. Veuillez réessayer."
     },
     "controls": {
       "searchLabel": "Rechercher",

@@ -57,3 +57,17 @@ export function trackingStatusBadgeVariant(
   if (status === "TO_APPLY") return "secondary";
   return "warning";
 }
+
+/** The Tracking-status transitions the Quick view's action buttons offer
+ * (issue #66) — every bucket except `TO_APPLY`, since reaching it would mean
+ * undoing a StatusEvent, which stays out of scope (no undo endpoint; see
+ * `services/api`'s CONTEXT.md). */
+export const TRACKING_STATUS_TRANSITIONS: readonly {
+  trackingStatus: Exclude<TrackingStatus, "TO_APPLY">;
+  applicationStatus: ApplicationStatus;
+}[] = [
+  { trackingStatus: "IN_PROGRESS", applicationStatus: "APPLIED" },
+  { trackingStatus: "REJECTED", applicationStatus: "REJECTED" },
+  { trackingStatus: "ACCEPTED", applicationStatus: "ACCEPTED" },
+  { trackingStatus: "WITHDRAWN", applicationStatus: "WITHDRAWN" },
+];

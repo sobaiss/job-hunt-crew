@@ -180,7 +180,9 @@
     "scoutTag": "Scout",
     "compareLink": "Compare with other CVs",
     "quickView": {
-      "viewFullAnalysis": "View full analysis"
+      "viewFullAnalysis": "View full analysis",
+      "viewOffer": "View job offer",
+      "statusError": "We couldn't update the tracking status. Please try again."
     },
     "controls": {
       "searchLabel": "Search",
