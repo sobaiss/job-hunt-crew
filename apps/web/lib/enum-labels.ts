@@ -9,7 +9,8 @@ type EnumNamespace =
   | "analysisStatus"
   | "ingestionStatus"
   | "cvConversionStatus"
-  | "applicationStatus";
+  | "applicationStatus"
+  | "sourceSite";
 
 /**
  * Returns a `label(value)` function for one server enum. An unmapped value

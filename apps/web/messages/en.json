@@ -185,15 +185,23 @@
       "statusLabel": "Status",
       "statusAll": "All statuses",
       "cvLabel": "CV version",
-      "cvAll": "All CV versions",
-      "sortLabel": "Sort by",
-      "sortRecent": "Most recent",
-      "sortScore": "Highest score"
+      "cvAll": "All CV versions"
     },
-    "batch": {
-      "siteFallback": "Job site",
-      "offers": "{count, plural, one {# offer} other {# offers}}",
-      "bestScore": "Best match score"
+    "columns": {
+      "title": "Position",
+      "company": "Company",
+      "platform": "Platform",
+      "postedAt": "Posted",
+      "cv": "CV",
+      "score": "Score",
+      "link": "Link",
+      "linkLabel": "Open the job offer"
+    },
+    "pagination": {
+      "pageSizeLabel": "Rows per page",
+      "pageInfo": "Page {page} of {totalPages}",
+      "previous": "Previous",
+      "next": "Next"
     },
     "detail": {
       "loading": "Loading this analysis",
@@ -618,6 +626,14 @@
       "ACCEPTED": "Accepted",
       "REJECTED": "Rejected",
       "WITHDRAWN": "Withdrawn"
+    },
+    "sourceSite": {
+      "LINKEDIN": "LinkedIn",
+      "INDEED": "Indeed",
+      "FRANCE_TRAVAIL": "France Travail",
+      "WTTJ": "Welcome to the Jungle",
+      "GLASSDOOR": "Glassdoor",
+      "OTHER": "Other"
     }
   }
 }

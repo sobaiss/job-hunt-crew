@@ -44,7 +44,14 @@ function analysis(overrides: Partial<AnalysisSummary> = {}): AnalysisSummary {
     ingestionJobId: null,
     scoutId: null,
     ingestionJob: null,
-    jobOffer: { id: "job1", title: "Role", company: "Co" },
+    jobOffer: {
+      id: "job1",
+      title: "Role",
+      company: "Co",
+      sourceSite: "OTHER",
+      postedAt: null,
+      sourceUrl: "https://example.com/jobs/job1",
+    },
     cvVersion: { label: "CV" },
     ...overrides,
   };
@@ -95,8 +102,28 @@ describe("onboardingSteps", () => {
   it("marks the comparison step once one job offer has two analyses", () => {
     const steps = onboardingSteps(
       [
-        analysis({ id: "a1", jobOffer: { id: "j1", title: null, company: null } }),
-        analysis({ id: "a2", jobOffer: { id: "j1", title: null, company: null } }),
+        analysis({
+          id: "a1",
+          jobOffer: {
+            id: "j1",
+            title: null,
+            company: null,
+            sourceSite: "OTHER",
+            postedAt: null,
+            sourceUrl: "https://example.com/jobs/j1",
+          },
+        }),
+        analysis({
+          id: "a2",
+          jobOffer: {
+            id: "j1",
+            title: null,
+            company: null,
+            sourceSite: "OTHER",
+            postedAt: null,
+            sourceUrl: "https://example.com/jobs/j1",
+          },
+        }),
       ],
       1,
     );

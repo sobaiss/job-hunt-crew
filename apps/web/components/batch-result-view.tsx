@@ -77,9 +77,9 @@ function byScoreDesc(a: AnalysisDetail, b: AnalysisDetail): number {
  * instead of a silently empty list; a discreet link drops to the raw
  * scraping-progress page.
  *
- * Rendered both inline on "Analyse several offers" right after submit and, via
- * `app/(app)/analyses/batch/[id]`, as a routable page the Dashboard's grouped
- * SITE_SEARCH row links to (#34) and that survives closing the tab (#36).
+ * Rendered inline on "Analyse several offers" right after submit (#36). The
+ * Analyses list itself no longer groups a SITE_SEARCH batch into one row
+ * (#63) — its Analyses just appear as their own rows, like any other.
  */
 export function BatchResultView({ ingestionJobId }: { ingestionJobId: string }) {
   const t = useTranslations("analyseSeveral");

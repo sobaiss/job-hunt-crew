@@ -1,15 +1,19 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 
 import { renderWithProviders, screen, waitFor } from "./test-utils";
 import { server } from "./msw/server";
+import { __getUrl, __setUrl } from "./next-navigation-mock";
 import AnalysesDashboardPage from "@/app/(app)/analyses/page";
 import AnalysisDetailPage from "@/app/(app)/analyses/[id]/page";
 
-vi.mock("next/navigation", () => ({
-  useParams: () => ({ id: "a1" }),
-}));
+vi.mock("next/navigation", async () => {
+  const mock = await vi.importActual<typeof import("./next-navigation-mock")>(
+    "./next-navigation-mock",
+  );
+  return mock;
+});
 
 const RESULT = {
   match_score: 87,
@@ -33,27 +37,22 @@ function summary(overrides: Record<string, unknown> = {}) {
     ingestionJobId: null,
     ingestionJob: null,
     scoutId: null,
-    jobOffer: { id: "job1", title: "Backend Engineer", company: "Acme Inc" },
+    jobOffer: {
+      id: "job1",
+      title: "Backend Engineer",
+      company: "Acme Inc",
+      sourceSite: "FRANCE_TRAVAIL",
+      postedAt: "2026-07-01T00:00:00.000Z",
+      sourceUrl: "https://example.com/jobs/job1",
+    },
     cvVersion: { label: "Grad CV" },
     ...overrides,
   };
 }
 
-function batchRow(
-  ingestionJobId: string,
-  overrides: Record<string, unknown> = {},
-) {
-  return summary({
-    ingestionJobId,
-    ingestionJob: { mode: "SITE_SEARCH", siteConfigId: "site-ft" },
-    ...overrides,
-  });
-}
-
 function detail(overrides: Record<string, unknown> = {}) {
   return {
     ...summary(),
-    jobOffer: { id: "job1", title: "Backend Engineer", company: "Acme Inc", sourceUrl: "https://example.com/jobs/job1" },
     resultJSON: RESULT,
     errorMessage: null,
     ...overrides,
@@ -61,7 +60,15 @@ function detail(overrides: Record<string, unknown> = {}) {
 }
 
 describe("AnalysesDashboardPage", () => {
-  it("shows a loading state, then a card per analysis with title, company, score and status", async () => {
+  beforeEach(() => {
+    __setUrl("/analyses");
+  });
+
+  afterEach(() => {
+    __setUrl("/analyses");
+  });
+
+  it("shows a loading state, then a flat table row per analysis with title, company, platform, CV, score and a link", async () => {
     server.use(
       http.get("/api/analyses", () =>
         HttpResponse.json({ analyses: [summary()] }),
@@ -74,37 +81,12 @@ describe("AnalysesDashboardPage", () => {
 
     expect(await screen.findByText("Backend Engineer")).toBeInTheDocument();
     expect(screen.getByText("Acme Inc")).toBeInTheDocument();
+    expect(screen.getByText("France Travail")).toBeInTheDocument();
+    expect(screen.getByText("Grad CV")).toBeInTheDocument();
     expect(screen.getByText("87")).toBeInTheDocument();
-    // "Completed" also appears as a status-filter option, so scope to the list.
-    expect(screen.getByRole("list")).toHaveTextContent("Completed");
-  });
-
-  it("tags a Scout-driven analysis row with a Scout badge and leaves manual rows untagged", async () => {
-    server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            summary({ id: "scouted", scoutId: "scout-1" }),
-            summary({
-              id: "manual",
-              jobOffer: { id: "job2", title: "Frontend Engineer", company: "Beta" },
-            }),
-          ],
-        }),
-      ),
-    );
-
-    renderWithProviders(<AnalysesDashboardPage />);
-
-    const scoutedRow = (await screen.findByText("Backend Engineer")).closest(
-      "[data-slot='card']",
-    ) as HTMLElement;
-    const manualRow = screen
-      .getByText("Frontend Engineer")
-      .closest("[data-slot='card']") as HTMLElement;
-
-    expect(scoutedRow).toHaveTextContent("Scout");
-    expect(manualRow).not.toHaveTextContent("Scout");
+    expect(
+      screen.getByRole("link", { name: "Open the job offer" }),
+    ).toHaveAttribute("href", "https://example.com/jobs/job1");
   });
 
   it("shows an empty state when there are no analyses", async () => {
@@ -119,83 +101,38 @@ describe("AnalysesDashboardPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("folds a SITE_SEARCH batch into one row with the site, offer count, best score and a link to the batch view", async () => {
+  it("renders every analysis as its own row, even when several share a SITE_SEARCH ingestionJobId (no batch grouping)", async () => {
     server.use(
-      http.get("/api/site-configs", () =>
-        HttpResponse.json({
-          siteConfigs: [
-            {
-              id: "site-ft",
-              siteKey: "france-travail",
-              displayName: "France Travail",
-              integrationType: "OFFICIAL_API",
-              antiBotRiskLevel: "LOW",
-            },
-          ],
-        }),
-      ),
       http.get("/api/analyses", () =>
         HttpResponse.json({
-          analyses: [
-            batchRow("job-1", {
-              id: "b1",
-              matchScore: 71,
-              requestedAt: "2026-08-05T00:00:00.000Z",
-            }),
-            batchRow("job-1", {
-              id: "b2",
-              matchScore: 88,
-              requestedAt: "2026-08-04T00:00:00.000Z",
-            }),
-          ],
-        }),
-      ),
-    );
-
-    renderWithProviders(<AnalysesDashboardPage />);
-
-    expect(await screen.findByText("France Travail")).toBeInTheDocument();
-    expect(screen.getByText("2 offers")).toBeInTheDocument();
-    expect(screen.getByText("88")).toBeInTheDocument();
-    expect(screen.queryByText("71")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /France Travail/ })).toHaveAttribute(
-      "href",
-      "/analyses/batch/job-1",
-    );
-  });
-
-  it("keeps SINGLE_URL / null-ingestionJobId analyses individual and orders grouped and individual rows by recency", async () => {
-    server.use(
-      http.get("/api/site-configs", () =>
-        HttpResponse.json({
-          siteConfigs: [
-            {
-              id: "site-ft",
-              siteKey: "france-travail",
-              displayName: "France Travail",
-              integrationType: "OFFICIAL_API",
-              antiBotRiskLevel: "LOW",
-            },
-          ],
-        }),
-      ),
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          // API returns rows recency-desc: a standalone one is newest, then
-          // the batch's two rows.
           analyses: [
             summary({
-              id: "s1",
-              jobOffer: { id: "job9", title: "Solo Role", company: "SoloCo" },
-              requestedAt: "2026-08-06T00:00:00.000Z",
-            }),
-            batchRow("job-1", {
               id: "b1",
-              requestedAt: "2026-08-05T00:00:00.000Z",
+              matchScore: 71,
+              ingestionJobId: "job-1",
+              ingestionJob: { mode: "SITE_SEARCH", siteConfigId: "site-ft" },
+              jobOffer: {
+                id: "job2",
+                title: "Offer One",
+                company: "Acme",
+                sourceSite: "FRANCE_TRAVAIL",
+                postedAt: "2026-07-01T00:00:00.000Z",
+                sourceUrl: "https://example.com/jobs/job2",
+              },
             }),
-            batchRow("job-1", {
+            summary({
               id: "b2",
-              requestedAt: "2026-08-04T00:00:00.000Z",
+              matchScore: 88,
+              ingestionJobId: "job-1",
+              ingestionJob: { mode: "SITE_SEARCH", siteConfigId: "site-ft" },
+              jobOffer: {
+                id: "job3",
+                title: "Offer Two",
+                company: "Acme",
+                sourceSite: "FRANCE_TRAVAIL",
+                postedAt: "2026-07-02T00:00:00.000Z",
+                sourceUrl: "https://example.com/jobs/job3",
+              },
             }),
           ],
         }),
@@ -204,14 +141,12 @@ describe("AnalysesDashboardPage", () => {
 
     renderWithProviders(<AnalysesDashboardPage />);
 
-    const solo = await screen.findByText("Solo Role");
-    const batch = screen.getByText("France Travail");
-    expect(solo.compareDocumentPosition(batch)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
-    expect(
-      screen.getByRole("link", { name: /Solo Role/ }),
-    ).toHaveAttribute("href", "/analyses/s1");
+    expect(await screen.findByText("Offer One")).toBeInTheDocument();
+    expect(screen.getByText("Offer Two")).toBeInTheDocument();
+    expect(screen.getByText("71")).toBeInTheDocument();
+    expect(screen.getByText("88")).toBeInTheDocument();
+    // Header row + the two analyses, no folded batch row in between.
+    expect(screen.getAllByRole("row")).toHaveLength(3);
   });
 
   it("narrows the list with the search box and restores it when cleared", async () => {
@@ -222,11 +157,25 @@ describe("AnalysesDashboardPage", () => {
           analyses: [
             summary({
               id: "s1",
-              jobOffer: { id: "j1", title: "Backend Engineer", company: "Acme Inc" },
+              jobOffer: {
+                id: "j1",
+                title: "Backend Engineer",
+                company: "Acme Inc",
+                sourceSite: "FRANCE_TRAVAIL",
+                postedAt: "2026-07-01T00:00:00.000Z",
+                sourceUrl: "https://example.com/jobs/j1",
+              },
             }),
             summary({
               id: "s2",
-              jobOffer: { id: "j2", title: "Frontend Developer", company: "Globex" },
+              jobOffer: {
+                id: "j2",
+                title: "Frontend Developer",
+                company: "Globex",
+                sourceSite: "LINKEDIN",
+                postedAt: "2026-07-02T00:00:00.000Z",
+                sourceUrl: "https://example.com/jobs/j2",
+              },
             }),
           ],
         }),
@@ -255,14 +204,28 @@ describe("AnalysesDashboardPage", () => {
             summary({
               id: "s1",
               status: "COMPLETED",
-              jobOffer: { id: "j1", title: "Backend Engineer", company: "Acme" },
+              jobOffer: {
+                id: "j1",
+                title: "Backend Engineer",
+                company: "Acme",
+                sourceSite: "FRANCE_TRAVAIL",
+                postedAt: "2026-07-01T00:00:00.000Z",
+                sourceUrl: "https://example.com/jobs/j1",
+              },
               cvVersion: { label: "Grad CV" },
             }),
             summary({
               id: "s2",
               status: "FAILED",
               matchScore: null,
-              jobOffer: { id: "j2", title: "Frontend Developer", company: "Globex" },
+              jobOffer: {
+                id: "j2",
+                title: "Frontend Developer",
+                company: "Globex",
+                sourceSite: "LINKEDIN",
+                postedAt: "2026-07-02T00:00:00.000Z",
+                sourceUrl: "https://example.com/jobs/j2",
+              },
               cvVersion: { label: "Senior CV" },
             }),
           ],
@@ -283,7 +246,7 @@ describe("AnalysesDashboardPage", () => {
     expect(screen.getByText("No analyses match your filters.")).toBeInTheDocument();
   });
 
-  it("sorts standalone rows by match score", async () => {
+  it("sorts by a column when its header is clicked, toggling direction on a repeat click", async () => {
     const user = userEvent.setup();
     server.use(
       http.get("/api/analyses", () =>
@@ -292,14 +255,26 @@ describe("AnalysesDashboardPage", () => {
             summary({
               id: "s1",
               matchScore: 40,
-              requestedAt: "2026-08-09T00:00:00.000Z",
-              jobOffer: { id: "j1", title: "Low Fit", company: "Acme" },
+              jobOffer: {
+                id: "j1",
+                title: "Low Fit",
+                company: "Acme",
+                sourceSite: "FRANCE_TRAVAIL",
+                postedAt: "2026-07-01T00:00:00.000Z",
+                sourceUrl: "https://example.com/jobs/j1",
+              },
             }),
             summary({
               id: "s2",
               matchScore: 95,
-              requestedAt: "2026-08-08T00:00:00.000Z",
-              jobOffer: { id: "j2", title: "High Fit", company: "Globex" },
+              jobOffer: {
+                id: "j2",
+                title: "High Fit",
+                company: "Globex",
+                sourceSite: "LINKEDIN",
+                postedAt: "2026-07-02T00:00:00.000Z",
+                sourceUrl: "https://example.com/jobs/j2",
+              },
             }),
           ],
         }),
@@ -307,15 +282,16 @@ describe("AnalysesDashboardPage", () => {
     );
 
     renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Low Fit");
 
-    // Default is recency order: "Low Fit" (newest) precedes "High Fit".
-    const low = await screen.findByText("Low Fit");
+    await user.click(screen.getByRole("button", { name: "Score" }));
     expect(
-      low.compareDocumentPosition(screen.getByText("High Fit")),
+      screen
+        .getByText("Low Fit")
+        .compareDocumentPosition(screen.getByText("High Fit")),
     ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 
-    await user.selectOptions(screen.getByLabelText("Sort by"), "score");
-
+    await user.click(screen.getByRole("button", { name: "Score" }));
     expect(
       screen
         .getByText("High Fit")
@@ -323,39 +299,71 @@ describe("AnalysesDashboardPage", () => {
     ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
-  it("keeps a SITE_SEARCH batch folded to one row while the controls filter its analyses", async () => {
+  it("paginates client-side, 25 per page by default, and lets the page size change", async () => {
     const user = userEvent.setup();
+    const analyses = Array.from({ length: 30 }, (_, i) =>
+      summary({
+        id: `a${i}`,
+        jobOffer: {
+          id: `job${i}`,
+          title: `Offer ${String(i).padStart(2, "0")}`,
+          company: "Acme",
+          sourceSite: "OTHER",
+          postedAt: `2026-07-${String((i % 28) + 1).padStart(2, "0")}T00:00:00.000Z`,
+          sourceUrl: `https://example.com/jobs/${i}`,
+        },
+      }),
+    );
     server.use(
-      http.get("/api/site-configs", () =>
-        HttpResponse.json({
-          siteConfigs: [
-            {
-              id: "site-ft",
-              siteKey: "france-travail",
-              displayName: "France Travail",
-              integrationType: "OFFICIAL_API",
-              antiBotRiskLevel: "LOW",
-            },
-          ],
-        }),
-      ),
+      http.get("/api/analyses", () => HttpResponse.json({ analyses })),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+
+    await screen.findByText("Page 1 of 2");
+    expect(screen.getAllByRole("row")).toHaveLength(26); // header + 25
+
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(await screen.findByText("Page 2 of 2")).toBeInTheDocument();
+    expect(screen.getAllByRole("row")).toHaveLength(6); // header + 5 remaining
+    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
+
+    await user.selectOptions(screen.getByLabelText("Rows per page"), "50");
+    expect(await screen.findByText("Page 1 of 1")).toBeInTheDocument();
+    expect(screen.getAllByRole("row")).toHaveLength(31); // header + all 30
+  });
+
+  it("restores search, status and sort from the URL query string on load", async () => {
+    __setUrl(
+      "/analyses?q=front&status=FAILED&sort=matchScore&dir=asc&page=1&pageSize=25",
+    );
+    server.use(
       http.get("/api/analyses", () =>
         HttpResponse.json({
           analyses: [
             summary({
               id: "s1",
-              jobOffer: { id: "solo", title: "Solo Role", company: "SoloCo" },
-              requestedAt: "2026-08-10T00:00:00.000Z",
-            }),
-            batchRow("job-1", {
-              id: "b1",
               status: "COMPLETED",
-              requestedAt: "2026-08-09T00:00:00.000Z",
+              jobOffer: {
+                id: "j1",
+                title: "Backend Engineer",
+                company: "Acme",
+                sourceSite: "FRANCE_TRAVAIL",
+                postedAt: "2026-07-01T00:00:00.000Z",
+                sourceUrl: "https://example.com/jobs/j1",
+              },
             }),
-            batchRow("job-1", {
-              id: "b2",
+            summary({
+              id: "s2",
               status: "FAILED",
-              requestedAt: "2026-08-08T00:00:00.000Z",
+              jobOffer: {
+                id: "j2",
+                title: "Frontend Developer",
+                company: "Globex",
+                sourceSite: "LINKEDIN",
+                postedAt: "2026-07-02T00:00:00.000Z",
+                sourceUrl: "https://example.com/jobs/j2",
+              },
             }),
           ],
         }),
@@ -364,15 +372,29 @@ describe("AnalysesDashboardPage", () => {
 
     renderWithProviders(<AnalysesDashboardPage />);
 
-    expect(await screen.findByText("France Travail")).toBeInTheDocument();
-    expect(screen.getByText("2 offers")).toBeInTheDocument();
+    expect(await screen.findByText("Frontend Developer")).toBeInTheDocument();
+    expect(screen.queryByText("Backend Engineer")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Search")).toHaveValue("front");
+    expect(screen.getByLabelText("Status")).toHaveValue("FAILED");
+  });
 
-    // Filtering to FAILED drops the solo row and one batch analysis; the batch
-    // still shows as a single folded row, now with one offer.
-    await user.selectOptions(screen.getByLabelText("Status"), "FAILED");
-    expect(screen.queryByText("Solo Role")).not.toBeInTheDocument();
-    expect(screen.getByText("France Travail")).toBeInTheDocument();
-    expect(screen.getByText("1 offer")).toBeInTheDocument();
+  it("writes filter changes back to the URL query string", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({ analyses: [summary()] }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Backend Engineer");
+
+    await user.type(screen.getByLabelText("Search"), "backend");
+
+    await waitFor(() => {
+      const url = new URL(__getUrl(), "http://localhost");
+      expect(url.searchParams.get("q")).toBe("backend");
+    });
   });
 
   it("shows an error state when the request fails", async () => {

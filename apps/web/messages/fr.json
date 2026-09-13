@@ -185,15 +185,23 @@
       "statusLabel": "Statut",
       "statusAll": "Tous les statuts",
       "cvLabel": "Version de CV",
-      "cvAll": "Toutes les versions de CV",
-      "sortLabel": "Trier par",
-      "sortRecent": "Plus récentes",
-      "sortScore": "Meilleur score"
+      "cvAll": "Toutes les versions de CV"
     },
-    "batch": {
-      "siteFallback": "Site d'emploi",
-      "offers": "{count, plural, one {# offre} other {# offres}}",
-      "bestScore": "Meilleur score de correspondance"
+    "columns": {
+      "title": "Poste",
+      "company": "Entreprise",
+      "platform": "Plateforme",
+      "postedAt": "Date de publication",
+      "cv": "CV",
+      "score": "Score",
+      "link": "Lien",
+      "linkLabel": "Ouvrir l'offre d'emploi"
+    },
+    "pagination": {
+      "pageSizeLabel": "Lignes par page",
+      "pageInfo": "Page {page} sur {totalPages}",
+      "previous": "Précédent",
+      "next": "Suivant"
     },
     "detail": {
       "loading": "Chargement de cette analyse",
@@ -618,6 +626,14 @@
       "ACCEPTED": "Acceptée",
       "REJECTED": "Refusée",
       "WITHDRAWN": "Retirée"
+    },
+    "sourceSite": {
+      "LINKEDIN": "LinkedIn",
+      "INDEED": "Indeed",
+      "FRANCE_TRAVAIL": "France Travail",
+      "WTTJ": "Welcome to the Jungle",
+      "GLASSDOOR": "Glassdoor",
+      "OTHER": "Autre"
     }
   }
 }

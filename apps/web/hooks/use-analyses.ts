@@ -67,7 +67,18 @@ export type AnalysisSummary = {
    *  Set by the ingestion fan-out when the parent job carries a `scoutRunId`
    *  (issue #54). */
   scoutId: string | null;
-  jobOffer: { id: string; title: string | null; company: string | null };
+  jobOffer: {
+    id: string;
+    title: string | null;
+    company: string | null;
+    /** A `JobOfferSourceSite` enum value (e.g. `"FRANCE_TRAVAIL"`) — the
+     *  Analyses table's "Plateforme" column (issue #63). */
+    sourceSite: string;
+    postedAt: string | null;
+    /** The offer's original posting — the Analyses table's "Lien" column
+     *  (issue #63) and the detail page's "Apply" action (issue #59). */
+    sourceUrl: string;
+  };
   cvVersion: { label: string };
   /** `{mode, siteConfigId}` of the parent IngestionJob when there is one —
    *  the Dashboard groups `mode === "SITE_SEARCH"` rows per `ingestionJobId`
@@ -78,10 +89,7 @@ export type AnalysisSummary = {
 export type AnalysisDetail = Omit<AnalysisSummary, "jobOffer"> & {
   resultJSON: AnalysisResult | null;
   errorMessage: string | null;
-  /** `sourceUrl` is only needed by the detail page's "Apply" action (issue
-   *  #59) — the list/summary shape omits it to match what the API actually
-   *  returns for each surface. */
-  jobOffer: AnalysisSummary["jobOffer"] & { sourceUrl: string };
+  jobOffer: AnalysisSummary["jobOffer"];
 };
 
 /**

@@ -16,6 +16,8 @@ function analysis(over: Partial<AnalysisDetail> = {}): AnalysisDetail {
       id: "job1",
       title: "Backend Engineer",
       company: "Acme",
+      sourceSite: "OTHER",
+      postedAt: null,
       sourceUrl: "https://example.com/jobs/job1",
     },
     cvVersion: { label: "Grad CV" },

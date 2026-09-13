@@ -37,8 +37,16 @@ The signed-in overview at `/` — stat tiles (average and best Match score, anal
 _Avoid_: Home, Overview (fine in prose; the term is Dashboard), analyses list (that's Analyses)
 
 **Analyses**:
-The list at `/analyses` — every standalone Analysis and every grouped SITE_SEARCH batch, with client-side search, status and CV filters, and date/score sort. Reached from the Dashboard and the Sidebar.
-_Avoid_: Dashboard (that's the overview now), analyses page (that's the route), History
+The list at `/analyses` — one row per Analysis (no SITE_SEARCH batch grouping; see [API](../../services/api/CONTEXT.md)'s Analysis batch, which this view deliberately no longer folds rows into), as a sortable, filterable table: client-side search, Tracking status filter, and date/score/company/platform sort, plus multi-select bulk actions. Clicking a row opens its detail in a right-hand slide-over without leaving the list; the slide-over links out to the full Analysis detail page and the Side-by-side comparison for deeper reading. Reached from the Dashboard and the Sidebar.
+_Avoid_: Dashboard (that's the overview now), analyses page (that's the route), History, batch view (retired from this list — a SITE_SEARCH batch's Analyses now just appear as their own rows, filterable/sortable like any other)
+
+**Quick view**:
+The right-hand slide-over opened by clicking an Analyses-list row (~480-560px, over the list, no navigation) — a condensed read of one Analysis: score gauge, summary, its top few missing skills, Tracking status, and actions (view the offer, change Tracking status, generate documents, compare). Links out to the full Analysis detail page for the complete skills/strengths/suggestions breakdown, and to the Side-by-side comparison.
+_Avoid_: Detail page (that's the full `/analyses/[id]` route this links out to, still reachable on its own), Drawer/Sheet (the component underneath, not the product concept)
+
+**Tracking status**:
+The Analyses list's "Statut" column and filter — a candidate's pursuit state for one Analysis, folding the API context's `ApplicationStatus` (plus the common case of no Application existing yet, since it's created lazily) down to five buckets: **À postuler** (no Application row yet, or one still `DRAFT`), **En cours** (`APPLIED`, `INTERVIEWING`, or `OFFER`), **Refusé** (`REJECTED`), **Accepté** (`ACCEPTED`), **Retiré** (`WITHDRAWN`). Only meaningful for a `COMPLETED` Analysis; a still-running or `FAILED` Analysis shows its pipeline state instead (raw `AnalysisStatus`) and is excluded from every Tracking status filter bucket.
+_Avoid_: Status (ambiguous — pipeline `AnalysisStatus` or tracking `ApplicationStatus`?), Application status (that's the underlying 7-value enum this folds; not every value maps 1:1 — `DRAFT` folds into "À postuler")
 
 **App shell**:
 The persistent frame around every signed-in page: a left **Sidebar** (brand wordmark, the "New analysis" primary action, the Dashboard / Analyses / Agents / Applications / CV-versions / Settings links, and the user menu with theme, `LocaleSwitch`, sign out) plus a context **Topbar** (page title and page-level actions). Implemented as `app/(app)/layout.tsx` + `components/app-sidebar.tsx` + `components/app-topbar.tsx`; `app/(public)` pages render outside it. Collapses to a drawer on narrow viewports.

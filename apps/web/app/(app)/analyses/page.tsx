@@ -1,133 +1,127 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Suspense, useCallback, useMemo } from "react";
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { ArrowDown, ArrowUp, ArrowUpDown, ExternalLink } from "lucide-react";
 
+import { useAnalyses, type AnalysisSummary } from "@/hooks/use-analyses";
 import {
-  useAnalyses,
-  type AnalysisSummary,
-} from "@/hooks/use-analyses";
-import { useSiteConfigs } from "@/hooks/use-site-configs";
-import {
+  ANALYSES_PAGE_SIZES,
   ANALYSIS_STATUSES,
+  analysesTableStateToParams,
   cvLabelsOf,
   filterAnalyses,
-  DEFAULT_ANALYSES_FILTERS,
-  type AnalysesFilterState,
+  pageCount,
+  paginate,
+  parseAnalysesTableState,
+  sortAnalyses,
+  type AnalysesPageSize,
+  type AnalysesSortColumn,
+  type AnalysesTableState,
 } from "@/lib/analyses-filters";
 import { useEnumLabel } from "@/lib/enum-labels";
-import { AnalysisRow } from "@/components/analysis-row";
-import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 // A styled native <select>: mirrors the matching-flow forms' SELECT_CLASS so
 // the app reads as one system, and stays trivial to drive with user-event.
 const SELECT_CLASS =
   "flex h-9 w-full rounded-md border border-border bg-background px-3 py-1 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50";
 
-/**
- * A Dashboard row: either one standalone Analysis, or a whole SITE_SEARCH
- * IngestionJob's batch folded into one grouped row (issue #34). Every
- * `mode === "SITE_SEARCH"` Analysis with an `ingestionJobId` is grouped; a
- * `SINGLE_URL` Analysis or one with `ingestionJobId === null` stays a single
- * row. Ordering follows the API's recency ordering — a group takes the slot of
- * its most recent (first-seen) Analysis.
- */
-type DashboardRow =
-  | { kind: "single"; analysis: AnalysisSummary }
-  | {
-      kind: "batch";
-      ingestionJobId: string;
-      siteConfigId: string | null;
-      analyses: AnalysisSummary[];
-    };
+type ColumnDef = {
+  key: AnalysesSortColumn;
+  labelKey: string;
+  className?: string;
+};
 
-function groupRows(analyses: AnalysisSummary[]): DashboardRow[] {
-  const rows: DashboardRow[] = [];
-  const byJob = new Map<string, Extract<DashboardRow, { kind: "batch" }>>();
-  for (const analysis of analyses) {
-    const parent = analysis.ingestionJob;
-    if (analysis.ingestionJobId && parent?.mode === "SITE_SEARCH") {
-      const existing = byJob.get(analysis.ingestionJobId);
-      if (existing) {
-        existing.analyses.push(analysis);
-        continue;
-      }
-      const row = {
-        kind: "batch" as const,
-        ingestionJobId: analysis.ingestionJobId,
-        siteConfigId: parent.siteConfigId,
-        analyses: [analysis],
-      };
-      byJob.set(analysis.ingestionJobId, row);
-      rows.push(row);
-    } else {
-      rows.push({ kind: "single", analysis });
-    }
-  }
-  return rows;
-}
+// The flat table's sortable columns, left to right (#63). "Lien" is sortable
+// by `sourceUrl` too, but rendered separately since its cell is an icon, not
+// text.
+const COLUMNS: ColumnDef[] = [
+  { key: "title", labelKey: "columns.title" },
+  { key: "company", labelKey: "columns.company" },
+  { key: "sourceSite", labelKey: "columns.platform" },
+  { key: "postedAt", labelKey: "columns.postedAt" },
+  { key: "cvLabel", labelKey: "columns.cv" },
+  { key: "matchScore", labelKey: "columns.score", className: "text-right" },
+];
 
-function bestScore(analyses: AnalysisSummary[]): number | null {
-  const scores = analyses
-    .map((a) => a.matchScore)
-    .filter((s): s is number => s !== null);
-  return scores.length > 0 ? Math.max(...scores) : null;
-}
-
-function rowScore(row: DashboardRow): number | null {
-  return row.kind === "batch"
-    ? bestScore(row.analyses)
-    : row.analysis.matchScore;
-}
-
-/**
- * Order the grouped rows for display. `"recent"` keeps the API's recency
- * ordering (a batch sits in its first-seen slot); `"score"` sorts by match
- * score descending, rows with no score last. The sort is stable, so equal rows
- * keep their recency order.
- */
-function sortRows(rows: DashboardRow[], sort: AnalysesFilterState["sort"]) {
-  if (sort !== "score") return rows;
-  return [...rows].sort((a, b) => {
-    const sa = rowScore(a);
-    const sb = rowScore(b);
-    if (sa === sb) return 0;
-    if (sa === null) return 1;
-    if (sb === null) return -1;
-    return sb - sa;
-  });
-}
-
-export default function AnalysesDashboardPage() {
+function AnalysesTable() {
   const t = useTranslations("analyses");
+  const sourceSiteLabel = useEnumLabel("sourceSite");
   const statusLabel = useEnumLabel("analysisStatus");
-  const { data: analyses, isPending, isError } = useAnalyses();
-  const { data: siteConfigs } = useSiteConfigs();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
 
-  const [filters, setFilters] = useState<AnalysesFilterState>(
-    DEFAULT_ANALYSES_FILTERS,
+  const { data: analyses, isPending, isError } = useAnalyses();
+
+  const state = useMemo(
+    () => parseAnalysesTableState(searchParams),
+    [searchParams],
   );
 
   const cvLabels = useMemo(
     () => (analyses ? cvLabelsOf(analyses) : []),
     [analyses],
   );
-  const rows = useMemo(
-    () =>
-      analyses
-        ? sortRows(groupRows(filterAnalyses(analyses, filters)), filters.sort)
-        : [],
-    [analyses, filters],
+
+  const filtered = useMemo(
+    () => (analyses ? filterAnalyses(analyses, state) : []),
+    [analyses, state],
   );
+  const sorted = useMemo(
+    () => sortAnalyses(filtered, state.sort),
+    [filtered, state.sort],
+  );
+  const totalPages = pageCount(sorted.length, state.pageSize);
+  const page = Math.min(state.page, totalPages);
+  const rows = useMemo(
+    () => paginate(sorted, page, state.pageSize),
+    [sorted, page, state.pageSize],
+  );
+
+  // Any change to a filter, sort or page size resets `page` to 1 — a stale
+  // page number from before the change would otherwise show an empty or
+  // truncated table. Passing `page` explicitly (the pager buttons) opts out.
+  const updateState = useCallback(
+    (patch: Partial<AnalysesTableState>) => {
+      const next: AnalysesTableState = {
+        ...state,
+        ...patch,
+        page: patch.page ?? 1,
+      };
+      const qs = analysesTableStateToParams(next).toString();
+      router.replace(`${pathname}?${qs}`, { scroll: false });
+    },
+    [state, router, pathname],
+  );
+
+  const toggleSort = (column: AnalysesSortColumn) => {
+    updateState({
+      sort:
+        state.sort.column === column
+          ? { column, direction: state.sort.direction === "asc" ? "desc" : "asc" }
+          : { column, direction: "asc" },
+    });
+  };
 
   const hasAnalyses = Boolean(analyses && analyses.length > 0);
 
   return (
-    <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-8">
+    <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-8">
       <h1 className="font-serif text-2xl font-semibold">{t("title")}</h1>
 
       {isPending && (
@@ -137,7 +131,7 @@ export default function AnalysesDashboardPage() {
           className="flex flex-col gap-3"
         >
           {[0, 1, 2].map((i) => (
-            <Skeleton key={i} className="h-20 w-full" />
+            <Skeleton key={i} className="h-12 w-full" />
           ))}
         </div>
       )}
@@ -153,16 +147,16 @@ export default function AnalysesDashboardPage() {
       )}
 
       {hasAnalyses && (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="flex flex-col gap-1.5 sm:col-span-2 lg:col-span-1">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="flex flex-col gap-1.5">
             <Label htmlFor="analyses-search">{t("controls.searchLabel")}</Label>
             <Input
               id="analyses-search"
               type="search"
               placeholder={t("controls.searchPlaceholder")}
-              value={filters.search}
+              value={state.search}
               onChange={(event) =>
-                setFilters((f) => ({ ...f, search: event.target.value }))
+                updateState({ search: event.target.value })
               }
             />
           </div>
@@ -172,12 +166,11 @@ export default function AnalysesDashboardPage() {
             <select
               id="analyses-status"
               className={SELECT_CLASS}
-              value={filters.status}
+              value={state.status}
               onChange={(event) =>
-                setFilters((f) => ({
-                  ...f,
-                  status: event.target.value as AnalysesFilterState["status"],
-                }))
+                updateState({
+                  status: event.target.value as AnalysesTableState["status"],
+                })
               }
             >
               <option value="all">{t("controls.statusAll")}</option>
@@ -194,10 +187,8 @@ export default function AnalysesDashboardPage() {
             <select
               id="analyses-cv"
               className={SELECT_CLASS}
-              value={filters.cvLabel}
-              onChange={(event) =>
-                setFilters((f) => ({ ...f, cvLabel: event.target.value }))
-              }
+              value={state.cvLabel}
+              onChange={(event) => updateState({ cvLabel: event.target.value })}
             >
               <option value="all">{t("controls.cvAll")}</option>
               {cvLabels.map((label) => (
@@ -207,76 +198,183 @@ export default function AnalysesDashboardPage() {
               ))}
             </select>
           </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="analyses-sort">{t("controls.sortLabel")}</Label>
-            <select
-              id="analyses-sort"
-              className={SELECT_CLASS}
-              value={filters.sort}
-              onChange={(event) =>
-                setFilters((f) => ({
-                  ...f,
-                  sort: event.target.value as AnalysesFilterState["sort"],
-                }))
-              }
-            >
-              <option value="recent">{t("controls.sortRecent")}</option>
-              <option value="score">{t("controls.sortScore")}</option>
-            </select>
-          </div>
         </div>
       )}
 
-      {hasAnalyses && rows.length === 0 && (
+      {hasAnalyses && sorted.length === 0 && (
         <p className="text-sm text-muted">{t("noMatches")}</p>
       )}
 
-      {rows.length > 0 && (
-        <ul className="flex flex-col gap-3">
-          {rows.map((row) =>
-            row.kind === "batch" ? (
-              <li key={`batch-${row.ingestionJobId}`}>
-                <Link href={`/analyses/batch/${row.ingestionJobId}`}>
-                  <Card className="py-0 transition-colors hover:bg-panel">
-                    <CardContent className="flex items-center justify-between gap-4 py-4">
-                      <div className="flex min-w-0 flex-col">
-                        <span className="truncate font-medium">
-                          {siteConfigs?.find((s) => s.id === row.siteConfigId)
-                            ?.displayName ?? t("batch.siteFallback")}
-                        </span>
-                        <span className="text-sm text-muted">
-                          {t("batch.offers", { count: row.analyses.length })}
-                        </span>
-                      </div>
-                      {bestScore(row.analyses) !== null && (
-                        <div className="flex shrink-0 flex-col items-end">
-                          <span className="text-lg font-semibold tabular-nums">
-                            {bestScore(row.analyses)}
-                          </span>
-                          <span className="text-xs text-muted">
-                            {t("batch.bestScore")}
-                          </span>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                </Link>
-              </li>
-            ) : (
-              <li key={row.analysis.id} className="flex flex-col gap-1">
-                <AnalysisRow analysis={row.analysis} />
-                <Link
-                  href={`/analyses/compare/${row.analysis.jobOffer.id}`}
-                  className="text-xs text-accent hover:underline"
-                >
-                  {t("compareLink")}
-                </Link>
-              </li>
-            ),
-          )}
-        </ul>
+      {sorted.length > 0 && (
+        <>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                {COLUMNS.map((column) => (
+                  <SortableHead
+                    key={column.key}
+                    column={column.key}
+                    label={t(column.labelKey)}
+                    className={column.className}
+                    sort={state.sort}
+                    onSort={toggleSort}
+                  />
+                ))}
+                <SortableHead
+                  column="sourceUrl"
+                  label={t("columns.link")}
+                  className="w-0"
+                  sort={state.sort}
+                  onSort={toggleSort}
+                />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((analysis) => (
+                <AnalysisTableRow
+                  key={analysis.id}
+                  analysis={analysis}
+                  sourceSiteLabel={sourceSiteLabel}
+                  linkLabel={t("columns.linkLabel")}
+                  jobOfferFallback={t("jobOfferFallback")}
+                />
+              ))}
+            </TableBody>
+          </Table>
+
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Label htmlFor="analyses-page-size" className="text-sm text-muted">
+                {t("pagination.pageSizeLabel")}
+              </Label>
+              <select
+                id="analyses-page-size"
+                className={SELECT_CLASS + " w-auto"}
+                value={state.pageSize}
+                onChange={(event) =>
+                  updateState({
+                    pageSize: Number(event.target.value) as AnalysesPageSize,
+                  })
+                }
+              >
+                {ANALYSES_PAGE_SIZES.map((size) => (
+                  <option key={size} value={size}>
+                    {size}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-muted">
+                {t("pagination.pageInfo", { page, totalPages })}
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={page <= 1}
+                onClick={() => updateState({ page: page - 1 })}
+              >
+                {t("pagination.previous")}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={page >= totalPages}
+                onClick={() => updateState({ page: page + 1 })}
+              >
+                {t("pagination.next")}
+              </Button>
+            </div>
+          </div>
+        </>
       )}
     </main>
+  );
+}
+
+function SortableHead({
+  column,
+  label,
+  className,
+  sort,
+  onSort,
+}: {
+  column: AnalysesSortColumn;
+  label: string;
+  className?: string;
+  sort: AnalysesTableState["sort"];
+  onSort: (column: AnalysesSortColumn) => void;
+}) {
+  const active = sort.column === column;
+  const ariaSort = !active ? "none" : sort.direction === "asc" ? "ascending" : "descending";
+  const Icon = !active ? ArrowUpDown : sort.direction === "asc" ? ArrowUp : ArrowDown;
+
+  return (
+    <TableHead aria-sort={ariaSort} className={className}>
+      <button
+        type="button"
+        className="inline-flex items-center gap-1 hover:text-foreground"
+        onClick={() => onSort(column)}
+      >
+        {label}
+        <Icon className="size-3.5" />
+      </button>
+    </TableHead>
+  );
+}
+
+function AnalysisTableRow({
+  analysis,
+  sourceSiteLabel,
+  linkLabel,
+  jobOfferFallback,
+}: {
+  analysis: AnalysisSummary;
+  sourceSiteLabel: (value: string) => string;
+  linkLabel: string;
+  jobOfferFallback: string;
+}) {
+  return (
+    <TableRow>
+      <TableCell>
+        <Link href={`/analyses/${analysis.id}`} className="font-medium hover:underline">
+          {analysis.jobOffer.title ?? jobOfferFallback}
+        </Link>
+      </TableCell>
+      <TableCell>{analysis.jobOffer.company ?? "—"}</TableCell>
+      <TableCell>{sourceSiteLabel(analysis.jobOffer.sourceSite)}</TableCell>
+      <TableCell>
+        {analysis.jobOffer.postedAt
+          ? new Date(analysis.jobOffer.postedAt).toLocaleDateString()
+          : "—"}
+      </TableCell>
+      <TableCell>{analysis.cvVersion.label}</TableCell>
+      <TableCell className="text-right tabular-nums">
+        {analysis.matchScore ?? "—"}
+      </TableCell>
+      <TableCell>
+        <a
+          href={analysis.jobOffer.sourceUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={linkLabel}
+          onClick={(event) => event.stopPropagation()}
+          className="inline-flex text-muted hover:text-accent"
+        >
+          <ExternalLink className="size-4" />
+        </a>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+export default function AnalysesDashboardPage() {
+  return (
+    <Suspense fallback={null}>
+      <AnalysesTable />
+    </Suspense>
   );
 }
