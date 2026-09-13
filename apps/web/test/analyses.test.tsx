@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 
-import { renderWithProviders, screen, waitFor } from "./test-utils";
+import { renderWithProviders, screen, waitFor, within } from "./test-utils";
 import { server } from "./msw/server";
 import { __getUrl, __setUrl } from "./next-navigation-mock";
 import AnalysesDashboardPage from "@/app/(app)/analyses/page";
@@ -464,6 +464,96 @@ describe("AnalysesDashboardPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       /couldn't load your analyses/i,
     );
+  });
+
+  it("opens the Quick view when a row is clicked, showing the score, summary, top missing skills and status, plus links to the full analysis and the comparison (issue #65)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            detail({
+              resultJSON: {
+                ...RESULT,
+                missing_skills: [
+                  { skill: "Kubernetes", importance: "required" },
+                  { skill: "Terraform", importance: "required" },
+                  { skill: "GraphQL", importance: "nice_to_have" },
+                  { skill: "Rust", importance: "nice_to_have" },
+                ],
+              },
+            }),
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+
+    await user.click(await screen.findByText("Backend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    expect(
+      quickView.getByRole("heading", { name: "Backend Engineer" }),
+    ).toBeInTheDocument();
+    expect(
+      quickView.getByRole("img", { name: "Match score 87 out of 100" }),
+    ).toBeInTheDocument();
+    expect(
+      quickView.getByText("Strong product engineer, light on platform work."),
+    ).toBeInTheDocument();
+    // Only a prioritized subset (required first), not the full list.
+    expect(quickView.getByText("Kubernetes")).toBeInTheDocument();
+    expect(quickView.getByText("Terraform")).toBeInTheDocument();
+    expect(quickView.getByText("GraphQL")).toBeInTheDocument();
+    expect(quickView.queryByText("Rust")).not.toBeInTheDocument();
+    expect(quickView.getByText("To apply")).toBeInTheDocument();
+
+    expect(
+      quickView.getByRole("link", { name: "View full analysis" }),
+    ).toHaveAttribute("href", "/analyses/a1");
+    expect(
+      quickView.getByRole("link", { name: "Compare with other CVs" }),
+    ).toHaveAttribute("href", "/analyses/compare/job1");
+  });
+
+  it("does not open the Quick view when the Lien icon is clicked", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({ analyses: [detail()] }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Backend Engineer");
+
+    await user.click(screen.getByRole("link", { name: "Open the job offer" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("closes the Quick view on Escape and returns focus to the triggering row", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({ analyses: [detail()] }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    const row = (await screen.findByText("Backend Engineer")).closest("tr");
+    if (!row) throw new Error("row not found");
+
+    await user.click(row);
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    expect(document.activeElement).toBe(row);
   });
 });
 

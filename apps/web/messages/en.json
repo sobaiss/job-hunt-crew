@@ -179,6 +179,9 @@
     "vsCv": "vs. {label}",
     "scoutTag": "Scout",
     "compareLink": "Compare with other CVs",
+    "quickView": {
+      "viewFullAnalysis": "View full analysis"
+    },
     "controls": {
       "searchLabel": "Search",
       "searchPlaceholder": "Offer title or company",

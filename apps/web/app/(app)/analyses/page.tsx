@@ -1,7 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useMemo } from "react";
-import Link from "next/link";
+import { Suspense, useCallback, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { ArrowDown, ArrowUp, ArrowUpDown, ExternalLink } from "lucide-react";
@@ -27,6 +26,7 @@ import {
 } from "@/lib/tracking-status";
 import { useEnumLabel } from "@/lib/enum-labels";
 import { analysisBadgeVariant } from "@/components/analysis-row";
+import { AnalysisQuickView } from "@/components/analysis-quick-view";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -74,6 +74,16 @@ function AnalysesTable() {
   const searchParams = useSearchParams();
 
   const { data: analyses, isPending, isError } = useAnalyses();
+
+  // Which Analysis's Quick view (#65) is open, if any — looked up by id
+  // rather than held as the row's data so it always reflects the latest
+  // fetch instead of a stale snapshot taken at click time.
+  const [quickViewId, setQuickViewId] = useState<string | null>(null);
+  const quickViewTriggerRef = useRef<HTMLElement | null>(null);
+  const quickViewAnalysis = useMemo(
+    () => analyses?.find((a) => a.id === quickViewId) ?? null,
+    [analyses, quickViewId],
+  );
 
   const state = useMemo(
     () => parseAnalysesTableState(searchParams),
@@ -247,6 +257,10 @@ function AnalysesTable() {
                   trackingStatusLabel={trackingStatusLabel}
                   linkLabel={t("columns.linkLabel")}
                   jobOfferFallback={t("jobOfferFallback")}
+                  onOpenQuickView={(row) => {
+                    quickViewTriggerRef.current = row;
+                    setQuickViewId(analysis.id);
+                  }}
                 />
               ))}
             </TableBody>
@@ -301,6 +315,17 @@ function AnalysesTable() {
           </div>
         </>
       )}
+
+      <AnalysisQuickView
+        analysis={quickViewAnalysis}
+        open={quickViewAnalysis !== null}
+        onOpenChange={(open) => {
+          if (!open) setQuickViewId(null);
+        }}
+        pipelineStatusLabel={pipelineStatusLabel}
+        trackingStatusLabel={trackingStatusLabel}
+        returnFocusRef={quickViewTriggerRef}
+      />
     </main>
   );
 }
@@ -343,6 +368,7 @@ function AnalysisTableRow({
   trackingStatusLabel,
   linkLabel,
   jobOfferFallback,
+  onOpenQuickView,
 }: {
   analysis: AnalysisSummary;
   sourceSiteLabel: (value: string) => string;
@@ -350,15 +376,24 @@ function AnalysisTableRow({
   trackingStatusLabel: (value: string) => string;
   linkLabel: string;
   jobOfferFallback: string;
+  onOpenQuickView: (row: HTMLTableRowElement) => void;
 }) {
   const tracking = trackingStatusOf(analysis);
 
   return (
-    <TableRow>
-      <TableCell>
-        <Link href={`/analyses/${analysis.id}`} className="font-medium hover:underline">
-          {analysis.jobOffer.title ?? jobOfferFallback}
-        </Link>
+    <TableRow
+      tabIndex={0}
+      onClick={(event) => onOpenQuickView(event.currentTarget)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpenQuickView(event.currentTarget);
+        }
+      }}
+      className="cursor-pointer"
+    >
+      <TableCell className="font-medium">
+        {analysis.jobOffer.title ?? jobOfferFallback}
       </TableCell>
       <TableCell>{analysis.jobOffer.company ?? "—"}</TableCell>
       <TableCell>{sourceSiteLabel(analysis.jobOffer.sourceSite)}</TableCell>
