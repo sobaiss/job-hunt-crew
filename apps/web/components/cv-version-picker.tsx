@@ -28,10 +28,11 @@ const SELECT_CLASS =
 
 /**
  * The shared CVVersion picker for the matching-flow screens. Lists the caller's
- * CVs with their `conversionStatus`; only `CONVERTED` ones are selectable; the
- * `isDefault` one is preselected once, when it is `CONVERTED` and nothing has
- * been chosen yet. Owns its own fetch (loading / error states) so callers only
- * wire `value` / `onChange`.
+ * non-superseded CVs (a replaced CV, per issue #74, is left off entirely — not
+ * merely disabled) with their `conversionStatus`; only `CONVERTED` ones are
+ * selectable; the `isDefault` one is preselected once, when it is `CONVERTED`
+ * and nothing has been chosen yet. Owns its own fetch (loading / error states)
+ * so callers only wire `value` / `onChange`.
  *
  * With `allowImport` (the "Analyse one offer" screen passes it) the picker also
  * renders an inline CV importer: it reuses the presigned-upload flow, polls the
@@ -142,7 +143,13 @@ export function CvVersionPicker({
     );
   }
 
-  const hasConverted = cvVersions.some(
+  // A superseded CV was replaced (issue #74) — it must never be offered as a
+  // choice here, unlike the not-yet-CONVERTED case which is shown disabled.
+  const selectableCvVersions = cvVersions.filter(
+    (cv) => cv.supersededById === null,
+  );
+
+  const hasConverted = selectableCvVersions.some(
     (cv) => cv.conversionStatus === "CONVERTED",
   );
 
@@ -159,7 +166,7 @@ export function CvVersionPicker({
           <option value="" disabled>
             {t("placeholder")}
           </option>
-          {cvVersions.map((cv) => (
+          {selectableCvVersions.map((cv) => (
             <option
               key={cv.id}
               value={cv.id}

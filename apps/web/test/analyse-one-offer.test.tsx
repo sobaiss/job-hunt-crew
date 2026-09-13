@@ -21,6 +21,7 @@ function cv(overrides: Record<string, unknown> = {}) {
     isDefault: true,
     conversionStatus: "CONVERTED",
     conversionError: null,
+    supersededById: null,
     createdAt: "2026-08-01T00:00:00.000Z",
     updatedAt: "2026-08-01T00:00:00.000Z",
     ...overrides,
@@ -164,6 +165,24 @@ describe("AnalyseOneOfferPage", () => {
     expect(
       within(select).getByRole("option", { name: /Default CV/ }),
     ).toBeEnabled();
+  });
+
+  it("excludes a superseded CV from the picker entirely", async () => {
+    stubApi({
+      cvVersions: [
+        cv({ id: "cv-old", label: "Old CV", isDefault: false, supersededById: "cv-default" }),
+        cv(),
+      ],
+    });
+    renderWithProviders(<AnalyseOneOfferPage />);
+
+    const select = await screen.findByLabelText("CV version");
+    expect(
+      within(select).queryByRole("option", { name: /Old CV/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(select).getByRole("option", { name: /Default CV/ }),
+    ).toBeInTheDocument();
   });
 
   it("rejects an empty URL", async () => {

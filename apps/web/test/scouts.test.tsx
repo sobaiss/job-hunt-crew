@@ -28,6 +28,7 @@ function cv(overrides: Record<string, unknown> = {}) {
     isDefault: true,
     conversionStatus: "CONVERTED",
     conversionError: null,
+    supersededById: null,
     createdAt: "2026-08-01T00:00:00.000Z",
     updatedAt: "2026-08-01T00:00:00.000Z",
     ...overrides,
@@ -127,6 +128,29 @@ describe("NewScoutPage — create form", () => {
     expect(franceTravail).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "LinkedIn" })).not.toBeChecked();
     expect(screen.getByLabelText("Relevance threshold")).toHaveValue(70);
+  });
+
+  it("excludes a superseded CV from the picker entirely", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: [
+            cv({ id: "cv-old", label: "Old CV", isDefault: false, supersededById: "cv-default" }),
+            cv(),
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<NewScoutPage />);
+
+    const select = await screen.findByLabelText("CV version");
+    expect(
+      within(select).queryByRole("option", { name: /Old CV/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(select).getByRole("option", { name: /Default CV/ }),
+    ).toBeInTheDocument();
   });
 
   it("styles the site checkboxes with the design system's accent and a visible focus ring", async () => {
