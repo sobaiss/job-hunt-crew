@@ -129,7 +129,9 @@ export function Dashboard() {
   }
 
   const analyses = analysesQuery.data ?? [];
-  const cvVersionCount = cvVersionsQuery.data?.length ?? 0;
+  const cvVersionCount =
+    cvVersionsQuery.data?.filter((cv) => cv.supersededById === null).length ??
+    0;
   const stats = computeStats(analyses, cvVersionCount);
   const steps = onboardingSteps(analyses, cvVersionCount);
   const trend = scoreTrend(analyses);

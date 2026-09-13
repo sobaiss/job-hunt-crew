@@ -43,6 +43,14 @@ function stub(options: {
   );
 }
 
+function cv(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "cv1",
+    supersededById: null,
+    ...overrides,
+  };
+}
+
 describe("Dashboard", () => {
   it("shows a loading state while the data is in flight", () => {
     stub({ analyses: [], cvVersions: [] });
@@ -51,7 +59,7 @@ describe("Dashboard", () => {
   });
 
   it("shows the onboarding checklist instead of stat tiles when there are no analyses", async () => {
-    stub({ analyses: [], cvVersions: [{ id: "cv1" }] });
+    stub({ analyses: [], cvVersions: [cv({ id: "cv1" })] });
 
     renderWithProviders(<Dashboard />);
 
@@ -75,7 +83,7 @@ describe("Dashboard", () => {
         analysis({ id: "a2", matchScore: 90 }),
         analysis({ id: "a3", status: "RUNNING_CREW", matchScore: null }),
       ],
-      cvVersions: [{ id: "cv1" }, { id: "cv2" }],
+      cvVersions: [cv({ id: "cv1" }), cv({ id: "cv2" })],
     });
 
     renderWithProviders(<Dashboard />);
@@ -91,8 +99,34 @@ describe("Dashboard", () => {
     expect(stats.getByText("2")).toBeInTheDocument(); // cv-version count
   });
 
+  it("excludes superseded CV versions from the cv-version count stat", async () => {
+    stub({
+      analyses: [
+        analysis({ id: "a1", matchScore: 60 }),
+        analysis({ id: "a2", matchScore: 90 }),
+      ],
+      cvVersions: [
+        cv({ id: "cv1", supersededById: "cv3" }),
+        cv({ id: "cv2", supersededById: "cv3" }),
+        cv({ id: "cv3" }),
+      ],
+    });
+
+    renderWithProviders(<Dashboard />);
+
+    const stats = within(
+      (await screen.findByText("Average match score")).closest(
+        "section",
+      ) as HTMLElement,
+    );
+    expect(stats.getByText("75")).toBeInTheDocument(); // average of 60 and 90
+    expect(stats.getByText("90")).toBeInTheDocument(); // best
+    expect(stats.getByText("2")).toBeInTheDocument(); // analysis count
+    expect(stats.getByText("1")).toBeInTheDocument(); // cv-version count excludes cv1 and cv2
+  });
+
   it("lists the recent analyses and the quick actions", async () => {
-    stub({ analyses: [analysis()], cvVersions: [{ id: "cv1" }] });
+    stub({ analyses: [analysis()], cvVersions: [cv({ id: "cv1" })] });
 
     renderWithProviders(<Dashboard />);
 
@@ -120,7 +154,7 @@ describe("Dashboard", () => {
         analysis({ id: "a1", matchScore: 60 }),
         analysis({ id: "a2", matchScore: 90 }),
       ],
-      cvVersions: [{ id: "cv1" }],
+      cvVersions: [cv({ id: "cv1" })],
     });
 
     renderWithProviders(<Dashboard />);
@@ -131,7 +165,7 @@ describe("Dashboard", () => {
   it("shows the cross-Scout new-matches block and links to Agents", async () => {
     stub({
       analyses: [analysis()],
-      cvVersions: [{ id: "cv1" }],
+      cvVersions: [cv({ id: "cv1" })],
       scouts: [
         { id: "s1", relevantFindsCount: 3 },
         { id: "s2", relevantFindsCount: 2 },
@@ -151,7 +185,7 @@ describe("Dashboard", () => {
   it("is zero-safe and hides the block when there are no relevant finds", async () => {
     stub({
       analyses: [analysis()],
-      cvVersions: [{ id: "cv1" }],
+      cvVersions: [cv({ id: "cv1" })],
       scouts: [{ id: "s1", relevantFindsCount: 0 }],
     });
 
