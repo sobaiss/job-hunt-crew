@@ -192,7 +192,14 @@
       "extendAction": "Select all {total} matching your filters",
       "exportCsv": "Export CSV",
       "csvFilename": "analyses.csv",
-      "statusPartialError": "{failed} of {total} updates failed. Please try again for those."
+      "statusPartialError": "{failed} of {total} updates failed. Please try again for those.",
+      "generateDocuments": "Generate documents",
+      "generateConfirm": "Generate for {count} offers — {remaining} remaining today",
+      "generateConfirmAction": "Confirm",
+      "cancel": "Cancel",
+      "generateInsufficientQuota": "Not enough remaining quota today for this many offers.",
+      "generatePartialError": "{failed} of {total} generations failed to start. Please try again for those.",
+      "generateProgress": "{ready} ready, {failed} failed, {total} total"
     },
     "controls": {
       "searchLabel": "Search",

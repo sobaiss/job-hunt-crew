@@ -37,6 +37,13 @@ export const handlers = [
   http.get("/api/analyses/:id/generated-documents", () =>
     HttpResponse.json({ generatedDocuments: [] }),
   ),
+  // The Analyses table's bulk "Générer les documents" action (issue #68)
+  // reads the remaining daily quota unconditionally on load; default to a
+  // generous budget so suites exercising other parts of the page don't have
+  // to stub it. Quota-threshold tests override with `server.use`.
+  http.get("/api/generated-documents/quota", () =>
+    HttpResponse.json({ quota: { cap: 20, used: 0, remaining: 20 } }),
+  ),
 ];
 
 const ZERO_APPLICATION_STATS_WINDOW = {

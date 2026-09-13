@@ -9,6 +9,11 @@ import { ArrowDown, ArrowUp, ArrowUpDown, ExternalLink } from "lucide-react";
 import { useAnalyses, type AnalysisSummary } from "@/hooks/use-analyses";
 import { useBulkSetApplicationStatus } from "@/hooks/use-applications";
 import {
+  useBulkCreateGeneratedDocuments,
+  useGeneratedDocumentsQuota,
+  useGeneratedDocumentsStatuses,
+} from "@/hooks/use-generated-documents";
+import {
   ANALYSES_PAGE_SIZES,
   analysesTableStateToParams,
   cvLabelsOf,
@@ -80,12 +85,21 @@ function AnalysesTable() {
   const { data: analyses, isPending, isError } = useAnalyses();
   const queryClient = useQueryClient();
   const bulkSetApplicationStatus = useBulkSetApplicationStatus();
+  const bulkCreateGeneratedDocuments = useBulkCreateGeneratedDocuments();
+  const { data: generatedDocumentsQuota } = useGeneratedDocumentsQuota();
 
   // Multi-select (#67): ids selected across however many pages the user has
   // extended the selection to via the "select all matching filters" banner —
   // not just the current page, so a bulk action can span pages.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkError, setBulkError] = useState<string | null>(null);
+
+  // Bulk "Générer les documents" (#68): a confirm step showing the remaining
+  // daily quota, then the ids of the freshly created GeneratedDocument rows
+  // this run produced, polled for a live ready/failed/total summary.
+  const [bulkGenerateConfirming, setBulkGenerateConfirming] = useState(false);
+  const [bulkGenerationDocumentIds, setBulkGenerationDocumentIds] = useState<string[]>([]);
+  const bulkGenerationStatuses = useGeneratedDocumentsStatuses(bulkGenerationDocumentIds);
 
   // Which Analysis's Quick view (#65) is open, if any — looked up by id
   // rather than held as the row's data so it always reflects the latest
@@ -140,6 +154,8 @@ function AnalysesTable() {
       if (patch.search !== undefined || patch.status !== undefined || patch.sort !== undefined) {
         setSelectedIds(new Set());
         setBulkError(null);
+        setBulkGenerateConfirming(false);
+        setBulkGenerationDocumentIds([]);
       }
     },
     [state, router, pathname],
@@ -200,6 +216,41 @@ function AnalysesTable() {
         },
       },
     );
+  };
+
+  const requiredGenerationDocs = selectedIds.size * 2;
+  const remainingGenerationQuota = generatedDocumentsQuota?.remaining;
+  const insufficientGenerationQuota =
+    remainingGenerationQuota !== undefined && requiredGenerationDocs > remainingGenerationQuota;
+
+  const bulkGenerationSummary = useMemo(() => {
+    if (bulkGenerationDocumentIds.length === 0) return null;
+    let ready = 0;
+    let failed = 0;
+    for (const query of bulkGenerationStatuses) {
+      if (query.data?.status === "READY") ready += 1;
+      else if (query.data?.status === "FAILED") failed += 1;
+    }
+    return { ready, failed, total: bulkGenerationDocumentIds.length };
+  }, [bulkGenerationDocumentIds, bulkGenerationStatuses]);
+
+  const handleConfirmBulkGenerate = () => {
+    setBulkError(null);
+    const analysisIds = [...selectedIds];
+    bulkCreateGeneratedDocuments.mutate(analysisIds, {
+      onSuccess: ({ failedAnalysisIds, documentIds }) => {
+        setBulkGenerateConfirming(false);
+        setBulkGenerationDocumentIds(documentIds);
+        if (failedAnalysisIds.length > 0) {
+          setBulkError(
+            t("bulk.generatePartialError", {
+              failed: failedAnalysisIds.length,
+              total: analysisIds.length,
+            }),
+          );
+        }
+      },
+    });
   };
 
   const handleExportCsv = () => {
@@ -324,6 +375,8 @@ function AnalysesTable() {
             onClick={() => {
               setSelectedIds(new Set());
               setBulkError(null);
+              setBulkGenerateConfirming(false);
+              setBulkGenerationDocumentIds([]);
             }}
           >
             {t("bulk.clearSelection")}
@@ -344,10 +397,57 @@ function AnalysesTable() {
             <Button type="button" variant="outline" size="sm" onClick={handleExportCsv}>
               {t("bulk.exportCsv")}
             </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={bulkCreateGeneratedDocuments.isPending}
+              onClick={() => setBulkGenerateConfirming(true)}
+            >
+              {t("bulk.generateDocuments")}
+            </Button>
           </div>
           {bulkError && (
             <p role="alert" className="w-full text-sm text-destructive">
               {bulkError}
+            </p>
+          )}
+          {bulkGenerateConfirming && (
+            <div className="flex w-full flex-col gap-2 rounded-md border border-border bg-background p-3">
+              <p className="text-sm">
+                {t("bulk.generateConfirm", {
+                  count: selectedIds.size,
+                  remaining: remainingGenerationQuota ?? 0,
+                })}
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={insufficientGenerationQuota || bulkCreateGeneratedDocuments.isPending}
+                  onClick={handleConfirmBulkGenerate}
+                >
+                  {t("bulk.generateConfirmAction")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setBulkGenerateConfirming(false)}
+                >
+                  {t("bulk.cancel")}
+                </Button>
+              </div>
+              {insufficientGenerationQuota && (
+                <p role="alert" className="text-sm text-destructive">
+                  {t("bulk.generateInsufficientQuota")}
+                </p>
+              )}
+            </div>
+          )}
+          {bulkGenerationSummary && (
+            <p className="w-full text-sm text-muted">
+              {t("bulk.generateProgress", bulkGenerationSummary)}
             </p>
           )}
         </div>

@@ -668,6 +668,93 @@ describe("AnalysesDashboardPage", () => {
     delete URL.revokeObjectURL;
   });
 
+  it("disables the bulk generate confirm when the selection would exceed the remaining quota (issue #68)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            summary({ id: "s1", jobOffer: { ...summary().jobOffer, id: "j1", title: "Offer One" } }),
+            summary({ id: "s2", jobOffer: { ...summary().jobOffer, id: "j2", title: "Offer Two" } }),
+          ],
+        }),
+      ),
+      http.get("/api/generated-documents/quota", () =>
+        HttpResponse.json({ quota: { cap: 20, used: 17, remaining: 3 } }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Offer One");
+
+    await user.click(screen.getByLabelText("Select all on this page"));
+    await user.click(screen.getByRole("button", { name: "Generate documents" }));
+
+    expect(await screen.findByText("Generate for 2 offers — 3 remaining today")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Confirm" })).toBeDisabled();
+    expect(
+      screen.getByText("Not enough remaining quota today for this many offers."),
+    ).toBeInTheDocument();
+  });
+
+  it("bulk-generates documents for the selection and reflects a live ready/failed progress summary (issue #68)", async () => {
+    const user = userEvent.setup();
+    const document = (id: string, status: string) => ({
+      id,
+      type: id.endsWith("cl") ? "COVER_LETTER" : "TAILORED_CV",
+      analysisId: id.startsWith("gd1") ? "s1" : "s2",
+      status,
+      markdownContent: status === "READY" ? "content" : null,
+      errorMessage: status === "FAILED" ? "Generation failed" : null,
+      createdAt: "2026-09-11T00:00:00.000Z",
+      updatedAt: "2026-09-11T00:00:00.000Z",
+    });
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            summary({ id: "s1", jobOffer: { ...summary().jobOffer, id: "j1", title: "Offer One" } }),
+            summary({ id: "s2", jobOffer: { ...summary().jobOffer, id: "j2", title: "Offer Two" } }),
+          ],
+        }),
+      ),
+      http.get("/api/generated-documents/quota", () =>
+        HttpResponse.json({ quota: { cap: 20, used: 0, remaining: 20 } }),
+      ),
+      http.post("/api/analyses/s1/generated-documents", () =>
+        HttpResponse.json({
+          generatedDocuments: [document("gd1-cl", "PENDING"), document("gd1-cv", "PENDING")],
+        }),
+      ),
+      http.post("/api/analyses/s2/generated-documents", () =>
+        HttpResponse.json({
+          generatedDocuments: [document("gd2-cl", "PENDING"), document("gd2-cv", "PENDING")],
+        }),
+      ),
+      http.get("/api/generated-documents/gd1-cl", () =>
+        HttpResponse.json({ generatedDocument: document("gd1-cl", "READY") }),
+      ),
+      http.get("/api/generated-documents/gd1-cv", () =>
+        HttpResponse.json({ generatedDocument: document("gd1-cv", "READY") }),
+      ),
+      http.get("/api/generated-documents/gd2-cl", () =>
+        HttpResponse.json({ generatedDocument: document("gd2-cl", "FAILED") }),
+      ),
+      http.get("/api/generated-documents/gd2-cv", () =>
+        HttpResponse.json({ generatedDocument: document("gd2-cv", "FAILED") }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Offer One");
+
+    await user.click(screen.getByLabelText("Select all on this page"));
+    await user.click(screen.getByRole("button", { name: "Generate documents" }));
+    await user.click(await screen.findByRole("button", { name: "Confirm" }));
+
+    expect(await screen.findByText("2 ready, 2 failed, 4 total")).toBeInTheDocument();
+  });
+
   it("clears the selection when the search term, Tracking status filter, or sort changes (issue #67)", async () => {
     const user = userEvent.setup();
     server.use(

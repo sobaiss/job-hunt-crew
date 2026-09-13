@@ -1794,6 +1794,37 @@ async def list_generated_documents(
     )
 
 
+class GeneratedDocumentsQuota(BaseModel):
+    cap: int
+    used: int
+    remaining: int
+
+
+class GeneratedDocumentsQuotaResponse(BaseModel):
+    quota: GeneratedDocumentsQuota
+
+
+# Declared before `/generated-documents/{document_id}` so "quota" is matched
+# here rather than captured as a document id — same trick as `/analyses/quota`.
+@router.get("/generated-documents/quota", response_model=GeneratedDocumentsQuotaResponse)
+async def get_generated_documents_quota(
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> GeneratedDocumentsQuotaResponse:
+    """The caller's per-user daily document-generation budget: `cap`
+    (`DAILY_GENERATION_CAP`), how many `GeneratedDocument` rows they've `used`
+    since 00:00 UTC, and how many `remaining` (floored at 0). Backs the bulk
+    "Générer les documents" pre-confirm estimate (issue #68) — the same shared
+    `py_db.quota` rule `POST .../generated-documents` and `.../regenerate`
+    enforce.
+    """
+    cap = daily_generation_cap()
+    used = await generated_documents_created_today(session, user_id)
+    return GeneratedDocumentsQuotaResponse(
+        quota=GeneratedDocumentsQuota(cap=cap, used=used, remaining=max(cap - used, 0))
+    )
+
+
 class GetGeneratedDocumentResponse(BaseModel):
     generatedDocument: GeneratedDocumentResponse
 

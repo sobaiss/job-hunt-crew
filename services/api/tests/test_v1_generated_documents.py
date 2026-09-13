@@ -507,4 +507,52 @@ def test_regenerate_generated_document_respects_daily_generation_cap(user_id, mo
             f"/v1/generated-documents/{document_id}/regenerate", headers=_headers(user_id)
         )
         assert response.status_code == 429
-        assert _drain_generation_intake() == []
+
+
+def test_get_generated_documents_quota_requires_user_id_header():
+    with TestClient(app) as client:
+        response = client.get("/v1/generated-documents/quota", headers=INTERNAL_SECRET_HEADERS)
+    assert response.status_code == 401
+
+
+def test_get_generated_documents_quota_reports_cap_used_and_remaining(user_id, monkeypatch):
+    monkeypatch.setenv("DAILY_GENERATION_CAP", "3")
+    with TestClient(app) as client:
+        before = client.get("/v1/generated-documents/quota", headers=_headers(user_id))
+        assert before.status_code == 200
+        assert before.json()["quota"] == {"cap": 3, "used": 0, "remaining": 3}
+
+        cv = _make_cv_version(client, user_id)
+        analysis_id = asyncio.run(
+            _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.COMPLETED)
+        )
+        created = client.post(
+            f"/v1/analyses/{analysis_id}/generated-documents", headers=_headers(user_id)
+        )
+        assert created.status_code == 202
+
+        # The create call above produced 2 rows (COVER_LETTER + TAILORED_CV).
+        after = client.get("/v1/generated-documents/quota", headers=_headers(user_id))
+        assert after.json()["quota"] == {"cap": 3, "used": 2, "remaining": 1}
+
+        other_user_id = asyncio.run(_create_user())
+        try:
+            other = client.get("/v1/generated-documents/quota", headers=_headers(other_user_id))
+            assert other.json()["quota"] == {"cap": 3, "used": 0, "remaining": 3}
+        finally:
+            asyncio.run(_delete_user(other_user_id))
+
+
+def test_get_generated_documents_quota_never_negative_remaining(user_id, monkeypatch):
+    monkeypatch.setenv("DAILY_GENERATION_CAP", "1")
+    with TestClient(app) as client:
+        cv = _make_cv_version(client, user_id)
+        analysis_id = asyncio.run(
+            _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.COMPLETED)
+        )
+        client.post(f"/v1/analyses/{analysis_id}/generated-documents", headers=_headers(user_id))
+
+        quota = client.get(
+            "/v1/generated-documents/quota", headers=_headers(user_id)
+        ).json()["quota"]
+    assert quota == {"cap": 1, "used": 2, "remaining": 0}

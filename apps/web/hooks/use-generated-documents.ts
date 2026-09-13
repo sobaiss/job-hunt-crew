@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery } from "@tanstack/react-query";
 
 import { bff } from "@/lib/bff-client";
 
@@ -84,5 +84,73 @@ export function useGeneratedDocument(id: string | null) {
         ? false
         : GENERATED_DOCUMENT_POLL_INTERVAL_MS;
     },
+  });
+}
+
+export type GeneratedDocumentsQuota = { cap: number; used: number; remaining: number };
+
+/**
+ * The caller's per-user daily document-generation budget (`GET
+ * /api/generated-documents/quota`): `cap`, how many they've `used` since
+ * 00:00 UTC, and how many `remaining`. Backs the bulk "Générer les
+ * documents" pre-confirm estimate (#68) — "Générer pour X offres — Y
+ * restantes aujourd'hui". Read on mount; not polled.
+ */
+export function useGeneratedDocumentsQuota() {
+  return useQuery({
+    queryKey: ["generated-documents-quota"],
+    queryFn: () => bff.get<{ quota: GeneratedDocumentsQuota }>("/generated-documents/quota"),
+    select: (data) => data.quota,
+  });
+}
+
+/** Kicks off generation (issue #68's bulk action) for every Analysis in
+ * `analysisIds`, one `POST /api/analyses/{id}/generated-documents` call per
+ * id via `Promise.allSettled` — mirrors `useBulkSetApplicationStatus`'s
+ * fan-out so a failure on one Analysis doesn't abort the rest. Returns the
+ * ids that failed and the full list of freshly created document ids, so the
+ * caller can poll each with {@link useGeneratedDocumentsStatuses}. */
+export function useBulkCreateGeneratedDocuments() {
+  return useMutation({
+    mutationFn: async (analysisIds: string[]) => {
+      const results = await Promise.allSettled(
+        analysisIds.map((analysisId) =>
+          bff.post<{ generatedDocuments: GeneratedDocument[] }>(
+            `/analyses/${analysisId}/generated-documents`,
+          ),
+        ),
+      );
+      const failedAnalysisIds = analysisIds.filter(
+        (_, i) => results[i]!.status === "rejected",
+      );
+      const documentIds = results
+        .filter(
+          (result): result is PromiseFulfilledResult<{ generatedDocuments: GeneratedDocument[] }> =>
+            result.status === "fulfilled",
+        )
+        .flatMap((result) => result.value.generatedDocuments.map((document) => document.id));
+      return { failedAnalysisIds, documentIds };
+    },
+  });
+}
+
+/** Polls a fixed list of GeneratedDocument ids (the bulk "Générer les
+ * documents" run's own rows), each until it leaves PENDING/GENERATING —
+ * lets the bulk-actions bar show a live per-run summary without a
+ * full-page reload. Shares its cache entries with {@link useGeneratedDocument}. */
+export function useGeneratedDocumentsStatuses(ids: string[]) {
+  return useQueries({
+    queries: ids.map((id) => ({
+      queryKey: ["generated-document", id],
+      queryFn: () =>
+        bff.get<{ generatedDocument: GeneratedDocument }>(`/generated-documents/${id}`),
+      select: (data: { generatedDocument: GeneratedDocument }) => data.generatedDocument,
+      refetchInterval: (query: { state: { data?: { generatedDocument: GeneratedDocument } } }) => {
+        const status = query.state.data?.generatedDocument.status;
+        return status && TERMINAL_GENERATED_DOCUMENT_STATUSES.has(status)
+          ? false
+          : GENERATED_DOCUMENT_POLL_INTERVAL_MS;
+      },
+    })),
   });
 }

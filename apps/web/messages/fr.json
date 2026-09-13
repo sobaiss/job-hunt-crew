@@ -192,7 +192,14 @@
       "extendAction": "Sélectionner les {total} correspondant à vos filtres",
       "exportCsv": "Exporter en CSV",
       "csvFilename": "analyses.csv",
-      "statusPartialError": "{failed} mise(s) à jour sur {total} ont échoué. Veuillez réessayer pour celles-ci."
+      "statusPartialError": "{failed} mise(s) à jour sur {total} ont échoué. Veuillez réessayer pour celles-ci.",
+      "generateDocuments": "Générer les documents",
+      "generateConfirm": "Générer pour {count} offres — {remaining} restantes aujourd'hui",
+      "generateConfirmAction": "Confirmer",
+      "cancel": "Annuler",
+      "generateInsufficientQuota": "Quota restant insuffisant aujourd'hui pour ce nombre d'offres.",
+      "generatePartialError": "{failed} génération(s) sur {total} n'ont pas pu démarrer. Veuillez réessayer pour celles-ci.",
+      "generateProgress": "{ready} prêt(s), {failed} échoué(s), {total} au total"
     },
     "controls": {
       "searchLabel": "Rechercher",
