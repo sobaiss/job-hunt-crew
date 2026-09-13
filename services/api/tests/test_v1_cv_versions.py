@@ -5,9 +5,19 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
-from py_db.models import CVVersion, Cvconversionstatus, User
+from py_db.models import (
+    Analysis,
+    Analysisstatus,
+    Application,
+    CVVersion,
+    Cvconversionstatus,
+    GeneratedDocument,
+    JobOffer,
+    Joboffersourcesite,
+    User,
+)
 from py_db.session import make_engine, make_session_factory
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 
 from botocore.exceptions import ClientError
 
@@ -48,12 +58,73 @@ async def _create_user() -> str:
 
 async def _delete_user(user_id: str) -> None:
     # CVVersion.userId has ondelete=CASCADE, so this also removes any rows
-    # created for the user during the test.
+    # created for the user during the test. GeneratedDocument.cvVersionId is
+    # onDelete: Restrict, though, so any such row must be cleared first or
+    # the CVVersion cascade from User would raise an IntegrityError.
     engine = make_engine()
     try:
         session_factory = make_session_factory(engine)
         async with session_factory() as session:
+            cv_version_ids = (
+                await session.scalars(select(CVVersion.id).where(CVVersion.userId == user_id))
+            ).all()
+            if cv_version_ids:
+                await session.execute(
+                    delete(GeneratedDocument).where(
+                        GeneratedDocument.cvVersionId.in_(cv_version_ids)
+                    )
+                )
             await session.execute(delete(User).where(User.id == user_id))
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+
+def _now() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
+async def _seed_analysis(*, user_id: str, cv_version_id: str, status: Analysisstatus) -> str:
+    job_offer_id = str(uuid.uuid4())
+    analysis_id = str(uuid.uuid4())
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            session.add(
+                JobOffer(
+                    id=job_offer_id,
+                    sourceUrl=f"https://example.com/jobs/{job_offer_id}",
+                    sourceSite=Joboffersourcesite.OTHER,
+                    updatedAt=_now(),
+                )
+            )
+            session.add(
+                Analysis(
+                    id=analysis_id,
+                    userId=user_id,
+                    jobOfferId=job_offer_id,
+                    cvVersionId=cv_version_id,
+                    status=status,
+                    resultJSON={"matched_skills": [], "missing_skills": []}
+                    if status == Analysisstatus.COMPLETED
+                    else None,
+                    matchScore=80 if status == Analysisstatus.COMPLETED else None,
+                    completedAt=_now() if status == Analysisstatus.COMPLETED else None,
+                )
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+    return analysis_id
+
+
+async def _delete_applications_for_analysis(analysis_id: str) -> None:
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            await session.execute(delete(Application).where(Application.analysisId == analysis_id))
             await session.commit()
     finally:
         await engine.dispose()
@@ -501,3 +572,40 @@ def test_delete_cv_version_does_not_fail_when_the_s3_object_is_already_gone(user
         # never completed) — deleting the row must still succeed.
         response = client.delete(f"/v1/cv-versions/{cv_id}", headers=_headers(user_id))
         assert response.status_code == 204
+
+
+def test_delete_cv_version_blocked_while_generated_document_references_it(user_id):
+    with TestClient(app) as client:
+        create_response = client.post(
+            "/v1/cv-versions",
+            headers=_headers(user_id),
+            json={
+                "label": "CV 1",
+                "fileName": "cv1.pdf",
+                "contentType": "application/pdf",
+                "fileSizeBytes": 1024,
+            },
+        )
+        cv_id = create_response.json()["cvVersionId"]
+
+        analysis_id = asyncio.run(
+            _seed_analysis(user_id=user_id, cv_version_id=cv_id, status=Analysisstatus.COMPLETED)
+        )
+        generated = client.post(
+            f"/v1/analyses/{analysis_id}/generated-documents", headers=_headers(user_id)
+        )
+        assert generated.status_code == 202
+
+        # Creating a document also creates an Application against the same
+        # Analysis (see #66), which would otherwise trip the pre-existing
+        # Application check first. Remove it so this test isolates the new
+        # GeneratedDocument check specifically.
+        asyncio.run(_delete_applications_for_analysis(analysis_id))
+
+        response = client.delete(f"/v1/cv-versions/{cv_id}", headers=_headers(user_id))
+        assert response.status_code == 409
+        assert "Cover Letter" in response.json()["detail"]
+        assert "Tailored CV" in response.json()["detail"]
+
+        still_there = client.get("/v1/cv-versions", headers=_headers(user_id)).json()["cvVersions"]
+        assert any(row["id"] == cv_id for row in still_there)

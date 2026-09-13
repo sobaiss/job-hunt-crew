@@ -385,6 +385,26 @@ async def delete_cv_version(
             "It cannot be deleted while those Applications reference it.",
         )
 
+    # GeneratedDocument.cvVersionId is also onDelete: Restrict (issue #73) — a
+    # CV backing a generated document can't be deleted either.
+    referencing_documents = (
+        await session.scalars(
+            select(GeneratedDocument)
+            .where(GeneratedDocument.cvVersionId == cv_version_id)
+            .order_by(GeneratedDocument.createdAt)
+        )
+    ).all()
+    if referencing_documents:
+        labels = ", ".join(
+            _GENERATED_DOCUMENT_LABELS[doc.type] for doc in referencing_documents
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=f"This CV version is used by {len(referencing_documents)} generated "
+            f"document(s): {labels}. It cannot be deleted while those documents "
+            "reference it.",
+        )
+
     file_key = existing.fileKey
     await session.delete(existing)
     await session.commit()
