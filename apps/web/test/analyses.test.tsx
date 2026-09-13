@@ -90,6 +90,87 @@ describe("AnalysesDashboardPage", () => {
     ).toHaveAttribute("href", "https://example.com/jobs/job1");
   });
 
+  it("collapses columns in the order CV, Platform, Posted, Company as space runs out, keeping Position/Score/Status/Link always visible (issue #69)", async () => {
+    server.use(
+      http.get("/api/analyses", () => HttpResponse.json({ analyses: [summary()] })),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Backend Engineer");
+
+    const cvHeader = screen.getByRole("columnheader", { name: "CV" });
+    const platformHeader = screen.getByRole("columnheader", { name: "Platform" });
+    const postedHeader = screen.getByRole("columnheader", { name: "Posted" });
+    const companyHeader = screen.getByRole("columnheader", { name: "Company" });
+
+    // Drops first (needs the widest viewport) -> drops last, in the order the
+    // issue specifies: CV, then Platform, then Posted, then Company.
+    expect(cvHeader.className).toContain("hidden xl:table-cell");
+    expect(platformHeader.className).toContain("hidden lg:table-cell");
+    expect(postedHeader.className).toContain("hidden md:table-cell");
+    expect(companyHeader.className).toContain("hidden sm:table-cell");
+    // The row's cells collapse in step with their header.
+    expect(screen.getByRole("cell", { name: "Acme Inc" }).className).toContain(
+      "hidden sm:table-cell",
+    );
+
+    for (const header of [
+      screen.getByRole("columnheader", { name: "Position" }),
+      screen.getByRole("columnheader", { name: "Score" }),
+      screen.getByRole("columnheader", { name: "Status" }),
+      screen.getByRole("columnheader", { name: "Link" }),
+    ]) {
+      expect(header.className).not.toMatch(/(^|\s)hidden(\s|$)/);
+    }
+  });
+
+  it("replaces the table with a stacked card per Analysis below ~640px, keeping the same click/select/link behavior (issue #69)", async () => {
+    const user = userEvent.setup();
+    const originalMatchMedia = window.matchMedia;
+    try {
+      window.matchMedia = ((query: string) =>
+        ({
+          matches: query === "(max-width: 639px)",
+          media: query,
+          onchange: null,
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        }) as unknown as MediaQueryList) as typeof window.matchMedia;
+
+      server.use(
+        http.get("/api/analyses", () => HttpResponse.json({ analyses: [detail()] })),
+      );
+
+      renderWithProviders(<AnalysesDashboardPage />);
+
+      const title = await screen.findByText("Backend Engineer");
+      expect(screen.queryByRole("table")).not.toBeInTheDocument();
+      const card = within(title.closest("[tabindex]") as HTMLElement);
+      expect(card.getByText("Acme Inc", { exact: false })).toBeInTheDocument();
+      expect(card.getByText("87")).toBeInTheDocument();
+      expect(card.getByText("To apply")).toBeInTheDocument();
+
+      // Same click behavior as a table row: opens the Quick view.
+      await user.click(screen.getByText("Backend Engineer"));
+      expect(await screen.findByRole("dialog")).toBeInTheDocument();
+      await user.keyboard("{Escape}");
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+      // Same Lien behavior: opens the offer without the Quick view.
+      await user.click(screen.getByRole("link", { name: "Open the job offer" }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+      // Same select behavior, feeding the same bulk-actions bar.
+      await user.click(screen.getByRole("checkbox", { name: "Select Backend Engineer" }));
+      expect(screen.getByText("1 selected")).toBeInTheDocument();
+    } finally {
+      window.matchMedia = originalMatchMedia;
+    }
+  });
+
   it("shows a Tracking status badge for a COMPLETED analysis and a pipeline badge otherwise (issue #64)", async () => {
     server.use(
       http.get("/api/analyses", () =>

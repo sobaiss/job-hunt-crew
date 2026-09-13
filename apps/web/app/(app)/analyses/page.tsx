@@ -13,6 +13,7 @@ import {
   useGeneratedDocumentsQuota,
   useGeneratedDocumentsStatuses,
 } from "@/hooks/use-generated-documents";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import {
   ANALYSES_PAGE_SIZES,
   analysesTableStateToParams,
@@ -61,16 +62,32 @@ type ColumnDef = {
   className?: string;
 };
 
+// Responsive column collapse (#69): as width shrinks, columns drop in this
+// exact order (CV first, Entreprise last) so Poste/Score/Statut/Lien and the
+// selection checkbox — not listed here — always stay visible. Each entry is
+// "hidden below breakpoint X", so a column requiring a bigger breakpoint
+// drops out earlier while shrinking than one requiring a smaller one.
+const COLUMN_VISIBILITY: Partial<Record<AnalysesSortColumn, string>> = {
+  cvLabel: "hidden xl:table-cell",
+  sourceSite: "hidden lg:table-cell",
+  postedAt: "hidden md:table-cell",
+  company: "hidden sm:table-cell",
+};
+
 // The flat table's sortable columns, left to right (#63). "Lien" is sortable
 // by `sourceUrl` too, but rendered separately since its cell is an icon, not
 // text.
 const COLUMNS: ColumnDef[] = [
   { key: "title", labelKey: "columns.title" },
-  { key: "company", labelKey: "columns.company" },
-  { key: "sourceSite", labelKey: "columns.platform" },
-  { key: "postedAt", labelKey: "columns.postedAt" },
-  { key: "cvLabel", labelKey: "columns.cv" },
-  { key: "matchScore", labelKey: "columns.score", className: "text-right" },
+  { key: "company", labelKey: "columns.company", className: COLUMN_VISIBILITY.company },
+  { key: "sourceSite", labelKey: "columns.platform", className: COLUMN_VISIBILITY.sourceSite },
+  { key: "postedAt", labelKey: "columns.postedAt", className: COLUMN_VISIBILITY.postedAt },
+  { key: "cvLabel", labelKey: "columns.cv", className: COLUMN_VISIBILITY.cvLabel },
+  {
+    key: "matchScore",
+    labelKey: "columns.score",
+    className: "text-right",
+  },
 ];
 
 function AnalysesTable() {
@@ -273,6 +290,11 @@ function AnalysesTable() {
 
   const hasAnalyses = Boolean(analyses && analyses.length > 0);
 
+  // Below ~640px the table becomes cramped even with every collapsible
+  // column dropped (#69), so it's replaced outright by a stacked card per
+  // Analysis carrying the same fields and click/select/link behaviors.
+  const isCardLayout = useMediaQuery("(max-width: 639px)");
+
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-8">
       <h1 className="font-serif text-2xl font-semibold">{t("title")}</h1>
@@ -455,43 +477,10 @@ function AnalysesTable() {
 
       {sorted.length > 0 && (
         <>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-0">
-                  <input
-                    type="checkbox"
-                    aria-label={t("bulk.selectPageLabel")}
-                    checked={allPageSelected}
-                    ref={(el) => {
-                      if (el) el.indeterminate = somePageSelected && !allPageSelected;
-                    }}
-                    onChange={togglePageSelection}
-                  />
-                </TableHead>
-                {COLUMNS.map((column) => (
-                  <SortableHead
-                    key={column.key}
-                    column={column.key}
-                    label={t(column.labelKey)}
-                    className={column.className}
-                    sort={state.sort}
-                    onSort={toggleSort}
-                  />
-                ))}
-                <TableHead>{t("columns.status")}</TableHead>
-                <SortableHead
-                  column="sourceUrl"
-                  label={t("columns.link")}
-                  className="w-0"
-                  sort={state.sort}
-                  onSort={toggleSort}
-                />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+          {isCardLayout ? (
+            <div className="flex flex-col gap-3">
               {rows.map((analysis) => (
-                <AnalysisTableRow
+                <AnalysisCard
                   key={analysis.id}
                   analysis={analysis}
                   sourceSiteLabel={sourceSiteLabel}
@@ -510,8 +499,66 @@ function AnalysesTable() {
                   }}
                 />
               ))}
-            </TableBody>
-          </Table>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-0">
+                    <input
+                      type="checkbox"
+                      aria-label={t("bulk.selectPageLabel")}
+                      checked={allPageSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = somePageSelected && !allPageSelected;
+                      }}
+                      onChange={togglePageSelection}
+                    />
+                  </TableHead>
+                  {COLUMNS.map((column) => (
+                    <SortableHead
+                      key={column.key}
+                      column={column.key}
+                      label={t(column.labelKey)}
+                      className={column.className}
+                      sort={state.sort}
+                      onSort={toggleSort}
+                    />
+                  ))}
+                  <TableHead>{t("columns.status")}</TableHead>
+                  <SortableHead
+                    column="sourceUrl"
+                    label={t("columns.link")}
+                    className="w-0"
+                    sort={state.sort}
+                    onSort={toggleSort}
+                  />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((analysis) => (
+                  <AnalysisTableRow
+                    key={analysis.id}
+                    analysis={analysis}
+                    sourceSiteLabel={sourceSiteLabel}
+                    pipelineStatusLabel={pipelineStatusLabel}
+                    trackingStatusLabel={trackingStatusLabel}
+                    linkLabel={t("columns.linkLabel")}
+                    jobOfferFallback={t("jobOfferFallback")}
+                    selected={selectedIds.has(analysis.id)}
+                    selectLabel={t("bulk.selectRowLabel", {
+                      title: analysis.jobOffer.title ?? t("jobOfferFallback"),
+                    })}
+                    onToggleSelect={() => toggleRowSelection(analysis.id)}
+                    onOpenQuickView={(row) => {
+                      quickViewTriggerRef.current = row;
+                      setQuickViewId(analysis.id);
+                    }}
+                  />
+                ))}
+              </TableBody>
+            </Table>
+          )}
 
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2">
@@ -631,8 +678,6 @@ function AnalysisTableRow({
   onToggleSelect: () => void;
   onOpenQuickView: (row: HTMLTableRowElement) => void;
 }) {
-  const tracking = trackingStatusOf(analysis);
-
   return (
     <TableRow
       tabIndex={0}
@@ -656,41 +701,161 @@ function AnalysisTableRow({
       <TableCell className="font-medium">
         {analysis.jobOffer.title ?? jobOfferFallback}
       </TableCell>
-      <TableCell>{analysis.jobOffer.company ?? "—"}</TableCell>
-      <TableCell>{sourceSiteLabel(analysis.jobOffer.sourceSite)}</TableCell>
-      <TableCell>
+      <TableCell className={COLUMN_VISIBILITY.company}>
+        {analysis.jobOffer.company ?? "—"}
+      </TableCell>
+      <TableCell className={COLUMN_VISIBILITY.sourceSite}>
+        {sourceSiteLabel(analysis.jobOffer.sourceSite)}
+      </TableCell>
+      <TableCell className={COLUMN_VISIBILITY.postedAt}>
         {analysis.jobOffer.postedAt
           ? new Date(analysis.jobOffer.postedAt).toLocaleDateString()
           : "—"}
       </TableCell>
-      <TableCell>{analysis.cvVersion.label}</TableCell>
+      <TableCell className={COLUMN_VISIBILITY.cvLabel}>
+        {analysis.cvVersion.label}
+      </TableCell>
       <TableCell className="text-right tabular-nums">
         {analysis.matchScore ?? "—"}
       </TableCell>
       <TableCell>
-        {tracking !== null ? (
-          <Badge variant={trackingStatusBadgeVariant(tracking)}>
-            {trackingStatusLabel(tracking)}
-          </Badge>
-        ) : (
-          <Badge variant={analysisBadgeVariant(analysis.status)}>
-            {pipelineStatusLabel(analysis.status)}
-          </Badge>
-        )}
+        <TrackingBadge
+          analysis={analysis}
+          pipelineStatusLabel={pipelineStatusLabel}
+          trackingStatusLabel={trackingStatusLabel}
+        />
       </TableCell>
       <TableCell>
-        <a
+        <OfferLink
           href={analysis.jobOffer.sourceUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label={linkLabel}
-          onClick={(event) => event.stopPropagation()}
+          linkLabel={linkLabel}
           className="inline-flex text-muted hover:text-accent"
-        >
-          <ExternalLink className="size-4" />
-        </a>
+        />
       </TableCell>
     </TableRow>
+  );
+}
+
+// Same fields and click/select/link behaviors as `AnalysisTableRow`, stacked
+// into a card for the sub-~640px layout (#69) where the table is too cramped
+// even with every collapsible column dropped.
+function AnalysisCard({
+  analysis,
+  sourceSiteLabel,
+  pipelineStatusLabel,
+  trackingStatusLabel,
+  linkLabel,
+  jobOfferFallback,
+  selected,
+  selectLabel,
+  onToggleSelect,
+  onOpenQuickView,
+}: {
+  analysis: AnalysisSummary;
+  sourceSiteLabel: (value: string) => string;
+  pipelineStatusLabel: (value: string) => string;
+  trackingStatusLabel: (value: string) => string;
+  linkLabel: string;
+  jobOfferFallback: string;
+  selected: boolean;
+  selectLabel: string;
+  onToggleSelect: () => void;
+  onOpenQuickView: (row: HTMLDivElement) => void;
+}) {
+  return (
+    <div
+      tabIndex={0}
+      onClick={(event) => onOpenQuickView(event.currentTarget)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpenQuickView(event.currentTarget);
+        }
+      }}
+      className="flex cursor-pointer flex-col gap-2 rounded-md border border-border bg-background p-3"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-start gap-2">
+          <input
+            type="checkbox"
+            aria-label={selectLabel}
+            checked={selected}
+            onChange={onToggleSelect}
+            onClick={(event) => event.stopPropagation()}
+            className="mt-1"
+          />
+          <div>
+            <p className="font-medium">
+              {analysis.jobOffer.title ?? jobOfferFallback}
+            </p>
+            <p className="text-sm text-muted">
+              {analysis.jobOffer.company ?? "—"} ·{" "}
+              {sourceSiteLabel(analysis.jobOffer.sourceSite)}
+            </p>
+          </div>
+        </div>
+        <OfferLink
+          href={analysis.jobOffer.sourceUrl}
+          linkLabel={linkLabel}
+          className="inline-flex shrink-0 text-muted hover:text-accent"
+        />
+      </div>
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <TrackingBadge
+          analysis={analysis}
+          pipelineStatusLabel={pipelineStatusLabel}
+          trackingStatusLabel={trackingStatusLabel}
+        />
+        <span className="text-muted">{analysis.cvVersion.label}</span>
+        <span className="ml-auto tabular-nums">
+          {analysis.matchScore ?? "—"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function TrackingBadge({
+  analysis,
+  pipelineStatusLabel,
+  trackingStatusLabel,
+}: {
+  analysis: AnalysisSummary;
+  pipelineStatusLabel: (value: string) => string;
+  trackingStatusLabel: (value: string) => string;
+}) {
+  const tracking = trackingStatusOf(analysis);
+  return tracking !== null ? (
+    <Badge variant={trackingStatusBadgeVariant(tracking)}>
+      {trackingStatusLabel(tracking)}
+    </Badge>
+  ) : (
+    <Badge variant={analysisBadgeVariant(analysis.status)}>
+      {pipelineStatusLabel(analysis.status)}
+    </Badge>
+  );
+}
+
+function OfferLink({
+  href,
+  linkLabel,
+  className,
+}: {
+  href: string;
+  linkLabel: string;
+  className: string;
+}) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={linkLabel}
+      onClick={(event) => event.stopPropagation()}
+      className={className}
+    >
+      <ExternalLink className="size-4" />
+    </a>
   );
 }
 
