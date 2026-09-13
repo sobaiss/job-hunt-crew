@@ -173,6 +173,7 @@ class CVVersionResponse(BaseModel):
     isDefault: bool
     conversionStatus: str
     conversionError: str | None
+    supersededById: str | None
     createdAt: datetime
     updatedAt: datetime
 
@@ -193,6 +194,7 @@ def _cv_version_response(row: CVVersion) -> CVVersionResponse:
         isDefault=row.isDefault,
         conversionStatus=row.conversionStatus.value,
         conversionError=row.conversionError,
+        supersededById=row.supersededById,
         createdAt=row.createdAt,
         updatedAt=row.updatedAt,
     )

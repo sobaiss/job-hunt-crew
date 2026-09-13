@@ -253,6 +253,7 @@ class CVVersion(Base):
     __table_args__ = (
         ForeignKeyConstraint(['userId'], ['User.id'], ondelete='CASCADE', onupdate='CASCADE', name='CVVersion_userId_fkey'),
         PrimaryKeyConstraint('id', name='CVVersion_pkey'),
+        Index('CVVersion_supersededById_key', 'supersededById', unique=True),
         Index('CVVersion_userId_idx', 'userId')
     )
 
@@ -269,6 +270,7 @@ class CVVersion(Base):
     conversionStatus: Mapped[Cvconversionstatus] = mapped_column(Enum(Cvconversionstatus, values_callable=lambda cls: [member.value for member in cls], name='CVConversionStatus'), nullable=False, server_default=text('\'PENDING\'::"CVConversionStatus"'))
     conversionError: Mapped[Optional[str]] = mapped_column(Text)
     markdownContent: Mapped[Optional[str]] = mapped_column(Text)
+    supersededById: Mapped[Optional[str]] = mapped_column(Text)
 
     User_: Mapped['User'] = relationship('User', back_populates='CVVersion')
     Scout: Mapped[list['Scout']] = relationship('Scout', back_populates='CVVersion_')

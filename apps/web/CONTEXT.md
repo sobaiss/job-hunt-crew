@@ -69,6 +69,10 @@ back-links to its Analysis, Scout, and GeneratedDocuments.
 _Avoid_: Tracker (fine in prose; the nav label and route area is
 "Applications")
 
+**CV versions**:
+The `/cv-versions` page — list a candidate's CVVersions (defined in [API](../../services/api/CONTEXT.md)'s context) with their Conversion status, upload a new one, set the default, and Replace an existing one with a new file. Replacing supersedes the row rather than overwriting or deleting it (docs/adr/0005): the superseded CVVersion drops out of this list and out of the CvVersionPicker by default, reachable again only through an explicit "show superseded" filter.
+_Avoid_: CV management, My CVs (fine in prose; the nav label and route area is "CV-versions")
+
 **Settings**:
 The `/settings` page — theme, Locale, and read-only account details (name and email from the Session), plus sign out. No account deletion (there is no API for it).
 _Avoid_: Preferences, Account page

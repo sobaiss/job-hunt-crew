@@ -26,6 +26,7 @@ export type CvVersion = {
   isDefault: boolean;
   conversionStatus: CvConversionStatus;
   conversionError: string | null;
+  supersededById: string | null;
   createdAt: string;
   updatedAt: string;
 };

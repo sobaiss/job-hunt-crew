@@ -94,6 +94,7 @@ model CVVersion {
   markdownContent  String?
   conversionStatus CVConversionStatus @default(PENDING)
   conversionError  String?
+  supersededById   String?            @unique
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
 
