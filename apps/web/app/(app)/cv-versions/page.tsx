@@ -12,6 +12,7 @@ import {
   useCreateCvVersion,
   useConvertCvVersion,
   useSetDefaultCvVersion,
+  useReplaceCvVersion,
   firstFile,
   ACCEPTED_CV_CONTENT_TYPES,
   CV_FILE_ACCEPT,
@@ -69,6 +70,115 @@ function CvMarkdownPreview({ id }: { id: string }) {
   );
 }
 
+/**
+ * Inline "Replace" form for one row (issue #74). Pre-filled with the row's
+ * current label (editable); reuses the same file-type/size validation as the
+ * upload form above. On success, the old row's `supersededById` points at the
+ * new row, so it drops out of `useCvVersions()`'s default (non-superseded)
+ * view and this form's parent unmounts it.
+ */
+function CvReplaceForm({
+  cv,
+  onDone,
+}: {
+  cv: { id: string; label: string };
+  onDone: () => void;
+}) {
+  const t = useTranslations("cvVersions");
+  const replace = useReplaceCvVersion();
+
+  const schema = z.object({
+    label: z.string().trim().min(1, t("form.labelRequired")),
+    file: z
+      .any()
+      .refine((v) => firstFile(v) !== undefined, t("form.fileRequired"))
+      .refine((v) => {
+        const f = firstFile(v);
+        return !f || f.type in ACCEPTED_CV_CONTENT_TYPES;
+      }, t("form.fileType"))
+      .refine((v) => {
+        const f = firstFile(v);
+        return !f || f.size <= MAX_CV_SIZE_BYTES;
+      }, t("form.fileTooLarge")),
+  });
+
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+  } = useForm<z.infer<typeof schema>>({
+    resolver: zodResolver(schema),
+    defaultValues: { label: cv.label },
+  });
+
+  const onSubmit = handleSubmit((values) => {
+    const file = firstFile(values.file);
+    if (!file) return;
+    replace.mutate(
+      { id: cv.id, label: values.label.trim(), file },
+      { onSuccess: onDone },
+    );
+  });
+
+  return (
+    <form
+      className="mt-3 flex flex-col gap-4 border-t pt-3"
+      onSubmit={onSubmit}
+      noValidate
+    >
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor={`replace-label-${cv.id}`}>
+          {t("list.replaceLabelLabel")}
+        </Label>
+        <Input
+          id={`replace-label-${cv.id}`}
+          type="text"
+          aria-invalid={errors.label ? true : undefined}
+          {...register("label")}
+        />
+        {errors.label && (
+          <p role="alert" className="text-sm text-destructive">
+            {errors.label.message}
+          </p>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor={`replace-file-${cv.id}`}>
+          {t("list.replaceFileLabel")}
+        </Label>
+        <Input
+          id={`replace-file-${cv.id}`}
+          type="file"
+          accept={CV_FILE_ACCEPT}
+          aria-invalid={errors.file ? true : undefined}
+          {...register("file")}
+        />
+        {errors.file && (
+          <p role="alert" className="text-sm text-destructive">
+            {errors.file.message as string}
+          </p>
+        )}
+      </div>
+
+      <div className="flex items-center gap-3">
+        <Button type="submit" size="sm" disabled={replace.isPending}>
+          {replace.isPending ? t("list.replacing") : t("list.replaceSubmit")}
+        </Button>
+        <Button type="button" size="sm" variant="outline" onClick={onDone}>
+          {t("list.cancelReplace")}
+        </Button>
+      </div>
+
+      {replace.isError && (
+        <p role="alert" className="text-sm text-destructive">
+          {t("list.replaceError")}
+        </p>
+      )}
+    </form>
+  );
+}
+
 export default function CvVersionsPage() {
   const t = useTranslations("cvVersions");
   const conversionStatusLabel = useEnumLabel("cvConversionStatus");
@@ -78,6 +188,11 @@ export default function CvVersionsPage() {
   const convert = useConvertCvVersion();
   const setDefault = useSetDefaultCvVersion();
   const [openMarkdownId, setOpenMarkdownId] = useState<string | null>(null);
+  const [replacingId, setReplacingId] = useState<string | null>(null);
+
+  // Default view excludes superseded CVVersions (issue #74) — showing them is
+  // a separate, off-by-default filter (issue #75), not built here.
+  const visibleCvVersions = list.data?.filter((cv) => cv.supersededById === null);
 
   const schema = z.object({
     label: z.string().trim().min(1, t("form.labelRequired")),
@@ -216,7 +331,7 @@ export default function CvVersionsPage() {
           </p>
         )}
 
-        {list.data && list.data.length === 0 && (
+        {visibleCvVersions && visibleCvVersions.length === 0 && (
           <p className="text-sm text-muted">{t("list.empty")}</p>
         )}
 
@@ -236,9 +351,9 @@ export default function CvVersionsPage() {
           </p>
         )}
 
-        {list.data && list.data.length > 0 && (
+        {visibleCvVersions && visibleCvVersions.length > 0 && (
           <ul className="flex flex-col gap-3">
-            {list.data.map((cv) => (
+            {visibleCvVersions.map((cv) => (
               <li key={cv.id}>
                 <Card className="py-0">
                   <CardContent className="flex flex-col py-4">
@@ -308,6 +423,16 @@ export default function CvVersionsPage() {
                               : t("list.setDefault")}
                           </Button>
                         )}
+                        {replacingId !== cv.id && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setReplacingId(cv.id)}
+                          >
+                            {t("list.replace")}
+                          </Button>
+                        )}
                       </div>
                     </div>
                     {cv.conversionStatus === "FAILED" && (
@@ -318,6 +443,12 @@ export default function CvVersionsPage() {
                     )}
                     {openMarkdownId === cv.id && (
                       <CvMarkdownPreview id={cv.id} />
+                    )}
+                    {replacingId === cv.id && (
+                      <CvReplaceForm
+                        cv={cv}
+                        onDone={() => setReplacingId(null)}
+                      />
                     )}
                   </CardContent>
                 </Card>

@@ -566,7 +566,14 @@
       "reconvert": "Reconvert",
       "converting": "Converting…",
       "convertError": "We couldn't start the Conversion. Please try again.",
-      "conversionFailed": "Conversion failed."
+      "conversionFailed": "Conversion failed.",
+      "replace": "Replace",
+      "replaceLabelLabel": "New label",
+      "replaceFileLabel": "New file",
+      "cancelReplace": "Cancel",
+      "replaceSubmit": "Replace",
+      "replacing": "Replacing…",
+      "replaceError": "We couldn't replace that CV version. Please try again."
     }
   },
   "ingestion": {

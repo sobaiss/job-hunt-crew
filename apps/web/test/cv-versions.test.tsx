@@ -18,6 +18,7 @@ function cvVersion(overrides: Record<string, unknown> = {}) {
     isDefault: false,
     conversionStatus: "CONVERTED",
     conversionError: null,
+    supersededById: null,
     createdAt: "2026-08-01T00:00:00.000Z",
     updatedAt: "2026-08-01T00:00:00.000Z",
     ...overrides,
@@ -318,5 +319,87 @@ describe("CvVersionsPage — list", () => {
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: "Set as default" })).toBeNull(),
     );
+  });
+
+  it("hides a superseded CV version from the default view", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: [
+            cvVersion({ id: "cv1", label: "Old CV", supersededById: "cv2" }),
+            cvVersion({ id: "cv2", label: "New CV" }),
+          ],
+        }),
+      ),
+    );
+    renderWithProviders(<CvVersionsPage />);
+
+    expect(await screen.findByText("New CV")).toBeInTheDocument();
+    expect(screen.queryByText("Old CV")).toBeNull();
+  });
+});
+
+describe("CvVersionsPage — replace", () => {
+  it("opens a form pre-filled with the current label, replaces, and drops the old row from the list", async () => {
+    let replaceBody: Record<string, unknown> | null = null;
+    let replaced = false;
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: replaced
+            ? [cvVersion({ id: "cv2", label: "Updated CV" })]
+            : [cvVersion()],
+        }),
+      ),
+      http.post("/api/cv-versions/cv1/replace", async ({ request }) => {
+        replaceBody = (await request.json()) as Record<string, unknown>;
+        replaced = true;
+        return HttpResponse.json(
+          { cvVersionId: "cv2", fileKey: "k", uploadUrl: UPLOAD_URL },
+          { status: 201 },
+        );
+      }),
+      http.put(UPLOAD_URL, () => new HttpResponse(null, { status: 200 })),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Replace" }));
+
+    const labelInput = screen.getByLabelText("New label") as HTMLInputElement;
+    expect(labelInput.value).toBe("Grad CV");
+    await user.clear(labelInput);
+    await user.type(labelInput, "Updated CV");
+    await user.upload(screen.getByLabelText("New file"), pdf("updated.pdf"));
+    await user.click(screen.getByRole("button", { name: "Replace" }));
+
+    await waitFor(() =>
+      expect(screen.getByText("Updated CV")).toBeInTheDocument(),
+    );
+    expect(screen.queryByText("Grad CV")).toBeNull();
+    expect(replaceBody).toMatchObject({
+      label: "Updated CV",
+      fileName: "updated.pdf",
+      contentType: "application/pdf",
+    });
+  });
+
+  it("closes the replace form on cancel without submitting", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cvVersion()] }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Replace" }));
+    expect(screen.getByLabelText("New label")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByLabelText("New label")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Replace" }),
+    ).toBeInTheDocument();
   });
 });

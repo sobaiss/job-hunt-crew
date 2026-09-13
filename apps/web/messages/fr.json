@@ -566,7 +566,14 @@
       "reconvert": "Reconvertir",
       "converting": "Conversion…",
       "convertError": "Impossible de lancer la conversion. Veuillez réessayer.",
-      "conversionFailed": "La conversion a échoué."
+      "conversionFailed": "La conversion a échoué.",
+      "replace": "Remplacer",
+      "replaceLabelLabel": "Nouveau libellé",
+      "replaceFileLabel": "Nouveau fichier",
+      "cancelReplace": "Annuler",
+      "replaceSubmit": "Remplacer",
+      "replacing": "Remplacement…",
+      "replaceError": "Impossible de remplacer cette version de CV. Veuillez réessayer."
     }
   },
   "ingestion": {

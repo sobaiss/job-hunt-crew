@@ -287,6 +287,96 @@ async def create_cv_version(
     return CreateCVVersionResponse(cvVersionId=cv_version.id, fileKey=file_key, uploadUrl=upload_url)
 
 
+@router.post("/cv-versions/{cv_version_id}/replace", response_model=CreateCVVersionResponse, status_code=201)
+async def replace_cv_version(
+    cv_version_id: str,
+    req: CreateCVVersionRequest,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> CreateCVVersionResponse:
+    """Replace an owned CVVersion with a new file (issue #74). Never mutates or
+    deletes the old row (docs/adr/0005): creates a new CVVersion, points the old
+    row's `supersededById` at it, transfers `isDefault` when the old row held
+    it, and enqueues the new row for Conversion the same way `convert_cv_version`
+    does, so it starts without a separate manual step. Validation mirrors
+    `create_cv_version` exactly. User-scoped: another user's CV, or one that
+    doesn't exist, is a 404. A CV that has already been superseded is a 409.
+    """
+    existing = await session.get(CVVersion, cv_version_id)
+    if existing is None or existing.userId != user_id:
+        raise HTTPException(status_code=404, detail="Not found")
+    if existing.supersededById is not None:
+        raise HTTPException(status_code=409, detail="This CV version has already been replaced")
+
+    label = req.label.strip() if isinstance(req.label, str) else ""
+    file_name = req.fileName.strip() if isinstance(req.fileName, str) else ""
+    content_type = req.contentType if isinstance(req.contentType, str) else ""
+    file_size_bytes = req.fileSizeBytes
+
+    if not label:
+        raise HTTPException(status_code=400, detail="label is required")
+    if not file_name:
+        raise HTTPException(status_code=400, detail="fileName is required")
+    if (
+        not isinstance(file_size_bytes, int | float)
+        or isinstance(file_size_bytes, bool)
+        or not math.isfinite(file_size_bytes)
+        or file_size_bytes <= 0
+    ):
+        raise HTTPException(status_code=400, detail="fileSizeBytes must be a positive number")
+
+    file_type = _resolve_cv_file_type(content_type, file_name)
+    if file_type is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported file type; only PDF, DOCX, Markdown, and plain text are supported",
+        )
+    if file_size_bytes > MAX_FILE_SIZE_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too large; max size is {MAX_FILE_SIZE_BYTES // (1024 * 1024)}MB",
+        )
+
+    new_cv_version_id = str(uuid.uuid4())
+    file_key = cv_file_key(user_id, new_cv_version_id, file_name)
+
+    was_default = existing.isDefault
+    new_cv_version = CVVersion(
+        id=new_cv_version_id,
+        userId=user_id,
+        label=label,
+        fileKey=file_key,
+        fileName=file_name,
+        fileType=file_type,
+        fileSizeBytes=int(file_size_bytes),
+        isDefault=was_default,
+        updatedAt=_now(),
+    )
+    session.add(new_cv_version)
+
+    existing.supersededById = new_cv_version_id
+    if was_default:
+        existing.isDefault = False
+    existing.updatedAt = _now()
+
+    await session.commit()
+
+    s3 = make_s3_client()
+    upload_url = s3.generate_presigned_url(
+        "put_object",
+        Params={"Bucket": S3_BUCKET, "Key": file_key, "ContentType": content_type},
+        ExpiresIn=UPLOAD_URL_EXPIRY_SECONDS,
+    )
+
+    sqs = make_sqs_client()
+    sqs.send_message(
+        QueueUrl=CV_CONVERSION_QUEUE_URL,
+        MessageBody=json.dumps({"cvVersionId": new_cv_version_id}),
+    )
+
+    return CreateCVVersionResponse(cvVersionId=new_cv_version.id, fileKey=file_key, uploadUrl=upload_url)
+
+
 class UpdateCVVersionRequest(BaseModel):
     label: Any = None
     isDefault: Any = None

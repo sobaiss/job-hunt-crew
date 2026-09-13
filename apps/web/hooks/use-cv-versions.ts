@@ -149,6 +149,54 @@ export function useCreateCvVersion() {
   });
 }
 
+/**
+ * Replace an existing CVVersion with a new file, then PUT the bytes straight
+ * to the presigned URL — same two-step shape as {@link useCreateCvVersion}.
+ * services/api creates a new row, points the old row's `supersededById` at
+ * it, transfers `isDefault` when the old row held it, and enqueues the new
+ * row for Conversion. Invalidates the list on success so the new row appears
+ * and the replaced row drops out of the default (non-superseded) view.
+ */
+export function useReplaceCvVersion() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      id,
+      label,
+      file,
+    }: {
+      id: string;
+      label: string;
+      file: File;
+    }) => {
+      const created = await bff.post<CreateCvVersionResponse>(
+        `/cv-versions/${id}/replace`,
+        {
+          label,
+          fileName: file.name,
+          contentType: file.type,
+          fileSizeBytes: file.size,
+        },
+      );
+
+      const uploadResponse = await fetch(created.uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": file.type },
+        body: file,
+      });
+      if (!uploadResponse.ok) {
+        throw new Error(`Upload failed with ${uploadResponse.status}`);
+      }
+
+      return created;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: CV_VERSIONS_KEY });
+    },
+  });
+}
+
 export type CvVersionMarkdown = {
   markdownContent: string | null;
   conversionStatus: CvConversionStatus;

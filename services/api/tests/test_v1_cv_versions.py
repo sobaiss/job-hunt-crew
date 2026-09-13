@@ -575,6 +575,222 @@ def test_delete_cv_version_does_not_fail_when_the_s3_object_is_already_gone(user
         assert response.status_code == 204
 
 
+def test_replace_cv_version_creates_new_row_and_supersedes_old(user_id):
+    _drain_cv_conversion_queue()
+    with TestClient(app) as client:
+        old_id = client.post(
+            "/v1/cv-versions",
+            headers=_headers(user_id),
+            json={
+                "label": "Old CV",
+                "fileName": "old.pdf",
+                "contentType": "application/pdf",
+                "fileSizeBytes": 1024,
+            },
+        ).json()["cvVersionId"]
+
+        response = client.post(
+            f"/v1/cv-versions/{old_id}/replace",
+            headers=_headers(user_id),
+            json={
+                "label": "New CV",
+                "fileName": "new.pdf",
+                "contentType": "application/pdf",
+                "fileSizeBytes": 2048,
+            },
+        )
+        assert response.status_code == 201
+        body = response.json()
+        new_id = body["cvVersionId"]
+        assert new_id != old_id
+        assert body["fileKey"] == f"cvs/{user_id}/{new_id}/new.pdf"
+        assert body["uploadUrl"]
+
+        listed = {
+            row["id"]: row
+            for row in client.get("/v1/cv-versions", headers=_headers(user_id)).json()["cvVersions"]
+        }
+        assert listed[old_id]["supersededById"] == new_id
+        assert listed[new_id]["label"] == "New CV"
+        assert listed[new_id]["supersededById"] is None
+        assert listed[new_id]["conversionStatus"] == "PENDING"
+
+        bodies = [json.loads(b) for b in _drain_cv_conversion_queue()]
+        assert bodies == [{"cvVersionId": new_id}]
+
+
+def test_replace_cv_version_transfers_default_status(user_id):
+    with TestClient(app) as client:
+        old_id = client.post(
+            "/v1/cv-versions",
+            headers=_headers(user_id),
+            json={
+                "label": "Old CV",
+                "fileName": "old.pdf",
+                "contentType": "application/pdf",
+                "fileSizeBytes": 1024,
+            },
+        ).json()["cvVersionId"]
+        client.patch(f"/v1/cv-versions/{old_id}", headers=_headers(user_id), json={"isDefault": True})
+
+        new_id = client.post(
+            f"/v1/cv-versions/{old_id}/replace",
+            headers=_headers(user_id),
+            json={
+                "label": "New CV",
+                "fileName": "new.pdf",
+                "contentType": "application/pdf",
+                "fileSizeBytes": 2048,
+            },
+        ).json()["cvVersionId"]
+
+        listed = {
+            row["id"]: row
+            for row in client.get("/v1/cv-versions", headers=_headers(user_id)).json()["cvVersions"]
+        }
+        assert listed[old_id]["isDefault"] is False
+        assert listed[new_id]["isDefault"] is True
+
+
+def test_replace_cv_version_does_not_set_default_when_old_was_not_default(user_id):
+    with TestClient(app) as client:
+        old_id = client.post(
+            "/v1/cv-versions",
+            headers=_headers(user_id),
+            json={
+                "label": "Old CV",
+                "fileName": "old.pdf",
+                "contentType": "application/pdf",
+                "fileSizeBytes": 1024,
+            },
+        ).json()["cvVersionId"]
+
+        new_id = client.post(
+            f"/v1/cv-versions/{old_id}/replace",
+            headers=_headers(user_id),
+            json={
+                "label": "New CV",
+                "fileName": "new.pdf",
+                "contentType": "application/pdf",
+                "fileSizeBytes": 2048,
+            },
+        ).json()["cvVersionId"]
+
+        listed = {
+            row["id"]: row
+            for row in client.get("/v1/cv-versions", headers=_headers(user_id)).json()["cvVersions"]
+        }
+        assert listed[new_id]["isDefault"] is False
+
+
+def test_replace_cv_version_returns_404_for_other_users_cv(user_id):
+    with TestClient(app) as client:
+        old_id = client.post(
+            "/v1/cv-versions",
+            headers=_headers(user_id),
+            json={
+                "label": "Old CV",
+                "fileName": "old.pdf",
+                "contentType": "application/pdf",
+                "fileSizeBytes": 1024,
+            },
+        ).json()["cvVersionId"]
+
+        other_user_id = asyncio.run(_create_user())
+        try:
+            response = client.post(
+                f"/v1/cv-versions/{old_id}/replace",
+                headers=_headers(other_user_id),
+                json={
+                    "label": "Hijack CV",
+                    "fileName": "new.pdf",
+                    "contentType": "application/pdf",
+                    "fileSizeBytes": 2048,
+                },
+            )
+            assert response.status_code == 404
+        finally:
+            asyncio.run(_delete_user(other_user_id))
+
+
+def test_replace_cv_version_returns_404_for_nonexistent_cv(user_id):
+    with TestClient(app) as client:
+        response = client.post(
+            f"/v1/cv-versions/{uuid.uuid4()}/replace",
+            headers=_headers(user_id),
+            json={
+                "label": "New CV",
+                "fileName": "new.pdf",
+                "contentType": "application/pdf",
+                "fileSizeBytes": 2048,
+            },
+        )
+        assert response.status_code == 404
+
+
+def test_replace_cv_version_rejects_already_superseded_cv(user_id):
+    with TestClient(app) as client:
+        old_id = client.post(
+            "/v1/cv-versions",
+            headers=_headers(user_id),
+            json={
+                "label": "Old CV",
+                "fileName": "old.pdf",
+                "contentType": "application/pdf",
+                "fileSizeBytes": 1024,
+            },
+        ).json()["cvVersionId"]
+        client.post(
+            f"/v1/cv-versions/{old_id}/replace",
+            headers=_headers(user_id),
+            json={
+                "label": "New CV",
+                "fileName": "new.pdf",
+                "contentType": "application/pdf",
+                "fileSizeBytes": 2048,
+            },
+        )
+
+        response = client.post(
+            f"/v1/cv-versions/{old_id}/replace",
+            headers=_headers(user_id),
+            json={
+                "label": "Another CV",
+                "fileName": "another.pdf",
+                "contentType": "application/pdf",
+                "fileSizeBytes": 2048,
+            },
+        )
+        assert response.status_code == 409
+
+
+def test_replace_cv_version_validates_like_create(user_id):
+    with TestClient(app) as client:
+        old_id = client.post(
+            "/v1/cv-versions",
+            headers=_headers(user_id),
+            json={
+                "label": "Old CV",
+                "fileName": "old.pdf",
+                "contentType": "application/pdf",
+                "fileSizeBytes": 1024,
+            },
+        ).json()["cvVersionId"]
+
+        response = client.post(
+            f"/v1/cv-versions/{old_id}/replace",
+            headers=_headers(user_id),
+            json={
+                "label": "   ",
+                "fileName": "new.pdf",
+                "contentType": "application/pdf",
+                "fileSizeBytes": 2048,
+            },
+        )
+        assert response.status_code == 400
+        assert response.json()["detail"] == "label is required"
+
+
 def test_delete_cv_version_blocked_while_generated_document_references_it(user_id):
     with TestClient(app) as client:
         create_response = client.post(
