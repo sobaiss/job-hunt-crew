@@ -181,6 +181,44 @@ export function useSetApplicationStatus() {
   });
 }
 
+/** The bulk-actions bar's Tracking status change (issue #67): applies
+ * `useSetApplicationStatus`'s lazy get-or-create + StatusEvent composition to
+ * every selected Analysis, one at a time via `Promise.allSettled` so one
+ * failure doesn't abort the rest, and reports back which `analysisId`s (if
+ * any) failed rather than failing silently or all-or-nothing. */
+export function useBulkSetApplicationStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      analysisIds,
+      status,
+    }: {
+      analysisIds: string[];
+      status: ApplicationStatus;
+    }) => {
+      const results = await Promise.allSettled(
+        analysisIds.map(async (analysisId) => {
+          const { application } = await bff.post<{ application: Application }>(
+            "/applications",
+            { analysisId },
+          );
+          await bff.post(`/applications/${application.id}/status-events`, {
+            status,
+            effectiveDate: new Date().toISOString(),
+          });
+        }),
+      );
+      const failedAnalysisIds = analysisIds.filter(
+        (_, i) => results[i]!.status === "rejected",
+      );
+      return { failedAnalysisIds };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: APPLICATIONS_KEY });
+    },
+  });
+}
+
 /** "Mark as applied" (issue #59): composes the lazy get-or-create with an
  * APPLIED StatusEvent in one action, for the Analysis detail page's action
  * button — the caller doesn't need to know the Application id ahead of time. */

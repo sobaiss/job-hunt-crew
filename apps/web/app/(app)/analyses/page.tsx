@@ -3,9 +3,11 @@
 import { Suspense, useCallback, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, ArrowUpDown, ExternalLink } from "lucide-react";
 
 import { useAnalyses, type AnalysisSummary } from "@/hooks/use-analyses";
+import { useBulkSetApplicationStatus } from "@/hooks/use-applications";
 import {
   ANALYSES_PAGE_SIZES,
   analysesTableStateToParams,
@@ -19,8 +21,10 @@ import {
   type AnalysesSortColumn,
   type AnalysesTableState,
 } from "@/lib/analyses-filters";
+import { analysesToCsv, downloadCsv } from "@/lib/analyses-csv";
 import {
   TRACKING_STATUSES,
+  TRACKING_STATUS_TRANSITIONS,
   trackingStatusBadgeVariant,
   trackingStatusOf,
 } from "@/lib/tracking-status";
@@ -74,6 +78,14 @@ function AnalysesTable() {
   const searchParams = useSearchParams();
 
   const { data: analyses, isPending, isError } = useAnalyses();
+  const queryClient = useQueryClient();
+  const bulkSetApplicationStatus = useBulkSetApplicationStatus();
+
+  // Multi-select (#67): ids selected across however many pages the user has
+  // extended the selection to via the "select all matching filters" banner —
+  // not just the current page, so a bulk action can span pages.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkError, setBulkError] = useState<string | null>(null);
 
   // Which Analysis's Quick view (#65) is open, if any — looked up by id
   // rather than held as the row's data so it always reflects the latest
@@ -122,9 +134,82 @@ function AnalysesTable() {
       };
       const qs = analysesTableStateToParams(next).toString();
       router.replace(`${pathname}?${qs}`, { scroll: false });
+      // A selection tied to a search term, Tracking status filter or sort
+      // that's about to change is confusing to keep around (#67) — page size
+      // and the CV filter aren't in that list, so they leave it untouched.
+      if (patch.search !== undefined || patch.status !== undefined || patch.sort !== undefined) {
+        setSelectedIds(new Set());
+        setBulkError(null);
+      }
     },
     [state, router, pathname],
   );
+
+  const pageIds = useMemo(() => rows.map((a) => a.id), [rows]);
+  const allPageSelected =
+    pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
+  const somePageSelected = pageIds.some((id) => selectedIds.has(id));
+  const allFilteredSelected =
+    filtered.length > 0 && filtered.every((a) => selectedIds.has(a.id));
+  const selectedAnalyses = useMemo(
+    () => (analyses ?? []).filter((a) => selectedIds.has(a.id)),
+    [analyses, selectedIds],
+  );
+
+  const togglePageSelection = () => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (allPageSelected) {
+        for (const id of pageIds) next.delete(id);
+      } else {
+        for (const id of pageIds) next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const toggleRowSelection = (id: string) => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAllFiltered = () => {
+    setSelectedIds(new Set(filtered.map((a) => a.id)));
+  };
+
+  const handleBulkStatusChange = (applicationStatus: (typeof TRACKING_STATUS_TRANSITIONS)[number]["applicationStatus"]) => {
+    setBulkError(null);
+    const analysisIds = [...selectedIds];
+    bulkSetApplicationStatus.mutate(
+      { analysisIds, status: applicationStatus },
+      {
+        onSuccess: ({ failedAnalysisIds }) => {
+          queryClient.invalidateQueries({ queryKey: ["analyses"] });
+          if (failedAnalysisIds.length > 0) {
+            setBulkError(
+              t("bulk.statusPartialError", {
+                failed: failedAnalysisIds.length,
+                total: analysisIds.length,
+              }),
+            );
+          }
+        },
+      },
+    );
+  };
+
+  const handleExportCsv = () => {
+    const csv = analysesToCsv(selectedAnalyses, {
+      sourceSiteLabel,
+      pipelineStatusLabel,
+      trackingStatusLabel,
+    });
+    downloadCsv(t("bulk.csvFilename"), csv);
+  };
 
   const toggleSort = (column: AnalysesSortColumn) => {
     updateState({
@@ -222,11 +307,68 @@ function AnalysesTable() {
         <p className="text-sm text-muted">{t("noMatches")}</p>
       )}
 
+      {selectedIds.size > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-muted/40 p-3">
+          <span className="text-sm font-medium">
+            {t("bulk.selectedCount", { count: selectedIds.size })}
+          </span>
+          {!allFilteredSelected && (
+            <Button type="button" variant="link" size="sm" onClick={selectAllFiltered}>
+              {t("bulk.extendAction", { total: filtered.length })}
+            </Button>
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setSelectedIds(new Set());
+              setBulkError(null);
+            }}
+          >
+            {t("bulk.clearSelection")}
+          </Button>
+          <div className="ml-auto flex flex-wrap gap-2">
+            {TRACKING_STATUS_TRANSITIONS.map((transition) => (
+              <Button
+                key={transition.trackingStatus}
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={bulkSetApplicationStatus.isPending}
+                onClick={() => handleBulkStatusChange(transition.applicationStatus)}
+              >
+                {trackingStatusLabel(transition.trackingStatus)}
+              </Button>
+            ))}
+            <Button type="button" variant="outline" size="sm" onClick={handleExportCsv}>
+              {t("bulk.exportCsv")}
+            </Button>
+          </div>
+          {bulkError && (
+            <p role="alert" className="w-full text-sm text-destructive">
+              {bulkError}
+            </p>
+          )}
+        </div>
+      )}
+
       {sorted.length > 0 && (
         <>
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-0">
+                  <input
+                    type="checkbox"
+                    aria-label={t("bulk.selectPageLabel")}
+                    checked={allPageSelected}
+                    ref={(el) => {
+                      if (el) el.indeterminate = somePageSelected && !allPageSelected;
+                    }}
+                    onChange={togglePageSelection}
+                  />
+                </TableHead>
                 {COLUMNS.map((column) => (
                   <SortableHead
                     key={column.key}
@@ -257,6 +399,11 @@ function AnalysesTable() {
                   trackingStatusLabel={trackingStatusLabel}
                   linkLabel={t("columns.linkLabel")}
                   jobOfferFallback={t("jobOfferFallback")}
+                  selected={selectedIds.has(analysis.id)}
+                  selectLabel={t("bulk.selectRowLabel", {
+                    title: analysis.jobOffer.title ?? t("jobOfferFallback"),
+                  })}
+                  onToggleSelect={() => toggleRowSelection(analysis.id)}
                   onOpenQuickView={(row) => {
                     quickViewTriggerRef.current = row;
                     setQuickViewId(analysis.id);
@@ -368,6 +515,9 @@ function AnalysisTableRow({
   trackingStatusLabel,
   linkLabel,
   jobOfferFallback,
+  selected,
+  selectLabel,
+  onToggleSelect,
   onOpenQuickView,
 }: {
   analysis: AnalysisSummary;
@@ -376,6 +526,9 @@ function AnalysisTableRow({
   trackingStatusLabel: (value: string) => string;
   linkLabel: string;
   jobOfferFallback: string;
+  selected: boolean;
+  selectLabel: string;
+  onToggleSelect: () => void;
   onOpenQuickView: (row: HTMLTableRowElement) => void;
 }) {
   const tracking = trackingStatusOf(analysis);
@@ -392,6 +545,14 @@ function AnalysisTableRow({
       }}
       className="cursor-pointer"
     >
+      <TableCell onClick={(event) => event.stopPropagation()}>
+        <input
+          type="checkbox"
+          aria-label={selectLabel}
+          checked={selected}
+          onChange={onToggleSelect}
+        />
+      </TableCell>
       <TableCell className="font-medium">
         {analysis.jobOffer.title ?? jobOfferFallback}
       </TableCell>

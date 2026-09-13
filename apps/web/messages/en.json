@@ -184,6 +184,16 @@
       "viewOffer": "View job offer",
       "statusError": "We couldn't update the tracking status. Please try again."
     },
+    "bulk": {
+      "selectPageLabel": "Select all on this page",
+      "selectRowLabel": "Select {title}",
+      "selectedCount": "{count} selected",
+      "clearSelection": "Clear selection",
+      "extendAction": "Select all {total} matching your filters",
+      "exportCsv": "Export CSV",
+      "csvFilename": "analyses.csv",
+      "statusPartialError": "{failed} of {total} updates failed. Please try again for those."
+    },
     "controls": {
       "searchLabel": "Search",
       "searchPlaceholder": "Offer title or company",

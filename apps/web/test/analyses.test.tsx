@@ -452,6 +452,240 @@ describe("AnalysesDashboardPage", () => {
     });
   });
 
+  it("selects rows via the header checkbox, scoped to the current page only (issue #67)", async () => {
+    const user = userEvent.setup();
+    const analyses = Array.from({ length: 30 }, (_, i) =>
+      summary({
+        id: `a${i}`,
+        jobOffer: {
+          id: `job${i}`,
+          title: `Offer ${String(i).padStart(2, "0")}`,
+          company: "Acme",
+          sourceSite: "OTHER",
+          // Descending, one distinct day per row (no ties) — the default
+          // sort is postedAt desc, so this keeps "Offer 00" deterministically
+          // on page 1 instead of depending on tie-break ordering.
+          postedAt: `2026-07-${String(30 - i).padStart(2, "0")}T00:00:00.000Z`,
+          sourceUrl: `https://example.com/jobs/${i}`,
+        },
+      }),
+    );
+    server.use(http.get("/api/analyses", () => HttpResponse.json({ analyses })));
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Page 1 of 2");
+
+    await user.click(screen.getByLabelText("Select all on this page"));
+    expect(screen.getByText("25 selected")).toBeInTheDocument();
+    expect(
+      screen.getByRole("checkbox", { name: "Select Offer 00" }),
+    ).toBeChecked();
+
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await screen.findByText("Page 2 of 2");
+    // The next page's rows are unaffected by the previous page's selection.
+    expect(
+      screen.getByRole("checkbox", { name: "Select all on this page" }),
+    ).not.toBeChecked();
+  });
+
+  it("offers to extend the selection to every row matching the filters, across pages (issue #67)", async () => {
+    const user = userEvent.setup();
+    const analyses = Array.from({ length: 30 }, (_, i) =>
+      summary({
+        id: `a${i}`,
+        jobOffer: {
+          id: `job${i}`,
+          title: `Offer ${String(i).padStart(2, "0")}`,
+          company: "Acme",
+          sourceSite: "OTHER",
+          postedAt: `2026-07-${String((i % 28) + 1).padStart(2, "0")}T00:00:00.000Z`,
+          sourceUrl: `https://example.com/jobs/${i}`,
+        },
+      }),
+    );
+    server.use(http.get("/api/analyses", () => HttpResponse.json({ analyses })));
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Page 1 of 2");
+
+    await user.click(screen.getByLabelText("Select all on this page"));
+    expect(
+      screen.getByRole("button", { name: "Select all 30 matching your filters" }),
+    ).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: "Select all 30 matching your filters" }),
+    );
+    expect(screen.getByText("30 selected")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Select all 30 matching your filters" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the bulk-actions bar only while something is selected, offering Tracking status changes and CSV export (issue #67)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            summary({ id: "s1" }),
+            summary({
+              id: "s2",
+              jobOffer: { ...summary().jobOffer, id: "job-s2", title: "Frontend Engineer" },
+            }),
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Backend Engineer");
+
+    expect(screen.queryByRole("button", { name: "Export CSV" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("checkbox", { name: "Select Backend Engineer" }));
+
+    expect(screen.getByRole("button", { name: "In progress" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Rejected" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Accepted" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Withdrawn" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "To apply" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Export CSV" })).toBeInTheDocument();
+  });
+
+  it("bulk-changes the Tracking status for the selection, lazily creating Applications, and reports a partial failure (issue #67)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            summary({ id: "s1", jobOffer: { ...summary().jobOffer, id: "j1", title: "Offer One" } }),
+            summary({ id: "s2", jobOffer: { ...summary().jobOffer, id: "j2", title: "Offer Two" } }),
+          ],
+        }),
+      ),
+      http.post("/api/applications", async ({ request }) => {
+        const body = (await request.json()) as { analysisId: string };
+        if (body.analysisId === "s2") {
+          return HttpResponse.json({ error: "boom" }, { status: 500 });
+        }
+        return HttpResponse.json({
+          application: {
+            id: "app-1",
+            userId: "user_1",
+            analysisId: body.analysisId,
+            jobOfferId: "j1",
+            cvVersionId: "cv1",
+            scoutId: null,
+            coverLetterDocId: null,
+            tailoredCvDocId: null,
+            status: "DRAFT",
+            appliedAt: null,
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+            jobOffer: { id: "j1", title: "Offer One", company: "Acme Inc" },
+            cvVersion: { label: "Grad CV" },
+          },
+        });
+      }),
+      http.post("/api/applications/app-1/status-events", () =>
+        HttpResponse.json({
+          application: {
+            id: "app-1",
+            userId: "user_1",
+            analysisId: "s1",
+            jobOfferId: "j1",
+            cvVersionId: "cv1",
+            scoutId: null,
+            coverLetterDocId: null,
+            tailoredCvDocId: null,
+            status: "APPLIED",
+            appliedAt: "2026-09-11T00:00:00.000Z",
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+            jobOffer: { id: "j1", title: "Offer One", company: "Acme Inc" },
+            cvVersion: { label: "Grad CV" },
+          },
+          statusEvent: {
+            id: "se-1",
+            applicationId: "app-1",
+            status: "APPLIED",
+            note: null,
+            effectiveDate: "2026-09-11T00:00:00.000Z",
+            createdAt: "2026-09-11T00:00:00.000Z",
+          },
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Offer One");
+
+    await user.click(screen.getByLabelText("Select all on this page"));
+    await user.click(screen.getByRole("button", { name: "In progress" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("1 of 2");
+  });
+
+  it("exports the selected rows to CSV without a network request (issue #67)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({ analyses: [summary({ id: "s1" })] }),
+      ),
+    );
+
+    const blobUrl = "blob:mock-url";
+    const createObjectURL = vi.fn<(blob: Blob) => string>(() => blobUrl);
+    const revokeObjectURL = vi.fn();
+    // jsdom doesn't implement these at all, so there's nothing to spy on —
+    // assign them directly and restore by deleting afterwards.
+    URL.createObjectURL = createObjectURL;
+    URL.revokeObjectURL = revokeObjectURL;
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Backend Engineer");
+
+    await user.click(screen.getByRole("checkbox", { name: "Select Backend Engineer" }));
+    await user.click(screen.getByRole("button", { name: "Export CSV" }));
+
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    const blob = createObjectURL.mock.calls[0]![0];
+    const text = await blob.text();
+    expect(text).toContain("Backend Engineer");
+    expect(text).toContain("https://example.com/jobs/job1");
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+    expect(revokeObjectURL).toHaveBeenCalledWith(blobUrl);
+
+    clickSpy.mockRestore();
+    // @ts-expect-error -- jsdom has no implementation to restore to.
+    delete URL.createObjectURL;
+    // @ts-expect-error -- jsdom has no implementation to restore to.
+    delete URL.revokeObjectURL;
+  });
+
+  it("clears the selection when the search term, Tracking status filter, or sort changes (issue #67)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({ analyses: [summary({ id: "s1" })] }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Backend Engineer");
+
+    await user.click(screen.getByRole("checkbox", { name: "Select Backend Engineer" }));
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Search"), "x");
+    expect(screen.queryByText("1 selected")).not.toBeInTheDocument();
+  });
+
   it("shows an error state when the request fails", async () => {
     server.use(
       http.get("/api/analyses", () =>

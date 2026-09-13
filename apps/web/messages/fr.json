@@ -184,6 +184,16 @@
       "viewOffer": "Voir l'offre",
       "statusError": "Impossible de mettre à jour le statut de suivi. Veuillez réessayer."
     },
+    "bulk": {
+      "selectPageLabel": "Sélectionner tout sur cette page",
+      "selectRowLabel": "Sélectionner {title}",
+      "selectedCount": "{count} sélectionnée(s)",
+      "clearSelection": "Effacer la sélection",
+      "extendAction": "Sélectionner les {total} correspondant à vos filtres",
+      "exportCsv": "Exporter en CSV",
+      "csvFilename": "analyses.csv",
+      "statusPartialError": "{failed} mise(s) à jour sur {total} ont échoué. Veuillez réessayer pour celles-ci."
+    },
     "controls": {
       "searchLabel": "Rechercher",
       "searchPlaceholder": "Titre de l'offre ou entreprise",
