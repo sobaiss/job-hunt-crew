@@ -433,4 +433,101 @@ describe("CvVersionsPage — replace", () => {
       screen.getByRole("button", { name: "Replace" }),
     ).toBeInTheDocument();
   });
+
+  it("warns about Scouts still pointing at the just-replaced CV version, linking to each edit form", async () => {
+    let replaced = false;
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: replaced
+            ? [cvVersion({ id: "cv2", label: "Updated CV" })]
+            : [cvVersion()],
+        }),
+      ),
+      http.post("/api/cv-versions/cv1/replace", async () => {
+        replaced = true;
+        return HttpResponse.json(
+          { cvVersionId: "cv2", fileKey: "k", uploadUrl: UPLOAD_URL },
+          { status: 201 },
+        );
+      }),
+      http.put(UPLOAD_URL, () => new HttpResponse(null, { status: 200 })),
+      http.get("/api/scouts", () =>
+        HttpResponse.json({
+          scouts: [
+            {
+              id: "scout1",
+              userId: "u1",
+              label: "Backend roles",
+              cvVersionId: "cv1",
+              targetSiteKeys: [],
+              filters: {
+                keywords: null,
+                location: null,
+                postedWithin: null,
+                contractType: null,
+                remote: null,
+                experienceLevel: null,
+              },
+              matchThreshold: 70,
+              status: "ACTIVE",
+              lastRunAt: null,
+              createdAt: "2026-08-01T00:00:00.000Z",
+              updatedAt: "2026-08-01T00:00:00.000Z",
+              relevantFindsCount: 0,
+            },
+          ],
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Replace" }));
+    await user.upload(screen.getByLabelText("New file"), pdf("updated.pdf"));
+    await user.click(screen.getByRole("button", { name: "Replace" }));
+
+    await waitFor(() =>
+      expect(screen.getByText("Updated CV")).toBeInTheDocument(),
+    );
+
+    expect(await screen.findByText("Backend roles")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Backend roles" })).toHaveAttribute(
+      "href",
+      "/scouts/scout1/edit",
+    );
+  });
+
+  it("shows no Scout warning when no Scout references the just-replaced CV version", async () => {
+    let replaced = false;
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: replaced
+            ? [cvVersion({ id: "cv2", label: "Updated CV" })]
+            : [cvVersion()],
+        }),
+      ),
+      http.post("/api/cv-versions/cv1/replace", async () => {
+        replaced = true;
+        return HttpResponse.json(
+          { cvVersionId: "cv2", fileKey: "k", uploadUrl: UPLOAD_URL },
+          { status: 201 },
+        );
+      }),
+      http.put(UPLOAD_URL, () => new HttpResponse(null, { status: 200 })),
+      http.get("/api/scouts", () => HttpResponse.json({ scouts: [] })),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Replace" }));
+    await user.upload(screen.getByLabelText("New file"), pdf("updated.pdf"));
+    await user.click(screen.getByRole("button", { name: "Replace" }));
+
+    await waitFor(() =>
+      expect(screen.getByText("Updated CV")).toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("alert", { name: /still used/i })).toBeNull();
+  });
 });

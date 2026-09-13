@@ -575,7 +575,8 @@
       "cancelReplace": "Annuler",
       "replaceSubmit": "Remplacer",
       "replacing": "Remplacement…",
-      "replaceError": "Impossible de remplacer cette version de CV. Veuillez réessayer."
+      "replaceError": "Impossible de remplacer cette version de CV. Veuillez réessayer.",
+      "scoutWarningHeading": "Cette version de CV a été remplacée, mais ces agents l'utilisent encore :"
     }
   },
   "ingestion": {

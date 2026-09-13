@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -19,6 +20,7 @@ import {
   MAX_CV_SIZE_BYTES,
   type CvConversionStatus,
 } from "@/hooks/use-cv-versions";
+import { useScouts } from "@/hooks/use-scouts";
 import { useEnumLabel } from "@/lib/enum-labels";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -79,10 +81,12 @@ function CvMarkdownPreview({ id }: { id: string }) {
  */
 function CvReplaceForm({
   cv,
-  onDone,
+  onReplaced,
+  onCancel,
 }: {
   cv: { id: string; label: string };
-  onDone: () => void;
+  onReplaced: (replacedId: string) => void;
+  onCancel: () => void;
 }) {
   const t = useTranslations("cvVersions");
   const replace = useReplaceCvVersion();
@@ -116,7 +120,7 @@ function CvReplaceForm({
     if (!file) return;
     replace.mutate(
       { id: cv.id, label: values.label.trim(), file },
-      { onSuccess: onDone },
+      { onSuccess: () => onReplaced(cv.id) },
     );
   });
 
@@ -165,7 +169,7 @@ function CvReplaceForm({
         <Button type="submit" size="sm" disabled={replace.isPending}>
           {replace.isPending ? t("list.replacing") : t("list.replaceSubmit")}
         </Button>
-        <Button type="button" size="sm" variant="outline" onClick={onDone}>
+        <Button type="button" size="sm" variant="outline" onClick={onCancel}>
           {t("list.cancelReplace")}
         </Button>
       </div>
@@ -187,9 +191,20 @@ export default function CvVersionsPage() {
   const create = useCreateCvVersion();
   const convert = useConvertCvVersion();
   const setDefault = useSetDefaultCvVersion();
+  const scouts = useScouts();
   const [openMarkdownId, setOpenMarkdownId] = useState<string | null>(null);
   const [replacingId, setReplacingId] = useState<string | null>(null);
   const [showSuperseded, setShowSuperseded] = useState(false);
+  const [justReplacedId, setJustReplacedId] = useState<string | null>(null);
+
+  // Issue #78: after a successful replace, tell the candidate which Scouts (if
+  // any) still reference the CVVersion that was just superseded — Scouts are
+  // never repointed automatically (docs/adr/0005), so this is surfaced only,
+  // with a link to each Scout's edit form.
+  const affectedScouts = justReplacedId
+    ? (scouts.data?.filter((scout) => scout.cvVersionId === justReplacedId) ??
+      [])
+    : [];
 
   // Default view excludes superseded CVVersions (issue #74); the toggle
   // (issue #75) reveals them again, each labeled with its replacement —
@@ -329,6 +344,24 @@ export default function CvVersionsPage() {
             {t("list.showSuperseded")}
           </label>
         </div>
+
+        {affectedScouts.length > 0 && (
+          <div role="alert" className="rounded-md border border-warning bg-warning/10 p-4 text-sm">
+            <p className="font-medium">{t("list.scoutWarningHeading")}</p>
+            <ul className="mt-2 flex flex-col gap-1">
+              {affectedScouts.map((scout) => (
+                <li key={scout.id}>
+                  <Link
+                    href={`/scouts/${scout.id}/edit`}
+                    className="text-accent underline"
+                  >
+                    {scout.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {list.isPending && (
           <div
@@ -472,7 +505,11 @@ export default function CvVersionsPage() {
                     {replacingId === cv.id && (
                       <CvReplaceForm
                         cv={cv}
-                        onDone={() => setReplacingId(null)}
+                        onReplaced={(replacedId) => {
+                          setReplacingId(null);
+                          setJustReplacedId(replacedId);
+                        }}
+                        onCancel={() => setReplacingId(null)}
                       />
                     )}
                   </CardContent>

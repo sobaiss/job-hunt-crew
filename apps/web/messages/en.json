@@ -575,7 +575,8 @@
       "cancelReplace": "Cancel",
       "replaceSubmit": "Replace",
       "replacing": "Replacing…",
-      "replaceError": "We couldn't replace that CV version. Please try again."
+      "replaceError": "We couldn't replace that CV version. Please try again.",
+      "scoutWarningHeading": "This CV version was replaced, but these Scouts still use it:"
     }
   },
   "ingestion": {
