@@ -337,6 +337,37 @@ describe("CvVersionsPage — list", () => {
     expect(await screen.findByText("New CV")).toBeInTheDocument();
     expect(screen.queryByText("Old CV")).toBeNull();
   });
+
+  it("reveals superseded CV versions, labeled with their replacement, via the toggle", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: [
+            cvVersion({ id: "cv1", label: "Old CV", supersededById: "cv2" }),
+            cvVersion({ id: "cv2", label: "New CV" }),
+          ],
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await screen.findByText("New CV");
+    expect(screen.queryByText("Old CV")).toBeNull();
+
+    await user.click(
+      screen.getByRole("checkbox", { name: "Show superseded CV versions" }),
+    );
+
+    expect(await screen.findByText("Old CV")).toBeInTheDocument();
+    expect(screen.getByText("Replaced by New CV")).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("checkbox", { name: "Show superseded CV versions" }),
+    );
+
+    expect(screen.queryByText("Old CV")).toBeNull();
+  });
 });
 
 describe("CvVersionsPage — replace", () => {

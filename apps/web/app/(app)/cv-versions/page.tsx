@@ -189,10 +189,16 @@ export default function CvVersionsPage() {
   const setDefault = useSetDefaultCvVersion();
   const [openMarkdownId, setOpenMarkdownId] = useState<string | null>(null);
   const [replacingId, setReplacingId] = useState<string | null>(null);
+  const [showSuperseded, setShowSuperseded] = useState(false);
 
-  // Default view excludes superseded CVVersions (issue #74) — showing them is
-  // a separate, off-by-default filter (issue #75), not built here.
-  const visibleCvVersions = list.data?.filter((cv) => cv.supersededById === null);
+  // Default view excludes superseded CVVersions (issue #74); the toggle
+  // (issue #75) reveals them again, each labeled with its replacement —
+  // resolved from the full (unfiltered) list, since services/api always
+  // returns every CVVersion regardless of this client-side filter.
+  const visibleCvVersions = showSuperseded
+    ? list.data
+    : list.data?.filter((cv) => cv.supersededById === null);
+  const labelById = new Map(list.data?.map((cv) => [cv.id, cv.label]));
 
   const schema = z.object({
     label: z.string().trim().min(1, t("form.labelRequired")),
@@ -309,9 +315,20 @@ export default function CvVersionsPage() {
       </section>
 
       <section className="flex flex-col gap-4">
-        <h2 className="font-serif text-xl font-semibold">
-          {t("list.heading")}
-        </h2>
+        <div className="flex items-center justify-between gap-4">
+          <h2 className="font-serif text-xl font-semibold">
+            {t("list.heading")}
+          </h2>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-border accent-accent outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              checked={showSuperseded}
+              onChange={(e) => setShowSuperseded(e.target.checked)}
+            />
+            {t("list.showSuperseded")}
+          </label>
+        </div>
 
         {list.isPending && (
           <div
@@ -363,6 +380,13 @@ export default function CvVersionsPage() {
                         <span className="truncate text-xs text-muted">
                           {cv.fileName} · {cv.fileType}
                         </span>
+                        {cv.supersededById && (
+                          <span className="truncate text-xs text-muted">
+                            {t("list.replacedBy", {
+                              label: labelById.get(cv.supersededById) ?? "",
+                            })}
+                          </span>
+                        )}
                       </div>
                       <div className="flex shrink-0 items-center gap-3">
                         <Badge
@@ -404,9 +428,10 @@ export default function CvVersionsPage() {
                             </Button>
                           );
                         })()}
-                        {cv.isDefault ? (
+                        {cv.isDefault && (
                           <Badge variant="outline">{t("list.default")}</Badge>
-                        ) : (
+                        )}
+                        {!cv.isDefault && !cv.supersededById && (
                           <Button
                             type="button"
                             size="sm"
@@ -423,7 +448,7 @@ export default function CvVersionsPage() {
                               : t("list.setDefault")}
                           </Button>
                         )}
-                        {replacingId !== cv.id && (
+                        {replacingId !== cv.id && !cv.supersededById && (
                           <Button
                             type="button"
                             size="sm"

@@ -551,6 +551,8 @@
       "loading": "Chargement de vos versions de CV",
       "loadError": "Impossible de charger vos versions de CV. Veuillez réessayer.",
       "empty": "Aucune version de CV téléversée pour l'instant.",
+      "showSuperseded": "Afficher les versions de CV remplacées",
+      "replacedBy": "Remplacée par {label}",
       "default": "Par défaut",
       "setDefault": "Définir par défaut",
       "settingDefault": "Application…",

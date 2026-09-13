@@ -551,6 +551,8 @@
       "loading": "Loading your CV versions",
       "loadError": "We couldn't load your CV versions. Please try again.",
       "empty": "No CV versions uploaded yet.",
+      "showSuperseded": "Show superseded CV versions",
+      "replacedBy": "Replaced by {label}",
       "default": "Default",
       "setDefault": "Set as default",
       "settingDefault": "Setting…",
