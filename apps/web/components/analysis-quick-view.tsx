@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useQueryClient } from "@tanstack/react-query";
 
-import type { AnalysisDetail, MissingSkill } from "@/hooks/use-analyses";
+import type { AnalysisDetail } from "@/hooks/use-analyses";
 import { useSetApplicationStatus } from "@/hooks/use-applications";
 import {
   TRACKING_STATUS_TRANSITIONS,
@@ -13,8 +13,8 @@ import {
   trackingStatusOf,
 } from "@/lib/tracking-status";
 import { analysisBadgeVariant } from "@/components/analysis-row";
+import { AnalysisResultView } from "@/components/analysis-result";
 import { GeneratedDocumentsPanel } from "@/components/generated-documents-panel";
-import { MatchScoreGauge } from "@/components/match-score-gauge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,19 +24,10 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 
-// The read-only slide-over opened from an Analyses-table row (issue #65): a
-// condensed read of one Analysis, linking out to the full detail page and the
-// Side-by-side comparison for the exhaustive breakdown. Reads the same
+// The read-only slide-over opened from an Analyses-table row (issue #65),
+// widened to show the full Analysis result breakdown in place (issue #70) via
+// the same `AnalysisResultView` the full detail page renders. Reads the same
 // `resultJSON` the detail page already fetches — no dedicated endpoint.
-
-/** Only the top few, not the full list — the exhaustive breakdown stays on
- *  the full Analysis detail page. */
-const QUICK_VIEW_MAX_MISSING_SKILLS = 3;
-
-const IMPORTANCE_RANK: Record<MissingSkill["importance"], number> = {
-  required: 0,
-  nice_to_have: 1,
-};
 
 export function AnalysisQuickView({
   analysis,
@@ -63,18 +54,11 @@ export function AnalysisQuickView({
 
   const tracking = analysis ? trackingStatusOf(analysis) : null;
   const result = analysis?.resultJSON ?? null;
-  const topMissingSkills = result
-    ? [...result.missing_skills]
-        .sort(
-          (a, b) => IMPORTANCE_RANK[a.importance] - IMPORTANCE_RANK[b.importance],
-        )
-        .slice(0, QUICK_VIEW_MAX_MISSING_SKILLS)
-    : [];
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
-        className="w-full gap-6 overflow-y-auto sm:max-w-lg"
+        className="w-full gap-6 overflow-y-auto sm:max-w-5xl"
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           returnFocusRef.current?.focus();
@@ -156,44 +140,7 @@ export function AnalysisQuickView({
             )}
 
             {result ? (
-              <>
-                <section className="flex flex-col items-center gap-3">
-                  <MatchScoreGauge score={result.match_score} />
-                </section>
-
-                <section className="flex flex-col gap-1">
-                  <h2 className="text-sm font-semibold text-muted">
-                    {td("summary")}
-                  </h2>
-                  <p className="text-sm leading-relaxed">{result.summary}</p>
-                </section>
-
-                <section className="flex flex-col gap-2">
-                  <h2 className="text-sm font-semibold text-muted">
-                    {td("missingSkills")}
-                  </h2>
-                  {topMissingSkills.length === 0 ? (
-                    <p className="text-sm text-muted">{td("none")}</p>
-                  ) : (
-                    <ul className="flex flex-col gap-2">
-                      {topMissingSkills.map((item, i) => (
-                        <li key={i} className="flex items-center gap-2 text-sm">
-                          <span className="font-medium">{item.skill}</span>
-                          <Badge
-                            variant={
-                              item.importance === "required"
-                                ? "warning"
-                                : "secondary"
-                            }
-                          >
-                            {td(`importance.${item.importance}`)}
-                          </Badge>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </section>
-              </>
+              <AnalysisResultView result={result} />
             ) : (
               <p className="text-sm text-muted">{td("noResult")}</p>
             )}

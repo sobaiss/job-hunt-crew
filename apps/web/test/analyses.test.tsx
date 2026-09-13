@@ -868,7 +868,7 @@ describe("AnalysesDashboardPage", () => {
     );
   });
 
-  it("opens the Quick view when a row is clicked, showing the score, summary, top missing skills and status, plus links to the full analysis and the comparison (issue #65)", async () => {
+  it("opens the Quick view when a row is clicked, showing the full result breakdown and status, plus links to the full analysis and the comparison (issue #65, widened in #70)", async () => {
     const user = userEvent.setup();
     server.use(
       http.get("/api/analyses", () =>
@@ -877,11 +877,19 @@ describe("AnalysesDashboardPage", () => {
             detail({
               resultJSON: {
                 ...RESULT,
+                matched_skills: [
+                  { skill: "TypeScript", evidence: "5 years at Acme" },
+                ],
                 missing_skills: [
                   { skill: "Kubernetes", importance: "required" },
                   { skill: "Terraform", importance: "required" },
                   { skill: "GraphQL", importance: "nice_to_have" },
                   { skill: "Rust", importance: "nice_to_have" },
+                ],
+                strengths: ["Ships fast"],
+                weaknesses: ["Thin on infra"],
+                improvement_suggestions: [
+                  { area: "Infra", suggestion: "Add a k8s project", priority: "high" },
                 ],
               },
             }),
@@ -904,11 +912,16 @@ describe("AnalysesDashboardPage", () => {
     expect(
       quickView.getByText("Strong product engineer, light on platform work."),
     ).toBeInTheDocument();
-    // Only a prioritized subset (required first), not the full list.
+    expect(quickView.getByText("TypeScript")).toBeInTheDocument();
+    expect(quickView.getByText(/5 years at Acme/)).toBeInTheDocument();
+    // No top-3 cap anymore — the full missing-skills list renders.
     expect(quickView.getByText("Kubernetes")).toBeInTheDocument();
     expect(quickView.getByText("Terraform")).toBeInTheDocument();
     expect(quickView.getByText("GraphQL")).toBeInTheDocument();
-    expect(quickView.queryByText("Rust")).not.toBeInTheDocument();
+    expect(quickView.getByText("Rust")).toBeInTheDocument();
+    expect(quickView.getByText("Ships fast")).toBeInTheDocument();
+    expect(quickView.getByText("Thin on infra")).toBeInTheDocument();
+    expect(quickView.getByText(/Add a k8s project/)).toBeInTheDocument();
     expect(quickView.getByText("To apply")).toBeInTheDocument();
 
     expect(
