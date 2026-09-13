@@ -43,6 +43,7 @@ function analysis(overrides: Partial<AnalysisSummary> = {}): AnalysisSummary {
     cvVersionId: "cv1",
     ingestionJobId: null,
     scoutId: null,
+    applicationStatus: null,
     ingestionJob: null,
     jobOffer: {
       id: "job1",

@@ -9,7 +9,6 @@ import { ArrowDown, ArrowUp, ArrowUpDown, ExternalLink } from "lucide-react";
 import { useAnalyses, type AnalysisSummary } from "@/hooks/use-analyses";
 import {
   ANALYSES_PAGE_SIZES,
-  ANALYSIS_STATUSES,
   analysesTableStateToParams,
   cvLabelsOf,
   filterAnalyses,
@@ -21,7 +20,14 @@ import {
   type AnalysesSortColumn,
   type AnalysesTableState,
 } from "@/lib/analyses-filters";
+import {
+  TRACKING_STATUSES,
+  trackingStatusBadgeVariant,
+  trackingStatusOf,
+} from "@/lib/tracking-status";
 import { useEnumLabel } from "@/lib/enum-labels";
+import { analysisBadgeVariant } from "@/components/analysis-row";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -61,7 +67,8 @@ const COLUMNS: ColumnDef[] = [
 function AnalysesTable() {
   const t = useTranslations("analyses");
   const sourceSiteLabel = useEnumLabel("sourceSite");
-  const statusLabel = useEnumLabel("analysisStatus");
+  const pipelineStatusLabel = useEnumLabel("analysisStatus");
+  const trackingStatusLabel = useEnumLabel("trackingStatus");
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -174,9 +181,9 @@ function AnalysesTable() {
               }
             >
               <option value="all">{t("controls.statusAll")}</option>
-              {ANALYSIS_STATUSES.map((status) => (
+              {TRACKING_STATUSES.map((status) => (
                 <option key={status} value={status}>
-                  {statusLabel(status)}
+                  {trackingStatusLabel(status)}
                 </option>
               ))}
             </select>
@@ -220,6 +227,7 @@ function AnalysesTable() {
                     onSort={toggleSort}
                   />
                 ))}
+                <TableHead>{t("columns.status")}</TableHead>
                 <SortableHead
                   column="sourceUrl"
                   label={t("columns.link")}
@@ -235,6 +243,8 @@ function AnalysesTable() {
                   key={analysis.id}
                   analysis={analysis}
                   sourceSiteLabel={sourceSiteLabel}
+                  pipelineStatusLabel={pipelineStatusLabel}
+                  trackingStatusLabel={trackingStatusLabel}
                   linkLabel={t("columns.linkLabel")}
                   jobOfferFallback={t("jobOfferFallback")}
                 />
@@ -329,14 +339,20 @@ function SortableHead({
 function AnalysisTableRow({
   analysis,
   sourceSiteLabel,
+  pipelineStatusLabel,
+  trackingStatusLabel,
   linkLabel,
   jobOfferFallback,
 }: {
   analysis: AnalysisSummary;
   sourceSiteLabel: (value: string) => string;
+  pipelineStatusLabel: (value: string) => string;
+  trackingStatusLabel: (value: string) => string;
   linkLabel: string;
   jobOfferFallback: string;
 }) {
+  const tracking = trackingStatusOf(analysis);
+
   return (
     <TableRow>
       <TableCell>
@@ -354,6 +370,17 @@ function AnalysisTableRow({
       <TableCell>{analysis.cvVersion.label}</TableCell>
       <TableCell className="text-right tabular-nums">
         {analysis.matchScore ?? "—"}
+      </TableCell>
+      <TableCell>
+        {tracking !== null ? (
+          <Badge variant={trackingStatusBadgeVariant(tracking)}>
+            {trackingStatusLabel(tracking)}
+          </Badge>
+        ) : (
+          <Badge variant={analysisBadgeVariant(analysis.status)}>
+            {pipelineStatusLabel(analysis.status)}
+          </Badge>
+        )}
       </TableCell>
       <TableCell>
         <a

@@ -37,6 +37,7 @@ function summary(overrides: Record<string, unknown> = {}) {
     ingestionJobId: null,
     ingestionJob: null,
     scoutId: null,
+    applicationStatus: null,
     jobOffer: {
       id: "job1",
       title: "Backend Engineer",
@@ -82,11 +83,63 @@ describe("AnalysesDashboardPage", () => {
     expect(await screen.findByText("Backend Engineer")).toBeInTheDocument();
     expect(screen.getByText("Acme Inc")).toBeInTheDocument();
     expect(screen.getByText("France Travail")).toBeInTheDocument();
-    expect(screen.getByText("Grad CV")).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "Grad CV" })).toBeInTheDocument();
     expect(screen.getByText("87")).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "Open the job offer" }),
     ).toHaveAttribute("href", "https://example.com/jobs/job1");
+  });
+
+  it("shows a Tracking status badge for a COMPLETED analysis and a pipeline badge otherwise (issue #64)", async () => {
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            summary({
+              id: "s1",
+              status: "COMPLETED",
+              applicationStatus: null,
+              jobOffer: {
+                id: "j1",
+                title: "To Apply Offer",
+                company: "Acme",
+                sourceSite: "FRANCE_TRAVAIL",
+                postedAt: "2026-07-01T00:00:00.000Z",
+                sourceUrl: "https://example.com/jobs/j1",
+              },
+            }),
+            summary({
+              id: "s2",
+              status: "RUNNING_CREW",
+              matchScore: null,
+              jobOffer: {
+                id: "j2",
+                title: "Still Running Offer",
+                company: "Globex",
+                sourceSite: "LINKEDIN",
+                postedAt: "2026-07-02T00:00:00.000Z",
+                sourceUrl: "https://example.com/jobs/j2",
+              },
+            }),
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+
+    expect(await screen.findByText("To Apply Offer")).toBeInTheDocument();
+    // COMPLETED with no Application yet -> the "To apply" Tracking status bucket.
+    expect(screen.getByRole("cell", { name: "To apply" })).toBeInTheDocument();
+    // Still running -> its raw pipeline state, not a Tracking status bucket.
+    expect(screen.getByRole("cell", { name: "Running" })).toBeInTheDocument();
+
+    // The pipeline-only row is excluded from every specific Tracking status
+    // filter, but stays visible under "All statuses" (the default).
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByLabelText("Status"), "TO_APPLY");
+    expect(screen.queryByText("Still Running Offer")).not.toBeInTheDocument();
+    expect(screen.getByText("To Apply Offer")).toBeInTheDocument();
   });
 
   it("shows an empty state when there are no analyses", async () => {
@@ -216,8 +269,9 @@ describe("AnalysesDashboardPage", () => {
             }),
             summary({
               id: "s2",
-              status: "FAILED",
-              matchScore: null,
+              status: "COMPLETED",
+              applicationStatus: "REJECTED",
+              matchScore: 55,
               jobOffer: {
                 id: "j2",
                 title: "Frontend Developer",
@@ -237,7 +291,7 @@ describe("AnalysesDashboardPage", () => {
 
     expect(await screen.findByText("Backend Engineer")).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText("Status"), "FAILED");
+    await user.selectOptions(screen.getByLabelText("Status"), "REJECTED");
     expect(screen.queryByText("Backend Engineer")).not.toBeInTheDocument();
     expect(screen.getByText("Frontend Developer")).toBeInTheDocument();
 
@@ -335,7 +389,7 @@ describe("AnalysesDashboardPage", () => {
 
   it("restores search, status and sort from the URL query string on load", async () => {
     __setUrl(
-      "/analyses?q=front&status=FAILED&sort=matchScore&dir=asc&page=1&pageSize=25",
+      "/analyses?q=front&status=REJECTED&sort=matchScore&dir=asc&page=1&pageSize=25",
     );
     server.use(
       http.get("/api/analyses", () =>
@@ -355,7 +409,8 @@ describe("AnalysesDashboardPage", () => {
             }),
             summary({
               id: "s2",
-              status: "FAILED",
+              status: "COMPLETED",
+              applicationStatus: "REJECTED",
               jobOffer: {
                 id: "j2",
                 title: "Frontend Developer",
@@ -375,7 +430,7 @@ describe("AnalysesDashboardPage", () => {
     expect(await screen.findByText("Frontend Developer")).toBeInTheDocument();
     expect(screen.queryByText("Backend Engineer")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Search")).toHaveValue("front");
-    expect(screen.getByLabelText("Status")).toHaveValue("FAILED");
+    expect(screen.getByLabelText("Status")).toHaveValue("REJECTED");
   });
 
   it("writes filter changes back to the URL query string", async () => {

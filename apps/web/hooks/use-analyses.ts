@@ -3,6 +3,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 
 import { bff } from "@/lib/bff-client";
+import type { ApplicationStatus } from "@/hooks/use-applications";
 
 // TanStack Query read hooks for the analyses area, layered on the typed BFF
 // client (`lib/bff-client.ts`). The `/api/*` contract is unchanged — these
@@ -67,6 +68,10 @@ export type AnalysisSummary = {
    *  Set by the ingestion fan-out when the parent job carries a `scoutRunId`
    *  (issue #54). */
   scoutId: string | null;
+  /** The linked Application's status, or `null` when none exists yet (it's
+   *  created lazily) — folded into the Analyses table's 5-bucket Tracking
+   *  status by `lib/tracking-status.ts` (issue #64). */
+  applicationStatus: ApplicationStatus | null;
   jobOffer: {
     id: string;
     title: string | null;

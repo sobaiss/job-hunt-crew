@@ -194,6 +194,7 @@
       "postedAt": "Date de publication",
       "cv": "CV",
       "score": "Score",
+      "status": "Statut",
       "link": "Lien",
       "linkLabel": "Ouvrir l'offre d'emploi"
     },
@@ -626,6 +627,13 @@
       "ACCEPTED": "Acceptée",
       "REJECTED": "Refusée",
       "WITHDRAWN": "Retirée"
+    },
+    "trackingStatus": {
+      "TO_APPLY": "À postuler",
+      "IN_PROGRESS": "En cours",
+      "REJECTED": "Refusé",
+      "ACCEPTED": "Accepté",
+      "WITHDRAWN": "Retiré"
     },
     "sourceSite": {
       "LINKEDIN": "LinkedIn",

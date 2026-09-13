@@ -13,6 +13,7 @@ import {
   sortAnalyses,
   type AnalysesTableState,
 } from "@/lib/analyses-filters";
+import { TRACKING_STATUSES } from "@/lib/tracking-status";
 import type { AnalysisSummary } from "@/hooks/use-analyses";
 
 function summary(overrides: Partial<AnalysisSummary> = {}): AnalysisSummary {
@@ -24,6 +25,7 @@ function summary(overrides: Partial<AnalysisSummary> = {}): AnalysisSummary {
     cvVersionId: "cv1",
     ingestionJobId: null,
     scoutId: null,
+    applicationStatus: null,
     ingestionJob: null,
     jobOffer: {
       id: "job1",
@@ -40,7 +42,7 @@ function summary(overrides: Partial<AnalysisSummary> = {}): AnalysisSummary {
 
 describe("filterAnalyses", () => {
   const list = [
-    summary({ id: "a1" }),
+    summary({ id: "a1" }), // COMPLETED, no Application yet -> TO_APPLY
     summary({
       id: "a2",
       status: "FAILED",
@@ -56,7 +58,8 @@ describe("filterAnalyses", () => {
     }),
     summary({
       id: "a3",
-      status: "RUNNING_CREW",
+      status: "COMPLETED",
+      applicationStatus: "REJECTED",
       jobOffer: {
         id: "job3",
         title: "Platform Engineer",
@@ -89,13 +92,13 @@ describe("filterAnalyses", () => {
     ).toEqual(["a2"]);
   });
 
-  it("filters by status and by CVVersion label, and combines the two", () => {
+  it("filters by Tracking status and by CVVersion label, and combines the two", () => {
     expect(
       filterAnalyses(list, {
         ...DEFAULT_ANALYSES_FILTERS,
-        status: "FAILED",
+        status: "TO_APPLY",
       }).map((a) => a.id),
-    ).toEqual(["a2"]);
+    ).toEqual(["a1"]);
 
     expect(
       filterAnalyses(list, {
@@ -108,9 +111,23 @@ describe("filterAnalyses", () => {
       filterAnalyses(list, {
         ...DEFAULT_ANALYSES_FILTERS,
         cvLabel: "Grad CV",
-        status: "RUNNING_CREW",
+        status: "REJECTED",
       }).map((a) => a.id),
     ).toEqual(["a3"]);
+  });
+
+  it("excludes a non-COMPLETED/FAILED Analysis from every Tracking status filter, but keeps it under \"all\"", () => {
+    expect(
+      filterAnalyses(list, DEFAULT_ANALYSES_FILTERS).map((a) => a.id),
+    ).toContain("a2");
+
+    for (const status of TRACKING_STATUSES) {
+      expect(
+        filterAnalyses(list, { ...DEFAULT_ANALYSES_FILTERS, status }).map(
+          (a) => a.id,
+        ),
+      ).not.toContain("a2");
+    }
   });
 });
 
@@ -215,7 +232,7 @@ describe("URL query-string state", () => {
   it("round-trips a fully-specified state through params and back", () => {
     const state: AnalysesTableState = {
       search: "backend",
-      status: "FAILED",
+      status: "REJECTED",
       cvLabel: "Grad CV",
       sort: { column: "matchScore", direction: "asc" },
       page: 2,
@@ -248,6 +265,20 @@ describe("URL query-string state", () => {
       page: 1,
       pageSize: 25,
     });
+  });
+
+  it("rejects a raw pipeline AnalysisStatus as a status param — the filter is Tracking status now", () => {
+    expect(parseAnalysesTableState(new URLSearchParams("status=FAILED")).status).toBe(
+      "all",
+    );
+  });
+
+  it("accepts exactly the 5 Tracking status buckets as the status param", () => {
+    for (const status of TRACKING_STATUSES) {
+      expect(
+        parseAnalysesTableState(new URLSearchParams(`status=${status}`)).status,
+      ).toBe(status);
+    }
   });
 
   it("omits a param from the query string when it's the default", () => {

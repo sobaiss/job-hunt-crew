@@ -1,4 +1,5 @@
-import type { AnalysisStatus, AnalysisSummary } from "@/hooks/use-analyses";
+import type { AnalysisSummary } from "@/hooks/use-analyses";
+import { TRACKING_STATUSES, trackingStatusOf, type TrackingStatus } from "@/lib/tracking-status";
 
 // Pure, framework-free helpers behind the Analyses table (#63). Search, status
 // filter and CVVersion filter all operate on the list already returned by
@@ -10,8 +11,10 @@ import type { AnalysisStatus, AnalysisSummary } from "@/hooks/use-analyses";
 export type AnalysesFilterState = {
   /** Substring over JobOffer title + company, case-insensitive. */
   search: string;
-  /** An `AnalysisStatus`, or `"all"` for no status filter. */
-  status: AnalysisStatus | "all";
+  /** A Tracking status bucket (issue #64), or `"all"` for no status filter —
+   *  "all" is the only way to see a non-`COMPLETED`/`FAILED` Analysis, since
+   *  those have no Tracking status bucket of their own. */
+  status: TrackingStatus | "all";
   /** A `cvVersion.label`, or `"all"` for no CVVersion filter. */
   cvLabel: string | "all";
 };
@@ -21,17 +24,6 @@ export const DEFAULT_ANALYSES_FILTERS: AnalysesFilterState = {
   status: "all",
   cvLabel: "all",
 };
-
-/** The status filter's options, in pipeline order. */
-export const ANALYSIS_STATUSES: readonly AnalysisStatus[] = [
-  "PENDING",
-  "QUEUED",
-  "RUNNING_CREW",
-  "AWAITING_RESULT",
-  "PERSISTING",
-  "COMPLETED",
-  "FAILED",
-];
 
 /** Distinct CVVersion labels present in the list, in first-seen order. */
 export function cvLabelsOf(analyses: AnalysisSummary[]): string[] {
@@ -50,8 +42,10 @@ function matchesSearch(analysis: AnalysisSummary, term: string): boolean {
 }
 
 /**
- * Narrow the analyses to those matching the search term, the status filter and
- * the CVVersion filter.
+ * Narrow the analyses to those matching the search term, the Tracking status
+ * filter and the CVVersion filter. A specific Tracking status bucket only
+ * ever matches a `COMPLETED` Analysis — a still-running or `FAILED` one has
+ * no bucket and is excluded from every filter but `"all"`.
  */
 export function filterAnalyses(
   analyses: AnalysisSummary[],
@@ -60,7 +54,7 @@ export function filterAnalyses(
   return analyses.filter(
     (analysis) =>
       matchesSearch(analysis, search) &&
-      (status === "all" || analysis.status === status) &&
+      (status === "all" || trackingStatusOf(analysis) === status) &&
       (cvLabel === "all" || analysis.cvVersion.label === cvLabel),
   );
 }
@@ -192,8 +186,8 @@ export function parseAnalysesTableState(
 
   return {
     search: params.get("q") ?? DEFAULT_ANALYSES_TABLE_STATE.search,
-    status: ANALYSIS_STATUSES.includes(status as AnalysisStatus)
-      ? (status as AnalysisStatus)
+    status: TRACKING_STATUSES.includes(status as TrackingStatus)
+      ? (status as TrackingStatus)
       : "all",
     cvLabel: cvLabel ?? "all",
     sort: {

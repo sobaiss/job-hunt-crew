@@ -194,6 +194,7 @@
       "postedAt": "Posted",
       "cv": "CV",
       "score": "Score",
+      "status": "Status",
       "link": "Link",
       "linkLabel": "Open the job offer"
     },
@@ -625,6 +626,13 @@
       "OFFER": "Offer",
       "ACCEPTED": "Accepted",
       "REJECTED": "Rejected",
+      "WITHDRAWN": "Withdrawn"
+    },
+    "trackingStatus": {
+      "TO_APPLY": "To apply",
+      "IN_PROGRESS": "In progress",
+      "REJECTED": "Rejected",
+      "ACCEPTED": "Accepted",
       "WITHDRAWN": "Withdrawn"
     },
     "sourceSite": {

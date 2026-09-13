@@ -453,6 +453,52 @@ async def _stamp_scout_id(analysis_id: str, scout_id: str) -> None:
         await engine.dispose()
 
 
+def test_list_and_get_analyses_expose_application_status(user_id, job_offer_id, cv_version_id):
+    """The Analyses table derives its 5-bucket Tracking status (issue #64)
+    from the linked Application's status, exposed here without a second
+    fetch/join: `null` before an Application exists, then live as it moves."""
+    with TestClient(app) as client:
+        analysis_id = client.post(
+            "/v1/analyses",
+            headers=_headers(user_id),
+            json={"jobOfferId": job_offer_id, "cvVersionId": cv_version_id},
+        ).json()["analysisId"]
+
+        rows = {
+            a["id"]: a
+            for a in client.get("/v1/analyses", headers=_headers(user_id)).json()["analyses"]
+        }
+        assert rows[analysis_id]["applicationStatus"] is None
+        detail = client.get(f"/v1/analyses/{analysis_id}", headers=_headers(user_id)).json()["analysis"]
+        assert detail["applicationStatus"] is None
+
+        application_id = client.post(
+            "/v1/applications",
+            headers=_headers(user_id),
+            json={"analysisId": analysis_id},
+        ).json()["application"]["id"]
+
+        rows = {
+            a["id"]: a
+            for a in client.get("/v1/analyses", headers=_headers(user_id)).json()["analyses"]
+        }
+        assert rows[analysis_id]["applicationStatus"] == "DRAFT"
+
+        client.post(
+            f"/v1/applications/{application_id}/status-events",
+            headers=_headers(user_id),
+            json={"status": "APPLIED"},
+        )
+
+        rows = {
+            a["id"]: a
+            for a in client.get("/v1/analyses", headers=_headers(user_id)).json()["analyses"]
+        }
+        assert rows[analysis_id]["applicationStatus"] == "APPLIED"
+        detail = client.get(f"/v1/analyses/{analysis_id}", headers=_headers(user_id)).json()["analysis"]
+        assert detail["applicationStatus"] == "APPLIED"
+
+
 def test_list_and_get_analyses_expose_scout_id(user_id, job_offer_id, cv_version_id):
     """A Scout-driven Analysis shows in `/analyses` tagged with its Scout
     (issue #54); a manual one carries `scoutId: null`."""

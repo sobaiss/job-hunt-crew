@@ -807,10 +807,17 @@ class AnalysisResponse(BaseModel):
     jobOffer: JobOfferResponse
     cvVersion: CVVersionResponse
     ingestionJob: AnalysisIngestionJobRef | None
+    # The linked Application's `status`, or `null` when none exists yet (it's
+    # created lazily) — lets the Web Analyses table derive its 5-bucket
+    # Tracking status (issue #64) without a second fetch/join.
+    applicationStatus: str | None
 
 
 def _analysis_response(row: Analysis) -> AnalysisResponse:
     ingestion_job = row.IngestionJob_
+    # `Application.analysisId` is unique (0 or 1 row per Analysis); the ORM
+    # relationship is still a list since it's declared without `uselist=False`.
+    application = row.Application[0] if row.Application else None
     return AnalysisResponse(
         id=row.id,
         userId=row.userId,
@@ -837,6 +844,7 @@ def _analysis_response(row: Analysis) -> AnalysisResponse:
             if ingestion_job is not None
             else None
         ),
+        applicationStatus=application.status.value if application is not None else None,
     )
 
 
@@ -857,6 +865,7 @@ async def list_analyses(
             selectinload(Analysis.JobOffer_),
             selectinload(Analysis.CVVersion_),
             selectinload(Analysis.IngestionJob_),
+            selectinload(Analysis.Application),
         )
         .where(Analysis.userId == user_id)
         .order_by(Analysis.requestedAt.desc())
@@ -973,6 +982,7 @@ async def get_analysis(
             selectinload(Analysis.JobOffer_),
             selectinload(Analysis.CVVersion_),
             selectinload(Analysis.IngestionJob_),
+            selectinload(Analysis.Application),
         )
         .where(Analysis.id == analysis_id)
     )
@@ -1377,6 +1387,7 @@ async def list_scout_finds(
                 selectinload(Analysis.JobOffer_),
                 selectinload(Analysis.CVVersion_),
                 selectinload(Analysis.IngestionJob_),
+                selectinload(Analysis.Application),
             )
             .where(Analysis.scoutId == scout.id, Analysis.status == Analysisstatus.COMPLETED)
             .order_by(Analysis.completedAt.desc())

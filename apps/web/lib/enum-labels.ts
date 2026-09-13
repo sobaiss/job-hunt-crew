@@ -10,6 +10,7 @@ type EnumNamespace =
   | "ingestionStatus"
   | "cvConversionStatus"
   | "applicationStatus"
+  | "trackingStatus"
   | "sourceSite";
 
 /**
