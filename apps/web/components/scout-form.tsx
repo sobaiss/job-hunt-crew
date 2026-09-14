@@ -33,8 +33,9 @@ function clampThreshold(value: number): number {
 /**
  * Shared create / edit form for a Scout. With no `scout` prop it creates one
  * (France Travail pre-checked, threshold 70, posted-within 7 days) and redirects
- * to the Scout list; given a `scout` it edits it and redirects to its detail
- * page. Slice 1 (#53) — Scouts do not run yet.
+ * to the Scout list; given a `scout` it edits it and redirects back to the
+ * list with its panel open (`?open=<id>` — the detail page this used to
+ * target is gone). Slice 1 (#53) — Scouts do not run yet.
  */
 export function ScoutForm({ scout }: { scout?: Scout }) {
   const t = useTranslations("scouts.form");
@@ -100,7 +101,7 @@ export function ScoutForm({ scout }: { scout?: Scout }) {
 
     mutation.mutate(payload, {
       onSuccess: (data) => {
-        router.push(isEdit ? `/scouts/${data.scout.id}` : "/scouts");
+        router.push(isEdit ? `/scouts?open=${data.scout.id}` : "/scouts");
       },
     });
   }

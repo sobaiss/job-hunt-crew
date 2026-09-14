@@ -57,25 +57,28 @@ The sidebar entry and `/scouts` area where a candidate creates and manages
 Scouts (defined in [API](../../services/api/CONTEXT.md)'s context) — a
 sortable, full-width table (Label, Status, Base CV, Sites, Last run,
 Relevant finds; Archived Scouts hidden by default behind a "show archived"
-toggle, mirroring CV versions' superseded filter), a create/edit form, and a
-detail page showing config, run history, relevant finds, the patterns
-panel, and per-Scout stats. Clicking a table row opens the Scout panel; the
-detail page stays reachable only from a link inside that panel, not from
-the table itself.
+toggle, mirroring CV versions' superseded filter) and a create/edit form.
+Clicking a table row opens the Scout panel, which is the only place a
+Scout's config, run history, patterns, and Finds are shown — there is no
+separate detail page (docs/adr/0007).
 _Avoid_: Scouts (fine in prose for the entity itself; "Agents" is
-specifically the nav label and route area a candidate sees)
+specifically the nav label and route area a candidate sees), Scout detail
+page (retired — see Scout panel)
 
 **Scout panel**:
-The right-hand slide-over opened by clicking a Scouts-table row (~1024px on
-desktop, full-width on mobile) — a light summary (Status, Base CV, Sites,
-Threshold, Filters, Last run) plus Run now / Pause / Resume / Archive /
-Edit, and a link out to the full Scout detail page for run history, the
-patterns panel, and Finds. Deliberately sized and scoped like the Analyses
-list's Quick view rather than the CV panel: it doesn't try to absorb
-everything the detail page shows (docs/adr/0006).
+The right-hand slide-over opened by clicking a Scouts-table row (~1152px on
+desktop, full-width on mobile) — Configuration, Statistiques, Historique des
+exécutions, Patterns, and Finds, plus Run now / Pause / Resume / Archive /
+Edit. Absorbs everything the former `/scouts/[id]` detail page showed, that
+route now being gone (docs/adr/0007, superseding docs/adr/0006's Quick-view
+shape). Reachable directly via `/scouts?open=<id>`, which `/scouts` reads
+once on mount to open the named Scout's panel before clearing the param —
+the target of the Edit-Scout page's back-link, the create/edit form's
+post-edit redirect, and an Application's "view Scout" back-link.
 _Avoid_: Side bar / slide bar (same trap as the CV panel's entry above —
 reads as the left-nav Sidebar or a mistranslation of "slide-over"), Quick
-view (that's the Analyses-list one; same shape, different content)
+view (that's the Analyses-list one — lighter, and still links out to its own
+full detail page, unlike this one)
 
 **Applications**:
 The sidebar entry and `/applications` area listing every Application

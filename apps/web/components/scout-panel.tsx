@@ -6,11 +6,16 @@ import { useTranslations } from "next-intl";
 
 import {
   useRunScout,
+  useScoutStats,
   useUpdateScout,
   type Scout,
   type ScoutStatus,
 } from "@/hooks/use-scouts";
 import { BffError } from "@/lib/bff-client";
+import { ApplicationStatsHeader } from "@/components/application-stats-header";
+import { ScoutPatternsPanel } from "@/components/scout-patterns-panel";
+import { ScoutRunHistory } from "@/components/scout-run-history";
+import { ScoutFinds } from "@/components/scout-finds";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,10 +25,12 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 
-// The right-hand slide-over opened from a Scouts table row (issue #91),
-// following the Quick view shape (docs/adr/0006) rather than the CV panel's
-// full-absorption shape — `/scouts/[id]` remains the deeper view this panel
-// links out to, not something this panel replaces.
+// The right-hand slide-over opened from a Scouts table row (issue #91). It
+// now absorbs the full former `/scouts/[id]` detail page — Configuration,
+// Statistiques, Historique des exécutions, Patterns, and Finds all render in
+// place here instead of behind a "view full detail" link, which is why that
+// route is gone (issue #92, superseding docs/adr/0006 — see
+// docs/adr/0007-scout-panel-full-absorption.md for the reversal).
 
 function statusVariant(
   status: ScoutStatus,
@@ -53,11 +60,13 @@ export function ScoutPanel({
   const tRuns = useTranslations("scouts.runs");
   const tSites = useTranslations("scouts.siteKeys");
 
-  // Hooks are parameterized by scout id (mirroring ScoutDetailPage), so an
-  // empty id while the panel is closed is harmless — no mutation fires until
-  // a button inside the open panel is clicked.
+  // Hooks are parameterized by scout id (mirroring the former ScoutDetailPage),
+  // so an empty id while the panel is closed is harmless — no mutation fires
+  // until a button inside the open panel is clicked, and the queries below
+  // are `enabled: Boolean(id)`-guarded in their hooks.
   const run = useRunScout(scout?.id ?? "");
   const update = useUpdateScout(scout?.id ?? "");
+  const stats = useScoutStats(scout?.id ?? "");
 
   const activeFilters = scout
     ? Object.entries(scout.filters).filter(
@@ -73,7 +82,7 @@ export function ScoutPanel({
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
-        className="w-full gap-6 overflow-y-auto sm:max-w-5xl"
+        className="w-full gap-6 overflow-y-auto sm:max-w-6xl"
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           returnFocusRef.current?.focus();
@@ -94,38 +103,43 @@ export function ScoutPanel({
               </Badge>
             </SheetHeader>
 
-            <dl className="flex flex-col gap-2 text-sm">
-              <div className="flex justify-between gap-4">
-                <dt className="text-muted">{t("detail.baseCv")}</dt>
-                <dd>{cvLabel}</dd>
-              </div>
-              <div className="flex justify-between gap-4">
-                <dt className="text-muted">{t("detail.sites")}</dt>
-                <dd className="text-right">
-                  {scout.targetSiteKeys.map((key) => tSites(key)).join(", ")}
-                </dd>
-              </div>
-              <div className="flex justify-between gap-4">
-                <dt className="text-muted">{t("detail.threshold")}</dt>
-                <dd>{scout.matchThreshold}</dd>
-              </div>
-              <div className="flex justify-between gap-4">
-                <dt className="text-muted">{t("detail.filters")}</dt>
-                <dd className="text-right">
-                  {activeFilters.length > 0
-                    ? activeFilters.map(([k, v]) => `${k}: ${v}`).join(", ")
-                    : t("detail.noFilters")}
-                </dd>
-              </div>
-              <div className="flex justify-between gap-4">
-                <dt className="text-muted">{t("detail.lastRun")}</dt>
-                <dd>
-                  {scout.lastRunAt
-                    ? new Date(scout.lastRunAt).toLocaleString()
-                    : t("detail.neverRun")}
-                </dd>
-              </div>
-            </dl>
+            <div className="flex flex-col gap-3 text-sm">
+              <h2 className="font-serif text-lg font-semibold">
+                {t("detail.configHeading")}
+              </h2>
+              <dl className="flex flex-col gap-2">
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted">{t("detail.baseCv")}</dt>
+                  <dd>{cvLabel}</dd>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted">{t("detail.sites")}</dt>
+                  <dd className="text-right">
+                    {scout.targetSiteKeys.map((key) => tSites(key)).join(", ")}
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted">{t("detail.threshold")}</dt>
+                  <dd>{scout.matchThreshold}</dd>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted">{t("detail.filters")}</dt>
+                  <dd className="text-right">
+                    {activeFilters.length > 0
+                      ? activeFilters.map(([k, v]) => `${k}: ${v}`).join(", ")
+                      : t("detail.noFilters")}
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-muted">{t("detail.lastRun")}</dt>
+                  <dd>
+                    {scout.lastRunAt
+                      ? new Date(scout.lastRunAt).toLocaleString()
+                      : t("detail.neverRun")}
+                  </dd>
+                </div>
+              </dl>
+            </div>
 
             {scout.status !== "ARCHIVED" && (
               <div className="flex flex-wrap gap-2">
@@ -190,13 +204,24 @@ export function ScoutPanel({
                   {t("actions.edit")}
                 </Link>
               </Button>
-              <Link
-                href={`/scouts/${scout.id}`}
-                className="text-accent underline-offset-2 hover:underline"
-              >
-                {t("panel.viewDetail")}
-              </Link>
             </div>
+
+            <div className="flex flex-col gap-3 text-sm">
+              <h2 className="font-serif text-lg font-semibold">
+                {t("detail.statsHeading")}
+              </h2>
+              <ApplicationStatsHeader
+                stats={stats.data}
+                isPending={stats.isPending}
+                isError={stats.isError}
+              />
+            </div>
+
+            <ScoutRunHistory scoutId={scout.id} />
+
+            <ScoutPatternsPanel scoutId={scout.id} />
+
+            <ScoutFinds scoutId={scout.id} />
           </>
         )}
       </SheetContent>

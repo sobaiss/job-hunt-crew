@@ -1,21 +1,26 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { http, HttpResponse } from "msw";
 import userEvent from "@testing-library/user-event";
 
 import { renderWithProviders, screen, waitFor, within } from "./test-utils";
 import { server } from "./msw/server";
+import { __getUrl, __setUrl } from "./next-navigation-mock";
 import ScoutsPage from "@/app/(app)/scouts/page";
 import NewScoutPage from "@/app/(app)/scouts/new/page";
-import ScoutDetailPage from "@/app/(app)/scouts/[id]/page";
 
-const { push } = vi.hoisted(() => ({ push: vi.fn() }));
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push }),
-  useParams: () => ({ id: "scout-1" }),
-}));
+vi.mock("next/navigation", async () => {
+  const mock = await vi.importActual<typeof import("./next-navigation-mock")>(
+    "./next-navigation-mock",
+  );
+  return mock;
+});
 
 beforeEach(() => {
-  push.mockReset();
+  __setUrl("/scouts");
+});
+
+afterEach(() => {
+  __setUrl("/scouts");
 });
 
 function cv(overrides: Record<string, unknown> = {}) {
@@ -262,6 +267,7 @@ describe("ScoutsPage — list", () => {
 
     const panel = within(await screen.findByRole("dialog"));
     expect(panel.getAllByText("Senior Backend — Remote EU").length).toBeGreaterThan(0);
+    expect(panel.getByText("Configuration")).toBeInTheDocument();
     expect(panel.getByText("Active")).toBeInTheDocument();
     expect(panel.getByText("Default CV")).toBeInTheDocument();
     expect(panel.getByText("France Travail, LinkedIn")).toBeInTheDocument();
@@ -291,6 +297,24 @@ describe("ScoutsPage — list", () => {
     await user.keyboard("{Enter}");
 
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("opens the panel for the Scout named in a `?open=` query param, then clears it from the URL (issue #92)", async () => {
+    server.use(
+      http.get("/api/scouts", () => HttpResponse.json({ scouts: [scout()] })),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+    );
+    __setUrl("/scouts?open=scout-1");
+
+    renderWithProviders(<ScoutsPage />);
+
+    const panel = within(await screen.findByRole("dialog"));
+    expect(
+      (await panel.findAllByText("Senior Backend — Remote EU")).length,
+    ).toBeGreaterThan(0);
+    await waitFor(() => expect(__getUrl()).toBe("/scouts"));
   });
 
   it("triggers Run now from the panel and surfaces the once-per-hour rate-limit error", async () => {
@@ -374,7 +398,7 @@ describe("ScoutsPage — list", () => {
     );
   });
 
-  it("includes an Edit link and a view full detail link in the panel", async () => {
+  it("includes an Edit link in the panel, with no more 'view full detail' link now that the panel absorbs it (issue #92)", async () => {
     server.use(
       http.get("/api/scouts", () => HttpResponse.json({ scouts: [scout()] })),
       http.get("/api/cv-versions", () =>
@@ -392,8 +416,8 @@ describe("ScoutsPage — list", () => {
       "/scouts/scout-1/edit",
     );
     expect(
-      panel.getByRole("link", { name: "View full detail" }),
-    ).toHaveAttribute("href", "/scouts/scout-1");
+      panel.queryByRole("link", { name: "View full detail" }),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -476,7 +500,7 @@ describe("NewScoutPage — create form", () => {
     expect(
       screen.getByText("Choose at least one job site."),
     ).toBeInTheDocument();
-    expect(push).not.toHaveBeenCalled();
+    expect(__getUrl()).toBe("/scouts");
   });
 
   it("submits the configured Scout and redirects to the list", async () => {
@@ -501,7 +525,7 @@ describe("NewScoutPage — create form", () => {
     await user.type(screen.getByLabelText("Keywords"), "python");
     await user.click(screen.getByRole("button", { name: "Create Scout" }));
 
-    await waitFor(() => expect(push).toHaveBeenCalledWith("/scouts"));
+    await waitFor(() => expect(__getUrl()).toBe("/scouts"));
     expect(received).toHaveLength(1);
     expect(received[0]).toMatchObject({
       label: "Senior Backend — Remote EU",
@@ -563,11 +587,21 @@ describe("NewScoutPage — create form", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("We couldn't save that Scout.");
-    expect(push).not.toHaveBeenCalled();
+    expect(__getUrl()).toBe("/scouts");
   });
 });
 
-describe("ScoutDetailPage — Run now + run history", () => {
+// These three describe blocks used to render the standalone `/scouts/[id]`
+// detail page directly; that route is gone (issue #92 — the panel now
+// absorbs it, superseding docs/adr/0006), so each opens the Scout panel from
+// the list instead and scopes its queries to it.
+async function openPanel(user: ReturnType<typeof userEvent.setup>) {
+  renderWithProviders(<ScoutsPage />);
+  await user.click(await screen.findByText("Senior Backend — Remote EU"));
+  return within(await screen.findByRole("dialog"));
+}
+
+describe("Scout panel — Run now + run history", () => {
   const scoutRun = (overrides: Record<string, unknown> = {}) => ({
     id: "run-1",
     scoutId: "scout-1",
@@ -591,7 +625,7 @@ describe("ScoutDetailPage — Run now + run history", () => {
   it("triggers a run and shows the run history", async () => {
     const runPosts: unknown[] = [];
     server.use(
-      http.get("/api/scouts/scout-1", () => HttpResponse.json({ scout: scout() })),
+      http.get("/api/scouts", () => HttpResponse.json({ scouts: [scout()] })),
       http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
       http.get("/api/scouts/scout-1/runs", () =>
         HttpResponse.json({ scoutRuns: runPosts.length ? [scoutRun()] : [] }),
@@ -602,20 +636,20 @@ describe("ScoutDetailPage — Run now + run history", () => {
       }),
     );
     const user = userEvent.setup();
-    renderWithProviders(<ScoutDetailPage />);
+    const panel = await openPanel(user);
 
-    expect(await screen.findByText("This Scout hasn't run yet.")).toBeInTheDocument();
+    expect(await panel.findByText("This Scout hasn't run yet.")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Run now" }));
+    await user.click(panel.getByRole("button", { name: "Run now" }));
 
     await waitFor(() => expect(runPosts).toHaveLength(1));
-    expect(await screen.findByText("Completed")).toBeInTheDocument();
-    expect(screen.getByText("2 sites queried")).toBeInTheDocument();
+    expect(await panel.findByText("Completed")).toBeInTheDocument();
+    expect(panel.getByText("2 sites queried")).toBeInTheDocument();
   });
 
   it("surfaces the once-per-hour rate limit", async () => {
     server.use(
-      http.get("/api/scouts/scout-1", () => HttpResponse.json({ scout: scout() })),
+      http.get("/api/scouts", () => HttpResponse.json({ scouts: [scout()] })),
       http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
       http.get("/api/scouts/scout-1/runs", () => HttpResponse.json({ scoutRuns: [] })),
       http.post("/api/scouts/scout-1/run", () =>
@@ -626,17 +660,17 @@ describe("ScoutDetailPage — Run now + run history", () => {
       ),
     );
     const user = userEvent.setup();
-    renderWithProviders(<ScoutDetailPage />);
+    const panel = await openPanel(user);
 
-    await user.click(await screen.findByRole("button", { name: "Run now" }));
+    await user.click(panel.getByRole("button", { name: "Run now" }));
 
-    const alert = await screen.findByRole("alert");
+    const alert = await panel.findByRole("alert");
     expect(alert).toHaveTextContent("This Scout ran within the last hour.");
   });
 
   it("surfaces the cost-bounded-matching skip counts when non-zero", async () => {
     server.use(
-      http.get("/api/scouts/scout-1", () => HttpResponse.json({ scout: scout() })),
+      http.get("/api/scouts", () => HttpResponse.json({ scouts: [scout()] })),
       http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
       http.get("/api/scouts/scout-1/runs", () =>
         HttpResponse.json({
@@ -650,15 +684,16 @@ describe("ScoutDetailPage — Run now + run history", () => {
         }),
       ),
     );
-    renderWithProviders(<ScoutDetailPage />);
+    const user = userEvent.setup();
+    const panel = await openPanel(user);
 
-    expect(await screen.findByText("3 already seen")).toBeInTheDocument();
-    expect(screen.getByText("2 not analysed — run limit")).toBeInTheDocument();
-    expect(screen.getByText("1 not analysed — daily limit")).toBeInTheDocument();
+    expect(await panel.findByText("3 already seen")).toBeInTheDocument();
+    expect(panel.getByText("2 not analysed — run limit")).toBeInTheDocument();
+    expect(panel.getByText("1 not analysed — daily limit")).toBeInTheDocument();
   });
 });
 
-describe("ScoutDetailPage — relevant finds (issue #56)", () => {
+describe("Scout panel — relevant finds (issue #56)", () => {
   function find(overrides: Record<string, unknown> = {}) {
     return {
       id: "a1",
@@ -679,9 +714,8 @@ describe("ScoutDetailPage — relevant finds (issue #56)", () => {
 
   it("lists relevant finds separately from found — low fit", async () => {
     server.use(
-      http.get("/api/scouts/scout-1", () => HttpResponse.json({ scout: scout() })),
+      http.get("/api/scouts", () => HttpResponse.json({ scouts: [scout()] })),
       http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
-      http.get("/api/scouts/scout-1/runs", () => HttpResponse.json({ scoutRuns: [] })),
       http.get("/api/scouts/scout-1/finds", () =>
         HttpResponse.json({
           relevantFinds: [find({ id: "a1", jobOffer: { id: "o1", title: "Backend Engineer", company: "Acme" } })],
@@ -689,43 +723,41 @@ describe("ScoutDetailPage — relevant finds (issue #56)", () => {
         }),
       ),
     );
-
-    renderWithProviders(<ScoutDetailPage />);
+    const user = userEvent.setup();
+    const panel = await openPanel(user);
 
     const relevant = within(
-      (await screen.findByText("Relevant finds")).closest("div") as HTMLElement,
+      (await panel.findByText("Relevant finds")).closest("div") as HTMLElement,
     );
     expect(relevant.getByText("Backend Engineer")).toBeInTheDocument();
 
     const lowFit = within(
-      screen.getByText("Found — low fit").closest("div") as HTMLElement,
+      panel.getByText("Found — low fit").closest("div") as HTMLElement,
     );
     expect(lowFit.getByText("Support Rep")).toBeInTheDocument();
   });
 
   it("shows an empty state when there are no relevant finds yet, and hides the low-fit card", async () => {
     server.use(
-      http.get("/api/scouts/scout-1", () => HttpResponse.json({ scout: scout() })),
+      http.get("/api/scouts", () => HttpResponse.json({ scouts: [scout()] })),
       http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
-      http.get("/api/scouts/scout-1/runs", () => HttpResponse.json({ scoutRuns: [] })),
       http.get("/api/scouts/scout-1/finds", () =>
         HttpResponse.json({ relevantFinds: [], lowFitFinds: [] }),
       ),
     );
+    const user = userEvent.setup();
+    const panel = await openPanel(user);
 
-    renderWithProviders(<ScoutDetailPage />);
-
-    expect(await screen.findByText("No relevant finds yet.")).toBeInTheDocument();
-    expect(screen.queryByText("Found — low fit")).not.toBeInTheDocument();
+    expect(await panel.findByText("No relevant finds yet.")).toBeInTheDocument();
+    expect(panel.queryByText("Found — low fit")).not.toBeInTheDocument();
   });
 });
 
-describe("ScoutDetailPage — stats and patterns (issue #60)", () => {
+describe("Scout panel — stats and patterns (issue #60)", () => {
   it("shows the scoped stats header", async () => {
     server.use(
-      http.get("/api/scouts/scout-1", () => HttpResponse.json({ scout: scout() })),
+      http.get("/api/scouts", () => HttpResponse.json({ scouts: [scout()] })),
       http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
-      http.get("/api/scouts/scout-1/runs", () => HttpResponse.json({ scoutRuns: [] })),
       http.get("/api/scouts/scout-1/stats", () =>
         HttpResponse.json({
           allTime: {
@@ -753,18 +785,18 @@ describe("ScoutDetailPage — stats and patterns (issue #60)", () => {
         }),
       ),
     );
+    const user = userEvent.setup();
+    const panel = await openPanel(user);
 
-    renderWithProviders(<ScoutDetailPage />);
-
-    expect(await screen.findByText("Offers discovered")).toBeInTheDocument();
-    expect(screen.getByText("40")).toBeInTheDocument();
+    expect(panel.getByText("Stats")).toBeInTheDocument();
+    expect(await panel.findByText("Offers discovered")).toBeInTheDocument();
+    expect(panel.getByText("40")).toBeInTheDocument();
   });
 
   it("ranks the patterns panel's missing skills by frequency", async () => {
     server.use(
-      http.get("/api/scouts/scout-1", () => HttpResponse.json({ scout: scout() })),
+      http.get("/api/scouts", () => HttpResponse.json({ scouts: [scout()] })),
       http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
-      http.get("/api/scouts/scout-1/runs", () => HttpResponse.json({ scoutRuns: [] })),
       http.get("/api/scouts/scout-1/patterns", () =>
         HttpResponse.json({
           patterns: [
@@ -775,18 +807,17 @@ describe("ScoutDetailPage — stats and patterns (issue #60)", () => {
         }),
       ),
     );
+    const user = userEvent.setup();
+    const panel = await openPanel(user);
 
-    renderWithProviders(<ScoutDetailPage />);
-
-    expect(await screen.findByText("Kubernetes")).toBeInTheDocument();
-    expect(screen.getByText("GraphQL")).toBeInTheDocument();
+    expect(await panel.findByText("Kubernetes")).toBeInTheDocument();
+    expect(panel.getByText("GraphQL")).toBeInTheDocument();
   });
 
   it("ranks the patterns panel's recurring weaknesses by frequency", async () => {
     server.use(
-      http.get("/api/scouts/scout-1", () => HttpResponse.json({ scout: scout() })),
+      http.get("/api/scouts", () => HttpResponse.json({ scouts: [scout()] })),
       http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
-      http.get("/api/scouts/scout-1/runs", () => HttpResponse.json({ scoutRuns: [] })),
       http.get("/api/scouts/scout-1/patterns", () =>
         HttpResponse.json({
           patterns: [],
@@ -797,30 +828,29 @@ describe("ScoutDetailPage — stats and patterns (issue #60)", () => {
         }),
       ),
     );
+    const user = userEvent.setup();
+    const panel = await openPanel(user);
 
-    renderWithProviders(<ScoutDetailPage />);
-
-    expect(await screen.findByText("Limited cloud experience")).toBeInTheDocument();
-    expect(screen.getByText("No team leadership")).toBeInTheDocument();
+    expect(await panel.findByText("Limited cloud experience")).toBeInTheDocument();
+    expect(panel.getByText("No team leadership")).toBeInTheDocument();
   });
 
   it("shows an empty state when there are no patterns yet", async () => {
     server.use(
-      http.get("/api/scouts/scout-1", () => HttpResponse.json({ scout: scout() })),
+      http.get("/api/scouts", () => HttpResponse.json({ scouts: [scout()] })),
       http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
-      http.get("/api/scouts/scout-1/runs", () => HttpResponse.json({ scoutRuns: [] })),
       http.get("/api/scouts/scout-1/patterns", () =>
         HttpResponse.json({ patterns: [], weaknesses: [] }),
       ),
     );
-
-    renderWithProviders(<ScoutDetailPage />);
+    const user = userEvent.setup();
+    const panel = await openPanel(user);
 
     expect(
-      await screen.findByText("No patterns yet — they'll appear as relevant finds accumulate."),
+      await panel.findByText("No patterns yet — they'll appear as relevant finds accumulate."),
     ).toBeInTheDocument();
     expect(
-      await screen.findByText(
+      await panel.findByText(
         "No recurring weaknesses yet — they'll appear as relevant finds accumulate.",
       ),
     ).toBeInTheDocument();

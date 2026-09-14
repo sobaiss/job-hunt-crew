@@ -16,21 +16,25 @@ export const handlers = [
   // the Scout list; default to none so suites that don't care about Scouts
   // don't have to stub it.
   http.get("/api/scouts", () => HttpResponse.json({ scouts: [] })),
-  // The Scout detail page's relevant-finds / low-fit lists (issue #56);
-  // default to empty so suites exercising other parts of the page (run
-  // history, actions) don't have to stub it.
+  // The Scout panel's relevant-finds / low-fit lists (issue #56); default to
+  // empty so suites exercising other parts of the panel (run history,
+  // actions) don't have to stub it.
   http.get("/api/scouts/:id/finds", () =>
     HttpResponse.json({ relevantFinds: [], lowFitFinds: [] }),
   ),
-  // The stats header (issue #60) on both the Applications view and a Scout's
-  // detail page; default to all-zero so suites exercising other parts of
-  // those pages don't have to stub it.
+  // The stats header (issue #60) on both the Applications view and the Scout
+  // panel; default to all-zero so suites exercising other parts of those
+  // pages don't have to stub it.
   http.get("/api/applications/stats", () => HttpResponse.json(ZERO_APPLICATION_STATS)),
   http.get("/api/scouts/:id/stats", () => HttpResponse.json(ZERO_APPLICATION_STATS)),
   // The "patterns across your matches" panel (issue #60); default to none.
   http.get("/api/scouts/:id/patterns", () =>
     HttpResponse.json({ patterns: [], weaknesses: [] }),
   ),
+  // The Scout panel's run history (issue #92, folded in from the former
+  // `/scouts/[id]` detail page); default to none so suites exercising other
+  // parts of the panel don't have to stub it.
+  http.get("/api/scouts/:id/runs", () => HttpResponse.json({ scoutRuns: [] })),
   // The Analysis detail page's GeneratedDocumentsPanel and "Apply" action
   // (issue #59) check for already-generated documents on load; default to
   // none so suites exercising other parts of the page don't have to stub it.

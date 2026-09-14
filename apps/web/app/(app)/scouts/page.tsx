@@ -1,7 +1,8 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 
 import { useScouts, type ScoutStatus } from "@/hooks/use-scouts";
@@ -42,20 +43,42 @@ function statusVariant(
   return "secondary";
 }
 
-export default function ScoutsPage() {
+function ScoutsPageContent() {
   const t = useTranslations("scouts");
   const { data: scouts, isPending, isError } = useScouts();
   const { data: cvVersions } = useCvVersions();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   // Archived Scouts are hidden by default (issue #90); the toggle reveals
   // them again, mirroring cv-versions' showSuperseded checkbox. The toggle
   // doesn't affect sorting — filtering happens before sortScouts runs.
   const [showArchived, setShowArchived] = useState(false);
   const [sort, setSort] = useState<ScoutsSortState>(DEFAULT_SCOUTS_SORT);
-  // The Scout panel's open Scout is local state (an id), not URL-synced —
-  // same pattern as CvVersionsPage's `panelId` (issue #81) — and looked up
-  // against the live fetched list each render, not a snapshot.
-  const [panelId, setPanelId] = useState<string | null>(null);
+  // The Scout panel's open Scout is local state (an id), same pattern as
+  // CvVersionsPage's `panelId` (issue #81) — looked up against the live
+  // fetched list each render, not a snapshot, so it resolves even for an
+  // Archived Scout that `visibleScouts` is currently hiding. Not URL-synced
+  // in general, but a `?open=<id>` link elsewhere in the app (the Edit-Scout
+  // page, the post-edit redirect, an Application's "view Scout" back-link —
+  // issue #92, now that `/scouts/[id]` is gone) seeds the initial value from
+  // whatever `?open=` the page was reached with, read once via the lazy
+  // initializer rather than an effect + setState.
+  const [panelId, setPanelId] = useState<string | null>(() =>
+    searchParams.get("open"),
+  );
   const panelTriggerRef = useRef<HTMLElement | null>(null);
+
+  // Strips a consumed `?open=` from the URL so it doesn't reopen the panel
+  // again on a later visit (e.g. navigating back). Only a router call, no
+  // setState, since the initial `panelId` above already captured the value.
+  useEffect(() => {
+    if (searchParams.get("open")) {
+      router.replace(pathname, { scroll: false });
+    }
+    // Runs once, against whatever `?open=` the page mounted with.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const toggleSort = (column: ScoutsSortColumn) => {
     setSort((current) =>
@@ -193,5 +216,13 @@ export default function ScoutsPage() {
         returnFocusRef={panelTriggerRef}
       />
     </main>
+  );
+}
+
+export default function ScoutsPage() {
+  return (
+    <Suspense fallback={null}>
+      <ScoutsPageContent />
+    </Suspense>
   );
 }

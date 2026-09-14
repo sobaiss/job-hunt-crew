@@ -34,7 +34,7 @@ export default function EditScoutPage() {
 
       {scout && <ScoutForm scout={scout} />}
 
-      <Link href={`/scouts/${params.id}`} className="text-sm text-accent underline">
+      <Link href={`/scouts?open=${params.id}`} className="text-sm text-accent underline">
         {t("detail.back")}
       </Link>
     </main>

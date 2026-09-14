@@ -68,7 +68,7 @@ export default function ApplicationDetailPage() {
             {t("detail.viewAnalysis")}
           </Link>
           {application.scoutId && (
-            <Link href={`/scouts/${application.scoutId}`} className="text-accent hover:underline">
+            <Link href={`/scouts?open=${application.scoutId}`} className="text-accent hover:underline">
               {t("detail.viewScout")}
             </Link>
           )}

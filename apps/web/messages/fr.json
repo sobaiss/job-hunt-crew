@@ -408,9 +408,6 @@
       "edit": "Modifier",
       "updateError": "Impossible de mettre à jour ce Scout. Veuillez réessayer."
     },
-    "panel": {
-      "viewDetail": "Voir le détail complet"
-    },
     "form": {
       "newHeading": "Nouveau Scout",
       "editHeading": "Modifier le Scout",
@@ -433,6 +430,7 @@
       "loading": "Chargement de ce Scout",
       "loadError": "Impossible de charger ce Scout. Veuillez réessayer.",
       "configHeading": "Configuration",
+      "statsHeading": "Statistiques",
       "baseCv": "CV de base",
       "sites": "Sites d'emploi",
       "threshold": "Seuil de pertinence",
