@@ -3,12 +3,16 @@ import json
 import uuid
 from datetime import UTC, datetime
 
+from io import BytesIO
+
 import pytest
+from docx import Document as DocxDocument
 from fastapi.testclient import TestClient
 from py_db.models import (
     Analysis,
     Analysisstatus,
     CVVersion,
+    Cvstylestatus,
     GeneratedDocument,
     Generateddocumentstatus,
     JobOffer,
@@ -351,6 +355,129 @@ async def _mark_document_ready(document_id: str, markdown_content: str) -> None:
             await session.commit()
     finally:
         await engine.dispose()
+
+
+async def _mark_cv_version_style(
+    cv_version_id: str, *, style_status: Cvstylestatus, style_profile: dict | None
+) -> None:
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            cv_version = await session.get(CVVersion, cv_version_id)
+            cv_version.styleStatus = style_status
+            cv_version.styleProfile = style_profile
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+
+_TAILORED_CV_STYLE_PROFILE = {
+    "layoutArchetype": "SINGLE_COLUMN",
+    "fonts": {"name": "Georgia", "family": "serif"},
+    "accentColor": "#112233",
+    "margins": {"top": 40, "bottom": 40, "left": 40, "right": 40},
+    "onePageFit": True,
+    "photoAssetRef": None,
+    "sections": {
+        "EXPERIENCE": {
+            "headingTreatment": {"font": {"name": "Impact", "family": "sans-serif"}, "color": "#FF0000"},
+            "region": None,
+        }
+    },
+}
+
+
+def test_get_generated_document_download_applies_style_profile_to_tailored_cv_docx(user_id):
+    with TestClient(app) as client:
+        cv = _make_cv_version(client, user_id)
+        analysis_id = asyncio.run(
+            _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.COMPLETED)
+        )
+        created = client.post(
+            f"/v1/analyses/{analysis_id}/generated-documents", headers=_headers(user_id)
+        ).json()
+        tailored_cv_id = next(
+            doc["id"] for doc in created["generatedDocuments"] if doc["type"] == "TAILORED_CV"
+        )
+        asyncio.run(
+            _mark_document_ready(
+                tailored_cv_id, "## Experience\n<!-- SectionType: EXPERIENCE -->\n\nDid things.\n"
+            )
+        )
+        asyncio.run(
+            _mark_cv_version_style(
+                cv, style_status=Cvstylestatus.EXTRACTED, style_profile=_TAILORED_CV_STYLE_PROFILE
+            )
+        )
+
+        response = client.get(
+            f"/v1/generated-documents/{tailored_cv_id}/download?format=docx",
+            headers=_headers(user_id),
+        )
+        assert response.status_code == 200
+        document = DocxDocument(BytesIO(response.content))
+        heading_paragraph = next(p for p in document.paragraphs if p.text == "Experience")
+        assert heading_paragraph.runs[0].font.name == "Impact"
+        assert str(heading_paragraph.runs[0].font.color.rgb) == "FF0000"
+
+
+def test_get_generated_document_download_falls_back_to_generic_template_without_extracted_style(
+    user_id,
+):
+    with TestClient(app) as client:
+        cv = _make_cv_version(client, user_id)
+        analysis_id = asyncio.run(
+            _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.COMPLETED)
+        )
+        created = client.post(
+            f"/v1/analyses/{analysis_id}/generated-documents", headers=_headers(user_id)
+        ).json()
+        tailored_cv_id = next(
+            doc["id"] for doc in created["generatedDocuments"] if doc["type"] == "TAILORED_CV"
+        )
+        asyncio.run(
+            _mark_document_ready(
+                tailored_cv_id, "## Experience\n<!-- SectionType: EXPERIENCE -->\n\nDid things.\n"
+            )
+        )
+        # cv_version.styleStatus stays PENDING (never extracted) — rendering
+        # must fall back to the generic template rather than erroring.
+
+        response = client.get(
+            f"/v1/generated-documents/{tailored_cv_id}/download?format=docx",
+            headers=_headers(user_id),
+        )
+        assert response.status_code == 200
+        document = DocxDocument(BytesIO(response.content))
+        heading_paragraph = next(p for p in document.paragraphs if p.text == "Experience")
+        assert heading_paragraph.runs[0].font.name is None
+
+
+def test_get_generated_document_download_strips_section_type_tag(user_id):
+    with TestClient(app) as client:
+        cv = _make_cv_version(client, user_id)
+        analysis_id = asyncio.run(
+            _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.COMPLETED)
+        )
+        created = client.post(
+            f"/v1/analyses/{analysis_id}/generated-documents", headers=_headers(user_id)
+        ).json()
+        tailored_cv_id = next(
+            doc["id"] for doc in created["generatedDocuments"] if doc["type"] == "TAILORED_CV"
+        )
+        asyncio.run(
+            _mark_document_ready(
+                tailored_cv_id, "## Experience\n<!-- SectionType: EXPERIENCE -->\n\nDid things.\n"
+            )
+        )
+
+        response = client.get(
+            f"/v1/generated-documents/{tailored_cv_id}/download?format=txt",
+            headers=_headers(user_id),
+        )
+        assert response.status_code == 200
+        assert "SectionType" not in response.content.decode("utf-8")
 
 
 def test_get_generated_document_download_defaults_to_pdf(user_id):

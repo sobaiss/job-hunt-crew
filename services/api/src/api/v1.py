@@ -14,6 +14,7 @@ from py_db.models import (
     CVVersion,
     Cvconversionstatus,
     Cvfiletype,
+    Cvstylestatus,
     GeneratedDocument,
     Generateddocumentstatus,
     Generateddocumenttype,
@@ -2038,12 +2039,20 @@ _GENERATED_DOCUMENT_CONTENT_TYPES: dict[GeneratedDocumentFormat, str] = {
 
 
 def _render_generated_document(
-    *, format: GeneratedDocumentFormat, title: str, markdown_content: str
+    *,
+    format: GeneratedDocumentFormat,
+    title: str,
+    markdown_content: str,
+    style_profile: dict | None,
 ) -> bytes:
     if format == "pdf":
-        return render_markdown_to_pdf(title=title, markdown_content=markdown_content)
+        return render_markdown_to_pdf(
+            title=title, markdown_content=markdown_content, style_profile=style_profile
+        )
     if format == "docx":
-        return render_markdown_to_docx(title=title, markdown_content=markdown_content)
+        return render_markdown_to_docx(
+            title=title, markdown_content=markdown_content, style_profile=style_profile
+        )
     if format == "md":
         return markdown_content.encode("utf-8")
     return render_markdown_to_text(markdown_content=markdown_content).encode("utf-8")
@@ -2070,8 +2079,22 @@ async def get_generated_document_download(
     label = _GENERATED_DOCUMENT_LABELS[document.type]
     job_offer = await session.get(JobOffer, document.jobOfferId)
     title = f"{label} — {job_offer.title}" if job_offer and job_offer.title else label
+
+    # A StyleProfile only ever styles a TAILORED_CV rendering (#98) — a
+    # COVER_LETTER, or a TAILORED_CV whose CVVersion never reached
+    # styleStatus = EXTRACTED (e.g. an MD/TXT upload, or a failed
+    # extraction), falls back to today's generic template unchanged.
+    style_profile: dict | None = None
+    if document.type == Generateddocumenttype.TAILORED_CV:
+        cv_version = await session.get(CVVersion, document.cvVersionId)
+        if cv_version is not None and cv_version.styleStatus == Cvstylestatus.EXTRACTED:
+            style_profile = cv_version.styleProfile
+
     content = _render_generated_document(
-        format=format, title=title, markdown_content=document.markdownContent
+        format=format,
+        title=title,
+        markdown_content=document.markdownContent,
+        style_profile=style_profile,
     )
 
     filename = f"{label.lower().replace(' ', '-')}-{document.id}.{format}"

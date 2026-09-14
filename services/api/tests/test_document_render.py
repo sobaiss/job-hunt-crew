@@ -1,3 +1,7 @@
+from io import BytesIO
+
+from docx import Document
+
 from api.document_render import (
     render_markdown_to_docx,
     render_markdown_to_pdf,
@@ -65,3 +69,72 @@ def test_render_markdown_to_text_leaves_bullets_as_is():
 
 def test_render_markdown_to_text_handles_empty_content():
     assert render_markdown_to_text(markdown_content="") == ""
+
+
+def test_render_markdown_to_text_strips_section_type_comment():
+    markdown_content = "## Experience\n<!-- SectionType: EXPERIENCE -->\n\nDid things.\n"
+    text = render_markdown_to_text(markdown_content=markdown_content)
+    assert "SectionType" not in text
+    assert "Experience" in text
+    assert "Did things." in text
+
+
+def test_render_markdown_to_docx_strips_section_type_comment():
+    markdown_content = "## Experience\n<!-- SectionType: EXPERIENCE -->\n\nDid things.\n"
+    docx_bytes = render_markdown_to_docx(title="Tailored CV", markdown_content=markdown_content)
+    document = Document(BytesIO(docx_bytes))
+    text = "\n".join(p.text for p in document.paragraphs)
+    assert "SectionType" not in text
+    assert "Experience" in text
+
+
+_STYLE_PROFILE = {
+    "layoutArchetype": "SINGLE_COLUMN",
+    "fonts": {"name": "Georgia", "family": "serif"},
+    "accentColor": "#112233",
+    "margins": {"top": 40, "bottom": 40, "left": 40, "right": 40},
+    "onePageFit": True,
+    "photoAssetRef": None,
+    "sections": {
+        "EXPERIENCE": {
+            "headingTreatment": {"font": {"name": "Impact", "family": "sans-serif"}, "color": "#FF0000"},
+            "region": None,
+        }
+    },
+}
+
+
+def test_render_markdown_to_docx_applies_style_profile_heading_treatment():
+    markdown_content = "## Experience\n<!-- SectionType: EXPERIENCE -->\n\nDid things.\n"
+    docx_bytes = render_markdown_to_docx(
+        title="Tailored CV", markdown_content=markdown_content, style_profile=_STYLE_PROFILE
+    )
+    document = Document(BytesIO(docx_bytes))
+    heading_paragraph = next(p for p in document.paragraphs if p.text == "Experience")
+    run = heading_paragraph.runs[0]
+    assert run.font.name == "Impact"
+    assert str(run.font.color.rgb) == "FF0000"
+
+    body_paragraph = next(p for p in document.paragraphs if p.text == "Did things.")
+    body_run = body_paragraph.runs[0]
+    assert body_run.font.name == "Georgia"
+    assert str(body_run.font.color.rgb) == "112233"
+
+
+def test_render_markdown_to_docx_ignores_style_profile_for_sidebar_main():
+    style_profile = {**_STYLE_PROFILE, "layoutArchetype": "SIDEBAR_MAIN"}
+    markdown_content = "## Experience\n<!-- SectionType: EXPERIENCE -->\n\nDid things.\n"
+    docx_bytes = render_markdown_to_docx(
+        title="Tailored CV", markdown_content=markdown_content, style_profile=style_profile
+    )
+    document = Document(BytesIO(docx_bytes))
+    body_paragraph = next(p for p in document.paragraphs if p.text == "Did things.")
+    assert body_paragraph.runs[0].font.name is None
+
+
+def test_render_markdown_to_pdf_applies_style_profile_without_error():
+    markdown_content = "## Experience\n<!-- SectionType: EXPERIENCE -->\n\nDid things.\n"
+    pdf_bytes = render_markdown_to_pdf(
+        title="Tailored CV", markdown_content=markdown_content, style_profile=_STYLE_PROFILE
+    )
+    assert pdf_bytes.startswith(b"%PDF")
