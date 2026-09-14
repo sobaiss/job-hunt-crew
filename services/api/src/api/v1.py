@@ -3,9 +3,9 @@ import math
 import os
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from py_db.models import (
     Analysis,
     Analysisstatus,
@@ -42,7 +42,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from .db import get_session
-from .pdf_render import render_markdown_to_pdf
+from .document_render import (
+    render_markdown_to_docx,
+    render_markdown_to_pdf,
+    render_markdown_to_text,
+)
 from .s3_client import S3_BUCKET, cv_file_key, make_s3_client
 from .sqs_client import (
     ANALYSIS_INTAKE_QUEUE_URL,
@@ -2023,15 +2027,38 @@ _GENERATED_DOCUMENT_LABELS = {
     Generateddocumenttype.TAILORED_CV: "Tailored CV",
 }
 
+GeneratedDocumentFormat = Literal["pdf", "docx", "md", "txt"]
 
-@router.get("/generated-documents/{document_id}/pdf")
-async def get_generated_document_pdf(
+_GENERATED_DOCUMENT_CONTENT_TYPES: dict[GeneratedDocumentFormat, str] = {
+    "pdf": "application/pdf",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "md": "text/markdown; charset=utf-8",
+    "txt": "text/plain; charset=utf-8",
+}
+
+
+def _render_generated_document(
+    *, format: GeneratedDocumentFormat, title: str, markdown_content: str
+) -> bytes:
+    if format == "pdf":
+        return render_markdown_to_pdf(title=title, markdown_content=markdown_content)
+    if format == "docx":
+        return render_markdown_to_docx(title=title, markdown_content=markdown_content)
+    if format == "md":
+        return markdown_content.encode("utf-8")
+    return render_markdown_to_text(markdown_content=markdown_content).encode("utf-8")
+
+
+@router.get("/generated-documents/{document_id}/download")
+async def get_generated_document_download(
     document_id: str,
+    format: GeneratedDocumentFormat = Query("pdf"),
     user_id: str = Depends(require_user_id),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
-    """Renders a READY GeneratedDocument's Markdown to PDF on demand (no PDF
-    is stored — see pdf_render.render_markdown_to_pdf).
+    """Renders a READY GeneratedDocument's Markdown to the requested format on
+    demand (no rendition is stored — see document_render.py). `format`
+    defaults to `pdf` for backward-compatible callers.
     """
     document = await session.get(GeneratedDocument, document_id)
     if document is None:
@@ -2043,12 +2070,14 @@ async def get_generated_document_pdf(
     label = _GENERATED_DOCUMENT_LABELS[document.type]
     job_offer = await session.get(JobOffer, document.jobOfferId)
     title = f"{label} — {job_offer.title}" if job_offer and job_offer.title else label
-    pdf_bytes = render_markdown_to_pdf(title=title, markdown_content=document.markdownContent)
+    content = _render_generated_document(
+        format=format, title=title, markdown_content=document.markdownContent
+    )
 
-    filename = f"{label.lower().replace(' ', '-')}-{document.id}.pdf"
+    filename = f"{label.lower().replace(' ', '-')}-{document.id}.{format}"
     return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
+        content=content,
+        media_type=_GENERATED_DOCUMENT_CONTENT_TYPES[format],
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 

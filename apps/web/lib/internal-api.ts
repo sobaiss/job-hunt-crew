@@ -31,13 +31,19 @@ export async function proxyToApi(path: string, init?: RequestInit): Promise<Resp
       headers: { "Content-Type": "application/json" },
     });
   }
-  // arrayBuffer (not text) so binary bodies (e.g. the PDF-on-demand route)
+  // arrayBuffer (not text) so binary bodies (e.g. the document-download route)
   // pass through byte-for-byte instead of being mangled by a UTF-8 round-trip.
   const body = await res.arrayBuffer();
-  return new Response(body, {
-    status: res.status,
-    headers: { "Content-Type": res.headers.get("Content-Type") || "application/json" },
-  });
+  const headers: Record<string, string> = {
+    "Content-Type": res.headers.get("Content-Type") || "application/json",
+  };
+  // Forwarded so the browser picks up the per-format filename/extension the
+  // document-download route sets (see generated-documents-panel.tsx).
+  const contentDisposition = res.headers.get("Content-Disposition");
+  if (contentDisposition) {
+    headers["Content-Disposition"] = contentDisposition;
+  }
+  return new Response(body, { status: res.status, headers });
 }
 
 export async function upsertUser(params: {

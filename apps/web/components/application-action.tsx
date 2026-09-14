@@ -51,7 +51,7 @@ export function ApplicationAction({
   function apply() {
     window.open(sourceUrl, "_blank", "noopener,noreferrer");
     for (const id of readyDocumentIds) {
-      window.open(`/api/generated-documents/${id}/pdf`, "_blank", "noopener,noreferrer");
+      window.open(`/api/generated-documents/${id}/download`, "_blank", "noopener,noreferrer");
     }
     markAsApplied.mutate(analysisId);
   }

@@ -353,7 +353,7 @@ async def _mark_document_ready(document_id: str, markdown_content: str) -> None:
         await engine.dispose()
 
 
-def test_get_generated_document_pdf_returns_rendered_pdf_bytes(user_id):
+def test_get_generated_document_download_defaults_to_pdf(user_id):
     with TestClient(app) as client:
         cv = _make_cv_version(client, user_id)
         analysis_id = asyncio.run(
@@ -366,14 +366,60 @@ def test_get_generated_document_pdf_returns_rendered_pdf_bytes(user_id):
         asyncio.run(_mark_document_ready(document_id, "# Cover Letter\n\nDear hiring manager."))
 
         response = client.get(
-            f"/v1/generated-documents/{document_id}/pdf", headers=_headers(user_id)
+            f"/v1/generated-documents/{document_id}/download", headers=_headers(user_id)
         )
         assert response.status_code == 200
         assert response.headers["content-type"] == "application/pdf"
         assert response.content.startswith(b"%PDF")
 
 
-def test_get_generated_document_pdf_rejects_a_document_not_yet_ready(user_id):
+@pytest.mark.parametrize(
+    ("format", "content_type", "signature_check"),
+    [
+        ("pdf", "application/pdf", lambda content: content.startswith(b"%PDF")),
+        (
+            "docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            lambda content: content.startswith(b"PK"),
+        ),
+        (
+            "md",
+            "text/markdown; charset=utf-8",
+            lambda content: content.decode("utf-8") == "# Cover Letter\n\nDear hiring manager.",
+        ),
+        (
+            "txt",
+            "text/plain; charset=utf-8",
+            lambda content: "# Cover Letter" not in content.decode("utf-8"),
+        ),
+    ],
+)
+def test_get_generated_document_download_supports_every_format(
+    user_id, format, content_type, signature_check
+):
+    with TestClient(app) as client:
+        cv = _make_cv_version(client, user_id)
+        analysis_id = asyncio.run(
+            _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.COMPLETED)
+        )
+        created = client.post(
+            f"/v1/analyses/{analysis_id}/generated-documents", headers=_headers(user_id)
+        ).json()
+        document_id = created["generatedDocuments"][0]["id"]
+        asyncio.run(_mark_document_ready(document_id, "# Cover Letter\n\nDear hiring manager."))
+
+        response = client.get(
+            f"/v1/generated-documents/{document_id}/download?format={format}",
+            headers=_headers(user_id),
+        )
+        assert response.status_code == 200
+        assert response.headers["content-type"] == content_type
+        assert response.headers["content-disposition"].endswith(f'.{format}"')
+        assert signature_check(response.content)
+
+
+@pytest.mark.parametrize("format", ["pdf", "docx", "md", "txt"])
+def test_get_generated_document_download_rejects_a_document_not_yet_ready(user_id, format):
     with TestClient(app) as client:
         cv = _make_cv_version(client, user_id)
         analysis_id = asyncio.run(
@@ -385,12 +431,14 @@ def test_get_generated_document_pdf_rejects_a_document_not_yet_ready(user_id):
         document_id = created["generatedDocuments"][0]["id"]
 
         response = client.get(
-            f"/v1/generated-documents/{document_id}/pdf", headers=_headers(user_id)
+            f"/v1/generated-documents/{document_id}/download?format={format}",
+            headers=_headers(user_id),
         )
         assert response.status_code == 400
 
 
-def test_get_generated_document_pdf_is_user_scoped(user_id):
+@pytest.mark.parametrize("format", ["pdf", "docx", "md", "txt"])
+def test_get_generated_document_download_is_user_scoped(user_id, format):
     other = asyncio.run(_create_user())
     try:
         with TestClient(app) as client:
@@ -405,7 +453,8 @@ def test_get_generated_document_pdf_is_user_scoped(user_id):
             asyncio.run(_mark_document_ready(document_id, "Some content."))
 
             response = client.get(
-                f"/v1/generated-documents/{document_id}/pdf", headers=_headers(other)
+                f"/v1/generated-documents/{document_id}/download?format={format}",
+                headers=_headers(other),
             )
         assert response.status_code == 404
     finally:

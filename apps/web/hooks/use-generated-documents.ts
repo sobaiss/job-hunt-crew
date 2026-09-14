@@ -6,12 +6,17 @@ import { bff } from "@/lib/bff-client";
 
 // "Generate documents" on a relevant find (issue #58, Scout slice 6):
 // creates a COVER_LETTER + a TAILORED_CV GeneratedDocument for a completed
-// Analysis and polls each until it leaves PENDING/GENERATING. The PDF
-// download itself is a plain link to /api/generated-documents/{id}/pdf
+// Analysis and polls each until it leaves PENDING/GENERATING. The download
+// itself is a plain link to /api/generated-documents/{id}/download?format=...
 // (see generated-documents-panel.tsx), not a hook.
 
 export type GeneratedDocumentType = "COVER_LETTER" | "TAILORED_CV";
 export type GeneratedDocumentStatus = "PENDING" | "GENERATING" | "READY" | "FAILED";
+
+// Issue #95: every READY GeneratedDocument can be downloaded in any of these
+// formats, all rendered on demand from the same generic template.
+export const GENERATED_DOCUMENT_FORMATS = ["pdf", "docx", "md", "txt"] as const;
+export type GeneratedDocumentFormat = (typeof GENERATED_DOCUMENT_FORMATS)[number];
 
 export type GeneratedDocument = {
   id: string;

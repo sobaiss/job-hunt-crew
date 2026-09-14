@@ -1383,10 +1383,78 @@ describe("AnalysisDetailPage", () => {
     expect(await screen.findByText("Dear Hiring Manager, ...")).toBeInTheDocument();
     expect(screen.getByText("# Jane Doe tailored")).toBeInTheDocument();
 
-    const downloadLinks = screen.getAllByRole("link", { name: /download pdf/i });
+    const downloadLinks = screen.getAllByRole("link", { name: /^download$/i });
     expect(downloadLinks).toHaveLength(2);
-    expect(downloadLinks[0]).toHaveAttribute("href", "/api/generated-documents/gd-cl/pdf");
-    expect(downloadLinks[1]).toHaveAttribute("href", "/api/generated-documents/gd-cv/pdf");
+    expect(downloadLinks[0]).toHaveAttribute(
+      "href",
+      "/api/generated-documents/gd-cl/download?format=pdf",
+    );
+    expect(downloadLinks[1]).toHaveAttribute(
+      "href",
+      "/api/generated-documents/gd-cv/download?format=pdf",
+    );
+  });
+
+  it("lets each document card pick its own download format independently", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses/a1", () => HttpResponse.json({ analysis: detail() })),
+      http.post("/api/analyses/a1/generated-documents", () =>
+        HttpResponse.json({
+          generatedDocuments: [
+            { id: "gd-cl", type: "COVER_LETTER", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
+            { id: "gd-cv", type: "TAILORED_CV", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
+          ],
+        }),
+      ),
+      http.get("/api/generated-documents/gd-cl", () =>
+        HttpResponse.json({
+          generatedDocument: {
+            id: "gd-cl",
+            type: "COVER_LETTER",
+            analysisId: "a1",
+            status: "READY",
+            markdownContent: "Dear Hiring Manager, ...",
+            errorMessage: null,
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+          },
+        }),
+      ),
+      http.get("/api/generated-documents/gd-cv", () =>
+        HttpResponse.json({
+          generatedDocument: {
+            id: "gd-cv",
+            type: "TAILORED_CV",
+            analysisId: "a1",
+            status: "READY",
+            markdownContent: "# Jane Doe tailored",
+            errorMessage: null,
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+          },
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Generate documents" }));
+    await screen.findByText("Dear Hiring Manager, ...");
+
+    const formatSelects = screen.getAllByRole("combobox");
+    expect(formatSelects).toHaveLength(2);
+    await user.selectOptions(formatSelects[0]!, "docx");
+
+    const downloadLinks = screen.getAllByRole("link", { name: /^download$/i });
+    expect(downloadLinks[0]).toHaveAttribute(
+      "href",
+      "/api/generated-documents/gd-cl/download?format=docx",
+    );
+    expect(downloadLinks[1]).toHaveAttribute(
+      "href",
+      "/api/generated-documents/gd-cv/download?format=pdf",
+    );
   });
 
   it("shows a Download both action once both documents are ready, downloading both PDFs", async () => {
@@ -1444,12 +1512,12 @@ describe("AnalysisDetailPage", () => {
     await user.click(await screen.findByRole("button", { name: "Download both" }));
 
     expect(openSpy).toHaveBeenCalledWith(
-      "/api/generated-documents/gd-cl/pdf",
+      "/api/generated-documents/gd-cl/download?format=pdf",
       "_blank",
       "noopener,noreferrer",
     );
     expect(openSpy).toHaveBeenCalledWith(
-      "/api/generated-documents/gd-cv/pdf",
+      "/api/generated-documents/gd-cv/download?format=pdf",
       "_blank",
       "noopener,noreferrer",
     );
@@ -1820,12 +1888,12 @@ describe("AnalysisDetailPage", () => {
       "noopener,noreferrer",
     );
     expect(openSpy).toHaveBeenCalledWith(
-      "/api/generated-documents/gd-cl/pdf",
+      "/api/generated-documents/gd-cl/download",
       "_blank",
       "noopener,noreferrer",
     );
     expect(openSpy).toHaveBeenCalledWith(
-      "/api/generated-documents/gd-cv/pdf",
+      "/api/generated-documents/gd-cv/download",
       "_blank",
       "noopener,noreferrer",
     );

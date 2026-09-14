@@ -114,6 +114,7 @@ dependencies = [
     { name = "fpdf2" },
     { name = "py-db" },
     { name = "pydantic" },
+    { name = "python-docx" },
     { name = "uvicorn" },
 ]
 
@@ -131,6 +132,7 @@ requires-dist = [
     { name = "fpdf2", specifier = ">=2.7" },
     { name = "py-db", editable = "packages/py-db" },
     { name = "pydantic", specifier = ">=2.0" },
+    { name = "python-docx", specifier = ">=1.1" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]
 
