@@ -4,7 +4,7 @@ from enum import Enum
 from io import BytesIO
 
 from docx import Document
-from docx.shared import RGBColor
+from docx.shared import Pt, RGBColor
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
 from py_db.section_type import SectionType
@@ -13,6 +13,28 @@ _MARGIN_MM = 20
 _BODY_FONT_SIZE = 11
 _HEADING_FONT_SIZE = 14
 _TITLE_FONT_SIZE = 16
+
+# #100: when a StyleProfile's `onePageFit` is set, PDF rendering tries these
+# (margin_mm, font_scale) levels in order — from the normal template down to
+# a bounded, still-readable floor — and stops at the first level that keeps
+# the render to one page. If even the floor doesn't fit, the floor render is
+# used as-is and the content is allowed to spill onto a second page.
+_MARGIN_FLOOR_MM = 12
+_FONT_SCALE_FLOOR = 0.85
+_PDF_ONE_PAGE_FIT_LEVELS = [(_MARGIN_MM, 1.0), (16, 0.94), (_MARGIN_FLOOR_MM, _FONT_SCALE_FLOOR)]
+
+# DOCX has no page-layout engine (same limitation noted in
+# style_profile.py's DOCX_ONE_PAGE_CHAR_BUDGET), so "does this spill past one
+# page" is approximated by the same character-count proxy rather than a real
+# page count. Crossing the budget triggers the one bounded reduction step
+# below (margins down to a fixed floor, explicit font sizes at
+# _FONT_SCALE_FLOOR) — there's no finer-grained ladder to walk since there's
+# no measurement to walk it against.
+_DOCX_ONE_PAGE_CHAR_BUDGET = 3500
+_DOCX_MARGIN_FLOOR_PT = 36
+_DOCX_TITLE_FONT_SIZE = 16
+_DOCX_HEADING1_FONT_SIZE = 14
+_DOCX_HEADING2_FONT_SIZE = 12
 
 # CvTailoringAgent (#97) tags every heading it writes with this HTML comment,
 # on its own line right below the heading. It must never reach a
@@ -25,10 +47,22 @@ _SECTION_TYPE_COMMENT_RE = re.compile(r"<!--\s*SectionType:\s*(\w+)\s*-->")
 _FONT_FAMILY_TO_PDF_FONT = {"serif": "Times", "sans-serif": "Helvetica", "monospace": "Courier"}
 
 # Word can render an arbitrary font by name (falling back at open-time if the
-# reader doesn't have it installed) so, unlike PDF, the real extracted name is
-# used directly; family is only a fallback when no name was captured. Smarter
-# substitution for fonts outside a curated cross-platform set is #100's scope.
+# reader doesn't have it installed), but that fallback is an unpredictable
+# substitute picked by whichever reader opens the file. So a real extracted
+# name is only used directly when it's in this small curated set known to be
+# available cross-platform; any other name (however common on the machine it
+# was extracted from) is replaced by its family's entry here instead (#100).
 _FONT_FAMILY_TO_DOCX_FONT = {"serif": "Times New Roman", "sans-serif": "Arial", "monospace": "Courier New"}
+_CURATED_DOCX_FONTS = {"Arial", "Times New Roman", "Courier New", "Georgia", "Calibri", "Verdana"}
+
+
+def _docx_font_name(font_descriptor: dict | None) -> str | None:
+    if not font_descriptor:
+        return None
+    name = font_descriptor.get("name")
+    if name and name in _CURATED_DOCX_FONTS:
+        return name
+    return _FONT_FAMILY_TO_DOCX_FONT.get(font_descriptor.get("family"))
 
 
 class _LineKind(Enum):
@@ -124,6 +158,67 @@ def _heading_treatment(style_profile: dict, section_type: SectionType | None) ->
     return style_profile.get("sections", {}).get(section_type.value, {}).get("headingTreatment")
 
 
+def _render_pdf(
+    *, title: str, lines: list[_Line], profile: dict | None, margin_mm: float, font_scale: float
+) -> FPDF:
+    body_font = _FONT_FAMILY_TO_PDF_FONT.get(
+        (profile or {}).get("fonts", {}).get("family"), "Helvetica"
+    )
+    body_color = _hex_to_rgb((profile or {}).get("accentColor")) or (0, 0, 0)
+
+    pdf = FPDF(format="A4")
+    pdf.set_auto_page_break(auto=True, margin=margin_mm)
+    pdf.set_margins(margin_mm, margin_mm, margin_mm)
+    pdf.add_page()
+
+    pdf.set_font("Helvetica", style="B", size=round(_TITLE_FONT_SIZE * font_scale))
+    _block(pdf, 10 * font_scale, _latin1_safe(title))
+    pdf.ln(4 * font_scale)
+
+    for line in lines:
+        if line.kind is _LineKind.BLANK:
+            pdf.ln(3 * font_scale)
+        elif line.kind in (_LineKind.HEADING1, _LineKind.HEADING2):
+            base_size = _HEADING_FONT_SIZE if line.kind is _LineKind.HEADING1 else _BODY_FONT_SIZE + 1
+            treatment = profile and _heading_treatment(profile, line.section_type)
+            font = _FONT_FAMILY_TO_PDF_FONT.get(
+                (treatment or {}).get("font", {}).get("family"), body_font
+            )
+            color = _hex_to_rgb((treatment or {}).get("color")) or body_color
+            pdf.set_text_color(*color)
+            pdf.set_font(font, style="B", size=round(base_size * font_scale))
+            line_height = (8 if line.kind is _LineKind.HEADING1 else 7) * font_scale
+            _block(pdf, line_height, _latin1_safe(line.text))
+            pdf.set_text_color(0, 0, 0)
+        elif line.kind is _LineKind.BULLET:
+            pdf.set_text_color(*body_color)
+            pdf.set_font(body_font, size=round(_BODY_FONT_SIZE * font_scale))
+            _block(pdf, 6 * font_scale, _latin1_safe(f"- {line.text}"))
+            pdf.set_text_color(0, 0, 0)
+        else:
+            pdf.set_text_color(*body_color)
+            pdf.set_font(body_font, size=round(_BODY_FONT_SIZE * font_scale))
+            _block(pdf, 6 * font_scale, _latin1_safe(line.text))
+            pdf.set_text_color(0, 0, 0)
+
+    return pdf
+
+
+def _render_pdf_with_one_page_fit(*, title: str, lines: list[_Line], profile: dict) -> FPDF:
+    """Walks _PDF_ONE_PAGE_FIT_LEVELS from the normal template down to the
+    bounded floor, stopping at the first level whose render fits on one
+    page. If even the floor spills, that floor render is returned as-is
+    (#100) — tailored content long enough to still overflow is allowed to,
+    rather than shrinking further past the readability floor.
+    """
+    pdf = None
+    for margin_mm, font_scale in _PDF_ONE_PAGE_FIT_LEVELS:
+        pdf = _render_pdf(title=title, lines=lines, profile=profile, margin_mm=margin_mm, font_scale=font_scale)
+        if pdf.page_no() == 1:
+            return pdf
+    return pdf
+
+
 def render_markdown_to_pdf(
     *, title: str, markdown_content: str, style_profile: dict | None = None
 ) -> bytes:
@@ -132,56 +227,37 @@ def render_markdown_to_pdf(
     everything else is a plain paragraph. When `style_profile` is a
     SINGLE_COLUMN StyleProfile (#98), body text and each SectionType-tagged
     heading use that profile's font family and colors instead of the
-    template default.
+    template default. When that profile also recorded `onePageFit` (#100),
+    rendering attempts a bounded margin/font reduction to keep the tailored
+    content on one page too, before allowing it to spill onto a second.
     """
     profile = _active_style_profile(style_profile)
-    body_font = _FONT_FAMILY_TO_PDF_FONT.get(
-        (profile or {}).get("fonts", {}).get("family"), "Helvetica"
-    )
-    body_color = _hex_to_rgb((profile or {}).get("accentColor")) or (0, 0, 0)
+    lines = _classify_lines(markdown_content)
 
-    pdf = FPDF(format="A4")
-    pdf.set_auto_page_break(auto=True, margin=_MARGIN_MM)
-    pdf.set_margins(_MARGIN_MM, _MARGIN_MM, _MARGIN_MM)
-    pdf.add_page()
-
-    pdf.set_font("Helvetica", style="B", size=_TITLE_FONT_SIZE)
-    _block(pdf, 10, _latin1_safe(title))
-    pdf.ln(4)
-
-    for line in _classify_lines(markdown_content):
-        if line.kind is _LineKind.BLANK:
-            pdf.ln(3)
-        elif line.kind in (_LineKind.HEADING1, _LineKind.HEADING2):
-            size = _HEADING_FONT_SIZE if line.kind is _LineKind.HEADING1 else _BODY_FONT_SIZE + 1
-            treatment = profile and _heading_treatment(profile, line.section_type)
-            font = _FONT_FAMILY_TO_PDF_FONT.get(
-                (treatment or {}).get("font", {}).get("family"), body_font
-            )
-            color = _hex_to_rgb((treatment or {}).get("color")) or body_color
-            pdf.set_text_color(*color)
-            pdf.set_font(font, style="B", size=size)
-            _block(pdf, 8 if line.kind is _LineKind.HEADING1 else 7, _latin1_safe(line.text))
-            pdf.set_text_color(0, 0, 0)
-        elif line.kind is _LineKind.BULLET:
-            pdf.set_text_color(*body_color)
-            pdf.set_font(body_font, size=_BODY_FONT_SIZE)
-            _block(pdf, 6, _latin1_safe(f"- {line.text}"))
-            pdf.set_text_color(0, 0, 0)
-        else:
-            pdf.set_text_color(*body_color)
-            pdf.set_font(body_font, size=_BODY_FONT_SIZE)
-            _block(pdf, 6, _latin1_safe(line.text))
-            pdf.set_text_color(0, 0, 0)
+    if profile and profile.get("onePageFit"):
+        pdf = _render_pdf_with_one_page_fit(title=title, lines=lines, profile=profile)
+    else:
+        pdf = _render_pdf(title=title, lines=lines, profile=profile, margin_mm=_MARGIN_MM, font_scale=1.0)
 
     return bytes(pdf.output())
 
 
-def _apply_docx_run_style(run, *, font_name: str | None, color: tuple[int, int, int] | None) -> None:
+def _apply_docx_run_style(
+    run, *, font_name: str | None, color: tuple[int, int, int] | None, font_size_pt: float | None
+) -> None:
     if font_name:
         run.font.name = font_name
     if color:
         run.font.color.rgb = RGBColor(*color)
+    if font_size_pt:
+        run.font.size = Pt(font_size_pt)
+
+
+def _docx_needs_one_page_reduction(*, profile: dict | None, title: str, lines: list[_Line]) -> bool:
+    if not profile or not profile.get("onePageFit"):
+        return False
+    total_chars = len(title) + sum(len(line.text) for line in lines if line.kind is not _LineKind.BLANK)
+    return total_chars > _DOCX_ONE_PAGE_CHAR_BUDGET
 
 
 def render_markdown_to_docx(
@@ -191,39 +267,58 @@ def render_markdown_to_docx(
     built-in template, mirroring render_markdown_to_pdf's heading/bullet
     styling via python-docx's built-in Heading/List Bullet styles. When
     `style_profile` is a SINGLE_COLUMN StyleProfile (#98), body text and each
-    SectionType-tagged heading get that profile's font and colors.
+    SectionType-tagged heading get that profile's font and colors, with any
+    font outside a small curated cross-platform set replaced by its family's
+    entry instead of used literally (#100). When that profile also recorded
+    `onePageFit` and the tailored content crosses the same character-count
+    proxy style_profile.py's extraction uses, margins drop to a bounded
+    floor and every run gets an explicit, smaller font size (#100) — content
+    long enough to still cross the budget at the floor is simply allowed to
+    spill onto a second page.
     """
     profile = _active_style_profile(style_profile)
-    body_font_name = (profile or {}).get("fonts", {}).get("name") or _FONT_FAMILY_TO_DOCX_FONT.get(
-        (profile or {}).get("fonts", {}).get("family")
-    )
+    lines = _classify_lines(markdown_content)
+    body_font_name = _docx_font_name((profile or {}).get("fonts"))
     body_color = _hex_to_rgb((profile or {}).get("accentColor"))
+    needs_reduction = _docx_needs_one_page_reduction(profile=profile, title=title, lines=lines)
+    body_size = _BODY_FONT_SIZE * _FONT_SCALE_FLOOR if needs_reduction else None
+    heading1_size = _DOCX_HEADING1_FONT_SIZE * _FONT_SCALE_FLOOR if needs_reduction else None
+    heading2_size = _DOCX_HEADING2_FONT_SIZE * _FONT_SCALE_FLOOR if needs_reduction else None
 
     document = Document()
-    document.add_heading(title, level=0)
+    if needs_reduction:
+        section = document.sections[0]
+        section.top_margin = Pt(_DOCX_MARGIN_FLOOR_PT)
+        section.bottom_margin = Pt(_DOCX_MARGIN_FLOOR_PT)
+        section.left_margin = Pt(_DOCX_MARGIN_FLOOR_PT)
+        section.right_margin = Pt(_DOCX_MARGIN_FLOOR_PT)
 
-    for line in _classify_lines(markdown_content):
+    title_paragraph = document.add_heading(title, level=0)
+    if needs_reduction:
+        for run in title_paragraph.runs:
+            _apply_docx_run_style(run, font_name=None, color=None, font_size_pt=_DOCX_TITLE_FONT_SIZE * _FONT_SCALE_FLOOR)
+
+    for line in lines:
         if line.kind is _LineKind.BLANK:
             continue
         elif line.kind in (_LineKind.HEADING1, _LineKind.HEADING2):
             level = 1 if line.kind is _LineKind.HEADING1 else 2
             paragraph = document.add_heading(line.text, level=level)
             treatment = profile and _heading_treatment(profile, line.section_type)
-            if treatment:
-                font_name = treatment.get("font", {}).get("name") or _FONT_FAMILY_TO_DOCX_FONT.get(
-                    treatment.get("font", {}).get("family")
-                )
-                color = _hex_to_rgb(treatment.get("color"))
+            font_name = _docx_font_name(treatment.get("font")) if treatment else None
+            color = _hex_to_rgb(treatment.get("color")) if treatment else None
+            heading_size = heading1_size if line.kind is _LineKind.HEADING1 else heading2_size
+            if font_name or color or heading_size:
                 for run in paragraph.runs:
-                    _apply_docx_run_style(run, font_name=font_name, color=color)
+                    _apply_docx_run_style(run, font_name=font_name, color=color, font_size_pt=heading_size)
         elif line.kind is _LineKind.BULLET:
             paragraph = document.add_paragraph(line.text, style="List Bullet")
             for run in paragraph.runs:
-                _apply_docx_run_style(run, font_name=body_font_name, color=body_color)
+                _apply_docx_run_style(run, font_name=body_font_name, color=body_color, font_size_pt=body_size)
         else:
             paragraph = document.add_paragraph(line.text)
             for run in paragraph.runs:
-                _apply_docx_run_style(run, font_name=body_font_name, color=body_color)
+                _apply_docx_run_style(run, font_name=body_font_name, color=body_color, font_size_pt=body_size)
 
     buffer = BytesIO()
     document.save(buffer)

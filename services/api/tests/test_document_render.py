@@ -1,6 +1,8 @@
+import re
 from io import BytesIO
 
 from docx import Document
+from docx.shared import Pt
 
 from api.document_render import (
     render_markdown_to_docx,
@@ -112,7 +114,9 @@ def test_render_markdown_to_docx_applies_style_profile_heading_treatment():
     document = Document(BytesIO(docx_bytes))
     heading_paragraph = next(p for p in document.paragraphs if p.text == "Experience")
     run = heading_paragraph.runs[0]
-    assert run.font.name == "Impact"
+    # "Impact" isn't in the curated cross-platform set, so it's substituted
+    # by its family's ("sans-serif") entry rather than used literally (#100).
+    assert run.font.name == "Arial"
     assert str(run.font.color.rgb) == "FF0000"
 
     body_paragraph = next(p for p in document.paragraphs if p.text == "Did things.")
@@ -138,3 +142,87 @@ def test_render_markdown_to_pdf_applies_style_profile_without_error():
         title="Tailored CV", markdown_content=markdown_content, style_profile=_STYLE_PROFILE
     )
     assert pdf_bytes.startswith(b"%PDF")
+
+
+def test_render_markdown_to_docx_substitutes_uncurated_body_font_by_family():
+    style_profile = {**_STYLE_PROFILE, "fonts": {"name": "Papyrus", "family": "serif"}, "onePageFit": False}
+    docx_bytes = render_markdown_to_docx(
+        title="Tailored CV", markdown_content="Some paragraph text.", style_profile=style_profile
+    )
+    document = Document(BytesIO(docx_bytes))
+    body_paragraph = next(p for p in document.paragraphs if p.text == "Some paragraph text.")
+    assert body_paragraph.runs[0].font.name == "Times New Roman"
+
+
+def test_render_markdown_to_docx_keeps_curated_body_font_name():
+    style_profile = {**_STYLE_PROFILE, "fonts": {"name": "Calibri", "family": "sans-serif"}, "onePageFit": False}
+    docx_bytes = render_markdown_to_docx(
+        title="Tailored CV", markdown_content="Some paragraph text.", style_profile=style_profile
+    )
+    document = Document(BytesIO(docx_bytes))
+    body_paragraph = next(p for p in document.paragraphs if p.text == "Some paragraph text.")
+    assert body_paragraph.runs[0].font.name == "Calibri"
+
+
+_LOREM_PARAGRAPH = (
+    "Lorem ipsum dolor sit amet, consectetur adipiscing elit sed do eiusmod "
+    "tempor incididunt ut labore et dolore magna aliqua."
+)
+
+
+def _pdf_page_count(pdf_bytes: bytes) -> int:
+    match = re.search(rb"/Count (\d+)", pdf_bytes)
+    assert match is not None
+    return int(match.group(1))
+
+
+def test_render_markdown_to_pdf_one_page_fit_reduces_to_stay_on_one_page():
+    style_profile = {**_STYLE_PROFILE, "onePageFit": True}
+    markdown_content = "\n\n".join([_LOREM_PARAGRAPH] * 28)
+    pdf_bytes = render_markdown_to_pdf(
+        title="Tailored CV", markdown_content=markdown_content, style_profile=style_profile
+    )
+    assert _pdf_page_count(pdf_bytes) == 1
+
+
+def test_render_markdown_to_pdf_one_page_fit_allows_overflow_when_too_long():
+    style_profile = {**_STYLE_PROFILE, "onePageFit": True}
+    markdown_content = "\n\n".join([_LOREM_PARAGRAPH] * 40)
+    pdf_bytes = render_markdown_to_pdf(
+        title="Tailored CV", markdown_content=markdown_content, style_profile=style_profile
+    )
+    assert _pdf_page_count(pdf_bytes) > 1
+
+
+def test_render_markdown_to_pdf_without_one_page_fit_does_not_reduce():
+    style_profile = {**_STYLE_PROFILE, "onePageFit": False}
+    markdown_content = "\n\n".join([_LOREM_PARAGRAPH] * 28)
+    pdf_bytes = render_markdown_to_pdf(
+        title="Tailored CV", markdown_content=markdown_content, style_profile=style_profile
+    )
+    assert _pdf_page_count(pdf_bytes) == 2
+
+
+def test_render_markdown_to_docx_one_page_fit_reduces_margins_and_font_for_long_content():
+    style_profile = {**_STYLE_PROFILE, "onePageFit": True}
+    markdown_content = "\n\n".join([_LOREM_PARAGRAPH] * 40)
+    docx_bytes = render_markdown_to_docx(
+        title="Tailored CV", markdown_content=markdown_content, style_profile=style_profile
+    )
+    document = Document(BytesIO(docx_bytes))
+    section = document.sections[0]
+    assert section.top_margin == Pt(36)
+    body_paragraph = next(p for p in document.paragraphs if p.text == _LOREM_PARAGRAPH)
+    assert body_paragraph.runs[0].font.size < Pt(11)
+
+
+def test_render_markdown_to_docx_one_page_fit_leaves_short_content_untouched():
+    style_profile = {**_STYLE_PROFILE, "onePageFit": True}
+    docx_bytes = render_markdown_to_docx(
+        title="Tailored CV", markdown_content="Short body text.", style_profile=style_profile
+    )
+    document = Document(BytesIO(docx_bytes))
+    section = document.sections[0]
+    assert section.top_margin != Pt(36)
+    body_paragraph = next(p for p in document.paragraphs if p.text == "Short body text.")
+    assert body_paragraph.runs[0].font.size is None

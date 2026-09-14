@@ -418,7 +418,9 @@ def test_get_generated_document_download_applies_style_profile_to_tailored_cv_do
         assert response.status_code == 200
         document = DocxDocument(BytesIO(response.content))
         heading_paragraph = next(p for p in document.paragraphs if p.text == "Experience")
-        assert heading_paragraph.runs[0].font.name == "Impact"
+        # "Impact" isn't in the curated cross-platform font set, so it's
+        # substituted by its family's ("sans-serif") entry instead (#100).
+        assert heading_paragraph.runs[0].font.name == "Arial"
         assert str(heading_paragraph.runs[0].font.color.rgb) == "FF0000"
 
 
