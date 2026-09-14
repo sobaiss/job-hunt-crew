@@ -58,6 +58,14 @@ through a status pipeline. See the `services/scout` and Scout-related
 owning contexts and [docs/adr/0004](./docs/adr/0004-scout-context-and-scoutrun-aggregate.md)
 for the scheduling and orchestration design.
 
+**Amendment (docs/adr/0008 — Style-matched tailored CV):** the non-goal is
+narrowed further: rendering a `TAILORED_CV` may reproduce its base
+`CVVersion`'s visual style (fonts, colors, section layout) via a derived
+`StyleProfile`, on a best-effort/adaptive basis — never pixel-perfect, and
+never by editing the stored `CVVersion` or its uploaded file.
+`COVER_LETTER` keeps the existing generic template. Candidates can also
+download either generated document as PDF, Word, Markdown, or plain text.
+
 ## 3. Personas & User Stories
 
 **Persona:** Job-seeking candidate, applies to multiple roles, tailors CV per role

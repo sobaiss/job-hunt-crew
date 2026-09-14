@@ -9,12 +9,20 @@ The account record for one candidate, identified by email, keyed by the canonica
 _Avoid_: Candidate, account — "candidate" names the persona in product conversations; `User` is the row every context actually references.
 
 **CVVersion**:
-One labeled, versioned upload of a candidate's CV (PDF, DOCX, Markdown, or plain text). Exactly one per user may be the default; each carries a Markdown rendition and its `conversionStatus`. Replacing one never mutates or deletes it — it creates a new CVVersion and sets `supersededById` on the old one (docs/adr/0005), so every Analysis, Application, GeneratedDocument, and Scout that already reference it keep seeing exactly what they always saw.
+One labeled, versioned upload of a candidate's CV (PDF, DOCX, Markdown, or plain text). Exactly one per user may be the default; each carries a Markdown rendition and its `conversionStatus`, and — for a PDF/DOCX upload — a StyleProfile and its `styleStatus`. Replacing one never mutates or deletes it — it creates a new CVVersion and sets `supersededById` on the old one (docs/adr/0005), so every Analysis, Application, GeneratedDocument, and Scout that already reference it keep seeing exactly what they always saw.
 _Avoid_: Resume, CV file
 
 **Markdown rendition**:
 The canonical Markdown form of one CVVersion, in `CVVersion.markdownContent` — the exact text the Analysis context's comparison reads. It is the uploaded file itself for a Markdown upload, or the output of the Analysis context's Conversion otherwise; the candidate sees it read-only.
 _Avoid_: Parsed CV, CV structured data, preview
+
+**StyleProfile**:
+The extracted look-and-feel of one CVVersion, in `CVVersion.styleProfile` — real fonts, RGB colors, and margins read directly from a PDF/DOCX upload, plus a layout archetype (single-column or sidebar-plus-main) and a visual treatment (heading style, sidebar-vs-main region) per SectionType. Derived once, alongside the Markdown rendition, by the Analysis context's Conversion (docs/adr/0008); `CVVersion.styleStatus` tracks that extraction independently of `conversionStatus` — a Markdown/plain-text upload has none, and a failed extraction never fails Conversion or blocks matching, it only means TAILORED_CV rendering falls back to the built-in generic template. Never backfilled for an existing CVVersion; replacing it (docs/adr/0005) is what triggers one.
+_Avoid_: Template, design — "template" stays reserved for the existing generic PDF template (`pdf_render.py`); a StyleProfile is what TAILORED_CV rendering consults to deviate from that default.
+
+**SectionType**:
+The canonical category one CV section is classified into (SUMMARY, EXPERIENCE, EDUCATION, SKILLS, LANGUAGES, ... OTHER). A StyleProfile records visual style per SectionType, never a section's original literal heading text or position — that's what lets a generated document apply the original's look even when its heading is written in a different language than the source. `CvTailoringAgent` (Analysis context) tags each heading it writes with its SectionType directly, so rendering never re-classifies.
+_Avoid_: Section, heading — those name the generic markdown-parsing concept; SectionType is specifically the classification value.
 
 **JobOffer**:
 One job posting, deduplicated globally by its source URL — not owned by any single user, since the same posting is relevant to many candidates.
@@ -82,8 +90,9 @@ and a `supersededById` self-link a regenerate sets on the row it replaces.
 Produced by the [Analysis](../analysis/CONTEXT.md) context's
 GenerationWorkflow, triggered only by an explicit "Generate documents"
 action — never automatically.
-_Avoid_: Tailored CV file, generated PDF — no PDF is stored, only rendered
-on demand from `markdownContent`.
+_Avoid_: Tailored CV file, generated PDF — no PDF or Word file is stored,
+only rendered on demand from `markdownContent` (using the base CVVersion's
+StyleProfile when the document is a TAILORED_CV with one — docs/adr/0008).
 
 **Application**:
 The record of a candidate pursuing one Analysis's offer — user-scoped,

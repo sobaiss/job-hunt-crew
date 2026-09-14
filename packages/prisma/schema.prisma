@@ -82,6 +82,18 @@ enum CVConversionStatus {
   FAILED
 }
 
+// Status of a CVVersion's derived StyleProfile (its `styleProfile`). Tracked
+// independently of CVConversionStatus (docs/adr/0008): null for every
+// CVVersion created before this status existed (no backfill), NOT_APPLICABLE
+// for an MD/TXT upload (nothing to extract), and FAILED never affects
+// conversionStatus/markdownContent.
+enum CVStyleStatus {
+  PENDING
+  EXTRACTED
+  NOT_APPLICABLE
+  FAILED
+}
+
 model CVVersion {
   id               String             @id @default(cuid())
   userId           String
@@ -94,6 +106,8 @@ model CVVersion {
   markdownContent  String?
   conversionStatus CVConversionStatus @default(PENDING)
   conversionError  String?
+  styleProfile     Json?
+  styleStatus      CVStyleStatus?
   supersededById   String?            @unique
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt

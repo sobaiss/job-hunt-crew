@@ -44,6 +44,13 @@ class Cvfiletype(str, enum.Enum):
     TXT = 'TXT'
 
 
+class Cvstylestatus(str, enum.Enum):
+    PENDING = 'PENDING'
+    EXTRACTED = 'EXTRACTED'
+    NOT_APPLICABLE = 'NOT_APPLICABLE'
+    FAILED = 'FAILED'
+
+
 class Generateddocumentstatus(str, enum.Enum):
     PENDING = 'PENDING'
     GENERATING = 'GENERATING'
@@ -271,6 +278,8 @@ class CVVersion(Base):
     conversionError: Mapped[Optional[str]] = mapped_column(Text)
     markdownContent: Mapped[Optional[str]] = mapped_column(Text)
     supersededById: Mapped[Optional[str]] = mapped_column(Text)
+    styleProfile: Mapped[Optional[dict]] = mapped_column(JSONB)
+    styleStatus: Mapped[Optional[Cvstylestatus]] = mapped_column(Enum(Cvstylestatus, values_callable=lambda cls: [member.value for member in cls], name='CVStyleStatus'))
 
     User_: Mapped['User'] = relationship('User', back_populates='CVVersion')
     Scout: Mapped[list['Scout']] = relationship('Scout', back_populates='CVVersion_')

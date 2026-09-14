@@ -195,11 +195,18 @@ async def test_convert_cv_stores_text_verbatim_without_calling_the_llm(file_type
             assert cv_version.conversionStatus == Cvconversionstatus.CONVERTED
             assert cv_version.markdownContent == content
             assert cv_version.conversionError is None
+            # styleProfile/styleStatus are foundations for #96 (StyleProfile
+            # extraction) — convert_cv doesn't touch them yet, so a plain
+            # MD/TXT round-trip must leave both null (issue #94).
+            assert cv_version.styleProfile is None
+            assert cv_version.styleStatus is None
 
         async with session_factory() as session:
             reloaded = await session.get(CVVersion, cv_version_id)
             assert reloaded.conversionStatus == Cvconversionstatus.CONVERTED
             assert reloaded.markdownContent == content
+            assert reloaded.styleProfile is None
+            assert reloaded.styleStatus is None
 
             events = (
                 await session.scalars(

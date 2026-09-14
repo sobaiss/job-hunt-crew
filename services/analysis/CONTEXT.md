@@ -5,7 +5,7 @@ The CrewAI pipeline that compares one CVVersion against one JobOffer and produce
 ## Language
 
 **Conversion** (CVVersion):
-Turning a CVVersion's uploaded file into its Markdown rendition (defined in [API](../api/CONTEXT.md)'s context) — mechanical text extraction followed by one LLM normalisation pass, skipped entirely when the upload is already Markdown or plain text. AnalysisWorkflow's `EnsureCVConverted` step runs it as a comparison prerequisite; the API context's manual "convert" action runs the same code off an SQS message.
+Turning a CVVersion's uploaded file into its Markdown rendition (defined in [API](../api/CONTEXT.md)'s context) — mechanical text extraction followed by one LLM normalisation pass, skipped entirely when the upload is already Markdown or plain text. For a PDF/DOCX upload, Conversion also derives a StyleProfile (defined in [API](../api/CONTEXT.md)'s context) in the same pass — deterministic font/color/margin extraction plus one LLM call for layout archetype and per-SectionType classification — tracked by its own `styleStatus`, independent of `conversionStatus`: a StyleProfile failure never fails the Markdown rendition or blocks matching (docs/adr/0008). AnalysisWorkflow's `EnsureCVConverted` step runs it as a comparison prerequisite; the API context's manual "convert" action runs the same code off an SQS message.
 _Avoid_: Parsing — the CV path no longer produces structured data. Extraction — reserved for JobOffer's structuring step, owned by the Ingestion context.
 
 **JobOfferExtractionAgent**:
@@ -53,6 +53,12 @@ missing-skill lists as input, and is bound by the truthfulness constraint
 already contains, never fabricate employers, dates, titles, or
 credentials. Output language follows the offer's detected language, falling
 back to the candidate's Locale (defined in [Web](../../apps/web/CONTEXT.md)'s
-context).
+context). CvTailoringAgent additionally tags each heading it writes with its
+SectionType (docs/adr/0008), so TAILORED_CV rendering can apply the base
+CVVersion's StyleProfile — per SectionType, never the original's section
+order, which the truthfulness constraint's reordering already governs —
+without a second classification pass. CoverLetterWriterAgent's output
+carries no such tag: a cover letter is never rendered against a
+StyleProfile.
 _Avoid_: CV rewriter — the output is a new GeneratedDocument, never a
 rewrite of the CVVersion itself.
