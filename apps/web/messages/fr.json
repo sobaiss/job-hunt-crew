@@ -552,6 +552,15 @@
       "loadError": "Impossible de charger vos versions de CV. Veuillez réessayer.",
       "empty": "Aucune version de CV téléversée pour l'instant.",
       "showSuperseded": "Afficher les versions de CV remplacées",
+      "columns": {
+        "label": "Libellé",
+        "file": "Fichier",
+        "size": "Taille",
+        "uploaded": "Téléversée le",
+        "status": "Statut",
+        "default": "Par défaut"
+      },
+      "actions": "Actions",
       "replacedBy": "Remplacée par {label}",
       "default": "Par défaut",
       "setDefault": "Définir par défaut",

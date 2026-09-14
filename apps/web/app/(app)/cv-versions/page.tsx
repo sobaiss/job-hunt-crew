@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useTranslations } from "next-intl";
+import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 
 import {
   useCvVersions,
@@ -21,6 +22,12 @@ import {
   type CvConversionStatus,
 } from "@/hooks/use-cv-versions";
 import { useScouts } from "@/hooks/use-scouts";
+import {
+  DEFAULT_CV_VERSIONS_SORT,
+  sortCvVersions,
+  type CvVersionsSortColumn,
+  type CvVersionsSortState,
+} from "@/lib/cv-versions-sort";
 import { useEnumLabel } from "@/lib/enum-labels";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,6 +35,70 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+
+/** Human-readable file size, e.g. `12.3 KB` — no existing helper for this. */
+function formatFileSize(bytes: number): string {
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+const COLUMNS: { key: CvVersionsSortColumn; labelKey: string; className?: string }[] = [
+  { key: "label", labelKey: "list.columns.label" },
+  { key: "file", labelKey: "list.columns.file" },
+  { key: "size", labelKey: "list.columns.size", className: "text-right" },
+  { key: "uploaded", labelKey: "list.columns.uploaded" },
+  { key: "status", labelKey: "list.columns.status" },
+  { key: "default", labelKey: "list.columns.default" },
+];
+
+// +1 for the non-sortable Actions column, used as the expanded detail row's
+// colSpan (Markdown preview / Replace form / conversion error).
+const TABLE_COLUMN_COUNT = COLUMNS.length + 1;
+
+function SortableHead({
+  column,
+  label,
+  className,
+  sort,
+  onSort,
+}: {
+  column: CvVersionsSortColumn;
+  label: string;
+  className?: string;
+  sort: CvVersionsSortState;
+  onSort: (column: CvVersionsSortColumn) => void;
+}) {
+  const active = sort.column === column;
+  const ariaSort = !active ? "none" : sort.direction === "asc" ? "ascending" : "descending";
+  const Icon = !active ? ArrowUpDown : sort.direction === "asc" ? ArrowUp : ArrowDown;
+
+  return (
+    <TableHead aria-sort={ariaSort} className={className}>
+      <button
+        type="button"
+        className="inline-flex items-center gap-1 hover:text-foreground"
+        onClick={() => onSort(column)}
+      >
+        {label}
+        <Icon className="size-3.5" />
+      </button>
+    </TableHead>
+  );
+}
 
 function conversionBadgeVariant(
   status: CvConversionStatus,
@@ -196,6 +267,17 @@ export default function CvVersionsPage() {
   const [replacingId, setReplacingId] = useState<string | null>(null);
   const [showSuperseded, setShowSuperseded] = useState(false);
   const [justReplacedId, setJustReplacedId] = useState<string | null>(null);
+  const [sort, setSort] = useState<CvVersionsSortState>(
+    DEFAULT_CV_VERSIONS_SORT,
+  );
+
+  const toggleSort = (column: CvVersionsSortColumn) => {
+    setSort((current) =>
+      current.column === column
+        ? { column, direction: current.direction === "asc" ? "desc" : "asc" }
+        : { column, direction: "asc" },
+    );
+  };
 
   // Issue #78: after a successful replace, tell the candidate which Scouts (if
   // any) still reference the CVVersion that was just superseded — Scouts are
@@ -214,6 +296,13 @@ export default function CvVersionsPage() {
     ? list.data
     : list.data?.filter((cv) => cv.supersededById === null);
   const labelById = new Map(list.data?.map((cv) => [cv.id, cv.label]));
+
+  // Sorting (#80) is applied client-side to the already-filtered list, one
+  // column at a time — the same shape as `sortAnalyses`.
+  const sortedCvVersions = useMemo(
+    () => (visibleCvVersions ? sortCvVersions(visibleCvVersions, sort) : undefined),
+    [visibleCvVersions, sort],
+  );
 
   const schema = z.object({
     label: z.string().trim().min(1, t("form.labelRequired")),
@@ -401,122 +490,155 @@ export default function CvVersionsPage() {
           </p>
         )}
 
-        {visibleCvVersions && visibleCvVersions.length > 0 && (
-          <ul className="flex flex-col gap-3">
-            {visibleCvVersions.map((cv) => (
-              <li key={cv.id}>
-                <Card className="py-0">
-                  <CardContent className="flex flex-col py-4">
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="flex min-w-0 flex-col">
-                        <span className="truncate font-medium">{cv.label}</span>
-                        <span className="truncate text-xs text-muted">
-                          {cv.fileName} · {cv.fileType}
-                        </span>
-                        {cv.supersededById && (
-                          <span className="truncate text-xs text-muted">
-                            {t("list.replacedBy", {
-                              label: labelById.get(cv.supersededById) ?? "",
-                            })}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex shrink-0 items-center gap-3">
+        {sortedCvVersions && sortedCvVersions.length > 0 && (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                {COLUMNS.map((column) => (
+                  <SortableHead
+                    key={column.key}
+                    column={column.key}
+                    label={t(column.labelKey)}
+                    className={column.className}
+                    sort={sort}
+                    onSort={toggleSort}
+                  />
+                ))}
+                <TableHead>{t("list.actions")}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {sortedCvVersions.map((cv) => {
+                const busy =
+                  cv.conversionStatus === "CONVERTING" ||
+                  (convert.isPending && convert.variables === cv.id);
+                const showDetailRow =
+                  cv.conversionStatus === "FAILED" ||
+                  openMarkdownId === cv.id ||
+                  replacingId === cv.id;
+
+                return (
+                  <Fragment key={cv.id}>
+                    <TableRow>
+                      <TableCell className="font-medium">{cv.label}</TableCell>
+                      <TableCell>
+                        {cv.fileName} · {cv.fileType}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatFileSize(cv.fileSizeBytes)}
+                      </TableCell>
+                      <TableCell>
+                        {new Date(cv.createdAt).toLocaleDateString()}
+                      </TableCell>
+                      <TableCell>
                         <Badge
                           variant={conversionBadgeVariant(cv.conversionStatus)}
                         >
                           {conversionStatusLabel(cv.conversionStatus)}
                         </Badge>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() =>
-                            setOpenMarkdownId((current) =>
-                              current === cv.id ? null : cv.id,
-                            )
-                          }
-                        >
-                          {openMarkdownId === cv.id
-                            ? t("list.hideMarkdown")
-                            : t("list.viewMarkdown")}
-                        </Button>
-                        {(() => {
-                          const busy =
-                            cv.conversionStatus === "CONVERTING" ||
-                            (convert.isPending && convert.variables === cv.id);
-                          return (
+                      </TableCell>
+                      <TableCell>
+                        {cv.isDefault ? (
+                          <Badge variant="outline">{t("list.default")}</Badge>
+                        ) : cv.supersededById ? (
+                          <span className="text-xs text-muted">
+                            {t("list.replacedBy", {
+                              label: labelById.get(cv.supersededById) ?? "",
+                            })}
+                          </span>
+                        ) : (
+                          "—"
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() =>
+                              setOpenMarkdownId((current) =>
+                                current === cv.id ? null : cv.id,
+                              )
+                            }
+                          >
+                            {openMarkdownId === cv.id
+                              ? t("list.hideMarkdown")
+                              : t("list.viewMarkdown")}
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => convert.mutate(cv.id)}
+                            disabled={busy}
+                          >
+                            {busy
+                              ? t("list.converting")
+                              : cv.conversionStatus === "CONVERTED"
+                                ? t("list.reconvert")
+                                : t("list.convert")}
+                          </Button>
+                          {!cv.isDefault && !cv.supersededById && (
                             <Button
                               type="button"
                               size="sm"
                               variant="outline"
-                              onClick={() => convert.mutate(cv.id)}
-                              disabled={busy}
+                              onClick={() => setDefault.mutate(cv.id)}
+                              disabled={
+                                setDefault.isPending &&
+                                setDefault.variables === cv.id
+                              }
                             >
-                              {busy
-                                ? t("list.converting")
-                                : cv.conversionStatus === "CONVERTED"
-                                  ? t("list.reconvert")
-                                  : t("list.convert")}
-                            </Button>
-                          );
-                        })()}
-                        {cv.isDefault && (
-                          <Badge variant="outline">{t("list.default")}</Badge>
-                        )}
-                        {!cv.isDefault && !cv.supersededById && (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setDefault.mutate(cv.id)}
-                            disabled={
-                              setDefault.isPending &&
+                              {setDefault.isPending &&
                               setDefault.variables === cv.id
-                            }
-                          >
-                            {setDefault.isPending &&
-                            setDefault.variables === cv.id
-                              ? t("list.settingDefault")
-                              : t("list.setDefault")}
-                          </Button>
-                        )}
-                        {replacingId !== cv.id && !cv.supersededById && (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setReplacingId(cv.id)}
-                          >
-                            {t("list.replace")}
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                    {cv.conversionStatus === "FAILED" && (
-                      <p role="alert" className="mt-2 text-sm text-destructive">
-                        {t("list.conversionFailed")}
-                        {cv.conversionError ? ` ${cv.conversionError}` : ""}
-                      </p>
+                                ? t("list.settingDefault")
+                                : t("list.setDefault")}
+                            </Button>
+                          )}
+                          {replacingId !== cv.id && !cv.supersededById && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setReplacingId(cv.id)}
+                            >
+                              {t("list.replace")}
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                    {showDetailRow && (
+                      <TableRow>
+                        <TableCell colSpan={TABLE_COLUMN_COUNT}>
+                          {cv.conversionStatus === "FAILED" && (
+                            <p role="alert" className="text-sm text-destructive">
+                              {t("list.conversionFailed")}
+                              {cv.conversionError ? ` ${cv.conversionError}` : ""}
+                            </p>
+                          )}
+                          {openMarkdownId === cv.id && (
+                            <CvMarkdownPreview id={cv.id} />
+                          )}
+                          {replacingId === cv.id && (
+                            <CvReplaceForm
+                              cv={cv}
+                              onReplaced={(replacedId) => {
+                                setReplacingId(null);
+                                setJustReplacedId(replacedId);
+                              }}
+                              onCancel={() => setReplacingId(null)}
+                            />
+                          )}
+                        </TableCell>
+                      </TableRow>
                     )}
-                    {openMarkdownId === cv.id && (
-                      <CvMarkdownPreview id={cv.id} />
-                    )}
-                    {replacingId === cv.id && (
-                      <CvReplaceForm
-                        cv={cv}
-                        onReplaced={(replacedId) => {
-                          setReplacingId(null);
-                          setJustReplacedId(replacedId);
-                        }}
-                        onCancel={() => setReplacingId(null)}
-                      />
-                    )}
-                  </CardContent>
-                </Card>
-              </li>
-            ))}
-          </ul>
+                  </Fragment>
+                );
+              })}
+            </TableBody>
+          </Table>
         )}
       </section>
     </main>

@@ -281,6 +281,34 @@ describe("CvVersionsPage — list", () => {
     ).toBeInTheDocument();
   });
 
+  it("sorts rows by label when the Label column header is clicked", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: [
+            cvVersion({ id: "cv1", label: "Zebra CV" }),
+            cvVersion({ id: "cv2", label: "Alpha CV" }),
+          ],
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await screen.findByText("Zebra CV");
+    const rowLabel = () =>
+      screen.getAllByRole("row").slice(1, 3).map((row) => row.textContent);
+    // Default sort is by upload date; both fixtures share the same
+    // `createdAt`, so insertion order ("Zebra CV" first) holds until sorted.
+    expect(rowLabel()[0]).toContain("Zebra CV");
+
+    await user.click(screen.getByRole("button", { name: "Label" }));
+    expect(rowLabel()[0]).toContain("Alpha CV");
+
+    await user.click(screen.getByRole("button", { name: "Label" }));
+    expect(rowLabel()[0]).toContain("Zebra CV");
+  });
+
   it("shows an error state when the list fails to load", async () => {
     server.use(
       http.get("/api/cv-versions", () =>

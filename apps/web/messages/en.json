@@ -552,6 +552,15 @@
       "loadError": "We couldn't load your CV versions. Please try again.",
       "empty": "No CV versions uploaded yet.",
       "showSuperseded": "Show superseded CV versions",
+      "columns": {
+        "label": "Label",
+        "file": "File",
+        "size": "Size",
+        "uploaded": "Uploaded",
+        "status": "Status",
+        "default": "Default"
+      },
+      "actions": "Actions",
       "replacedBy": "Replaced by {label}",
       "default": "Default",
       "setDefault": "Set as default",

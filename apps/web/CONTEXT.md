@@ -70,8 +70,12 @@ _Avoid_: Tracker (fine in prose; the nav label and route area is
 "Applications")
 
 **CV versions**:
-The `/cv-versions` page — list a candidate's CVVersions (defined in [API](../../services/api/CONTEXT.md)'s context) with their Conversion status, upload a new one, set the default, and Replace an existing one with a new file. Replacing supersedes the row rather than overwriting or deleting it (docs/adr/0005): the superseded CVVersion drops out of this list and out of the CvVersionPicker by default, reachable again only through an explicit "show superseded" filter.
+The `/cv-versions` page — a sortable table of a candidate's CVVersions (defined in [API](../../services/api/CONTEXT.md)'s context): label, file name/type, size, upload date, Conversion status, and a default/superseded indicator. Clicking a row opens the CV panel. Reconvert and Set default act directly from a table row; uploading a new CV is its own `/cv-versions/new` route (reached via an "Importer un CV" action here), which returns to this table on success. Replacing supersedes the row rather than overwriting or deleting it (docs/adr/0005): the superseded CVVersion drops out of this table and out of the CvVersionPicker by default, reachable again only through an explicit "show superseded" filter — Reconvert stays available on a superseded row, but Set default and Replace do not.
 _Avoid_: CV management, My CVs (fine in prose; the nav label and route area is "CV-versions")
+
+**CV panel**:
+The right-hand slide-over opened by clicking a CV-versions-table row: the CVVersion's Markdown rendition (fetched only while the panel is open, never inlined in the table) plus its full info, and its actions — Replace, Reconvert, Set default. A successful Replace switches the panel to the newly created CVVersion rather than closing it or lingering on the now-superseded row.
+_Avoid_: Quick view (that's the Analyses-list slide-over — different content and actions; this is CV-versions' own)
 
 **Settings**:
 The `/settings` page — theme, Locale, and read-only account details (name and email from the Session), plus sign out. No account deletion (there is no API for it).
