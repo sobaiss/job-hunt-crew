@@ -15,6 +15,11 @@ Per source format:
 - DOCX (slice 3, issue #18): `mammoth` converts the document to semantic HTML,
   then the same single LLM normalisation pass (and bounded retry) as the PDF
   branch produces the Markdown.
+
+A PDF/DOCX CVVersion additionally gets a StyleProfile (`CVVersion.styleProfile`
+/ `styleStatus`, issue #96) derived in the same pass — see style_profile.py
+and docs/adr/0008-tailored-cv-visual-style-profile.md. An MD/TXT CVVersion
+sets `styleStatus = NOT_APPLICABLE` and never calls style_profile.py.
 """
 
 import asyncio
@@ -23,7 +28,7 @@ import json
 from datetime import UTC, datetime
 
 import mammoth
-from py_db.models import CVVersion, Cvconversionstatus, Cvfiletype
+from py_db.models import CVVersion, Cvconversionstatus, Cvfiletype, Cvstylestatus
 from py_db.pipeline_events import record_pipeline_event
 from py_db.session import make_engine, make_session_factory
 from py_db.structured_logging import get_logger, log_stage_event
@@ -32,6 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .llm_provider import LLMProvider, get_llm_provider
 from .s3_client import S3_BUCKET, make_s3_client
+from .style_profile import StyleProfileError, build_style_profile
 
 logger = get_logger(__name__)
 
@@ -115,6 +121,39 @@ async def _mark_failed(
     raise CVConversionError(message)
 
 
+def _derive_style_profile(
+    cv_version: CVVersion,
+    file_bytes: bytes,
+    markdown: str,
+    *,
+    llm_provider: LLMProvider | None,
+) -> tuple[dict | None, Cvstylestatus]:
+    """Best-effort StyleProfile derivation (issue #96), run only once
+    `markdownContent`/`conversionStatus` have already succeeded. A failure
+    here never touches `conversionStatus`/`conversionError`/`markdownContent`
+    — it only downgrades `styleStatus` to FAILED, per docs/adr/0008: a
+    presentation-layer extraction can't be allowed to block Conversion or
+    matching.
+    """
+    if cv_version.fileType in _TEXT_FILE_TYPES:
+        return None, Cvstylestatus.NOT_APPLICABLE
+
+    try:
+        profile = build_style_profile(
+            file_bytes=file_bytes,
+            file_type=cv_version.fileType,
+            markdown=markdown,
+            llm_provider=llm_provider or get_llm_provider(),
+        )
+    except StyleProfileError:
+        logger.exception(
+            "style_profile_extraction_failed for cv_version_id=%s", cv_version.id
+        )
+        return None, Cvstylestatus.FAILED
+
+    return profile, Cvstylestatus.EXTRACTED
+
+
 async def convert_cv(
     session: AsyncSession,
     cv_version_id: str,
@@ -129,12 +168,17 @@ async def convert_cv(
     step, or standalone via the manual convert trigger) used only to tag the
     observability rows this emits.
 
-    MD / TXT: the file's decoded UTF-8 text is the rendition, no LLM call.
+    MD / TXT: the file's decoded UTF-8 text is the rendition, no LLM call;
+    styleStatus is set to NOT_APPLICABLE, styleProfile stays null.
     PDF: `pypdf` text extraction, then one LLM normalisation pass (up to
     MAX_ATTEMPTS on an empty/erroring response); a PDF with under
     MIN_EXTRACTED_CHARS of text goes straight to FAILED with a cause message.
     DOCX: `mammoth` docx -> HTML, then the same normalisation pass and bounded
     retry as the PDF branch.
+    PDF/DOCX additionally derive a StyleProfile (issue #96, see
+    style_profile.py) once markdownContent/conversionStatus have already
+    succeeded — a StyleProfile failure sets styleStatus = FAILED without
+    affecting conversionStatus/conversionError/markdownContent.
     """
     cv_version = await session.get(CVVersion, cv_version_id)
     if cv_version is None:
@@ -180,6 +224,9 @@ async def convert_cv(
     cv_version.markdownContent = markdown
     cv_version.conversionStatus = Cvconversionstatus.CONVERTED
     cv_version.conversionError = None
+    cv_version.styleProfile, cv_version.styleStatus = _derive_style_profile(
+        cv_version, file_bytes, markdown, llm_provider=llm_provider
+    )
     cv_version.updatedAt = _now()
     await session.commit()
 

@@ -20,7 +20,7 @@ import boto3
 import pytest
 from botocore.client import Config
 from docx import Document as DocxDocument
-from py_db.models import CVVersion, Cvconversionstatus, Cvfiletype, PipelineEvent, User
+from py_db.models import CVVersion, Cvconversionstatus, Cvfiletype, Cvstylestatus, PipelineEvent, User
 from py_db.session import make_engine, make_session_factory
 from sqlalchemy import select
 
@@ -38,6 +38,13 @@ NORMALISED_MARKDOWN = (
     "# Jane Doe\n\n## Experience\n\n"
     "- **Senior Backend Engineer**, Acme Corp (2019–2024)\n\n"
     "## Skills\n\n- Python\n- AWS\n- PostgreSQL"
+)
+
+STYLE_CLASSIFICATION_JSON = (
+    '{"layoutArchetype": "SINGLE_COLUMN", "sections": '
+    '[{"heading": "Jane Doe", "sectionType": "OTHER", "region": null}, '
+    '{"heading": "Experience", "sectionType": "EXPERIENCE", "region": null}, '
+    '{"heading": "Skills", "sectionType": "SKILLS", "region": null}]}'
 )
 
 
@@ -195,18 +202,19 @@ async def test_convert_cv_stores_text_verbatim_without_calling_the_llm(file_type
             assert cv_version.conversionStatus == Cvconversionstatus.CONVERTED
             assert cv_version.markdownContent == content
             assert cv_version.conversionError is None
-            # styleProfile/styleStatus are foundations for #96 (StyleProfile
-            # extraction) — convert_cv doesn't touch them yet, so a plain
-            # MD/TXT round-trip must leave both null (issue #94).
+            # An MD/TXT upload has no visual style to extract (issue #96):
+            # styleStatus is NOT_APPLICABLE and styleProfile stays null, with
+            # no additional LLM call (ExplodingLLMProvider would fail the
+            # test if style extraction tried to call it).
             assert cv_version.styleProfile is None
-            assert cv_version.styleStatus is None
+            assert cv_version.styleStatus == Cvstylestatus.NOT_APPLICABLE
 
         async with session_factory() as session:
             reloaded = await session.get(CVVersion, cv_version_id)
             assert reloaded.conversionStatus == Cvconversionstatus.CONVERTED
             assert reloaded.markdownContent == content
             assert reloaded.styleProfile is None
-            assert reloaded.styleStatus is None
+            assert reloaded.styleStatus == Cvstylestatus.NOT_APPLICABLE
 
             events = (
                 await session.scalars(
@@ -220,7 +228,7 @@ async def test_convert_cv_stores_text_verbatim_without_calling_the_llm(file_type
 
 
 @pytest.mark.asyncio
-async def test_convert_cv_normalises_a_docx_via_one_llm_call():
+async def test_convert_cv_normalises_a_docx_and_extracts_its_style_profile():
     engine = make_engine()
     session_factory = make_session_factory(engine)
     user_id = f"test-user-{uuid.uuid4()}"
@@ -232,7 +240,9 @@ async def test_convert_cv_normalises_a_docx_via_one_llm_call():
     await _make_pending_cv_version(
         session_factory, user_id, cv_version_id, file_key, Cvfiletype.DOCX, "cv.docx"
     )
-    provider = StubLLMProvider([NORMALISED_MARKDOWN])
+    # Two LLM calls: one to normalise to Markdown, one to classify the
+    # StyleProfile's layout archetype + per-heading SectionType (issue #96).
+    provider = StubLLMProvider([NORMALISED_MARKDOWN, STYLE_CLASSIFICATION_JSON])
 
     try:
         async with session_factory() as session:
@@ -240,10 +250,15 @@ async def test_convert_cv_normalises_a_docx_via_one_llm_call():
             assert cv_version.conversionStatus == Cvconversionstatus.CONVERTED
             assert cv_version.markdownContent == NORMALISED_MARKDOWN
             assert cv_version.conversionError is None
+            assert cv_version.styleStatus == Cvstylestatus.EXTRACTED
+            assert cv_version.styleProfile["layoutArchetype"] == "SINGLE_COLUMN"
+            assert "EXPERIENCE" in cv_version.styleProfile["sections"]
 
         async with session_factory() as session:
             reloaded = await session.get(CVVersion, cv_version_id)
             assert reloaded.markdownContent == NORMALISED_MARKDOWN
+            assert reloaded.styleStatus == Cvstylestatus.EXTRACTED
+            assert reloaded.styleProfile["layoutArchetype"] == "SINGLE_COLUMN"
             events = (
                 await session.scalars(
                     select(PipelineEvent).where(PipelineEvent.message.contains(cv_version_id))
@@ -251,7 +266,38 @@ async def test_convert_cv_normalises_a_docx_via_one_llm_call():
             ).all()
             statuses = {e.status for e in events if e.stage == "convert"}
             assert {"STARTED", "SUCCEEDED"} <= statuses
-        assert provider.calls == 1
+        assert provider.calls == 2
+    finally:
+        await _cleanup(engine, session_factory, s3, file_key, user_id, cv_version_id)
+
+
+@pytest.mark.asyncio
+async def test_convert_cv_sets_style_status_failed_on_malformed_style_classification():
+    """A StyleProfile extraction failure (malformed LLM classification, here)
+    must not affect conversionStatus/conversionError/markdownContent —
+    Conversion itself already succeeded by the time style extraction runs
+    (issue #96 / docs/adr/0008)."""
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id = f"test-user-{uuid.uuid4()}"
+    cv_version_id = f"test-cv-{uuid.uuid4()}"
+    file_key = f"cvs/{user_id}/{cv_version_id}/cv.docx"
+    s3 = _s3_client()
+    s3.put_object(Bucket=S3_BUCKET, Key=file_key, Body=FIXTURE_DOCX_BYTES)
+
+    await _make_pending_cv_version(
+        session_factory, user_id, cv_version_id, file_key, Cvfiletype.DOCX, "cv.docx"
+    )
+    provider = StubLLMProvider([NORMALISED_MARKDOWN, "not valid json"])
+
+    try:
+        async with session_factory() as session:
+            cv_version = await convert_cv(session, cv_version_id, llm_provider=provider)
+            assert cv_version.conversionStatus == Cvconversionstatus.CONVERTED
+            assert cv_version.markdownContent == NORMALISED_MARKDOWN
+            assert cv_version.conversionError is None
+            assert cv_version.styleStatus == Cvstylestatus.FAILED
+            assert cv_version.styleProfile is None
     finally:
         await _cleanup(engine, session_factory, s3, file_key, user_id, cv_version_id)
 
@@ -287,7 +333,7 @@ async def test_convert_cv_marks_docx_failed_after_bounded_normalisation_retries(
 
 
 @pytest.mark.asyncio
-async def test_convert_cv_normalises_a_pdf_via_one_llm_call():
+async def test_convert_cv_normalises_a_pdf_and_extracts_its_style_profile():
     engine = make_engine()
     session_factory = make_session_factory(engine)
     user_id = f"test-user-{uuid.uuid4()}"
@@ -299,7 +345,9 @@ async def test_convert_cv_normalises_a_pdf_via_one_llm_call():
     await _make_pending_cv_version(
         session_factory, user_id, cv_version_id, file_key, Cvfiletype.PDF, "cv.pdf"
     )
-    provider = StubLLMProvider([NORMALISED_MARKDOWN])
+    # Two LLM calls: one to normalise to Markdown, one to classify the
+    # StyleProfile's layout archetype + per-heading SectionType (issue #96).
+    provider = StubLLMProvider([NORMALISED_MARKDOWN, STYLE_CLASSIFICATION_JSON])
 
     try:
         async with session_factory() as session:
@@ -307,10 +355,12 @@ async def test_convert_cv_normalises_a_pdf_via_one_llm_call():
             assert cv_version.conversionStatus == Cvconversionstatus.CONVERTED
             assert cv_version.markdownContent == NORMALISED_MARKDOWN
             assert cv_version.conversionError is None
+            assert cv_version.styleStatus == Cvstylestatus.EXTRACTED
 
         async with session_factory() as session:
             reloaded = await session.get(CVVersion, cv_version_id)
             assert reloaded.markdownContent == NORMALISED_MARKDOWN
+            assert reloaded.styleStatus == Cvstylestatus.EXTRACTED
             events = (
                 await session.scalars(
                     select(PipelineEvent).where(PipelineEvent.message.contains(cv_version_id))
@@ -318,7 +368,7 @@ async def test_convert_cv_normalises_a_pdf_via_one_llm_call():
             ).all()
             statuses = {e.status for e in events if e.stage == "convert"}
             assert {"STARTED", "SUCCEEDED"} <= statuses
-        assert provider.calls == 1
+        assert provider.calls == 2
     finally:
         await _cleanup(engine, session_factory, s3, file_key, user_id, cv_version_id)
 
@@ -396,14 +446,17 @@ async def test_convert_cv_normalises_a_pdf_on_retry_after_one_empty_response():
     await _make_pending_cv_version(
         session_factory, user_id, cv_version_id, file_key, Cvfiletype.PDF, "cv.pdf"
     )
-    provider = StubLLMProvider(["", NORMALISED_MARKDOWN])
+    # An empty first response triggers the normalisation retry; the third
+    # call is the StyleProfile layout/section classification (issue #96).
+    provider = StubLLMProvider(["", NORMALISED_MARKDOWN, STYLE_CLASSIFICATION_JSON])
 
     try:
         async with session_factory() as session:
             cv_version = await convert_cv(session, cv_version_id, llm_provider=provider)
             assert cv_version.conversionStatus == Cvconversionstatus.CONVERTED
             assert cv_version.markdownContent == NORMALISED_MARKDOWN
-        assert provider.calls == 2
+            assert cv_version.styleStatus == Cvstylestatus.EXTRACTED
+        assert provider.calls == 3
     finally:
         await _cleanup(engine, session_factory, s3, file_key, user_id, cv_version_id)
 
