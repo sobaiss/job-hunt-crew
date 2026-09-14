@@ -309,7 +309,7 @@ describe("CvVersionsPage — list", () => {
     await waitFor(() => expect(patchBody).toEqual({ isDefault: true }));
   });
 
-  it("hides Set as default (but keeps Reconvert) in the panel for a superseded CV", async () => {
+  it("hides Set as default and Replace (but keeps Reconvert) in the panel for a superseded CV", async () => {
     server.use(
       http.get("/api/cv-versions", () =>
         HttpResponse.json({
@@ -336,6 +336,7 @@ describe("CvVersionsPage — list", () => {
     expect(
       panel.queryByRole("button", { name: "Set as default" }),
     ).toBeNull();
+    expect(panel.queryByRole("button", { name: "Replace" })).toBeNull();
     expect(panel.getByText("Replaced by New CV")).toBeInTheDocument();
   });
 
@@ -521,15 +522,34 @@ describe("CvVersionsPage — list", () => {
   });
 });
 
-describe("CvVersionsPage — replace", () => {
-  it("opens a form pre-filled with the current label, replaces, and drops the old row from the list", async () => {
+describe("CvVersionsPage — replace (from the panel, issue #82)", () => {
+  it("does not render a Replace button or form on the row itself", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cvVersion()] }),
+      ),
+    );
+    renderWithProviders(<CvVersionsPage />);
+
+    await screen.findByText("Grad CV");
+    expect(screen.queryByRole("button", { name: "Replace" })).toBeNull();
+    expect(screen.queryByLabelText("New label")).toBeNull();
+  });
+
+  it("opens a form pre-filled with the current label, replaces, and switches the panel to the new CV", async () => {
     let replaceBody: Record<string, unknown> | null = null;
     let replaced = false;
     server.use(
       http.get("/api/cv-versions", () =>
         HttpResponse.json({
           cvVersions: replaced
-            ? [cvVersion({ id: "cv2", label: "Updated CV" })]
+            ? [
+                cvVersion({
+                  id: "cv2",
+                  label: "Updated CV",
+                  conversionStatus: "PENDING",
+                }),
+              ]
             : [cvVersion()],
         }),
       ),
@@ -542,23 +562,30 @@ describe("CvVersionsPage — replace", () => {
         );
       }),
       http.put(UPLOAD_URL, () => new HttpResponse(null, { status: 200 })),
+      http.get("/api/cv-versions/cv2/markdown", () =>
+        HttpResponse.json({ markdownContent: null, conversionStatus: "PENDING" }),
+      ),
     );
     const user = userEvent.setup();
     renderWithProviders(<CvVersionsPage />);
 
-    await user.click(await screen.findByRole("button", { name: "Replace" }));
+    await user.click(await screen.findByText("Grad CV"));
+    const panel = within(await screen.findByRole("dialog"));
+    await user.click(panel.getByRole("button", { name: "Replace" }));
 
-    const labelInput = screen.getByLabelText("New label") as HTMLInputElement;
+    const labelInput = panel.getByLabelText("New label") as HTMLInputElement;
     expect(labelInput.value).toBe("Grad CV");
     await user.clear(labelInput);
     await user.type(labelInput, "Updated CV");
-    await user.upload(screen.getByLabelText("New file"), pdf("updated.pdf"));
-    await user.click(screen.getByRole("button", { name: "Replace" }));
+    await user.upload(panel.getByLabelText("New file"), pdf("updated.pdf"));
+    await user.click(panel.getByRole("button", { name: "Replace" }));
 
+    // Panel switches to the newly created CV (new id, PENDING status) rather
+    // than closing or lingering on the now-superseded one.
     await waitFor(() =>
-      expect(screen.getByText("Updated CV")).toBeInTheDocument(),
+      expect(panel.getByText("Pending")).toBeInTheDocument(),
     );
-    expect(screen.queryByText("Grad CV")).toBeNull();
+    expect(within(screen.getByRole("dialog")).getByText("Updated CV")).toBeInTheDocument();
     expect(replaceBody).toMatchObject({
       label: "Updated CV",
       fileName: "updated.pdf",
@@ -575,13 +602,15 @@ describe("CvVersionsPage — replace", () => {
     const user = userEvent.setup();
     renderWithProviders(<CvVersionsPage />);
 
-    await user.click(await screen.findByRole("button", { name: "Replace" }));
-    expect(screen.getByLabelText("New label")).toBeInTheDocument();
+    await user.click(await screen.findByText("Grad CV"));
+    const panel = within(await screen.findByRole("dialog"));
+    await user.click(panel.getByRole("button", { name: "Replace" }));
+    expect(panel.getByLabelText("New label")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByLabelText("New label")).toBeNull();
+    await user.click(panel.getByRole("button", { name: "Cancel" }));
+    expect(panel.queryByLabelText("New label")).toBeNull();
     expect(
-      screen.getByRole("button", { name: "Replace" }),
+      panel.getByRole("button", { name: "Replace" }),
     ).toBeInTheDocument();
   });
 
@@ -603,6 +632,9 @@ describe("CvVersionsPage — replace", () => {
         );
       }),
       http.put(UPLOAD_URL, () => new HttpResponse(null, { status: 200 })),
+      http.get("/api/cv-versions/cv2/markdown", () =>
+        HttpResponse.json({ markdownContent: null, conversionStatus: "CONVERTED" }),
+      ),
       http.get("/api/scouts", () =>
         HttpResponse.json({
           scouts: [
@@ -634,19 +666,19 @@ describe("CvVersionsPage — replace", () => {
     const user = userEvent.setup();
     renderWithProviders(<CvVersionsPage />);
 
-    await user.click(await screen.findByRole("button", { name: "Replace" }));
-    await user.upload(screen.getByLabelText("New file"), pdf("updated.pdf"));
-    await user.click(screen.getByRole("button", { name: "Replace" }));
+    await user.click(await screen.findByText("Grad CV"));
+    const panel = within(await screen.findByRole("dialog"));
+    await user.click(panel.getByRole("button", { name: "Replace" }));
+    await user.upload(panel.getByLabelText("New file"), pdf("updated.pdf"));
+    await user.click(panel.getByRole("button", { name: "Replace" }));
 
-    await waitFor(() =>
-      expect(screen.getByText("Updated CV")).toBeInTheDocument(),
-    );
-
+    // The panel (a modal Sheet) stays open after a successful Replace, so
+    // Radix marks the page's background — including this banner — aria-hidden
+    // until the panel is closed; query with `hidden: true` to see it anyway.
     expect(await screen.findByText("Backend roles")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Backend roles" })).toHaveAttribute(
-      "href",
-      "/scouts/scout1/edit",
-    );
+    expect(
+      screen.getByRole("link", { name: "Backend roles", hidden: true }),
+    ).toHaveAttribute("href", "/scouts/scout1/edit");
   });
 
   it("shows no Scout warning when no Scout references the just-replaced CV version", async () => {
@@ -667,17 +699,22 @@ describe("CvVersionsPage — replace", () => {
         );
       }),
       http.put(UPLOAD_URL, () => new HttpResponse(null, { status: 200 })),
+      http.get("/api/cv-versions/cv2/markdown", () =>
+        HttpResponse.json({ markdownContent: null, conversionStatus: "CONVERTED" }),
+      ),
       http.get("/api/scouts", () => HttpResponse.json({ scouts: [] })),
     );
     const user = userEvent.setup();
     renderWithProviders(<CvVersionsPage />);
 
-    await user.click(await screen.findByRole("button", { name: "Replace" }));
-    await user.upload(screen.getByLabelText("New file"), pdf("updated.pdf"));
-    await user.click(screen.getByRole("button", { name: "Replace" }));
+    await user.click(await screen.findByText("Grad CV"));
+    const panel = within(await screen.findByRole("dialog"));
+    await user.click(panel.getByRole("button", { name: "Replace" }));
+    await user.upload(panel.getByLabelText("New file"), pdf("updated.pdf"));
+    await user.click(panel.getByRole("button", { name: "Replace" }));
 
     await waitFor(() =>
-      expect(screen.getByText("Updated CV")).toBeInTheDocument(),
+      expect(within(screen.getByRole("dialog")).getByText("Updated CV")).toBeInTheDocument(),
     );
     expect(screen.queryByRole("alert", { name: /still used/i })).toBeNull();
   });

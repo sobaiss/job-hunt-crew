@@ -586,7 +586,8 @@
       "scoutWarningHeading": "Cette version de CV a été remplacée, mais ces agents l'utilisent encore :"
     },
     "panel": {
-      "updated": "Mise à jour"
+      "updated": "Mise à jour",
+      "loading": "Chargement…"
     }
   },
   "ingestion": {

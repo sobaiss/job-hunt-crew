@@ -54,7 +54,7 @@ const COLUMNS: { key: CvVersionsSortColumn; labelKey: string; className?: string
 ];
 
 // +1 for the non-sortable Actions column, used as the expanded detail row's
-// colSpan (Replace form / conversion error).
+// colSpan (conversion error text; Replace lives in the panel since #82).
 const TABLE_COLUMN_COUNT = COLUMNS.length + 1;
 
 function SortableHead({
@@ -88,117 +88,6 @@ function SortableHead({
   );
 }
 
-/**
- * Inline "Replace" form for one row (issue #74). Pre-filled with the row's
- * current label (editable); reuses the same file-type/size validation as the
- * upload form above. On success, the old row's `supersededById` points at the
- * new row, so it drops out of `useCvVersions()`'s default (non-superseded)
- * view and this form's parent unmounts it.
- */
-function CvReplaceForm({
-  cv,
-  onReplaced,
-  onCancel,
-}: {
-  cv: { id: string; label: string };
-  onReplaced: (replacedId: string) => void;
-  onCancel: () => void;
-}) {
-  const t = useTranslations("cvVersions");
-  const replace = useReplaceCvVersion();
-
-  const schema = z.object({
-    label: z.string().trim().min(1, t("form.labelRequired")),
-    file: z
-      .any()
-      .refine((v) => firstFile(v) !== undefined, t("form.fileRequired"))
-      .refine((v) => {
-        const f = firstFile(v);
-        return !f || f.type in ACCEPTED_CV_CONTENT_TYPES;
-      }, t("form.fileType"))
-      .refine((v) => {
-        const f = firstFile(v);
-        return !f || f.size <= MAX_CV_SIZE_BYTES;
-      }, t("form.fileTooLarge")),
-  });
-
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-  } = useForm<z.infer<typeof schema>>({
-    resolver: zodResolver(schema),
-    defaultValues: { label: cv.label },
-  });
-
-  const onSubmit = handleSubmit((values) => {
-    const file = firstFile(values.file);
-    if (!file) return;
-    replace.mutate(
-      { id: cv.id, label: values.label.trim(), file },
-      { onSuccess: () => onReplaced(cv.id) },
-    );
-  });
-
-  return (
-    <form
-      className="mt-3 flex flex-col gap-4 border-t pt-3"
-      onSubmit={onSubmit}
-      noValidate
-    >
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor={`replace-label-${cv.id}`}>
-          {t("list.replaceLabelLabel")}
-        </Label>
-        <Input
-          id={`replace-label-${cv.id}`}
-          type="text"
-          aria-invalid={errors.label ? true : undefined}
-          {...register("label")}
-        />
-        {errors.label && (
-          <p role="alert" className="text-sm text-destructive">
-            {errors.label.message}
-          </p>
-        )}
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor={`replace-file-${cv.id}`}>
-          {t("list.replaceFileLabel")}
-        </Label>
-        <Input
-          id={`replace-file-${cv.id}`}
-          type="file"
-          accept={CV_FILE_ACCEPT}
-          aria-invalid={errors.file ? true : undefined}
-          {...register("file")}
-        />
-        {errors.file && (
-          <p role="alert" className="text-sm text-destructive">
-            {errors.file.message as string}
-          </p>
-        )}
-      </div>
-
-      <div className="flex items-center gap-3">
-        <Button type="submit" size="sm" disabled={replace.isPending}>
-          {replace.isPending ? t("list.replacing") : t("list.replaceSubmit")}
-        </Button>
-        <Button type="button" size="sm" variant="outline" onClick={onCancel}>
-          {t("list.cancelReplace")}
-        </Button>
-      </div>
-
-      {replace.isError && (
-        <p role="alert" className="text-sm text-destructive">
-          {t("list.replaceError")}
-        </p>
-      )}
-    </form>
-  );
-}
-
 export default function CvVersionsPage() {
   const t = useTranslations("cvVersions");
   const conversionStatusLabel = useEnumLabel("cvConversionStatus");
@@ -207,8 +96,8 @@ export default function CvVersionsPage() {
   const create = useCreateCvVersion();
   const convert = useConvertCvVersion();
   const setDefault = useSetDefaultCvVersion();
+  const replace = useReplaceCvVersion();
   const scouts = useScouts();
-  const [replacingId, setReplacingId] = useState<string | null>(null);
   const [showSuperseded, setShowSuperseded] = useState(false);
   const [justReplacedId, setJustReplacedId] = useState<string | null>(null);
   const [sort, setSort] = useState<CvVersionsSortState>(
@@ -466,8 +355,7 @@ export default function CvVersionsPage() {
                 const busy =
                   cv.conversionStatus === "CONVERTING" ||
                   (convert.isPending && convert.variables === cv.id);
-                const showDetailRow =
-                  cv.conversionStatus === "FAILED" || replacingId === cv.id;
+                const showDetailRow = cv.conversionStatus === "FAILED";
                 const openPanel = (row: HTMLTableRowElement) => {
                   panelTriggerRef.current = row;
                   setPanelId(cv.id);
@@ -548,38 +436,16 @@ export default function CvVersionsPage() {
                                 : t("list.setDefault")}
                             </Button>
                           )}
-                          {replacingId !== cv.id && !cv.supersededById && (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={() => setReplacingId(cv.id)}
-                            >
-                              {t("list.replace")}
-                            </Button>
-                          )}
                         </div>
                       </TableCell>
                     </TableRow>
                     {showDetailRow && (
                       <TableRow>
                         <TableCell colSpan={TABLE_COLUMN_COUNT}>
-                          {cv.conversionStatus === "FAILED" && (
-                            <p role="alert" className="text-sm text-destructive">
-                              {t("list.conversionFailed")}
-                              {cv.conversionError ? ` ${cv.conversionError}` : ""}
-                            </p>
-                          )}
-                          {replacingId === cv.id && (
-                            <CvReplaceForm
-                              cv={cv}
-                              onReplaced={(replacedId) => {
-                                setReplacingId(null);
-                                setJustReplacedId(replacedId);
-                              }}
-                              onCancel={() => setReplacingId(null)}
-                            />
-                          )}
+                          <p role="alert" className="text-sm text-destructive">
+                            {t("list.conversionFailed")}
+                            {cv.conversionError ? ` ${cv.conversionError}` : ""}
+                          </p>
                         </TableCell>
                       </TableRow>
                     )}
@@ -594,7 +460,12 @@ export default function CvVersionsPage() {
       <CvVersionPanel
         cv={panelCv}
         replacedByLabel={panelReplacedByLabel}
-        open={panelCv !== null}
+        // `panelId !== null` (not `panelCv !== null`): right after a
+        // successful Replace the panel switches to the new id (#82) before
+        // the invalidated list query has refetched it, so `panelCv` is
+        // briefly null — checking `panelId` keeps the Sheet open through
+        // that gap instead of having Radix treat it as a close.
+        open={panelId !== null}
         onOpenChange={(open) => {
           if (!open) setPanelId(null);
         }}
@@ -602,6 +473,11 @@ export default function CvVersionsPage() {
         conversionStatusLabel={conversionStatusLabel}
         convert={convert}
         setDefault={setDefault}
+        replace={replace}
+        onReplaced={(oldId, newId) => {
+          setJustReplacedId(oldId);
+          setPanelId(newId);
+        }}
       />
     </main>
   );

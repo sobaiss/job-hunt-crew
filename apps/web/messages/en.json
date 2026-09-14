@@ -586,7 +586,8 @@
       "scoutWarningHeading": "This CV version was replaced, but these Scouts still use it:"
     },
     "panel": {
-      "updated": "Updated"
+      "updated": "Updated",
+      "loading": "Loading…"
     }
   },
   "ingestion": {

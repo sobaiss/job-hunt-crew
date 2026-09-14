@@ -1,17 +1,27 @@
 "use client";
 
-import type { RefObject } from "react";
+import { type RefObject, useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
 import { useTranslations } from "next-intl";
 import type { UseMutationResult } from "@tanstack/react-query";
 
 import {
   useCvVersionMarkdown,
+  firstFile,
+  ACCEPTED_CV_CONTENT_TYPES,
+  CV_FILE_ACCEPT,
+  MAX_CV_SIZE_BYTES,
+  type CreateCvVersionResponse,
   type CvConversionStatus,
   type CvVersion,
 } from "@/hooks/use-cv-versions";
 import { conversionBadgeVariant, formatFileSize } from "@/lib/cv-versions-display";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Sheet,
   SheetContent,
@@ -23,8 +33,8 @@ import {
 // mirroring the `Sheet`-based pattern `AnalysisQuickView` already uses. Shows
 // the CVVersion's Markdown rendition (fetched only while open, via the same
 // on-demand `useCvVersionMarkdown` query) plus its full info, and exposes
-// Reconvertir/Définir par défaut using the same mutations already wired on
-// the table row — Remplacer stays on the row for now (moves here in #82).
+// Reconvertir/Définir par défaut/Remplacer (issue #82) using the same
+// mutations already wired at the page level.
 
 /**
  * Read-only Markdown rendition of one CV version. Only mounted while the
@@ -60,6 +70,122 @@ function CvMarkdownPreview({ id }: { id: string }) {
   );
 }
 
+/**
+ * Inline "Replace" form, relocated from the table row into the panel (issue
+ * #82). Pre-filled with the CV's current label (editable); same
+ * file-type/size validation as the upload form. On success, `onReplaced`
+ * carries both the old (now superseded) id — for the Scout-warning banner —
+ * and the newly created id, so the page can switch the panel to it.
+ */
+function CvReplaceForm({
+  cv,
+  replace,
+  onReplaced,
+  onCancel,
+}: {
+  cv: { id: string; label: string };
+  replace: UseMutationResult<
+    CreateCvVersionResponse,
+    Error,
+    { id: string; label: string; file: File }
+  >;
+  onReplaced: (oldId: string, newId: string) => void;
+  onCancel: () => void;
+}) {
+  const t = useTranslations("cvVersions");
+
+  const schema = z.object({
+    label: z.string().trim().min(1, t("form.labelRequired")),
+    file: z
+      .any()
+      .refine((v) => firstFile(v) !== undefined, t("form.fileRequired"))
+      .refine((v) => {
+        const f = firstFile(v);
+        return !f || f.type in ACCEPTED_CV_CONTENT_TYPES;
+      }, t("form.fileType"))
+      .refine((v) => {
+        const f = firstFile(v);
+        return !f || f.size <= MAX_CV_SIZE_BYTES;
+      }, t("form.fileTooLarge")),
+  });
+
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+  } = useForm<z.infer<typeof schema>>({
+    resolver: zodResolver(schema),
+    defaultValues: { label: cv.label },
+  });
+
+  const onSubmit = handleSubmit((values) => {
+    const file = firstFile(values.file);
+    if (!file) return;
+    replace.mutate(
+      { id: cv.id, label: values.label.trim(), file },
+      { onSuccess: (data) => onReplaced(cv.id, data.cvVersionId) },
+    );
+  });
+
+  return (
+    <form
+      className="flex flex-col gap-4 border-t pt-3"
+      onSubmit={onSubmit}
+      noValidate
+    >
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor={`replace-label-${cv.id}`}>
+          {t("list.replaceLabelLabel")}
+        </Label>
+        <Input
+          id={`replace-label-${cv.id}`}
+          type="text"
+          aria-invalid={errors.label ? true : undefined}
+          {...register("label")}
+        />
+        {errors.label && (
+          <p role="alert" className="text-sm text-destructive">
+            {errors.label.message}
+          </p>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor={`replace-file-${cv.id}`}>
+          {t("list.replaceFileLabel")}
+        </Label>
+        <Input
+          id={`replace-file-${cv.id}`}
+          type="file"
+          accept={CV_FILE_ACCEPT}
+          aria-invalid={errors.file ? true : undefined}
+          {...register("file")}
+        />
+        {errors.file && (
+          <p role="alert" className="text-sm text-destructive">
+            {errors.file.message as string}
+          </p>
+        )}
+      </div>
+
+      <div className="flex items-center gap-3">
+        <Button type="submit" size="sm" disabled={replace.isPending}>
+          {replace.isPending ? t("list.replacing") : t("list.replaceSubmit")}
+        </Button>
+        <Button type="button" size="sm" variant="outline" onClick={onCancel}>
+          {t("list.cancelReplace")}
+        </Button>
+      </div>
+
+      {replace.isError && (
+        <p role="alert" className="text-sm text-destructive">
+          {t("list.replaceError")}
+        </p>
+      )}
+    </form>
+  );
+}
+
 export function CvVersionPanel({
   cv,
   replacedByLabel,
@@ -69,6 +195,8 @@ export function CvVersionPanel({
   conversionStatusLabel,
   convert,
   setDefault,
+  replace,
+  onReplaced,
 }: {
   cv: CvVersion | null;
   replacedByLabel: string | null;
@@ -81,16 +209,30 @@ export function CvVersionPanel({
   conversionStatusLabel: (value: CvConversionStatus) => string;
   convert: UseMutationResult<{ conversionStatus: CvConversionStatus }, Error, string>;
   setDefault: UseMutationResult<{ cvVersion: CvVersion }, Error, string>;
+  replace: UseMutationResult<
+    CreateCvVersionResponse,
+    Error,
+    { id: string; label: string; file: File }
+  >;
+  /** Called after a successful Replace with (oldId, newId) — the page uses
+   *  oldId for the Scout-warning banner and switches the panel to newId. */
+  onReplaced: (oldId: string, newId: string) => void;
 }) {
   const t = useTranslations("cvVersions");
+  const [isReplacing, setIsReplacing] = useState(false);
 
   const busy =
     cv !== null &&
     (cv.conversionStatus === "CONVERTING" ||
       (convert.isPending && convert.variables === cv.id));
 
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) setIsReplacing(false);
+    onOpenChange(nextOpen);
+  };
+
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetContent
         className="w-full gap-6 overflow-y-auto sm:max-w-xl"
         onCloseAutoFocus={(event) => {
@@ -98,6 +240,12 @@ export function CvVersionPanel({
           returnFocusRef.current?.focus();
         }}
       >
+        {!cv && open && (
+          <p role="status" className="text-sm text-muted">
+            {t("panel.loading")}
+          </p>
+        )}
+
         {cv && (
           <>
             <SheetHeader>
@@ -171,7 +319,29 @@ export function CvVersionPanel({
                     : t("list.setDefault")}
                 </Button>
               )}
+              {!isReplacing && !cv.supersededById && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setIsReplacing(true)}
+                >
+                  {t("list.replace")}
+                </Button>
+              )}
             </div>
+
+            {isReplacing && (
+              <CvReplaceForm
+                cv={cv}
+                replace={replace}
+                onReplaced={(oldId, newId) => {
+                  setIsReplacing(false);
+                  onReplaced(oldId, newId);
+                }}
+                onCancel={() => setIsReplacing(false)}
+              />
+            )}
 
             <CvMarkdownPreview id={cv.id} />
           </>
