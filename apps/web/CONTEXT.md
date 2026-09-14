@@ -75,7 +75,7 @@ _Avoid_: CV management, My CVs (fine in prose; the nav label and route area is "
 
 **CV panel**:
 The right-hand slide-over opened by clicking a CV-versions-table row: the CVVersion's Markdown rendition (fetched only while the panel is open, never inlined in the table) plus its full info, and its actions — Replace, Reconvert, Set default. A successful Replace switches the panel to the newly created CVVersion rather than closing it or lingering on the now-superseded row.
-_Avoid_: Quick view (that's the Analyses-list slide-over — different content and actions; this is CV-versions' own)
+_Avoid_: Quick view (that's the Analyses-list slide-over — different content and actions; this is CV-versions' own), side bar / slide bar (a candidate's own phrasing that reads as the left-nav Sidebar or a mistranslation of "slide-over" — got issue #84 pointed at the wrong component once already; this is the CV panel)
 
 **Settings**:
 The `/settings` page — theme, Locale, and read-only account details (name and email from the Session), plus sign out. No account deletion (there is no API for it).

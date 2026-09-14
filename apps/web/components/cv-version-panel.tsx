@@ -234,7 +234,7 @@ export function CvVersionPanel({
   return (
     <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetContent
-        className="w-full gap-6 overflow-y-auto sm:max-w-xl"
+        className="w-full gap-6 overflow-y-auto sm:max-w-6xl"
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           returnFocusRef.current?.focus();
