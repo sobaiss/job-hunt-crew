@@ -125,15 +125,97 @@ def test_render_markdown_to_docx_applies_style_profile_heading_treatment():
     assert str(body_run.font.color.rgb) == "112233"
 
 
-def test_render_markdown_to_docx_ignores_style_profile_for_sidebar_main():
-    style_profile = {**_STYLE_PROFILE, "layoutArchetype": "SIDEBAR_MAIN"}
-    markdown_content = "## Experience\n<!-- SectionType: EXPERIENCE -->\n\nDid things.\n"
+_SIDEBAR_MAIN_STYLE_PROFILE = {
+    "layoutArchetype": "SIDEBAR_MAIN",
+    "fonts": {"name": "Georgia", "family": "serif"},
+    "accentColor": "#112233",
+    "margins": {"top": 40, "bottom": 40, "left": 40, "right": 40},
+    "onePageFit": False,
+    "photoAssetRef": None,
+    "sections": {
+        "SKILLS": {
+            "headingTreatment": {"font": {"name": "Georgia", "family": "serif"}, "color": "#112233"},
+            "region": "SIDEBAR",
+        },
+        "EXPERIENCE": {
+            "headingTreatment": {"font": {"name": "Impact", "family": "sans-serif"}, "color": "#FF0000"},
+            "region": "MAIN",
+        },
+    },
+}
+
+_SIDEBAR_MAIN_MARKDOWN = (
+    "## Skills\n<!-- SectionType: SKILLS -->\n\n- Python\n- SQL\n\n"
+    "## Experience\n<!-- SectionType: EXPERIENCE -->\n\nDid things.\n"
+)
+
+
+def test_group_lines_by_region_splits_by_section_type():
+    from api.document_render import _classify_lines, _group_lines_by_region
+
+    lines = _classify_lines(_SIDEBAR_MAIN_MARKDOWN)
+    sidebar_lines, main_lines = _group_lines_by_region(lines, _SIDEBAR_MAIN_STYLE_PROFILE)
+
+    assert [line.text for line in sidebar_lines if line.text] == ["Skills", "Python", "SQL"]
+    assert [line.text for line in main_lines if line.text] == ["Experience", "Did things."]
+
+
+def test_group_lines_by_region_defaults_unassigned_sections_to_main():
+    from api.document_render import _classify_lines, _group_lines_by_region
+
+    markdown_content = "Some preamble.\n\n## Other\n<!-- SectionType: OTHER -->\n\nBody text.\n"
+    lines = _classify_lines(markdown_content)
+    sidebar_lines, main_lines = _group_lines_by_region(lines, _SIDEBAR_MAIN_STYLE_PROFILE)
+
+    assert sidebar_lines == []
+    assert [line.text for line in main_lines if line.text] == ["Some preamble.", "Other", "Body text."]
+
+
+def test_render_markdown_to_docx_sidebar_main_splits_sections_into_columns():
     docx_bytes = render_markdown_to_docx(
-        title="Tailored CV", markdown_content=markdown_content, style_profile=style_profile
+        title="Tailored CV", markdown_content=_SIDEBAR_MAIN_MARKDOWN, style_profile=_SIDEBAR_MAIN_STYLE_PROFILE
     )
     document = Document(BytesIO(docx_bytes))
-    body_paragraph = next(p for p in document.paragraphs if p.text == "Did things.")
-    assert body_paragraph.runs[0].font.name is None
+    table = document.tables[0]
+    sidebar_text = "\n".join(p.text for p in table.rows[0].cells[0].paragraphs)
+    main_text = "\n".join(p.text for p in table.rows[0].cells[1].paragraphs)
+
+    assert "Skills" in sidebar_text and "Python" in sidebar_text
+    assert "Experience" not in sidebar_text
+    assert "Experience" in main_text and "Did things." in main_text
+    assert "Skills" not in main_text
+
+
+def test_render_markdown_to_docx_sidebar_main_applies_heading_treatment_per_column():
+    docx_bytes = render_markdown_to_docx(
+        title="Tailored CV", markdown_content=_SIDEBAR_MAIN_MARKDOWN, style_profile=_SIDEBAR_MAIN_STYLE_PROFILE
+    )
+    document = Document(BytesIO(docx_bytes))
+    table = document.tables[0]
+    main_heading = next(p for p in table.rows[0].cells[1].paragraphs if p.text == "Experience")
+    run = main_heading.runs[0]
+    # "Impact" isn't in the curated cross-platform set, so it's substituted
+    # by its family's ("sans-serif") entry, same rule as SINGLE_COLUMN (#100).
+    assert run.font.name == "Arial"
+    assert str(run.font.color.rgb) == "FF0000"
+
+
+def test_render_markdown_to_docx_single_column_unaffected_by_sidebar_main_support():
+    markdown_content = "## Experience\n<!-- SectionType: EXPERIENCE -->\n\nDid things.\n"
+    docx_bytes = render_markdown_to_docx(
+        title="Tailored CV", markdown_content=markdown_content, style_profile=_STYLE_PROFILE
+    )
+    document = Document(BytesIO(docx_bytes))
+    assert document.tables == []
+    heading_paragraph = next(p for p in document.paragraphs if p.text == "Experience")
+    assert heading_paragraph.runs[0].font.name == "Arial"
+
+
+def test_render_markdown_to_pdf_sidebar_main_renders_without_error():
+    pdf_bytes = render_markdown_to_pdf(
+        title="Tailored CV", markdown_content=_SIDEBAR_MAIN_MARKDOWN, style_profile=_SIDEBAR_MAIN_STYLE_PROFILE
+    )
+    assert pdf_bytes.startswith(b"%PDF")
 
 
 def test_render_markdown_to_pdf_applies_style_profile_without_error():

@@ -4,7 +4,7 @@ from enum import Enum
 from io import BytesIO
 
 from docx import Document
-from docx.shared import Pt, RGBColor
+from docx.shared import Inches, Pt, RGBColor
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
 from py_db.section_type import SectionType
@@ -35,6 +35,15 @@ _DOCX_MARGIN_FLOOR_PT = 36
 _DOCX_TITLE_FONT_SIZE = 16
 _DOCX_HEADING1_FONT_SIZE = 14
 _DOCX_HEADING2_FONT_SIZE = 12
+
+# #99: neither fpdf nor python-docx has a real multi-column text-flow
+# primitive, so a SIDEBAR_MAIN StyleProfile is rendered as two independently
+# positioned/sized regions instead — a fixed-width sidebar and a wider main
+# region that just reflows to however much content it's given.
+_SIDEBAR_WIDTH_MM = 55
+_COLUMN_GAP_MM = 8
+_DOCX_SIDEBAR_WIDTH = Inches(2.0)
+_DOCX_MAIN_WIDTH = Inches(4.5)
 
 # CvTailoringAgent (#97) tags every heading it writes with this HTML comment,
 # on its own line right below the heading. It must never reach a
@@ -126,21 +135,53 @@ def _latin1_safe(text: str) -> str:
     return text.encode("latin-1", errors="replace").decode("latin-1")
 
 
-def _block(pdf: FPDF, line_height: float, text: str) -> None:
+def _block(pdf: FPDF, line_height: float, text: str, *, width: float = 0) -> None:
     """multi_cell defaults to leaving the cursor at the right margin
-    (new_x=XPos.RIGHT), which starves the next call of width. Every block in
-    this template is meant to behave like a full-width paragraph, so the
-    cursor is explicitly returned to the left margin on the next line.
+    (new_x=XPos.RIGHT), which starves the next call of width. `new_x=LEFT`
+    returns the cursor to wherever this cell started (the page margin for a
+    full-width block, or a column's own x for a sidebar/main block — #99),
+    so the next line in the same column keeps its width.
     """
-    pdf.multi_cell(0, line_height, text, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.multi_cell(width, line_height, text, new_x=XPos.LEFT, new_y=YPos.NEXT)
+
+
+_STYLED_ARCHETYPES = ("SINGLE_COLUMN", "SIDEBAR_MAIN")
 
 
 def _active_style_profile(style_profile: dict | None) -> dict | None:
-    """A StyleProfile only styles rendering for the SINGLE_COLUMN archetype
-    (#98) — SIDEBAR_MAIN falls back to the generic template until #99."""
-    if style_profile is None or style_profile.get("layoutArchetype") != "SINGLE_COLUMN":
+    """A StyleProfile only styles rendering for the SINGLE_COLUMN (#98) and
+    SIDEBAR_MAIN (#99) archetypes; anything else (or no profile at all)
+    falls back to the generic template."""
+    if style_profile is None or style_profile.get("layoutArchetype") not in _STYLED_ARCHETYPES:
         return None
     return style_profile
+
+
+def _section_region(profile: dict, section_type: SectionType | None) -> str:
+    """The StyleProfile's SIDEBAR/MAIN assignment for a heading's
+    SectionType (#99). A heading with no recognized SectionType, or one the
+    classification didn't assign a region, defaults to MAIN — the sidebar is
+    only ever the StyleProfile's explicit, short/low-variance picks."""
+    if section_type is None:
+        return "MAIN"
+    return profile.get("sections", {}).get(section_type.value, {}).get("region") or "MAIN"
+
+
+def _group_lines_by_region(lines: list[_Line], profile: dict) -> tuple[list[_Line], list[_Line]]:
+    """Splits classified lines into (sidebar_lines, main_lines) for a
+    SIDEBAR_MAIN StyleProfile (#99). Every line inherits the region of the
+    most recent heading above it — content above any heading defaults to
+    MAIN. Order within each region is preserved exactly as it appears in the
+    source Markdown (#98's rule: section order always follows the tailored
+    Markdown, never the StyleProfile)."""
+    sidebar: list[_Line] = []
+    main: list[_Line] = []
+    current_region = "MAIN"
+    for line in lines:
+        if line.kind in (_LineKind.HEADING1, _LineKind.HEADING2):
+            current_region = _section_region(profile, line.section_type)
+        (sidebar if current_region == "SIDEBAR" else main).append(line)
+    return sidebar, main
 
 
 def _hex_to_rgb(hex_color: str | None) -> tuple[int, int, int] | None:
@@ -156,6 +197,90 @@ def _heading_treatment(style_profile: dict, section_type: SectionType | None) ->
     if section_type is None:
         return None
     return style_profile.get("sections", {}).get(section_type.value, {}).get("headingTreatment")
+
+
+def _render_pdf_lines(
+    pdf: FPDF,
+    lines: list[_Line],
+    profile: dict | None,
+    *,
+    body_font: str,
+    body_color: tuple[int, int, int],
+    font_scale: float,
+    width: float,
+    x: float | None = None,
+) -> None:
+    """Renders classified lines from the PDF's current cursor, applying a
+    profile's per-SectionType heading treatment. Used both for a single
+    full-width column (#98, `x=None`, `width=0`) and for a SIDEBAR_MAIN
+    profile's narrow/wide columns (#99): when `x` is given, the cursor
+    returns to it before every line so two independently-flowing columns
+    can be rendered without fighting over fpdf's single shared cursor.
+    """
+    for line in lines:
+        if x is not None:
+            pdf.set_x(x)
+        if line.kind is _LineKind.BLANK:
+            pdf.ln(3 * font_scale)
+        elif line.kind in (_LineKind.HEADING1, _LineKind.HEADING2):
+            base_size = _HEADING_FONT_SIZE if line.kind is _LineKind.HEADING1 else _BODY_FONT_SIZE + 1
+            treatment = profile and _heading_treatment(profile, line.section_type)
+            font = _FONT_FAMILY_TO_PDF_FONT.get(
+                (treatment or {}).get("font", {}).get("family"), body_font
+            )
+            color = _hex_to_rgb((treatment or {}).get("color")) or body_color
+            pdf.set_text_color(*color)
+            pdf.set_font(font, style="B", size=round(base_size * font_scale))
+            line_height = (8 if line.kind is _LineKind.HEADING1 else 7) * font_scale
+            _block(pdf, line_height, _latin1_safe(line.text), width=width)
+            pdf.set_text_color(0, 0, 0)
+        elif line.kind is _LineKind.BULLET:
+            pdf.set_text_color(*body_color)
+            pdf.set_font(body_font, size=round(_BODY_FONT_SIZE * font_scale))
+            _block(pdf, 6 * font_scale, _latin1_safe(f"- {line.text}"), width=width)
+            pdf.set_text_color(0, 0, 0)
+        else:
+            pdf.set_text_color(*body_color)
+            pdf.set_font(body_font, size=round(_BODY_FONT_SIZE * font_scale))
+            _block(pdf, 6 * font_scale, _latin1_safe(line.text), width=width)
+            pdf.set_text_color(0, 0, 0)
+
+
+def _render_pdf_sidebar_main(
+    pdf: FPDF,
+    lines: list[_Line],
+    profile: dict,
+    *,
+    body_font: str,
+    body_color: tuple[int, int, int],
+    font_scale: float,
+    margin_mm: float,
+) -> None:
+    """Lays a SIDEBAR_MAIN StyleProfile (#99) out as a fixed-width sidebar
+    plus a main column that reflows to whatever content it's given; both
+    start at the same y (right below the title) and are rendered as two
+    separate cursor passes since fpdf has no native multi-column text flow.
+    Section order within each column still follows the Markdown's own order
+    (#98's rule) — only the SIDEBAR/MAIN split itself comes from the
+    StyleProfile.
+    """
+    sidebar_lines, main_lines = _group_lines_by_region(lines, profile)
+    top_y = pdf.get_y()
+    sidebar_x = margin_mm
+    main_x = margin_mm + _SIDEBAR_WIDTH_MM + _COLUMN_GAP_MM
+    main_width = pdf.w - main_x - margin_mm
+
+    pdf.set_xy(sidebar_x, top_y)
+    _render_pdf_lines(
+        pdf, sidebar_lines, profile, body_font=body_font, body_color=body_color,
+        font_scale=font_scale, width=_SIDEBAR_WIDTH_MM, x=sidebar_x,
+    )
+
+    pdf.set_xy(main_x, top_y)
+    _render_pdf_lines(
+        pdf, main_lines, profile, body_font=body_font, body_color=body_color,
+        font_scale=font_scale, width=main_width, x=main_x,
+    )
 
 
 def _render_pdf(
@@ -175,31 +300,16 @@ def _render_pdf(
     _block(pdf, 10 * font_scale, _latin1_safe(title))
     pdf.ln(4 * font_scale)
 
-    for line in lines:
-        if line.kind is _LineKind.BLANK:
-            pdf.ln(3 * font_scale)
-        elif line.kind in (_LineKind.HEADING1, _LineKind.HEADING2):
-            base_size = _HEADING_FONT_SIZE if line.kind is _LineKind.HEADING1 else _BODY_FONT_SIZE + 1
-            treatment = profile and _heading_treatment(profile, line.section_type)
-            font = _FONT_FAMILY_TO_PDF_FONT.get(
-                (treatment or {}).get("font", {}).get("family"), body_font
-            )
-            color = _hex_to_rgb((treatment or {}).get("color")) or body_color
-            pdf.set_text_color(*color)
-            pdf.set_font(font, style="B", size=round(base_size * font_scale))
-            line_height = (8 if line.kind is _LineKind.HEADING1 else 7) * font_scale
-            _block(pdf, line_height, _latin1_safe(line.text))
-            pdf.set_text_color(0, 0, 0)
-        elif line.kind is _LineKind.BULLET:
-            pdf.set_text_color(*body_color)
-            pdf.set_font(body_font, size=round(_BODY_FONT_SIZE * font_scale))
-            _block(pdf, 6 * font_scale, _latin1_safe(f"- {line.text}"))
-            pdf.set_text_color(0, 0, 0)
-        else:
-            pdf.set_text_color(*body_color)
-            pdf.set_font(body_font, size=round(_BODY_FONT_SIZE * font_scale))
-            _block(pdf, 6 * font_scale, _latin1_safe(line.text))
-            pdf.set_text_color(0, 0, 0)
+    if profile and profile.get("layoutArchetype") == "SIDEBAR_MAIN":
+        _render_pdf_sidebar_main(
+            pdf, lines, profile, body_font=body_font, body_color=body_color,
+            font_scale=font_scale, margin_mm=margin_mm,
+        )
+    else:
+        _render_pdf_lines(
+            pdf, lines, profile, body_font=body_font, body_color=body_color,
+            font_scale=font_scale, width=0,
+        )
 
     return pdf
 
@@ -227,9 +337,12 @@ def render_markdown_to_pdf(
     everything else is a plain paragraph. When `style_profile` is a
     SINGLE_COLUMN StyleProfile (#98), body text and each SectionType-tagged
     heading use that profile's font family and colors instead of the
-    template default. When that profile also recorded `onePageFit` (#100),
-    rendering attempts a bounded margin/font reduction to keep the tailored
-    content on one page too, before allowing it to spill onto a second.
+    template default. A SIDEBAR_MAIN StyleProfile (#99) additionally splits
+    rendering into a fixed-width sidebar and a reflowing main column per the
+    StyleProfile's SIDEBAR/MAIN section assignment. When the profile also
+    recorded `onePageFit` (#100), rendering attempts a bounded margin/font
+    reduction to keep the tailored content on one page too, before allowing
+    it to spill onto a second.
     """
     profile = _active_style_profile(style_profile)
     lines = _classify_lines(markdown_content)
@@ -260,6 +373,78 @@ def _docx_needs_one_page_reduction(*, profile: dict | None, title: str, lines: l
     return total_chars > _DOCX_ONE_PAGE_CHAR_BUDGET
 
 
+def _add_docx_line(
+    container,
+    line: _Line,
+    profile: dict | None,
+    *,
+    body_font_name: str | None,
+    body_color: tuple[int, int, int] | None,
+    body_size: float | None,
+    heading1_size: float | None,
+    heading2_size: float | None,
+) -> None:
+    """Adds one classified line to `container` — a `Document` or a table
+    `_Cell` (#99), both of which expose the same `add_paragraph(text,
+    style=...)` shape that `Document.add_heading` itself is built on. Shared
+    by the single-column path and each SIDEBAR_MAIN column (#99) so heading
+    treatment/body styling behaves identically either way.
+    """
+    if line.kind in (_LineKind.HEADING1, _LineKind.HEADING2):
+        level = 1 if line.kind is _LineKind.HEADING1 else 2
+        paragraph = container.add_paragraph(line.text, style=f"Heading {level}")
+        treatment = profile and _heading_treatment(profile, line.section_type)
+        font_name = _docx_font_name(treatment.get("font")) if treatment else None
+        color = _hex_to_rgb(treatment.get("color")) if treatment else None
+        heading_size = heading1_size if line.kind is _LineKind.HEADING1 else heading2_size
+        if font_name or color or heading_size:
+            for run in paragraph.runs:
+                _apply_docx_run_style(run, font_name=font_name, color=color, font_size_pt=heading_size)
+    elif line.kind is _LineKind.BULLET:
+        paragraph = container.add_paragraph(line.text, style="List Bullet")
+        for run in paragraph.runs:
+            _apply_docx_run_style(run, font_name=body_font_name, color=body_color, font_size_pt=body_size)
+    else:
+        paragraph = container.add_paragraph(line.text)
+        for run in paragraph.runs:
+            _apply_docx_run_style(run, font_name=body_font_name, color=body_color, font_size_pt=body_size)
+
+
+def _render_docx_sidebar_main(
+    document: Document,
+    lines: list[_Line],
+    profile: dict,
+    *,
+    body_font_name: str | None,
+    body_color: tuple[int, int, int] | None,
+    body_size: float | None,
+    heading1_size: float | None,
+    heading2_size: float | None,
+) -> None:
+    """Lays a SIDEBAR_MAIN StyleProfile (#99) out as a two-cell, one-row
+    table: a fixed-width sidebar cell for the StyleProfile's SIDEBAR
+    SectionTypes and a wider main cell for everything else, mirroring the
+    PDF renderer's split since python-docx has no native multi-column text
+    flow either. Section order within each cell still follows the
+    Markdown's own order (#98's rule).
+    """
+    sidebar_lines, main_lines = _group_lines_by_region(lines, profile)
+    table = document.add_table(rows=1, cols=2)
+    table.autofit = False
+    sidebar_cell, main_cell = table.rows[0].cells
+    sidebar_cell.width = _DOCX_SIDEBAR_WIDTH
+    main_cell.width = _DOCX_MAIN_WIDTH
+
+    for cell, cell_lines in ((sidebar_cell, sidebar_lines), (main_cell, main_lines)):
+        for line in cell_lines:
+            if line.kind is _LineKind.BLANK:
+                continue
+            _add_docx_line(
+                cell, line, profile, body_font_name=body_font_name, body_color=body_color,
+                body_size=body_size, heading1_size=heading1_size, heading2_size=heading2_size,
+            )
+
+
 def render_markdown_to_docx(
     *, title: str, markdown_content: str, style_profile: dict | None = None
 ) -> bytes:
@@ -269,12 +454,15 @@ def render_markdown_to_docx(
     `style_profile` is a SINGLE_COLUMN StyleProfile (#98), body text and each
     SectionType-tagged heading get that profile's font and colors, with any
     font outside a small curated cross-platform set replaced by its family's
-    entry instead of used literally (#100). When that profile also recorded
-    `onePageFit` and the tailored content crosses the same character-count
-    proxy style_profile.py's extraction uses, margins drop to a bounded
-    floor and every run gets an explicit, smaller font size (#100) — content
-    long enough to still cross the budget at the floor is simply allowed to
-    spill onto a second page.
+    entry instead of used literally (#100). A SIDEBAR_MAIN StyleProfile (#99)
+    instead lays the same styled content out as a two-column table — a
+    fixed-width sidebar cell and a wider main cell — split per the
+    StyleProfile's SIDEBAR/MAIN section assignment. When that profile also
+    recorded `onePageFit` and the tailored content crosses the same
+    character-count proxy style_profile.py's extraction uses, margins drop
+    to a bounded floor and every run gets an explicit, smaller font size
+    (#100) — content long enough to still cross the budget at the floor is
+    simply allowed to spill onto a second page.
     """
     profile = _active_style_profile(style_profile)
     lines = _classify_lines(markdown_content)
@@ -298,27 +486,19 @@ def render_markdown_to_docx(
         for run in title_paragraph.runs:
             _apply_docx_run_style(run, font_name=None, color=None, font_size_pt=_DOCX_TITLE_FONT_SIZE * _FONT_SCALE_FLOOR)
 
-    for line in lines:
-        if line.kind is _LineKind.BLANK:
-            continue
-        elif line.kind in (_LineKind.HEADING1, _LineKind.HEADING2):
-            level = 1 if line.kind is _LineKind.HEADING1 else 2
-            paragraph = document.add_heading(line.text, level=level)
-            treatment = profile and _heading_treatment(profile, line.section_type)
-            font_name = _docx_font_name(treatment.get("font")) if treatment else None
-            color = _hex_to_rgb(treatment.get("color")) if treatment else None
-            heading_size = heading1_size if line.kind is _LineKind.HEADING1 else heading2_size
-            if font_name or color or heading_size:
-                for run in paragraph.runs:
-                    _apply_docx_run_style(run, font_name=font_name, color=color, font_size_pt=heading_size)
-        elif line.kind is _LineKind.BULLET:
-            paragraph = document.add_paragraph(line.text, style="List Bullet")
-            for run in paragraph.runs:
-                _apply_docx_run_style(run, font_name=body_font_name, color=body_color, font_size_pt=body_size)
-        else:
-            paragraph = document.add_paragraph(line.text)
-            for run in paragraph.runs:
-                _apply_docx_run_style(run, font_name=body_font_name, color=body_color, font_size_pt=body_size)
+    if profile and profile.get("layoutArchetype") == "SIDEBAR_MAIN":
+        _render_docx_sidebar_main(
+            document, lines, profile, body_font_name=body_font_name, body_color=body_color,
+            body_size=body_size, heading1_size=heading1_size, heading2_size=heading2_size,
+        )
+    else:
+        for line in lines:
+            if line.kind is _LineKind.BLANK:
+                continue
+            _add_docx_line(
+                document, line, profile, body_font_name=body_font_name, body_color=body_color,
+                body_size=body_size, heading1_size=heading1_size, heading2_size=heading2_size,
+            )
 
     buffer = BytesIO()
     document.save(buffer)
