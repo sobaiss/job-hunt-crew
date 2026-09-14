@@ -136,7 +136,7 @@ export default function CvVersionsPage() {
     : null;
 
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-col gap-10 p-8">
+    <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-10 p-8">
       <div className="flex items-center justify-between gap-4">
         <h1 className="font-serif text-2xl font-semibold">{t("title")}</h1>
         <Button asChild size="sm">
