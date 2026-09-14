@@ -384,10 +384,17 @@
       "loadError": "We couldn't load your Scouts. Please try again.",
       "empty": "You don't have any Scouts yet.",
       "new": "New Scout",
-      "baseCv": "Base CV",
-      "lastRun": "Last run",
       "neverRun": "Never run",
-      "sites": "{count, plural, one {# site} other {# sites}}"
+      "showArchived": "Show archived Scouts",
+      "sites": "{count, plural, one {# site} other {# sites}}",
+      "columns": {
+        "label": "Label",
+        "status": "Status",
+        "baseCv": "Base CV",
+        "sites": "Sites",
+        "lastRun": "Last run",
+        "relevantFinds": "Relevant finds"
+      }
     },
     "status": {
       "ACTIVE": "Active",
@@ -423,6 +430,7 @@
       "loading": "Loading this Scout",
       "loadError": "We couldn't load this Scout. Please try again.",
       "configHeading": "Configuration",
+      "statsHeading": "Stats",
       "baseCv": "Base CV",
       "sites": "Job sites",
       "threshold": "Relevance threshold",
@@ -552,14 +560,22 @@
       "loadError": "We couldn't load your CV versions. Please try again.",
       "empty": "No CV versions uploaded yet.",
       "showSuperseded": "Show superseded CV versions",
+      "importCv": "Import a CV",
+      "columns": {
+        "label": "Label",
+        "file": "File",
+        "size": "Size",
+        "uploaded": "Uploaded",
+        "status": "Status",
+        "default": "Default"
+      },
+      "actions": "Actions",
       "replacedBy": "Replaced by {label}",
       "default": "Default",
       "setDefault": "Set as default",
       "settingDefault": "Setting…",
       "setDefaultError": "We couldn't set that as your default. Please try again.",
       "setDefaultSuccess": "Default CV version updated.",
-      "viewMarkdown": "View Markdown",
-      "hideMarkdown": "Hide Markdown",
       "markdownHeading": "Markdown rendition",
       "markdownLoading": "Loading the Markdown rendition",
       "markdownError": "We couldn't load the Markdown rendition. Please try again.",
@@ -577,6 +593,10 @@
       "replacing": "Replacing…",
       "replaceError": "We couldn't replace that CV version. Please try again.",
       "scoutWarningHeading": "This CV version was replaced, but these Scouts still use it:"
+    },
+    "panel": {
+      "updated": "Updated",
+      "loading": "Loading…"
     }
   },
   "ingestion": {

@@ -182,7 +182,7 @@ describe("ApplicationDetailPage", () => {
     );
     expect(screen.getByRole("link", { name: "View the Scout" })).toHaveAttribute(
       "href",
-      "/scouts/scout-1",
+      "/scouts?open=scout-1",
     );
   });
 

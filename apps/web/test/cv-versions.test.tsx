@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { http, HttpResponse } from "msw";
 import userEvent from "@testing-library/user-event";
 
-import { renderWithProviders, screen, waitFor } from "./test-utils";
+import { renderWithProviders, screen, waitFor, within } from "./test-utils";
 import { server } from "./msw/server";
 import CvVersionsPage from "@/app/(app)/cv-versions/page";
 
@@ -33,141 +33,22 @@ function pdf(name = "cv.pdf", { size }: { size?: number } = {}) {
   return file;
 }
 
-describe("CvVersionsPage — upload form", () => {
-  it("shows inline validation when submitting with no label and no file", async () => {
-    server.use(
-      http.get("/api/cv-versions", () =>
-        HttpResponse.json({ cvVersions: [] }),
-      ),
-    );
-    const user = userEvent.setup();
-    renderWithProviders(<CvVersionsPage />);
-
-    await user.click(screen.getByRole("button", { name: "Upload" }));
-
-    expect(
-      await screen.findByText("Give this CV version a label."),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText("Choose a PDF, DOCX, Markdown, or plain-text file."),
-    ).toBeInTheDocument();
-  });
-
-  it("rejects an unsupported file type with a type message", async () => {
-    server.use(
-      http.get("/api/cv-versions", () =>
-        HttpResponse.json({ cvVersions: [] }),
-      ),
-    );
-    const user = userEvent.setup();
-    renderWithProviders(<CvVersionsPage />);
-
-    await user.type(screen.getByLabelText("Label"), "My CV");
-    // Named `.pdf` (so the <input accept> lets user-event set it) but with an
-    // unsupported media type, so the zod content-type check is what rejects it.
-    await user.upload(
-      screen.getByLabelText("File"),
-      new File(["hi"], "notes.pdf", { type: "application/rtf" }),
-    );
-    await user.click(screen.getByRole("button", { name: "Upload" }));
-
-    expect(
-      await screen.findByText(
-        "Only PDF, DOCX, Markdown, and plain-text files are supported.",
-      ),
-    ).toBeInTheDocument();
-  });
-
-  it("accepts a Markdown file", async () => {
-    let createBody: Record<string, unknown> | null = null;
-    server.use(
-      http.get("/api/cv-versions", () =>
-        HttpResponse.json({ cvVersions: [] }),
-      ),
-      http.post("/api/cv-versions", async ({ request }) => {
-        createBody = (await request.json()) as Record<string, unknown>;
-        return HttpResponse.json(
-          { cvVersionId: "cvmd", fileKey: "k", uploadUrl: UPLOAD_URL },
-          { status: 201 },
-        );
-      }),
-      http.put(UPLOAD_URL, () => new HttpResponse(null, { status: 200 })),
-    );
-    const user = userEvent.setup();
-    renderWithProviders(<CvVersionsPage />);
-
-    await user.type(screen.getByLabelText("Label"), "Markdown CV");
-    await user.upload(
-      screen.getByLabelText("File"),
-      new File(["# CV"], "cv.md", { type: "text/markdown" }),
-    );
-    await user.click(screen.getByRole("button", { name: "Upload" }));
-
-    expect(await screen.findByText("CV version uploaded.")).toBeInTheDocument();
-    expect(createBody).toMatchObject({
-      fileName: "cv.md",
-      contentType: "text/markdown",
-    });
-  });
-
-  it("rejects a file over the 10 MB limit", async () => {
-    server.use(
-      http.get("/api/cv-versions", () =>
-        HttpResponse.json({ cvVersions: [] }),
-      ),
-    );
-    const user = userEvent.setup();
-    renderWithProviders(<CvVersionsPage />);
-
-    await user.type(screen.getByLabelText("Label"), "My CV");
-    await user.upload(
-      screen.getByLabelText("File"),
-      pdf("big.pdf", { size: 11 * 1024 * 1024 }),
-    );
-    await user.click(screen.getByRole("button", { name: "Upload" }));
-
-    expect(
-      await screen.findByText("That file is larger than the 10 MB limit."),
-    ).toBeInTheDocument();
-  });
-
-  it("creates the CV version, PUTs the file, and confirms success", async () => {
-    let createBody: Record<string, unknown> | null = null;
-    let putReceived = false;
-    server.use(
-      http.get("/api/cv-versions", () =>
-        HttpResponse.json({ cvVersions: [] }),
-      ),
-      http.post("/api/cv-versions", async ({ request }) => {
-        createBody = (await request.json()) as Record<string, unknown>;
-        return HttpResponse.json(
-          { cvVersionId: "cv9", fileKey: "k", uploadUrl: UPLOAD_URL },
-          { status: 201 },
-        );
-      }),
-      http.put(UPLOAD_URL, () => {
-        putReceived = true;
-        return new HttpResponse(null, { status: 200 });
-      }),
-    );
-    const user = userEvent.setup();
-    renderWithProviders(<CvVersionsPage />);
-
-    await user.type(screen.getByLabelText("Label"), "Fintech CV");
-    await user.upload(screen.getByLabelText("File"), pdf("fintech.pdf"));
-    await user.click(screen.getByRole("button", { name: "Upload" }));
-
-    expect(await screen.findByText("CV version uploaded.")).toBeInTheDocument();
-    expect(putReceived).toBe(true);
-    expect(createBody).toMatchObject({
-      label: "Fintech CV",
-      fileName: "fintech.pdf",
-      contentType: "application/pdf",
-    });
-  });
-});
-
 describe("CvVersionsPage — list", () => {
+  it("shows an 'Import a CV' entry point linking to /cv-versions/new instead of an inline form (issue #83)", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [] }),
+      ),
+    );
+    renderWithProviders(<CvVersionsPage />);
+
+    expect(
+      await screen.findByRole("link", { name: "Import a CV" }),
+    ).toHaveAttribute("href", "/cv-versions/new");
+    expect(screen.queryByLabelText("Label")).toBeNull();
+    expect(screen.queryByLabelText("File")).toBeNull();
+  });
+
   it("renders each CV version with its conversion status", async () => {
     server.use(
       http.get("/api/cv-versions", () =>
@@ -182,7 +63,7 @@ describe("CvVersionsPage — list", () => {
     expect(screen.getByText("Converting")).toBeInTheDocument();
   });
 
-  it("fetches and shows the Markdown rendition only after the panel is opened", async () => {
+  it("opens the CV panel on row click, fetching the Markdown rendition only once open (issue #81)", async () => {
     let markdownRequests = 0;
     server.use(
       http.get("/api/cv-versions", () =>
@@ -201,19 +82,143 @@ describe("CvVersionsPage — list", () => {
 
     await screen.findByText("Grad CV");
     expect(markdownRequests).toBe(0);
-    expect(screen.queryByText(/Staff Engineer since 2019/)).toBeNull();
 
-    await user.click(screen.getByRole("button", { name: "View Markdown" }));
+    await user.click(screen.getByText("Grad CV"));
 
+    const panel = within(await screen.findByRole("dialog"));
     expect(
-      await screen.findByText(/Staff Engineer since 2019/),
+      await panel.findByText(/Staff Engineer since 2019/),
     ).toBeInTheDocument();
     expect(markdownRequests).toBe(1);
+  });
 
-    await user.click(screen.getByRole("button", { name: "Hide Markdown" }));
-    await waitFor(() =>
-      expect(screen.queryByText(/Staff Engineer since 2019/)).toBeNull(),
+  it("shows the CV's full info (file, size, dates, status, default state) in the panel", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: [cvVersion({ isDefault: true })],
+        }),
+      ),
+      http.get("/api/cv-versions/cv1/markdown", () =>
+        HttpResponse.json({ markdownContent: null, conversionStatus: "CONVERTED" }),
+      ),
     );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await user.click(await screen.findByText("Grad CV"));
+
+    const panel = within(await screen.findByRole("dialog"));
+    expect(panel.getByText("grad-cv.pdf · PDF")).toBeInTheDocument();
+    expect(panel.getByText("12.1 KB")).toBeInTheDocument();
+    expect(panel.getByText("Converted")).toBeInTheDocument();
+    expect(panel.getAllByText("Default").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("shows the conversionError text in the panel for a FAILED CV", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: [
+            cvVersion({
+              conversionStatus: "FAILED",
+              conversionError: "no extractable text — is this a scanned PDF?",
+            }),
+          ],
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await user.click(await screen.findByText("Grad CV"));
+
+    const panel = within(await screen.findByRole("dialog"));
+    expect(
+      panel.getByText(/no extractable text — is this a scanned PDF\?/),
+    ).toBeInTheDocument();
+  });
+
+  it("does not open the panel when clicking an inline action button", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cvVersion()] }),
+      ),
+      http.post("/api/cv-versions/cv1/convert", () =>
+        HttpResponse.json({ conversionStatus: "PENDING" }, { status: 202 }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Reconvert" }),
+    );
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("triggers Reconvert and Set as default from the panel", async () => {
+    let convertCalls = 0;
+    let patchBody: Record<string, unknown> | null = null;
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cvVersion()] }),
+      ),
+      http.get("/api/cv-versions/cv1/markdown", () =>
+        HttpResponse.json({ markdownContent: null, conversionStatus: "CONVERTED" }),
+      ),
+      http.post("/api/cv-versions/cv1/convert", () => {
+        convertCalls += 1;
+        return HttpResponse.json({ conversionStatus: "PENDING" }, { status: 202 });
+      }),
+      http.patch("/api/cv-versions/cv1", async ({ request }) => {
+        patchBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ cvVersion: cvVersion({ isDefault: true }) });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await user.click(await screen.findByText("Grad CV"));
+    const panel = within(await screen.findByRole("dialog"));
+
+    await user.click(panel.getByRole("button", { name: "Reconvert" }));
+    await waitFor(() => expect(convertCalls).toBe(1));
+
+    await user.click(panel.getByRole("button", { name: "Set as default" }));
+    await waitFor(() => expect(patchBody).toEqual({ isDefault: true }));
+  });
+
+  it("hides Set as default and Replace (but keeps Reconvert) in the panel for a superseded CV", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: [
+            cvVersion({ id: "cv1", label: "Old CV", supersededById: "cv2" }),
+            cvVersion({ id: "cv2", label: "New CV" }),
+          ],
+        }),
+      ),
+      http.get("/api/cv-versions/cv1/markdown", () =>
+        HttpResponse.json({ markdownContent: null, conversionStatus: "CONVERTED" }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await user.click(
+      screen.getByRole("checkbox", { name: "Show superseded CV versions" }),
+    );
+    await user.click(await screen.findByText("Old CV"));
+
+    const panel = within(await screen.findByRole("dialog"));
+    expect(panel.getByRole("button", { name: "Reconvert" })).toBeEnabled();
+    expect(
+      panel.queryByRole("button", { name: "Set as default" }),
+    ).toBeNull();
+    expect(panel.queryByRole("button", { name: "Replace" })).toBeNull();
+    expect(panel.getByText("Replaced by New CV")).toBeInTheDocument();
   });
 
   it("triggers a Conversion via POST /api/cv-versions/:id/convert", async () => {
@@ -279,6 +284,34 @@ describe("CvVersionsPage — list", () => {
     expect(
       await screen.findByText(/no extractable text — is this a scanned PDF\?/),
     ).toBeInTheDocument();
+  });
+
+  it("sorts rows by label when the Label column header is clicked", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: [
+            cvVersion({ id: "cv1", label: "Zebra CV" }),
+            cvVersion({ id: "cv2", label: "Alpha CV" }),
+          ],
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await screen.findByText("Zebra CV");
+    const rowLabel = () =>
+      screen.getAllByRole("row").slice(1, 3).map((row) => row.textContent);
+    // Default sort is by upload date; both fixtures share the same
+    // `createdAt`, so insertion order ("Zebra CV" first) holds until sorted.
+    expect(rowLabel()[0]).toContain("Zebra CV");
+
+    await user.click(screen.getByRole("button", { name: "Label" }));
+    expect(rowLabel()[0]).toContain("Alpha CV");
+
+    await user.click(screen.getByRole("button", { name: "Label" }));
+    expect(rowLabel()[0]).toContain("Zebra CV");
   });
 
   it("shows an error state when the list fails to load", async () => {
@@ -370,15 +403,34 @@ describe("CvVersionsPage — list", () => {
   });
 });
 
-describe("CvVersionsPage — replace", () => {
-  it("opens a form pre-filled with the current label, replaces, and drops the old row from the list", async () => {
+describe("CvVersionsPage — replace (from the panel, issue #82)", () => {
+  it("does not render a Replace button or form on the row itself", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cvVersion()] }),
+      ),
+    );
+    renderWithProviders(<CvVersionsPage />);
+
+    await screen.findByText("Grad CV");
+    expect(screen.queryByRole("button", { name: "Replace" })).toBeNull();
+    expect(screen.queryByLabelText("New label")).toBeNull();
+  });
+
+  it("opens a form pre-filled with the current label, replaces, and switches the panel to the new CV", async () => {
     let replaceBody: Record<string, unknown> | null = null;
     let replaced = false;
     server.use(
       http.get("/api/cv-versions", () =>
         HttpResponse.json({
           cvVersions: replaced
-            ? [cvVersion({ id: "cv2", label: "Updated CV" })]
+            ? [
+                cvVersion({
+                  id: "cv2",
+                  label: "Updated CV",
+                  conversionStatus: "PENDING",
+                }),
+              ]
             : [cvVersion()],
         }),
       ),
@@ -391,23 +443,30 @@ describe("CvVersionsPage — replace", () => {
         );
       }),
       http.put(UPLOAD_URL, () => new HttpResponse(null, { status: 200 })),
+      http.get("/api/cv-versions/cv2/markdown", () =>
+        HttpResponse.json({ markdownContent: null, conversionStatus: "PENDING" }),
+      ),
     );
     const user = userEvent.setup();
     renderWithProviders(<CvVersionsPage />);
 
-    await user.click(await screen.findByRole("button", { name: "Replace" }));
+    await user.click(await screen.findByText("Grad CV"));
+    const panel = within(await screen.findByRole("dialog"));
+    await user.click(panel.getByRole("button", { name: "Replace" }));
 
-    const labelInput = screen.getByLabelText("New label") as HTMLInputElement;
+    const labelInput = panel.getByLabelText("New label") as HTMLInputElement;
     expect(labelInput.value).toBe("Grad CV");
     await user.clear(labelInput);
     await user.type(labelInput, "Updated CV");
-    await user.upload(screen.getByLabelText("New file"), pdf("updated.pdf"));
-    await user.click(screen.getByRole("button", { name: "Replace" }));
+    await user.upload(panel.getByLabelText("New file"), pdf("updated.pdf"));
+    await user.click(panel.getByRole("button", { name: "Replace" }));
 
+    // Panel switches to the newly created CV (new id, PENDING status) rather
+    // than closing or lingering on the now-superseded one.
     await waitFor(() =>
-      expect(screen.getByText("Updated CV")).toBeInTheDocument(),
+      expect(panel.getByText("Pending")).toBeInTheDocument(),
     );
-    expect(screen.queryByText("Grad CV")).toBeNull();
+    expect(within(screen.getByRole("dialog")).getByText("Updated CV")).toBeInTheDocument();
     expect(replaceBody).toMatchObject({
       label: "Updated CV",
       fileName: "updated.pdf",
@@ -424,13 +483,15 @@ describe("CvVersionsPage — replace", () => {
     const user = userEvent.setup();
     renderWithProviders(<CvVersionsPage />);
 
-    await user.click(await screen.findByRole("button", { name: "Replace" }));
-    expect(screen.getByLabelText("New label")).toBeInTheDocument();
+    await user.click(await screen.findByText("Grad CV"));
+    const panel = within(await screen.findByRole("dialog"));
+    await user.click(panel.getByRole("button", { name: "Replace" }));
+    expect(panel.getByLabelText("New label")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByLabelText("New label")).toBeNull();
+    await user.click(panel.getByRole("button", { name: "Cancel" }));
+    expect(panel.queryByLabelText("New label")).toBeNull();
     expect(
-      screen.getByRole("button", { name: "Replace" }),
+      panel.getByRole("button", { name: "Replace" }),
     ).toBeInTheDocument();
   });
 
@@ -452,6 +513,9 @@ describe("CvVersionsPage — replace", () => {
         );
       }),
       http.put(UPLOAD_URL, () => new HttpResponse(null, { status: 200 })),
+      http.get("/api/cv-versions/cv2/markdown", () =>
+        HttpResponse.json({ markdownContent: null, conversionStatus: "CONVERTED" }),
+      ),
       http.get("/api/scouts", () =>
         HttpResponse.json({
           scouts: [
@@ -483,19 +547,19 @@ describe("CvVersionsPage — replace", () => {
     const user = userEvent.setup();
     renderWithProviders(<CvVersionsPage />);
 
-    await user.click(await screen.findByRole("button", { name: "Replace" }));
-    await user.upload(screen.getByLabelText("New file"), pdf("updated.pdf"));
-    await user.click(screen.getByRole("button", { name: "Replace" }));
+    await user.click(await screen.findByText("Grad CV"));
+    const panel = within(await screen.findByRole("dialog"));
+    await user.click(panel.getByRole("button", { name: "Replace" }));
+    await user.upload(panel.getByLabelText("New file"), pdf("updated.pdf"));
+    await user.click(panel.getByRole("button", { name: "Replace" }));
 
-    await waitFor(() =>
-      expect(screen.getByText("Updated CV")).toBeInTheDocument(),
-    );
-
+    // The panel (a modal Sheet) stays open after a successful Replace, so
+    // Radix marks the page's background — including this banner — aria-hidden
+    // until the panel is closed; query with `hidden: true` to see it anyway.
     expect(await screen.findByText("Backend roles")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Backend roles" })).toHaveAttribute(
-      "href",
-      "/scouts/scout1/edit",
-    );
+    expect(
+      screen.getByRole("link", { name: "Backend roles", hidden: true }),
+    ).toHaveAttribute("href", "/scouts/scout1/edit");
   });
 
   it("shows no Scout warning when no Scout references the just-replaced CV version", async () => {
@@ -516,17 +580,22 @@ describe("CvVersionsPage — replace", () => {
         );
       }),
       http.put(UPLOAD_URL, () => new HttpResponse(null, { status: 200 })),
+      http.get("/api/cv-versions/cv2/markdown", () =>
+        HttpResponse.json({ markdownContent: null, conversionStatus: "CONVERTED" }),
+      ),
       http.get("/api/scouts", () => HttpResponse.json({ scouts: [] })),
     );
     const user = userEvent.setup();
     renderWithProviders(<CvVersionsPage />);
 
-    await user.click(await screen.findByRole("button", { name: "Replace" }));
-    await user.upload(screen.getByLabelText("New file"), pdf("updated.pdf"));
-    await user.click(screen.getByRole("button", { name: "Replace" }));
+    await user.click(await screen.findByText("Grad CV"));
+    const panel = within(await screen.findByRole("dialog"));
+    await user.click(panel.getByRole("button", { name: "Replace" }));
+    await user.upload(panel.getByLabelText("New file"), pdf("updated.pdf"));
+    await user.click(panel.getByRole("button", { name: "Replace" }));
 
     await waitFor(() =>
-      expect(screen.getByText("Updated CV")).toBeInTheDocument(),
+      expect(within(screen.getByRole("dialog")).getByText("Updated CV")).toBeInTheDocument(),
     );
     expect(screen.queryByRole("alert", { name: /still used/i })).toBeNull();
   });

@@ -109,7 +109,7 @@ export function useCvVersions(options?: { pollWhileConverting?: boolean }) {
   });
 }
 
-type CreateCvVersionResponse = {
+export type CreateCvVersionResponse = {
   cvVersionId: string;
   fileKey: string;
   uploadUrl: string;

@@ -384,10 +384,17 @@
       "loadError": "Impossible de charger vos Scouts. Veuillez réessayer.",
       "empty": "Vous n'avez encore aucun Scout.",
       "new": "Nouveau Scout",
-      "baseCv": "CV de base",
-      "lastRun": "Dernière exécution",
       "neverRun": "Jamais exécuté",
-      "sites": "{count, plural, one {# site} other {# sites}}"
+      "showArchived": "Afficher les Scouts archivés",
+      "sites": "{count, plural, one {# site} other {# sites}}",
+      "columns": {
+        "label": "Libellé",
+        "status": "Statut",
+        "baseCv": "CV de base",
+        "sites": "Sites",
+        "lastRun": "Dernière exécution",
+        "relevantFinds": "Résultats pertinents"
+      }
     },
     "status": {
       "ACTIVE": "Actif",
@@ -423,6 +430,7 @@
       "loading": "Chargement de ce Scout",
       "loadError": "Impossible de charger ce Scout. Veuillez réessayer.",
       "configHeading": "Configuration",
+      "statsHeading": "Statistiques",
       "baseCv": "CV de base",
       "sites": "Sites d'emploi",
       "threshold": "Seuil de pertinence",
@@ -552,14 +560,22 @@
       "loadError": "Impossible de charger vos versions de CV. Veuillez réessayer.",
       "empty": "Aucune version de CV téléversée pour l'instant.",
       "showSuperseded": "Afficher les versions de CV remplacées",
+      "importCv": "Importer un CV",
+      "columns": {
+        "label": "Libellé",
+        "file": "Fichier",
+        "size": "Taille",
+        "uploaded": "Téléversée le",
+        "status": "Statut",
+        "default": "Par défaut"
+      },
+      "actions": "Actions",
       "replacedBy": "Remplacée par {label}",
       "default": "Par défaut",
       "setDefault": "Définir par défaut",
       "settingDefault": "Application…",
       "setDefaultError": "Impossible de définir cette version par défaut. Veuillez réessayer.",
       "setDefaultSuccess": "Version de CV par défaut mise à jour.",
-      "viewMarkdown": "Voir le Markdown",
-      "hideMarkdown": "Masquer le Markdown",
       "markdownHeading": "Rendu Markdown",
       "markdownLoading": "Chargement du rendu Markdown",
       "markdownError": "Impossible de charger le rendu Markdown. Veuillez réessayer.",
@@ -577,6 +593,10 @@
       "replacing": "Remplacement…",
       "replaceError": "Impossible de remplacer cette version de CV. Veuillez réessayer.",
       "scoutWarningHeading": "Cette version de CV a été remplacée, mais ces agents l'utilisent encore :"
+    },
+    "panel": {
+      "updated": "Mise à jour",
+      "loading": "Chargement…"
     }
   },
   "ingestion": {

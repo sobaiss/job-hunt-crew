@@ -203,7 +203,7 @@ function SidebarAccountMenu() {
 export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const t = useTranslations("nav");
   return (
-    <div className="flex h-full flex-col gap-5">
+    <div className="flex h-full w-full flex-col gap-5">
       <SidebarBrand onNavigate={onNavigate} />
       <Button asChild className="w-full">
         <Link href="/analyses/new" onClick={onNavigate}>
