@@ -407,6 +407,9 @@
       "edit": "Edit",
       "updateError": "We couldn't update that Scout. Please try again."
     },
+    "panel": {
+      "viewDetail": "View full detail"
+    },
     "form": {
       "newHeading": "New Scout",
       "editHeading": "Edit Scout",

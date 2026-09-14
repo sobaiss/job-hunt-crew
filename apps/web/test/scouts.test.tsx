@@ -60,7 +60,7 @@ function scout(overrides: Record<string, unknown> = {}) {
 }
 
 describe("ScoutsPage — list", () => {
-  it("lists each Scout with its status and base CV and a New Scout link", async () => {
+  it("lists each Scout with its status and base CV and a New Scout link, with the Label as plain text (issue #91)", async () => {
     server.use(
       http.get("/api/scouts", () => HttpResponse.json({ scouts: [scout()] })),
       http.get("/api/cv-versions", () =>
@@ -71,8 +71,11 @@ describe("ScoutsPage — list", () => {
     renderWithProviders(<ScoutsPage />);
 
     expect(
-      await screen.findByRole("link", { name: "Senior Backend — Remote EU" }),
-    ).toHaveAttribute("href", "/scouts/scout-1");
+      await screen.findByText("Senior Backend — Remote EU"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "Senior Backend — Remote EU" }),
+    ).not.toBeInTheDocument();
     expect(screen.getByText("Active")).toBeInTheDocument();
     expect(screen.getByText(/Default CV/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "New Scout" })).toHaveAttribute(
@@ -100,9 +103,9 @@ describe("ScoutsPage — list", () => {
 
     renderWithProviders(<ScoutsPage />);
 
-    const row = (await screen.findByRole("link", {
-      name: "Senior Backend — Remote EU",
-    })).closest("tr");
+    const row = (await screen.findByText(
+      "Senior Backend — Remote EU",
+    )).closest("tr");
     expect(row).not.toBeNull();
     const withinRow = within(row as HTMLElement);
     expect(withinRow.getByText("Active")).toBeInTheDocument();
@@ -188,6 +191,155 @@ describe("ScoutsPage — list", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "We couldn't load your Scouts.",
     );
+  });
+
+  it("opens the Scout panel on row click, showing status, base CV, full site names, threshold, filters, and last run (issue #91)", async () => {
+    server.use(
+      http.get("/api/scouts", () =>
+        HttpResponse.json({
+          scouts: [scout({ lastRunAt: "2026-09-10T00:00:00.000Z" })],
+        }),
+      ),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<ScoutsPage />);
+
+    await user.click(await screen.findByText("Senior Backend — Remote EU"));
+
+    const panel = within(await screen.findByRole("dialog"));
+    expect(panel.getAllByText("Senior Backend — Remote EU").length).toBeGreaterThan(0);
+    expect(panel.getByText("Active")).toBeInTheDocument();
+    expect(panel.getByText("Default CV")).toBeInTheDocument();
+    expect(panel.getByText("France Travail, LinkedIn")).toBeInTheDocument();
+    expect(panel.getByText("70")).toBeInTheDocument();
+    expect(
+      panel.getByText("keywords: python, postedWithin: 7d"),
+    ).toBeInTheDocument();
+    expect(
+      panel.getByText(new Date("2026-09-10T00:00:00.000Z").toLocaleString()),
+    ).toBeInTheDocument();
+  });
+
+  it("opens the Scout panel via keyboard when a row is focused (Enter or Space)", async () => {
+    server.use(
+      http.get("/api/scouts", () => HttpResponse.json({ scouts: [scout()] })),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<ScoutsPage />);
+
+    const row = (await screen.findByText("Senior Backend — Remote EU")).closest(
+      "tr",
+    ) as HTMLElement;
+    row.focus();
+    await user.keyboard("{Enter}");
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("triggers Run now from the panel and surfaces the once-per-hour rate-limit error", async () => {
+    server.use(
+      http.get("/api/scouts", () => HttpResponse.json({ scouts: [scout()] })),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+      http.post("/api/scouts/scout-1/run", () =>
+        HttpResponse.json(
+          { error: "This Scout ran within the last hour. Try again later." },
+          { status: 429 },
+        ),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<ScoutsPage />);
+
+    await user.click(await screen.findByText("Senior Backend — Remote EU"));
+    const panel = within(await screen.findByRole("dialog"));
+    await user.click(panel.getByRole("button", { name: "Run now" }));
+
+    expect(await panel.findByRole("alert")).toHaveTextContent(
+      "This Scout ran within the last hour.",
+    );
+  });
+
+  it("hides Run now / Pause / Resume / Archive in the panel for an Archived Scout", async () => {
+    server.use(
+      http.get("/api/scouts", () =>
+        HttpResponse.json({ scouts: [scout({ status: "ARCHIVED" })] }),
+      ),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<ScoutsPage />);
+
+    await user.click(await screen.findByText("Senior Backend — Remote EU"));
+    const panel = within(await screen.findByRole("dialog"));
+
+    expect(panel.queryByRole("button", { name: "Run now" })).toBeNull();
+    expect(panel.queryByRole("button", { name: "Pause" })).toBeNull();
+    expect(panel.queryByRole("button", { name: "Resume" })).toBeNull();
+    expect(panel.queryByRole("button", { name: "Archive" })).toBeNull();
+  });
+
+  it("calls the status-patch mutation for Pause, Resume, and Archive from the panel", async () => {
+    const patches: unknown[] = [];
+    server.use(
+      http.get("/api/scouts", () =>
+        HttpResponse.json({ scouts: [scout({ status: "ACTIVE" })] }),
+      ),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+      http.patch("/api/scouts/scout-1", async ({ request }) => {
+        const body = await request.json();
+        patches.push(body);
+        return HttpResponse.json({ scout: scout({ ...(body as object) }) });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<ScoutsPage />);
+
+    await user.click(await screen.findByText("Senior Backend — Remote EU"));
+    const panel = within(await screen.findByRole("dialog"));
+
+    await user.click(panel.getByRole("button", { name: "Pause" }));
+    await waitFor(() =>
+      expect(patches).toContainEqual({ status: "PAUSED" }),
+    );
+
+    await user.click(panel.getByRole("button", { name: "Archive" }));
+    await waitFor(() =>
+      expect(patches).toContainEqual({ status: "ARCHIVED" }),
+    );
+  });
+
+  it("includes an Edit link and a view full detail link in the panel", async () => {
+    server.use(
+      http.get("/api/scouts", () => HttpResponse.json({ scouts: [scout()] })),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<ScoutsPage />);
+
+    await user.click(await screen.findByText("Senior Backend — Remote EU"));
+    const panel = within(await screen.findByRole("dialog"));
+
+    expect(panel.getByRole("link", { name: "Edit" })).toHaveAttribute(
+      "href",
+      "/scouts/scout-1/edit",
+    );
+    expect(
+      panel.getByRole("link", { name: "View full detail" }),
+    ).toHaveAttribute("href", "/scouts/scout-1");
   });
 });
 

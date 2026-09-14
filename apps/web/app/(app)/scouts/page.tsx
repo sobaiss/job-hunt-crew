@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 
@@ -13,6 +13,7 @@ import {
   type ScoutsSortState,
 } from "@/lib/scouts-sort";
 import { SortableHead } from "@/components/sortable-head";
+import { ScoutPanel } from "@/components/scout-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -46,6 +47,11 @@ export default function ScoutsPage() {
   const { data: scouts, isPending, isError } = useScouts();
   const { data: cvVersions } = useCvVersions();
   const [sort, setSort] = useState<ScoutsSortState>(DEFAULT_SCOUTS_SORT);
+  // The Scout panel's open Scout is local state (an id), not URL-synced —
+  // same pattern as CvVersionsPage's `panelId` (issue #81) — and looked up
+  // against the live fetched list each render, not a snapshot.
+  const [panelId, setPanelId] = useState<string | null>(null);
+  const panelTriggerRef = useRef<HTMLElement | null>(null);
 
   const toggleSort = (column: ScoutsSortColumn) => {
     setSort((current) =>
@@ -61,6 +67,13 @@ export default function ScoutsPage() {
   // Sorting (#89) is applied client-side to the full list, same shape as
   // `sortCvVersions` on the cv-versions table.
   const sortedScouts = scouts ? sortScouts(scouts, sort, cvLabelById) : undefined;
+
+  const panelScout = scouts?.find((scout) => scout.id === panelId) ?? null;
+
+  const openPanel = (row: HTMLTableRowElement, id: string) => {
+    panelTriggerRef.current = row;
+    setPanelId(id);
+  };
 
   return (
     <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-8 p-8">
@@ -114,15 +127,19 @@ export default function ScoutsPage() {
           </TableHeader>
           <TableBody>
             {sortedScouts.map((scout) => (
-              <TableRow key={scout.id}>
-                <TableCell className="font-medium">
-                  <Link
-                    href={`/scouts/${scout.id}`}
-                    className="text-accent underline-offset-2 hover:underline"
-                  >
-                    {scout.label}
-                  </Link>
-                </TableCell>
+              <TableRow
+                key={scout.id}
+                tabIndex={0}
+                onClick={(event) => openPanel(event.currentTarget, scout.id)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    openPanel(event.currentTarget, scout.id);
+                  }
+                }}
+                className="cursor-pointer"
+              >
+                <TableCell className="font-medium">{scout.label}</TableCell>
                 <TableCell>
                   <Badge variant={statusVariant(scout.status)}>
                     {t(`status.${scout.status}`)}
@@ -145,6 +162,16 @@ export default function ScoutsPage() {
           </TableBody>
         </Table>
       )}
+
+      <ScoutPanel
+        scout={panelScout}
+        cvLabel={panelScout ? cvLabel(panelScout.cvVersionId) : ""}
+        open={panelId !== null}
+        onOpenChange={(open) => {
+          if (!open) setPanelId(null);
+        }}
+        returnFocusRef={panelTriggerRef}
+      />
     </main>
   );
 }

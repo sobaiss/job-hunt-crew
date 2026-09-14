@@ -54,11 +54,28 @@ _Avoid_: Layout (too generic), navbar / header (it's a Sidebar now)
 
 **Agents**:
 The sidebar entry and `/scouts` area where a candidate creates and manages
-Scouts (defined in [API](../../services/api/CONTEXT.md)'s context) — list,
-create/edit form, and a detail page showing config, run history, relevant
-finds, the patterns panel, and per-Scout stats.
+Scouts (defined in [API](../../services/api/CONTEXT.md)'s context) — a
+sortable, full-width table (Label, Status, Base CV, Sites, Last run,
+Relevant finds; Archived Scouts hidden by default behind a "show archived"
+toggle, mirroring CV versions' superseded filter), a create/edit form, and a
+detail page showing config, run history, relevant finds, the patterns
+panel, and per-Scout stats. Clicking a table row opens the Scout panel; the
+detail page stays reachable only from a link inside that panel, not from
+the table itself.
 _Avoid_: Scouts (fine in prose for the entity itself; "Agents" is
 specifically the nav label and route area a candidate sees)
+
+**Scout panel**:
+The right-hand slide-over opened by clicking a Scouts-table row (~1024px on
+desktop, full-width on mobile) — a light summary (Status, Base CV, Sites,
+Threshold, Filters, Last run) plus Run now / Pause / Resume / Archive /
+Edit, and a link out to the full Scout detail page for run history, the
+patterns panel, and Finds. Deliberately sized and scoped like the Analyses
+list's Quick view rather than the CV panel: it doesn't try to absorb
+everything the detail page shows (docs/adr/0006).
+_Avoid_: Side bar / slide bar (same trap as the CV panel's entry above —
+reads as the left-nav Sidebar or a mistranslation of "slide-over"), Quick
+view (that's the Analyses-list one; same shape, different content)
 
 **Applications**:
 The sidebar entry and `/applications` area listing every Application

@@ -407,6 +407,9 @@
       "edit": "Modifier",
       "updateError": "Impossible de mettre à jour ce Scout. Veuillez réessayer."
     },
+    "panel": {
+      "viewDetail": "Voir le détail complet"
+    },
     "form": {
       "newHeading": "Nouveau Scout",
       "editHeading": "Modifier le Scout",
