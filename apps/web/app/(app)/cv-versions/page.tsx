@@ -2,22 +2,14 @@
 
 import { Fragment, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import { useTranslations } from "next-intl";
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 
 import {
   useCvVersions,
-  useCreateCvVersion,
   useConvertCvVersion,
   useSetDefaultCvVersion,
   useReplaceCvVersion,
-  firstFile,
-  ACCEPTED_CV_CONTENT_TYPES,
-  CV_FILE_ACCEPT,
-  MAX_CV_SIZE_BYTES,
 } from "@/hooks/use-cv-versions";
 import { useScouts } from "@/hooks/use-scouts";
 import {
@@ -31,9 +23,6 @@ import { useEnumLabel } from "@/lib/enum-labels";
 import { CvVersionPanel } from "@/components/cv-version-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -93,7 +82,6 @@ export default function CvVersionsPage() {
   const conversionStatusLabel = useEnumLabel("cvConversionStatus");
 
   const list = useCvVersions();
-  const create = useCreateCvVersion();
   const convert = useConvertCvVersion();
   const setDefault = useSetDefaultCvVersion();
   const replace = useReplaceCvVersion();
@@ -147,119 +135,14 @@ export default function CvVersionsPage() {
     ? (labelById.get(panelCv.supersededById) ?? null)
     : null;
 
-  const schema = z.object({
-    label: z.string().trim().min(1, t("form.labelRequired")),
-    file: z
-      .any()
-      .refine((v) => firstFile(v) !== undefined, t("form.fileRequired"))
-      .refine((v) => {
-        const f = firstFile(v);
-        return !f || f.type in ACCEPTED_CV_CONTENT_TYPES;
-      }, t("form.fileType"))
-      .refine((v) => {
-        const f = firstFile(v);
-        return !f || f.size <= MAX_CV_SIZE_BYTES;
-      }, t("form.fileTooLarge")),
-  });
-
-  const {
-    register,
-    handleSubmit,
-    reset,
-    formState: { errors },
-  } = useForm<z.infer<typeof schema>>({
-    resolver: zodResolver(schema),
-    defaultValues: { label: "" },
-  });
-
-  const onSubmit = handleSubmit((values) => {
-    const file = firstFile(values.file);
-    if (!file) return;
-    create.mutate(
-      { label: values.label.trim(), file },
-      { onSuccess: () => reset({ label: "" }) },
-    );
-  });
-
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-col gap-10 p-8">
-      <h1 className="font-serif text-2xl font-semibold">{t("title")}</h1>
-
-      <section className="flex flex-col gap-4">
-        <h2 className="font-serif text-xl font-semibold">
-          {t("form.heading")}
-        </h2>
-
-        <Card>
-          <CardContent className="py-6">
-            <form
-              className="flex flex-col gap-4"
-              onSubmit={onSubmit}
-              noValidate
-            >
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="cv-label">{t("form.labelLabel")}</Label>
-                <Input
-                  id="cv-label"
-                  type="text"
-                  placeholder={t("form.labelPlaceholder")}
-                  aria-invalid={errors.label ? true : undefined}
-                  {...register("label")}
-                />
-                {errors.label && (
-                  <p role="alert" className="text-sm text-destructive">
-                    {errors.label.message}
-                  </p>
-                )}
-              </div>
-
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="cv-file">{t("form.fileLabel")}</Label>
-                <Input
-                  id="cv-file"
-                  type="file"
-                  accept={CV_FILE_ACCEPT}
-                  aria-invalid={errors.file ? true : undefined}
-                  aria-describedby="cv-file-hint"
-                  {...register("file")}
-                />
-                <p id="cv-file-hint" className="text-xs text-muted">
-                  {t("form.fileHint")}
-                </p>
-                {errors.file && (
-                  <p role="alert" className="text-sm text-destructive">
-                    {errors.file.message as string}
-                  </p>
-                )}
-              </div>
-
-              <Button
-                type="submit"
-                disabled={create.isPending}
-                className="self-start"
-              >
-                {create.isPending ? t("form.uploading") : t("form.submit")}
-              </Button>
-
-              {create.isPending && (
-                <p role="status" className="text-sm text-muted">
-                  {t("form.uploading")}
-                </p>
-              )}
-              {create.isSuccess && (
-                <p role="status" className="text-sm text-success">
-                  {t("form.success")}
-                </p>
-              )}
-              {create.isError && (
-                <p role="alert" className="text-sm text-destructive">
-                  {t("form.error")}
-                </p>
-              )}
-            </form>
-          </CardContent>
-        </Card>
-      </section>
+      <div className="flex items-center justify-between gap-4">
+        <h1 className="font-serif text-2xl font-semibold">{t("title")}</h1>
+        <Button asChild size="sm">
+          <Link href="/cv-versions/new">{t("list.importCv")}</Link>
+        </Button>
+      </div>
 
       <section className="flex flex-col gap-4">
         <div className="flex items-center justify-between gap-4">

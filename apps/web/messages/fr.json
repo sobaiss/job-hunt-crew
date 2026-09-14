@@ -552,6 +552,7 @@
       "loadError": "Impossible de charger vos versions de CV. Veuillez réessayer.",
       "empty": "Aucune version de CV téléversée pour l'instant.",
       "showSuperseded": "Afficher les versions de CV remplacées",
+      "importCv": "Importer un CV",
       "columns": {
         "label": "Libellé",
         "file": "Fichier",

@@ -33,141 +33,22 @@ function pdf(name = "cv.pdf", { size }: { size?: number } = {}) {
   return file;
 }
 
-describe("CvVersionsPage — upload form", () => {
-  it("shows inline validation when submitting with no label and no file", async () => {
-    server.use(
-      http.get("/api/cv-versions", () =>
-        HttpResponse.json({ cvVersions: [] }),
-      ),
-    );
-    const user = userEvent.setup();
-    renderWithProviders(<CvVersionsPage />);
-
-    await user.click(screen.getByRole("button", { name: "Upload" }));
-
-    expect(
-      await screen.findByText("Give this CV version a label."),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText("Choose a PDF, DOCX, Markdown, or plain-text file."),
-    ).toBeInTheDocument();
-  });
-
-  it("rejects an unsupported file type with a type message", async () => {
-    server.use(
-      http.get("/api/cv-versions", () =>
-        HttpResponse.json({ cvVersions: [] }),
-      ),
-    );
-    const user = userEvent.setup();
-    renderWithProviders(<CvVersionsPage />);
-
-    await user.type(screen.getByLabelText("Label"), "My CV");
-    // Named `.pdf` (so the <input accept> lets user-event set it) but with an
-    // unsupported media type, so the zod content-type check is what rejects it.
-    await user.upload(
-      screen.getByLabelText("File"),
-      new File(["hi"], "notes.pdf", { type: "application/rtf" }),
-    );
-    await user.click(screen.getByRole("button", { name: "Upload" }));
-
-    expect(
-      await screen.findByText(
-        "Only PDF, DOCX, Markdown, and plain-text files are supported.",
-      ),
-    ).toBeInTheDocument();
-  });
-
-  it("accepts a Markdown file", async () => {
-    let createBody: Record<string, unknown> | null = null;
-    server.use(
-      http.get("/api/cv-versions", () =>
-        HttpResponse.json({ cvVersions: [] }),
-      ),
-      http.post("/api/cv-versions", async ({ request }) => {
-        createBody = (await request.json()) as Record<string, unknown>;
-        return HttpResponse.json(
-          { cvVersionId: "cvmd", fileKey: "k", uploadUrl: UPLOAD_URL },
-          { status: 201 },
-        );
-      }),
-      http.put(UPLOAD_URL, () => new HttpResponse(null, { status: 200 })),
-    );
-    const user = userEvent.setup();
-    renderWithProviders(<CvVersionsPage />);
-
-    await user.type(screen.getByLabelText("Label"), "Markdown CV");
-    await user.upload(
-      screen.getByLabelText("File"),
-      new File(["# CV"], "cv.md", { type: "text/markdown" }),
-    );
-    await user.click(screen.getByRole("button", { name: "Upload" }));
-
-    expect(await screen.findByText("CV version uploaded.")).toBeInTheDocument();
-    expect(createBody).toMatchObject({
-      fileName: "cv.md",
-      contentType: "text/markdown",
-    });
-  });
-
-  it("rejects a file over the 10 MB limit", async () => {
-    server.use(
-      http.get("/api/cv-versions", () =>
-        HttpResponse.json({ cvVersions: [] }),
-      ),
-    );
-    const user = userEvent.setup();
-    renderWithProviders(<CvVersionsPage />);
-
-    await user.type(screen.getByLabelText("Label"), "My CV");
-    await user.upload(
-      screen.getByLabelText("File"),
-      pdf("big.pdf", { size: 11 * 1024 * 1024 }),
-    );
-    await user.click(screen.getByRole("button", { name: "Upload" }));
-
-    expect(
-      await screen.findByText("That file is larger than the 10 MB limit."),
-    ).toBeInTheDocument();
-  });
-
-  it("creates the CV version, PUTs the file, and confirms success", async () => {
-    let createBody: Record<string, unknown> | null = null;
-    let putReceived = false;
-    server.use(
-      http.get("/api/cv-versions", () =>
-        HttpResponse.json({ cvVersions: [] }),
-      ),
-      http.post("/api/cv-versions", async ({ request }) => {
-        createBody = (await request.json()) as Record<string, unknown>;
-        return HttpResponse.json(
-          { cvVersionId: "cv9", fileKey: "k", uploadUrl: UPLOAD_URL },
-          { status: 201 },
-        );
-      }),
-      http.put(UPLOAD_URL, () => {
-        putReceived = true;
-        return new HttpResponse(null, { status: 200 });
-      }),
-    );
-    const user = userEvent.setup();
-    renderWithProviders(<CvVersionsPage />);
-
-    await user.type(screen.getByLabelText("Label"), "Fintech CV");
-    await user.upload(screen.getByLabelText("File"), pdf("fintech.pdf"));
-    await user.click(screen.getByRole("button", { name: "Upload" }));
-
-    expect(await screen.findByText("CV version uploaded.")).toBeInTheDocument();
-    expect(putReceived).toBe(true);
-    expect(createBody).toMatchObject({
-      label: "Fintech CV",
-      fileName: "fintech.pdf",
-      contentType: "application/pdf",
-    });
-  });
-});
-
 describe("CvVersionsPage — list", () => {
+  it("shows an 'Import a CV' entry point linking to /cv-versions/new instead of an inline form (issue #83)", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [] }),
+      ),
+    );
+    renderWithProviders(<CvVersionsPage />);
+
+    expect(
+      await screen.findByRole("link", { name: "Import a CV" }),
+    ).toHaveAttribute("href", "/cv-versions/new");
+    expect(screen.queryByLabelText("Label")).toBeNull();
+    expect(screen.queryByLabelText("File")).toBeNull();
+  });
+
   it("renders each CV version with its conversion status", async () => {
     server.use(
       http.get("/api/cv-versions", () =>

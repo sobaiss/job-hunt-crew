@@ -552,6 +552,7 @@
       "loadError": "We couldn't load your CV versions. Please try again.",
       "empty": "No CV versions uploaded yet.",
       "showSuperseded": "Show superseded CV versions",
+      "importCv": "Import a CV",
       "columns": {
         "label": "Label",
         "file": "File",
