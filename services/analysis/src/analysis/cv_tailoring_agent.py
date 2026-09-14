@@ -17,6 +17,8 @@ dates, titles, or credentials.
 import json
 import time
 
+from py_db.section_type import SectionType
+
 from .llm_provider import LLMProvider, get_llm_provider
 
 MAX_ATTEMPTS = 3
@@ -26,6 +28,8 @@ RETRY_BACKOFF_RATE = 2.0
 
 def _sleep(seconds: float) -> None:
     time.sleep(seconds)
+
+_SECTION_TYPE_VOCABULARY = ", ".join(section_type.value for section_type in SectionType)
 
 SYSTEM_PROMPT = (
     "You produce an offer-tailored copy of a candidate's CV. You are given the "
@@ -37,6 +41,12 @@ SYSTEM_PROMPT = (
     "in the base CV Markdown. Never invent or embellish anything absent from "
     "it. Lean on the matched skills to surface relevant experience that was "
     "buried. Write the tailored CV in {language}. "
+    "After every section heading you write, on its own line immediately below "
+    "the heading, add a machine-readable SectionType tag as an HTML comment: "
+    "<!-- SectionType: X --> where X is exactly one of: "
+    f"{_SECTION_TYPE_VOCABULARY}. Use OTHER if none fits. This tag must never "
+    "be visible to the candidate reading the CV — it is for downstream "
+    "software only, never prose, never inside the heading text itself. "
     "Respond with ONLY the tailored CV as Markdown prose — no JSON, no "
     "commentary, no markdown code fences."
 )

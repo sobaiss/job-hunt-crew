@@ -1,6 +1,7 @@
 from analysis import cv_tailoring_agent
 from analysis.cv_tailoring_agent import CvTailoringError, run_cv_tailoring
 from analysis.llm_provider import LLMProvider
+from py_db.section_type import SectionType
 
 CV_MARKDOWN = (
     "# Jane Doe\n\n"
@@ -48,6 +49,24 @@ def test_run_cv_tailoring_returns_the_provider_text():
     assert result == "# Jane Doe\n\n## Skills\n\n- Python"
     assert provider.calls == 1
     assert "fr" in provider.last_system
+
+
+def test_run_cv_tailoring_system_prompt_instructs_section_type_tagging():
+    provider = StubLLMProvider(["# Jane Doe\n\n## Skills\n\n- Python\n"])
+
+    run_cv_tailoring(
+        cv_markdown=CV_MARKDOWN,
+        job_offer_structured_data=JOB_OFFER_STRUCTURED_DATA,
+        matched_skills=MATCHED_SKILLS,
+        missing_skills=MISSING_SKILLS,
+        llm_provider=provider,
+    )
+
+    system = provider.last_system
+    assert "SectionType" in system
+    for section_type in SectionType:
+        assert section_type.value in system
+    assert "never" in system.lower() and "visible" in system.lower()
 
 
 def test_run_cv_tailoring_retries_on_empty_response_then_succeeds():
