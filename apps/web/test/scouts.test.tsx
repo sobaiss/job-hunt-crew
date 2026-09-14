@@ -81,6 +81,85 @@ describe("ScoutsPage — list", () => {
     );
   });
 
+  it("renders the Status, Base CV, Sites, Last run, and Relevant finds columns", async () => {
+    server.use(
+      http.get("/api/scouts", () =>
+        HttpResponse.json({
+          scouts: [
+            scout({
+              lastRunAt: "2026-09-10T00:00:00.000Z",
+              relevantFindsCount: 3,
+            }),
+          ],
+        }),
+      ),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+    );
+
+    renderWithProviders(<ScoutsPage />);
+
+    const row = (await screen.findByRole("link", {
+      name: "Senior Backend — Remote EU",
+    })).closest("tr");
+    expect(row).not.toBeNull();
+    const withinRow = within(row as HTMLElement);
+    expect(withinRow.getByText("Active")).toBeInTheDocument();
+    expect(withinRow.getByText("Default CV")).toBeInTheDocument();
+    expect(withinRow.getByText("2 sites")).toBeInTheDocument();
+    expect(
+      withinRow.getByText(new Date("2026-09-10T00:00:00.000Z").toLocaleDateString()),
+    ).toBeInTheDocument();
+    expect(withinRow.getByText("3")).toBeInTheDocument();
+  });
+
+  it("renders \"Never run\" for a Scout with no lastRunAt", async () => {
+    server.use(
+      http.get("/api/scouts", () =>
+        HttpResponse.json({ scouts: [scout({ lastRunAt: null })] }),
+      ),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+    );
+
+    renderWithProviders(<ScoutsPage />);
+
+    expect(await screen.findByText("Never run")).toBeInTheDocument();
+  });
+
+  it("sorts rows by label when the Label column header is clicked", async () => {
+    server.use(
+      http.get("/api/scouts", () =>
+        HttpResponse.json({
+          scouts: [
+            scout({ id: "scout-z", label: "Zebra Scout", lastRunAt: "2026-09-10T00:00:00.000Z" }),
+            scout({ id: "scout-a", label: "Alpha Scout", lastRunAt: "2026-09-10T00:00:00.000Z" }),
+          ],
+        }),
+      ),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<ScoutsPage />);
+
+    await screen.findByText("Zebra Scout");
+    const rowLabel = () =>
+      screen.getAllByRole("row").slice(1, 3).map((row) => row.textContent);
+    // Default sort is Last run, descending; both fixtures share the same
+    // lastRunAt, so insertion order ("Zebra Scout" first) holds until sorted.
+    expect(rowLabel()[0]).toContain("Zebra Scout");
+
+    await user.click(screen.getByRole("button", { name: "Label" }));
+    expect(rowLabel()[0]).toContain("Alpha Scout");
+
+    await user.click(screen.getByRole("button", { name: "Label" }));
+    expect(rowLabel()[0]).toContain("Zebra Scout");
+  });
+
   it("shows an empty state when there are no Scouts", async () => {
     server.use(
       http.get("/api/scouts", () => HttpResponse.json({ scouts: [] })),

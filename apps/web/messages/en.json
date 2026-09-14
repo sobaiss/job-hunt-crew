@@ -384,10 +384,16 @@
       "loadError": "We couldn't load your Scouts. Please try again.",
       "empty": "You don't have any Scouts yet.",
       "new": "New Scout",
-      "baseCv": "Base CV",
-      "lastRun": "Last run",
       "neverRun": "Never run",
-      "sites": "{count, plural, one {# site} other {# sites}}"
+      "sites": "{count, plural, one {# site} other {# sites}}",
+      "columns": {
+        "label": "Label",
+        "status": "Status",
+        "baseCv": "Base CV",
+        "sites": "Sites",
+        "lastRun": "Last run",
+        "relevantFinds": "Relevant finds"
+      }
     },
     "status": {
       "ACTIVE": "Active",

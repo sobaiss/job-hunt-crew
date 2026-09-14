@@ -3,7 +3,6 @@
 import { Fragment, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 
 import {
   useCvVersions,
@@ -21,6 +20,7 @@ import {
 import { conversionBadgeVariant, formatFileSize } from "@/lib/cv-versions-display";
 import { useEnumLabel } from "@/lib/enum-labels";
 import { CvVersionPanel } from "@/components/cv-version-panel";
+import { SortableHead } from "@/components/sortable-head";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -45,37 +45,6 @@ const COLUMNS: { key: CvVersionsSortColumn; labelKey: string; className?: string
 // +1 for the non-sortable Actions column, used as the expanded detail row's
 // colSpan (conversion error text; Replace lives in the panel since #82).
 const TABLE_COLUMN_COUNT = COLUMNS.length + 1;
-
-function SortableHead({
-  column,
-  label,
-  className,
-  sort,
-  onSort,
-}: {
-  column: CvVersionsSortColumn;
-  label: string;
-  className?: string;
-  sort: CvVersionsSortState;
-  onSort: (column: CvVersionsSortColumn) => void;
-}) {
-  const active = sort.column === column;
-  const ariaSort = !active ? "none" : sort.direction === "asc" ? "ascending" : "descending";
-  const Icon = !active ? ArrowUpDown : sort.direction === "asc" ? ArrowUp : ArrowDown;
-
-  return (
-    <TableHead aria-sort={ariaSort} className={className}>
-      <button
-        type="button"
-        className="inline-flex items-center gap-1 hover:text-foreground"
-        onClick={() => onSort(column)}
-      >
-        {label}
-        <Icon className="size-3.5" />
-      </button>
-    </TableHead>
-  );
-}
 
 export default function CvVersionsPage() {
   const t = useTranslations("cvVersions");
