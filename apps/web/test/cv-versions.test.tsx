@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { http, HttpResponse } from "msw";
 import userEvent from "@testing-library/user-event";
 
-import { renderWithProviders, screen, waitFor } from "./test-utils";
+import { renderWithProviders, screen, waitFor, within } from "./test-utils";
 import { server } from "./msw/server";
 import CvVersionsPage from "@/app/(app)/cv-versions/page";
 
@@ -182,7 +182,7 @@ describe("CvVersionsPage — list", () => {
     expect(screen.getByText("Converting")).toBeInTheDocument();
   });
 
-  it("fetches and shows the Markdown rendition only after the panel is opened", async () => {
+  it("opens the CV panel on row click, fetching the Markdown rendition only once open (issue #81)", async () => {
     let markdownRequests = 0;
     server.use(
       http.get("/api/cv-versions", () =>
@@ -201,19 +201,142 @@ describe("CvVersionsPage — list", () => {
 
     await screen.findByText("Grad CV");
     expect(markdownRequests).toBe(0);
-    expect(screen.queryByText(/Staff Engineer since 2019/)).toBeNull();
 
-    await user.click(screen.getByRole("button", { name: "View Markdown" }));
+    await user.click(screen.getByText("Grad CV"));
 
+    const panel = within(await screen.findByRole("dialog"));
     expect(
-      await screen.findByText(/Staff Engineer since 2019/),
+      await panel.findByText(/Staff Engineer since 2019/),
     ).toBeInTheDocument();
     expect(markdownRequests).toBe(1);
+  });
 
-    await user.click(screen.getByRole("button", { name: "Hide Markdown" }));
-    await waitFor(() =>
-      expect(screen.queryByText(/Staff Engineer since 2019/)).toBeNull(),
+  it("shows the CV's full info (file, size, dates, status, default state) in the panel", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: [cvVersion({ isDefault: true })],
+        }),
+      ),
+      http.get("/api/cv-versions/cv1/markdown", () =>
+        HttpResponse.json({ markdownContent: null, conversionStatus: "CONVERTED" }),
+      ),
     );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await user.click(await screen.findByText("Grad CV"));
+
+    const panel = within(await screen.findByRole("dialog"));
+    expect(panel.getByText("grad-cv.pdf · PDF")).toBeInTheDocument();
+    expect(panel.getByText("12.1 KB")).toBeInTheDocument();
+    expect(panel.getByText("Converted")).toBeInTheDocument();
+    expect(panel.getAllByText("Default").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("shows the conversionError text in the panel for a FAILED CV", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: [
+            cvVersion({
+              conversionStatus: "FAILED",
+              conversionError: "no extractable text — is this a scanned PDF?",
+            }),
+          ],
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await user.click(await screen.findByText("Grad CV"));
+
+    const panel = within(await screen.findByRole("dialog"));
+    expect(
+      panel.getByText(/no extractable text — is this a scanned PDF\?/),
+    ).toBeInTheDocument();
+  });
+
+  it("does not open the panel when clicking an inline action button", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cvVersion()] }),
+      ),
+      http.post("/api/cv-versions/cv1/convert", () =>
+        HttpResponse.json({ conversionStatus: "PENDING" }, { status: 202 }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Reconvert" }),
+    );
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("triggers Reconvert and Set as default from the panel", async () => {
+    let convertCalls = 0;
+    let patchBody: Record<string, unknown> | null = null;
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cvVersion()] }),
+      ),
+      http.get("/api/cv-versions/cv1/markdown", () =>
+        HttpResponse.json({ markdownContent: null, conversionStatus: "CONVERTED" }),
+      ),
+      http.post("/api/cv-versions/cv1/convert", () => {
+        convertCalls += 1;
+        return HttpResponse.json({ conversionStatus: "PENDING" }, { status: 202 });
+      }),
+      http.patch("/api/cv-versions/cv1", async ({ request }) => {
+        patchBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ cvVersion: cvVersion({ isDefault: true }) });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await user.click(await screen.findByText("Grad CV"));
+    const panel = within(await screen.findByRole("dialog"));
+
+    await user.click(panel.getByRole("button", { name: "Reconvert" }));
+    await waitFor(() => expect(convertCalls).toBe(1));
+
+    await user.click(panel.getByRole("button", { name: "Set as default" }));
+    await waitFor(() => expect(patchBody).toEqual({ isDefault: true }));
+  });
+
+  it("hides Set as default (but keeps Reconvert) in the panel for a superseded CV", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: [
+            cvVersion({ id: "cv1", label: "Old CV", supersededById: "cv2" }),
+            cvVersion({ id: "cv2", label: "New CV" }),
+          ],
+        }),
+      ),
+      http.get("/api/cv-versions/cv1/markdown", () =>
+        HttpResponse.json({ markdownContent: null, conversionStatus: "CONVERTED" }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await user.click(
+      screen.getByRole("checkbox", { name: "Show superseded CV versions" }),
+    );
+    await user.click(await screen.findByText("Old CV"));
+
+    const panel = within(await screen.findByRole("dialog"));
+    expect(panel.getByRole("button", { name: "Reconvert" })).toBeEnabled();
+    expect(
+      panel.queryByRole("button", { name: "Set as default" }),
+    ).toBeNull();
+    expect(panel.getByText("Replaced by New CV")).toBeInTheDocument();
   });
 
   it("triggers a Conversion via POST /api/cv-versions/:id/convert", async () => {

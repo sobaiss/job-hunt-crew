@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -10,7 +10,6 @@ import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 
 import {
   useCvVersions,
-  useCvVersionMarkdown,
   useCreateCvVersion,
   useConvertCvVersion,
   useSetDefaultCvVersion,
@@ -19,7 +18,6 @@ import {
   ACCEPTED_CV_CONTENT_TYPES,
   CV_FILE_ACCEPT,
   MAX_CV_SIZE_BYTES,
-  type CvConversionStatus,
 } from "@/hooks/use-cv-versions";
 import { useScouts } from "@/hooks/use-scouts";
 import {
@@ -28,7 +26,9 @@ import {
   type CvVersionsSortColumn,
   type CvVersionsSortState,
 } from "@/lib/cv-versions-sort";
+import { conversionBadgeVariant, formatFileSize } from "@/lib/cv-versions-display";
 import { useEnumLabel } from "@/lib/enum-labels";
+import { CvVersionPanel } from "@/components/cv-version-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -44,18 +44,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-/** Human-readable file size, e.g. `12.3 KB` — no existing helper for this. */
-function formatFileSize(bytes: number): string {
-  const units = ["B", "KB", "MB", "GB"];
-  let value = bytes;
-  let unitIndex = 0;
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
-  return `${value.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
-}
-
 const COLUMNS: { key: CvVersionsSortColumn; labelKey: string; className?: string }[] = [
   { key: "label", labelKey: "list.columns.label" },
   { key: "file", labelKey: "list.columns.file" },
@@ -66,7 +54,7 @@ const COLUMNS: { key: CvVersionsSortColumn; labelKey: string; className?: string
 ];
 
 // +1 for the non-sortable Actions column, used as the expanded detail row's
-// colSpan (Markdown preview / Replace form / conversion error).
+// colSpan (Replace form / conversion error).
 const TABLE_COLUMN_COUNT = COLUMNS.length + 1;
 
 function SortableHead({
@@ -97,49 +85,6 @@ function SortableHead({
         <Icon className="size-3.5" />
       </button>
     </TableHead>
-  );
-}
-
-function conversionBadgeVariant(
-  status: CvConversionStatus,
-): "secondary" | "success" | "destructive" | "warning" {
-  if (status === "CONVERTED") return "success";
-  if (status === "FAILED") return "destructive";
-  if (status === "CONVERTING") return "warning";
-  return "secondary";
-}
-
-/**
- * Read-only panel showing the raw Markdown rendition of one CV version. The
- * query is only mounted (and only fetches) while the panel is open, so the
- * list stays small — `markdownContent` is never inlined in the list response.
- */
-function CvMarkdownPreview({ id }: { id: string }) {
-  const t = useTranslations("cvVersions");
-  const markdown = useCvVersionMarkdown(id, true);
-
-  return (
-    <div className="mt-3 border-t pt-3">
-      <h3 className="text-sm font-medium">{t("list.markdownHeading")}</h3>
-      {markdown.isPending && (
-        <p role="status" className="mt-2 text-sm text-muted">
-          {t("list.markdownLoading")}
-        </p>
-      )}
-      {markdown.isError && (
-        <p role="alert" className="mt-2 text-sm text-destructive">
-          {t("list.markdownError")}
-        </p>
-      )}
-      {markdown.data &&
-        (markdown.data.markdownContent ? (
-          <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap rounded bg-muted/30 p-3 text-xs">
-            {markdown.data.markdownContent}
-          </pre>
-        ) : (
-          <p className="mt-2 text-sm text-muted">{t("list.markdownEmpty")}</p>
-        ))}
-    </div>
   );
 }
 
@@ -263,13 +208,17 @@ export default function CvVersionsPage() {
   const convert = useConvertCvVersion();
   const setDefault = useSetDefaultCvVersion();
   const scouts = useScouts();
-  const [openMarkdownId, setOpenMarkdownId] = useState<string | null>(null);
   const [replacingId, setReplacingId] = useState<string | null>(null);
   const [showSuperseded, setShowSuperseded] = useState(false);
   const [justReplacedId, setJustReplacedId] = useState<string | null>(null);
   const [sort, setSort] = useState<CvVersionsSortState>(
     DEFAULT_CV_VERSIONS_SORT,
   );
+  // Issue #81: the CV panel's open CV is local state (an id), not
+  // URL-synced — same pattern as AnalysesTable's `quickViewId` — and looked
+  // up against the live fetched list each render, not a snapshot.
+  const [panelId, setPanelId] = useState<string | null>(null);
+  const panelTriggerRef = useRef<HTMLElement | null>(null);
 
   const toggleSort = (column: CvVersionsSortColumn) => {
     setSort((current) =>
@@ -303,6 +252,11 @@ export default function CvVersionsPage() {
     () => (visibleCvVersions ? sortCvVersions(visibleCvVersions, sort) : undefined),
     [visibleCvVersions, sort],
   );
+
+  const panelCv = list.data?.find((cv) => cv.id === panelId) ?? null;
+  const panelReplacedByLabel = panelCv?.supersededById
+    ? (labelById.get(panelCv.supersededById) ?? null)
+    : null;
 
   const schema = z.object({
     label: z.string().trim().min(1, t("form.labelRequired")),
@@ -513,13 +467,25 @@ export default function CvVersionsPage() {
                   cv.conversionStatus === "CONVERTING" ||
                   (convert.isPending && convert.variables === cv.id);
                 const showDetailRow =
-                  cv.conversionStatus === "FAILED" ||
-                  openMarkdownId === cv.id ||
-                  replacingId === cv.id;
+                  cv.conversionStatus === "FAILED" || replacingId === cv.id;
+                const openPanel = (row: HTMLTableRowElement) => {
+                  panelTriggerRef.current = row;
+                  setPanelId(cv.id);
+                };
 
                 return (
                   <Fragment key={cv.id}>
-                    <TableRow>
+                    <TableRow
+                      tabIndex={0}
+                      onClick={(event) => openPanel(event.currentTarget)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          openPanel(event.currentTarget);
+                        }
+                      }}
+                      className="cursor-pointer"
+                    >
                       <TableCell className="font-medium">{cv.label}</TableCell>
                       <TableCell>
                         {cv.fileName} · {cv.fileType}
@@ -550,22 +516,8 @@ export default function CvVersionsPage() {
                           "—"
                         )}
                       </TableCell>
-                      <TableCell>
+                      <TableCell onClick={(event) => event.stopPropagation()}>
                         <div className="flex flex-wrap items-center gap-2">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            onClick={() =>
-                              setOpenMarkdownId((current) =>
-                                current === cv.id ? null : cv.id,
-                              )
-                            }
-                          >
-                            {openMarkdownId === cv.id
-                              ? t("list.hideMarkdown")
-                              : t("list.viewMarkdown")}
-                          </Button>
                           <Button
                             type="button"
                             size="sm"
@@ -618,9 +570,6 @@ export default function CvVersionsPage() {
                               {cv.conversionError ? ` ${cv.conversionError}` : ""}
                             </p>
                           )}
-                          {openMarkdownId === cv.id && (
-                            <CvMarkdownPreview id={cv.id} />
-                          )}
                           {replacingId === cv.id && (
                             <CvReplaceForm
                               cv={cv}
@@ -641,6 +590,19 @@ export default function CvVersionsPage() {
           </Table>
         )}
       </section>
+
+      <CvVersionPanel
+        cv={panelCv}
+        replacedByLabel={panelReplacedByLabel}
+        open={panelCv !== null}
+        onOpenChange={(open) => {
+          if (!open) setPanelId(null);
+        }}
+        returnFocusRef={panelTriggerRef}
+        conversionStatusLabel={conversionStatusLabel}
+        convert={convert}
+        setDefault={setDefault}
+      />
     </main>
   );
 }

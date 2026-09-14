@@ -567,8 +567,6 @@
       "settingDefault": "Setting…",
       "setDefaultError": "We couldn't set that as your default. Please try again.",
       "setDefaultSuccess": "Default CV version updated.",
-      "viewMarkdown": "View Markdown",
-      "hideMarkdown": "Hide Markdown",
       "markdownHeading": "Markdown rendition",
       "markdownLoading": "Loading the Markdown rendition",
       "markdownError": "We couldn't load the Markdown rendition. Please try again.",
@@ -586,6 +584,9 @@
       "replacing": "Replacing…",
       "replaceError": "We couldn't replace that CV version. Please try again.",
       "scoutWarningHeading": "This CV version was replaced, but these Scouts still use it:"
+    },
+    "panel": {
+      "updated": "Updated"
     }
   },
   "ingestion": {
