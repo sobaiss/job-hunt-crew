@@ -117,6 +117,17 @@ class OllamaProvider(LLMProvider):
                 {"role": "user", "content": prompt},
             ],
             temperature=0,
+            # Hybrid "thinking" models (e.g. qwen3.5, the dev default) stream
+            # their chain-of-thought into a separate `reasoning` field before
+            # `content`. On a large enough prompt that reasoning alone can
+            # exceed `max_tokens`, cutting generation off before `content` is
+            # ever started — the call still returns 200 OK but with
+            # content == "", breaking every JSON-parsing caller (this is what
+            # broke StyleProfile classification in style_profile.py).
+            # `reasoning_effort="none"` is an Ollama extension, not a modeled
+            # OpenAI SDK param, hence extra_body — it turns thinking off so
+            # `content` always carries the full answer.
+            extra_body={"reasoning_effort": "none"},
             **optional,
         )
         return response.choices[0].message.content
