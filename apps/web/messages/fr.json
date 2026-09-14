@@ -385,6 +385,7 @@
       "empty": "Vous n'avez encore aucun Scout.",
       "new": "Nouveau Scout",
       "neverRun": "Jamais exécuté",
+      "showArchived": "Afficher les Scouts archivés",
       "sites": "{count, plural, one {# site} other {# sites}}",
       "columns": {
         "label": "Libellé",

@@ -163,6 +163,57 @@ describe("ScoutsPage — list", () => {
     expect(rowLabel()[0]).toContain("Zebra Scout");
   });
 
+  it("hides an Archived Scout from the default view", async () => {
+    server.use(
+      http.get("/api/scouts", () =>
+        HttpResponse.json({
+          scouts: [
+            scout({ id: "scout-archived", label: "Old Scout", status: "ARCHIVED" }),
+            scout({ id: "scout-active", label: "Active Scout" }),
+          ],
+        }),
+      ),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+    );
+    renderWithProviders(<ScoutsPage />);
+
+    expect(await screen.findByText("Active Scout")).toBeInTheDocument();
+    expect(screen.queryByText("Old Scout")).toBeNull();
+  });
+
+  it("reveals Archived Scouts via the show-archived toggle, and re-hides them when unchecked", async () => {
+    server.use(
+      http.get("/api/scouts", () =>
+        HttpResponse.json({
+          scouts: [
+            scout({ id: "scout-archived", label: "Old Scout", status: "ARCHIVED" }),
+            scout({ id: "scout-active", label: "Active Scout" }),
+          ],
+        }),
+      ),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<ScoutsPage />);
+
+    await screen.findByText("Active Scout");
+    expect(screen.queryByText("Old Scout")).toBeNull();
+
+    await user.click(
+      screen.getByRole("checkbox", { name: "Show archived Scouts" }),
+    );
+    expect(await screen.findByText("Old Scout")).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("checkbox", { name: "Show archived Scouts" }),
+    );
+    expect(screen.queryByText("Old Scout")).toBeNull();
+  });
+
   it("shows an empty state when there are no Scouts", async () => {
     server.use(
       http.get("/api/scouts", () => HttpResponse.json({ scouts: [] })),
@@ -279,6 +330,9 @@ describe("ScoutsPage — list", () => {
     const user = userEvent.setup();
     renderWithProviders(<ScoutsPage />);
 
+    await user.click(
+      await screen.findByRole("checkbox", { name: "Show archived Scouts" }),
+    );
     await user.click(await screen.findByText("Senior Backend — Remote EU"));
     const panel = within(await screen.findByRole("dialog"));
 

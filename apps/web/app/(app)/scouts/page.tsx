@@ -46,6 +46,10 @@ export default function ScoutsPage() {
   const t = useTranslations("scouts");
   const { data: scouts, isPending, isError } = useScouts();
   const { data: cvVersions } = useCvVersions();
+  // Archived Scouts are hidden by default (issue #90); the toggle reveals
+  // them again, mirroring cv-versions' showSuperseded checkbox. The toggle
+  // doesn't affect sorting — filtering happens before sortScouts runs.
+  const [showArchived, setShowArchived] = useState(false);
   const [sort, setSort] = useState<ScoutsSortState>(DEFAULT_SCOUTS_SORT);
   // The Scout panel's open Scout is local state (an id), not URL-synced —
   // same pattern as CvVersionsPage's `panelId` (issue #81) — and looked up
@@ -64,9 +68,15 @@ export default function ScoutsPage() {
   const cvLabelById = new Map(cvVersions?.map((cv) => [cv.id, cv.label]));
   const cvLabel = (id: string) => cvLabelById.get(id) ?? id;
 
-  // Sorting (#89) is applied client-side to the full list, same shape as
-  // `sortCvVersions` on the cv-versions table.
-  const sortedScouts = scouts ? sortScouts(scouts, sort, cvLabelById) : undefined;
+  const visibleScouts = showArchived
+    ? scouts
+    : scouts?.filter((scout) => scout.status !== "ARCHIVED");
+
+  // Sorting (#89) is applied client-side to the already-filtered list, same
+  // shape as `sortCvVersions` on the cv-versions table.
+  const sortedScouts = visibleScouts
+    ? sortScouts(visibleScouts, sort, cvLabelById)
+    : undefined;
 
   const panelScout = scouts?.find((scout) => scout.id === panelId) ?? null;
 
@@ -86,6 +96,16 @@ export default function ScoutsPage() {
           <Link href="/scouts/new">{t("list.new")}</Link>
         </Button>
       </div>
+
+      <label className="flex items-center gap-2 self-end text-sm">
+        <input
+          type="checkbox"
+          className="h-4 w-4 rounded border-border accent-accent outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          checked={showArchived}
+          onChange={(e) => setShowArchived(e.target.checked)}
+        />
+        {t("list.showArchived")}
+      </label>
 
       {isPending && (
         <div
