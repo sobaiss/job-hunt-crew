@@ -130,6 +130,9 @@ services:
       SQS_GENERATION_INTAKE_QUEUE_URL: http://elasticmq:9324/000000000000/generation-intake
       SQS_ACCESS_KEY_ID: x
       SQS_SECRET_ACCESS_KEY: x
+      # "Run now" on a Scout is rate-limited to once an hour by default;
+      # override locally (e.g. 0) to relaunch a Scout on demand in dev.
+      SCOUT_RUN_RATE_LIMIT_SECONDS: ${SCOUT_RUN_RATE_LIMIT_SECONDS:-3600}
     depends_on:
       postgres:
         condition: service_healthy

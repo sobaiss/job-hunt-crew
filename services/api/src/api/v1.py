@@ -1611,10 +1611,21 @@ async def get_scout_patterns(
 # "Run now" on a Scout creates a ScoutRun row and enqueues `{"scoutRunId": id}`
 # on `scout-intake`; the scout worker fans it out to one SITE_SEARCH
 # IngestionJob per targeted enabled site. "Run now" is rate-limited to once an
-# hour per Scout. GET returns run history / a single run, user-scoped via the
-# owning Scout (another user's run is a 404).
+# hour per Scout, overridable via SCOUT_RUN_RATE_LIMIT_SECONDS (e.g. 0 for
+# local development). GET returns run history / a single run, user-scoped via
+# the owning Scout (another user's run is a 404).
 
-SCOUT_RUN_RATE_LIMIT = timedelta(hours=1)
+DEFAULT_SCOUT_RUN_RATE_LIMIT_SECONDS = 3600
+
+
+def _scout_run_rate_limit() -> timedelta:
+    raw = os.environ.get("SCOUT_RUN_RATE_LIMIT_SECONDS")
+    try:
+        parsed = int(raw) if raw is not None else None
+    except ValueError:
+        parsed = None
+    seconds = parsed if parsed is not None and parsed >= 0 else DEFAULT_SCOUT_RUN_RATE_LIMIT_SECONDS
+    return timedelta(seconds=seconds)
 
 
 class ScoutRunResponse(BaseModel):
@@ -1692,7 +1703,7 @@ async def run_scout(
             .limit(1)
         )
     ).first()
-    if latest is not None and latest.createdAt > _now() - SCOUT_RUN_RATE_LIMIT:
+    if latest is not None and latest.createdAt > _now() - _scout_run_rate_limit():
         raise HTTPException(
             status_code=429,
             detail="This Scout ran within the last hour. Try again later.",
