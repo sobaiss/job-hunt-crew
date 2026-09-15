@@ -118,6 +118,22 @@ def test_build_search_url_hellowork_fills_template_and_keeps_fixed_defaults():
     )
 
 
+def test_build_search_url_hellowork_blanks_explicit_none_filters():
+    # The API layer stores unset optional filters as an explicit `None`
+    # (services/api's `_optional_string`), not as an absent key — `filters.get`'s
+    # default only kicks in for the latter, so this used to render literal
+    # "None" strings into the URL (e.g. `l=None&c=None`).
+    filters = {"keywords": "ingenieur", "location": None, "contractType": None}
+
+    url = build_search_url(_hellowork_site_config(), filters)
+
+    assert url == (
+        "https://www.hellowork.com/fr-fr/emploi/recherche.html?k=ingenieur&l="
+        "&c=&ray=20&st=relevance&cod=all&msa=0"
+    )
+    assert "None" not in url
+
+
 def test_build_search_url_hellowork_ignores_posted_within_and_remote_filters():
     # HelloWork's template has no {postedWithin}/{remote} tokens (#110): those
     # filters are deliberately left unwired rather than silently mismapped.

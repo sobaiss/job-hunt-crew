@@ -48,7 +48,11 @@ def build_search_url(site_config: SiteConfig, filters: dict[str, str]) -> str:
             f"searchUrlTemplate is required for HTML_SCRAPE site {site_config.siteKey}"
         )
     field_names = _TEMPLATE_FIELD_RE.findall(site_config.searchUrlTemplate)
-    values = {name: quote(str(filters.get(name, "")), safe="") for name in field_names}
+    # `filters.get(name, "")`'s default only applies when the key is absent —
+    # the API layer stores unset optional filters as an explicit `None`
+    # (services/api's `_optional_string`), so `or ""` is needed to catch that
+    # case too and avoid stringifying it into a literal "None" in the URL.
+    values = {name: quote(str(filters.get(name) or ""), safe="") for name in field_names}
     return site_config.searchUrlTemplate.format(**values)
 
 
