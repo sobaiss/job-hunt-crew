@@ -12,7 +12,6 @@ from py_db.section_type import SectionType
 _MARGIN_MM = 20
 _BODY_FONT_SIZE = 11
 _HEADING_FONT_SIZE = 14
-_TITLE_FONT_SIZE = 16
 
 # #100: when a StyleProfile's `onePageFit` is set, PDF rendering tries these
 # (margin_mm, font_scale) levels in order — from the normal template down to
@@ -32,7 +31,6 @@ _PDF_ONE_PAGE_FIT_LEVELS = [(_MARGIN_MM, 1.0), (16, 0.94), (_MARGIN_FLOOR_MM, _F
 # no measurement to walk it against.
 _DOCX_ONE_PAGE_CHAR_BUDGET = 3500
 _DOCX_MARGIN_FLOOR_PT = 36
-_DOCX_TITLE_FONT_SIZE = 16
 _DOCX_HEADING1_FONT_SIZE = 14
 _DOCX_HEADING2_FONT_SIZE = 12
 
@@ -284,7 +282,7 @@ def _render_pdf_sidebar_main(
 
 
 def _render_pdf(
-    *, title: str, lines: list[_Line], profile: dict | None, margin_mm: float, font_scale: float
+    *, lines: list[_Line], profile: dict | None, margin_mm: float, font_scale: float
 ) -> FPDF:
     body_font = _FONT_FAMILY_TO_PDF_FONT.get(
         (profile or {}).get("fonts", {}).get("family"), "Helvetica"
@@ -295,10 +293,6 @@ def _render_pdf(
     pdf.set_auto_page_break(auto=True, margin=margin_mm)
     pdf.set_margins(margin_mm, margin_mm, margin_mm)
     pdf.add_page()
-
-    pdf.set_font("Helvetica", style="B", size=round(_TITLE_FONT_SIZE * font_scale))
-    _block(pdf, 10 * font_scale, _latin1_safe(title))
-    pdf.ln(4 * font_scale)
 
     if profile and profile.get("layoutArchetype") == "SIDEBAR_MAIN":
         _render_pdf_sidebar_main(
@@ -314,7 +308,7 @@ def _render_pdf(
     return pdf
 
 
-def _render_pdf_with_one_page_fit(*, title: str, lines: list[_Line], profile: dict) -> FPDF:
+def _render_pdf_with_one_page_fit(*, lines: list[_Line], profile: dict) -> FPDF:
     """Walks _PDF_ONE_PAGE_FIT_LEVELS from the normal template down to the
     bounded floor, stopping at the first level whose render fits on one
     page. If even the floor spills, that floor render is returned as-is
@@ -323,18 +317,17 @@ def _render_pdf_with_one_page_fit(*, title: str, lines: list[_Line], profile: di
     """
     pdf = None
     for margin_mm, font_scale in _PDF_ONE_PAGE_FIT_LEVELS:
-        pdf = _render_pdf(title=title, lines=lines, profile=profile, margin_mm=margin_mm, font_scale=font_scale)
+        pdf = _render_pdf(lines=lines, profile=profile, margin_mm=margin_mm, font_scale=font_scale)
         if pdf.page_no() == 1:
             return pdf
     return pdf
 
 
-def render_markdown_to_pdf(
-    *, title: str, markdown_content: str, style_profile: dict | None = None
-) -> bytes:
+def render_markdown_to_pdf(*, markdown_content: str, style_profile: dict | None = None) -> bytes:
     """Renders a GeneratedDocument's Markdown to PDF bytes using a single
-    built-in template. Headings and bullets get their own styling;
-    everything else is a plain paragraph. When `style_profile` is a
+    built-in template, starting directly with the document's own content
+    (#105 — no auto-added title). Headings and bullets get their own
+    styling; everything else is a plain paragraph. When `style_profile` is a
     SINGLE_COLUMN StyleProfile (#98), body text and each SectionType-tagged
     heading use that profile's font family and colors instead of the
     template default. A SIDEBAR_MAIN StyleProfile (#99) additionally splits
@@ -348,9 +341,9 @@ def render_markdown_to_pdf(
     lines = _classify_lines(markdown_content)
 
     if profile and profile.get("onePageFit"):
-        pdf = _render_pdf_with_one_page_fit(title=title, lines=lines, profile=profile)
+        pdf = _render_pdf_with_one_page_fit(lines=lines, profile=profile)
     else:
-        pdf = _render_pdf(title=title, lines=lines, profile=profile, margin_mm=_MARGIN_MM, font_scale=1.0)
+        pdf = _render_pdf(lines=lines, profile=profile, margin_mm=_MARGIN_MM, font_scale=1.0)
 
     return bytes(pdf.output())
 
@@ -366,10 +359,10 @@ def _apply_docx_run_style(
         run.font.size = Pt(font_size_pt)
 
 
-def _docx_needs_one_page_reduction(*, profile: dict | None, title: str, lines: list[_Line]) -> bool:
+def _docx_needs_one_page_reduction(*, profile: dict | None, lines: list[_Line]) -> bool:
     if not profile or not profile.get("onePageFit"):
         return False
-    total_chars = len(title) + sum(len(line.text) for line in lines if line.kind is not _LineKind.BLANK)
+    total_chars = sum(len(line.text) for line in lines if line.kind is not _LineKind.BLANK)
     return total_chars > _DOCX_ONE_PAGE_CHAR_BUDGET
 
 
@@ -445,30 +438,29 @@ def _render_docx_sidebar_main(
             )
 
 
-def render_markdown_to_docx(
-    *, title: str, markdown_content: str, style_profile: dict | None = None
-) -> bytes:
+def render_markdown_to_docx(*, markdown_content: str, style_profile: dict | None = None) -> bytes:
     """Renders a GeneratedDocument's Markdown to .docx bytes using a single
-    built-in template, mirroring render_markdown_to_pdf's heading/bullet
-    styling via python-docx's built-in Heading/List Bullet styles. When
-    `style_profile` is a SINGLE_COLUMN StyleProfile (#98), body text and each
-    SectionType-tagged heading get that profile's font and colors, with any
-    font outside a small curated cross-platform set replaced by its family's
-    entry instead of used literally (#100). A SIDEBAR_MAIN StyleProfile (#99)
-    instead lays the same styled content out as a two-column table — a
-    fixed-width sidebar cell and a wider main cell — split per the
-    StyleProfile's SIDEBAR/MAIN section assignment. When that profile also
-    recorded `onePageFit` and the tailored content crosses the same
-    character-count proxy style_profile.py's extraction uses, margins drop
-    to a bounded floor and every run gets an explicit, smaller font size
-    (#100) — content long enough to still cross the budget at the floor is
-    simply allowed to spill onto a second page.
+    built-in template, starting directly with the document's own content
+    (#105 — no auto-added title), mirroring render_markdown_to_pdf's
+    heading/bullet styling via python-docx's built-in Heading/List Bullet
+    styles. When `style_profile` is a SINGLE_COLUMN StyleProfile (#98), body
+    text and each SectionType-tagged heading get that profile's font and
+    colors, with any font outside a small curated cross-platform set
+    replaced by its family's entry instead of used literally (#100). A
+    SIDEBAR_MAIN StyleProfile (#99) instead lays the same styled content out
+    as a two-column table — a fixed-width sidebar cell and a wider main
+    cell — split per the StyleProfile's SIDEBAR/MAIN section assignment.
+    When that profile also recorded `onePageFit` and the tailored content
+    crosses the same character-count proxy style_profile.py's extraction
+    uses, margins drop to a bounded floor and every run gets an explicit,
+    smaller font size (#100) — content long enough to still cross the
+    budget at the floor is simply allowed to spill onto a second page.
     """
     profile = _active_style_profile(style_profile)
     lines = _classify_lines(markdown_content)
     body_font_name = _docx_font_name((profile or {}).get("fonts"))
     body_color = _hex_to_rgb((profile or {}).get("accentColor"))
-    needs_reduction = _docx_needs_one_page_reduction(profile=profile, title=title, lines=lines)
+    needs_reduction = _docx_needs_one_page_reduction(profile=profile, lines=lines)
     body_size = _BODY_FONT_SIZE * _FONT_SCALE_FLOOR if needs_reduction else None
     heading1_size = _DOCX_HEADING1_FONT_SIZE * _FONT_SCALE_FLOOR if needs_reduction else None
     heading2_size = _DOCX_HEADING2_FONT_SIZE * _FONT_SCALE_FLOOR if needs_reduction else None
@@ -480,11 +472,6 @@ def render_markdown_to_docx(
         section.bottom_margin = Pt(_DOCX_MARGIN_FLOOR_PT)
         section.left_margin = Pt(_DOCX_MARGIN_FLOOR_PT)
         section.right_margin = Pt(_DOCX_MARGIN_FLOOR_PT)
-
-    title_paragraph = document.add_heading(title, level=0)
-    if needs_reduction:
-        for run in title_paragraph.runs:
-            _apply_docx_run_style(run, font_name=None, color=None, font_size_pt=_DOCX_TITLE_FONT_SIZE * _FONT_SCALE_FLOOR)
 
     if profile and profile.get("layoutArchetype") == "SIDEBAR_MAIN":
         _render_docx_sidebar_main(

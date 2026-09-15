@@ -2041,18 +2041,13 @@ _GENERATED_DOCUMENT_CONTENT_TYPES: dict[GeneratedDocumentFormat, str] = {
 def _render_generated_document(
     *,
     format: GeneratedDocumentFormat,
-    title: str,
     markdown_content: str,
     style_profile: dict | None,
 ) -> bytes:
     if format == "pdf":
-        return render_markdown_to_pdf(
-            title=title, markdown_content=markdown_content, style_profile=style_profile
-        )
+        return render_markdown_to_pdf(markdown_content=markdown_content, style_profile=style_profile)
     if format == "docx":
-        return render_markdown_to_docx(
-            title=title, markdown_content=markdown_content, style_profile=style_profile
-        )
+        return render_markdown_to_docx(markdown_content=markdown_content, style_profile=style_profile)
     if format == "md":
         return markdown_content.encode("utf-8")
     return render_markdown_to_text(markdown_content=markdown_content).encode("utf-8")
@@ -2077,8 +2072,6 @@ async def get_generated_document_download(
         raise HTTPException(status_code=400, detail="Document is not ready")
 
     label = _GENERATED_DOCUMENT_LABELS[document.type]
-    job_offer = await session.get(JobOffer, document.jobOfferId)
-    title = f"{label} — {job_offer.title}" if job_offer and job_offer.title else label
 
     # A StyleProfile only ever styles a TAILORED_CV rendering (#98) — a
     # COVER_LETTER, or a TAILORED_CV whose CVVersion never reached
@@ -2092,7 +2085,6 @@ async def get_generated_document_download(
 
     content = _render_generated_document(
         format=format,
-        title=title,
         markdown_content=document.markdownContent,
         style_profile=style_profile,
     )

@@ -12,43 +12,50 @@ from api.document_render import (
 
 
 def test_render_markdown_to_pdf_returns_pdf_bytes():
-    pdf_bytes = render_markdown_to_pdf(title="Cover Letter", markdown_content="Hello world")
+    pdf_bytes = render_markdown_to_pdf(markdown_content="Hello world")
     assert pdf_bytes.startswith(b"%PDF")
+
+
+def test_render_markdown_to_docx_does_not_inject_title():
+    docx_bytes = render_markdown_to_docx(markdown_content="Some paragraph text.")
+    document = Document(BytesIO(docx_bytes))
+    assert document.paragraphs[0].text == "Some paragraph text."
+    assert document.paragraphs[0].style.name != "Title"
 
 
 def test_render_markdown_to_pdf_handles_headings_and_bullets():
     markdown_content = "# Heading\n\nSome paragraph text.\n\n- First bullet\n- Second bullet\n"
-    pdf_bytes = render_markdown_to_pdf(title="Tailored CV", markdown_content=markdown_content)
+    pdf_bytes = render_markdown_to_pdf(markdown_content=markdown_content)
     assert pdf_bytes.startswith(b"%PDF")
     assert len(pdf_bytes) > 0
 
 
 def test_render_markdown_to_pdf_handles_empty_content():
-    pdf_bytes = render_markdown_to_pdf(title="Empty", markdown_content="")
+    pdf_bytes = render_markdown_to_pdf(markdown_content="")
     assert pdf_bytes.startswith(b"%PDF")
 
 
 def test_render_markdown_to_pdf_handles_characters_outside_latin1():
     pdf_bytes = render_markdown_to_pdf(
-        title="Café — Résumé", markdown_content="Smart quotes: “quoted” and an em dash — here."
+        markdown_content="Smart quotes: “quoted” and an em dash — here."
     )
     assert pdf_bytes.startswith(b"%PDF")
 
 
 def test_render_markdown_to_docx_returns_zip_signature():
-    docx_bytes = render_markdown_to_docx(title="Cover Letter", markdown_content="Hello world")
+    docx_bytes = render_markdown_to_docx(markdown_content="Hello world")
     assert docx_bytes.startswith(b"PK")
 
 
 def test_render_markdown_to_docx_handles_headings_and_bullets():
     markdown_content = "# Heading\n\n## Subheading\n\nSome paragraph text.\n\n- First bullet\n- Second bullet\n"
-    docx_bytes = render_markdown_to_docx(title="Tailored CV", markdown_content=markdown_content)
+    docx_bytes = render_markdown_to_docx(markdown_content=markdown_content)
     assert docx_bytes.startswith(b"PK")
     assert len(docx_bytes) > 0
 
 
 def test_render_markdown_to_docx_handles_empty_content():
-    docx_bytes = render_markdown_to_docx(title="Empty", markdown_content="")
+    docx_bytes = render_markdown_to_docx(markdown_content="")
     assert docx_bytes.startswith(b"PK")
 
 
@@ -83,7 +90,7 @@ def test_render_markdown_to_text_strips_section_type_comment():
 
 def test_render_markdown_to_docx_strips_section_type_comment():
     markdown_content = "## Experience\n<!-- SectionType: EXPERIENCE -->\n\nDid things.\n"
-    docx_bytes = render_markdown_to_docx(title="Tailored CV", markdown_content=markdown_content)
+    docx_bytes = render_markdown_to_docx(markdown_content=markdown_content)
     document = Document(BytesIO(docx_bytes))
     text = "\n".join(p.text for p in document.paragraphs)
     assert "SectionType" not in text
@@ -109,7 +116,7 @@ _STYLE_PROFILE = {
 def test_render_markdown_to_docx_applies_style_profile_heading_treatment():
     markdown_content = "## Experience\n<!-- SectionType: EXPERIENCE -->\n\nDid things.\n"
     docx_bytes = render_markdown_to_docx(
-        title="Tailored CV", markdown_content=markdown_content, style_profile=_STYLE_PROFILE
+        markdown_content=markdown_content, style_profile=_STYLE_PROFILE
     )
     document = Document(BytesIO(docx_bytes))
     heading_paragraph = next(p for p in document.paragraphs if p.text == "Experience")
@@ -173,7 +180,7 @@ def test_group_lines_by_region_defaults_unassigned_sections_to_main():
 
 def test_render_markdown_to_docx_sidebar_main_splits_sections_into_columns():
     docx_bytes = render_markdown_to_docx(
-        title="Tailored CV", markdown_content=_SIDEBAR_MAIN_MARKDOWN, style_profile=_SIDEBAR_MAIN_STYLE_PROFILE
+        markdown_content=_SIDEBAR_MAIN_MARKDOWN, style_profile=_SIDEBAR_MAIN_STYLE_PROFILE
     )
     document = Document(BytesIO(docx_bytes))
     table = document.tables[0]
@@ -188,7 +195,7 @@ def test_render_markdown_to_docx_sidebar_main_splits_sections_into_columns():
 
 def test_render_markdown_to_docx_sidebar_main_applies_heading_treatment_per_column():
     docx_bytes = render_markdown_to_docx(
-        title="Tailored CV", markdown_content=_SIDEBAR_MAIN_MARKDOWN, style_profile=_SIDEBAR_MAIN_STYLE_PROFILE
+        markdown_content=_SIDEBAR_MAIN_MARKDOWN, style_profile=_SIDEBAR_MAIN_STYLE_PROFILE
     )
     document = Document(BytesIO(docx_bytes))
     table = document.tables[0]
@@ -203,7 +210,7 @@ def test_render_markdown_to_docx_sidebar_main_applies_heading_treatment_per_colu
 def test_render_markdown_to_docx_single_column_unaffected_by_sidebar_main_support():
     markdown_content = "## Experience\n<!-- SectionType: EXPERIENCE -->\n\nDid things.\n"
     docx_bytes = render_markdown_to_docx(
-        title="Tailored CV", markdown_content=markdown_content, style_profile=_STYLE_PROFILE
+        markdown_content=markdown_content, style_profile=_STYLE_PROFILE
     )
     document = Document(BytesIO(docx_bytes))
     assert document.tables == []
@@ -213,7 +220,7 @@ def test_render_markdown_to_docx_single_column_unaffected_by_sidebar_main_suppor
 
 def test_render_markdown_to_pdf_sidebar_main_renders_without_error():
     pdf_bytes = render_markdown_to_pdf(
-        title="Tailored CV", markdown_content=_SIDEBAR_MAIN_MARKDOWN, style_profile=_SIDEBAR_MAIN_STYLE_PROFILE
+        markdown_content=_SIDEBAR_MAIN_MARKDOWN, style_profile=_SIDEBAR_MAIN_STYLE_PROFILE
     )
     assert pdf_bytes.startswith(b"%PDF")
 
@@ -221,7 +228,7 @@ def test_render_markdown_to_pdf_sidebar_main_renders_without_error():
 def test_render_markdown_to_pdf_applies_style_profile_without_error():
     markdown_content = "## Experience\n<!-- SectionType: EXPERIENCE -->\n\nDid things.\n"
     pdf_bytes = render_markdown_to_pdf(
-        title="Tailored CV", markdown_content=markdown_content, style_profile=_STYLE_PROFILE
+        markdown_content=markdown_content, style_profile=_STYLE_PROFILE
     )
     assert pdf_bytes.startswith(b"%PDF")
 
@@ -229,7 +236,7 @@ def test_render_markdown_to_pdf_applies_style_profile_without_error():
 def test_render_markdown_to_docx_substitutes_uncurated_body_font_by_family():
     style_profile = {**_STYLE_PROFILE, "fonts": {"name": "Papyrus", "family": "serif"}, "onePageFit": False}
     docx_bytes = render_markdown_to_docx(
-        title="Tailored CV", markdown_content="Some paragraph text.", style_profile=style_profile
+        markdown_content="Some paragraph text.", style_profile=style_profile
     )
     document = Document(BytesIO(docx_bytes))
     body_paragraph = next(p for p in document.paragraphs if p.text == "Some paragraph text.")
@@ -239,7 +246,7 @@ def test_render_markdown_to_docx_substitutes_uncurated_body_font_by_family():
 def test_render_markdown_to_docx_keeps_curated_body_font_name():
     style_profile = {**_STYLE_PROFILE, "fonts": {"name": "Calibri", "family": "sans-serif"}, "onePageFit": False}
     docx_bytes = render_markdown_to_docx(
-        title="Tailored CV", markdown_content="Some paragraph text.", style_profile=style_profile
+        markdown_content="Some paragraph text.", style_profile=style_profile
     )
     document = Document(BytesIO(docx_bytes))
     body_paragraph = next(p for p in document.paragraphs if p.text == "Some paragraph text.")
@@ -262,7 +269,7 @@ def test_render_markdown_to_pdf_one_page_fit_reduces_to_stay_on_one_page():
     style_profile = {**_STYLE_PROFILE, "onePageFit": True}
     markdown_content = "\n\n".join([_LOREM_PARAGRAPH] * 28)
     pdf_bytes = render_markdown_to_pdf(
-        title="Tailored CV", markdown_content=markdown_content, style_profile=style_profile
+        markdown_content=markdown_content, style_profile=style_profile
     )
     assert _pdf_page_count(pdf_bytes) == 1
 
@@ -271,7 +278,7 @@ def test_render_markdown_to_pdf_one_page_fit_allows_overflow_when_too_long():
     style_profile = {**_STYLE_PROFILE, "onePageFit": True}
     markdown_content = "\n\n".join([_LOREM_PARAGRAPH] * 40)
     pdf_bytes = render_markdown_to_pdf(
-        title="Tailored CV", markdown_content=markdown_content, style_profile=style_profile
+        markdown_content=markdown_content, style_profile=style_profile
     )
     assert _pdf_page_count(pdf_bytes) > 1
 
@@ -280,7 +287,7 @@ def test_render_markdown_to_pdf_without_one_page_fit_does_not_reduce():
     style_profile = {**_STYLE_PROFILE, "onePageFit": False}
     markdown_content = "\n\n".join([_LOREM_PARAGRAPH] * 28)
     pdf_bytes = render_markdown_to_pdf(
-        title="Tailored CV", markdown_content=markdown_content, style_profile=style_profile
+        markdown_content=markdown_content, style_profile=style_profile
     )
     assert _pdf_page_count(pdf_bytes) == 2
 
@@ -289,7 +296,7 @@ def test_render_markdown_to_docx_one_page_fit_reduces_margins_and_font_for_long_
     style_profile = {**_STYLE_PROFILE, "onePageFit": True}
     markdown_content = "\n\n".join([_LOREM_PARAGRAPH] * 40)
     docx_bytes = render_markdown_to_docx(
-        title="Tailored CV", markdown_content=markdown_content, style_profile=style_profile
+        markdown_content=markdown_content, style_profile=style_profile
     )
     document = Document(BytesIO(docx_bytes))
     section = document.sections[0]
@@ -301,10 +308,22 @@ def test_render_markdown_to_docx_one_page_fit_reduces_margins_and_font_for_long_
 def test_render_markdown_to_docx_one_page_fit_leaves_short_content_untouched():
     style_profile = {**_STYLE_PROFILE, "onePageFit": True}
     docx_bytes = render_markdown_to_docx(
-        title="Tailored CV", markdown_content="Short body text.", style_profile=style_profile
+        markdown_content="Short body text.", style_profile=style_profile
     )
     document = Document(BytesIO(docx_bytes))
     section = document.sections[0]
     assert section.top_margin != Pt(36)
     body_paragraph = next(p for p in document.paragraphs if p.text == "Short body text.")
     assert body_paragraph.runs[0].font.size is None
+
+
+def test_render_markdown_to_docx_one_page_fit_budget_excludes_removed_title():
+    # Exactly at the budget: with the removed title's characters still
+    # counted (as before #105), this would have crossed it and triggered
+    # reduction. It must not, now that the title no longer exists to count.
+    style_profile = {**_STYLE_PROFILE, "onePageFit": True}
+    markdown_content = "a" * 3500
+    docx_bytes = render_markdown_to_docx(markdown_content=markdown_content, style_profile=style_profile)
+    document = Document(BytesIO(docx_bytes))
+    section = document.sections[0]
+    assert section.top_margin != Pt(36)
