@@ -24,6 +24,7 @@ function analysis(overrides: Partial<AnalysisSummary> = {}): AnalysisSummary {
       id: "job1",
       title: "Backend Engineer",
       company: "Acme, Inc",
+      location: "Paris",
       sourceSite: "FRANCE_TRAVAIL",
       postedAt: "2026-07-01T00:00:00.000Z",
       sourceUrl: "https://example.com/jobs/job1",

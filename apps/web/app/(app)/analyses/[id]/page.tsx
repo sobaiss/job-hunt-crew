@@ -57,9 +57,10 @@ export default function AnalysisDetailPage() {
         <h1 className="font-serif text-2xl font-semibold">
           {analysis.jobOffer.title ?? t("jobOfferFallback")}
         </h1>
-        {analysis.jobOffer.company && (
-          <p className="text-sm text-muted">{analysis.jobOffer.company}</p>
-        )}
+        <p className="text-sm text-muted">
+          {analysis.jobOffer.company ?? "—"} ·{" "}
+          {analysis.jobOffer.location ?? "—"}
+        </p>
         <p className="text-sm text-muted">
           {t("vsCv", { label: analysis.cvVersion.label })} ·{" "}
           {statusLabel(analysis.status)}

@@ -14,7 +14,12 @@ function analysis(overrides: Record<string, unknown> = {}) {
     cvVersionId: "cv1",
     ingestionJobId: null,
     ingestionJob: null,
-    jobOffer: { id: "job1", title: "Backend Engineer", company: "Acme Inc" },
+    jobOffer: {
+      id: "job1",
+      title: "Backend Engineer",
+      company: "Acme Inc",
+      location: "Paris",
+    },
     cvVersion: { label: "Grad CV" },
     resultJSON: null,
     errorMessage: null,
@@ -136,6 +141,7 @@ describe("Dashboard", () => {
       ) as HTMLElement,
     );
     expect(recent.getByText("Backend Engineer")).toBeInTheDocument();
+    expect(recent.getByText("Acme Inc · Paris")).toBeInTheDocument();
 
     expect(
       screen.getByRole("link", { name: "Analyse one offer" }),
@@ -146,6 +152,26 @@ describe("Dashboard", () => {
     expect(
       screen.getByRole("link", { name: "Import a CV" }),
     ).toHaveAttribute("href", "/cv-versions");
+  });
+
+  it("falls back to a '—' placeholder for company and location on a recent-analysis row when the offer has neither (issue #116)", async () => {
+    stub({
+      analyses: [
+        analysis({
+          jobOffer: { id: "job1", title: "Backend Engineer", company: null, location: null },
+        }),
+      ],
+      cvVersions: [cv({ id: "cv1" })],
+    });
+
+    renderWithProviders(<Dashboard />);
+
+    const recent = within(
+      (await screen.findByText("Recent analyses")).closest(
+        "section",
+      ) as HTMLElement,
+    );
+    expect(recent.getByText("— · —")).toBeInTheDocument();
   });
 
   it("renders the match-score trend once two analyses have completed", async () => {

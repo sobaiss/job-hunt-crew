@@ -63,15 +63,18 @@ type ColumnDef = {
 };
 
 // Responsive column collapse (#69): as width shrinks, columns drop in this
-// exact order (CV first, Entreprise last) so Poste/Score/Statut/Lien and the
-// selection checkbox — not listed here — always stay visible. Each entry is
-// "hidden below breakpoint X", so a column requiring a bigger breakpoint
-// drops out earlier while shrinking than one requiring a smaller one.
+// exact order (CV first, Entreprise/Localisation last) so Poste/Score/Statut/
+// Lien and the selection checkbox — not listed here — always stay visible.
+// Each entry is "hidden below breakpoint X", so a column requiring a bigger
+// breakpoint drops out earlier while shrinking than one requiring a smaller
+// one. Location (#116) shares Company's breakpoint — both are offer metadata
+// of equal priority, so they collapse together.
 const COLUMN_VISIBILITY: Partial<Record<AnalysesSortColumn, string>> = {
   cvLabel: "hidden xl:table-cell",
   sourceSite: "hidden lg:table-cell",
   postedAt: "hidden md:table-cell",
   company: "hidden sm:table-cell",
+  location: "hidden sm:table-cell",
 };
 
 // The flat table's sortable columns, left to right (#63). "Lien" is sortable
@@ -80,6 +83,7 @@ const COLUMN_VISIBILITY: Partial<Record<AnalysesSortColumn, string>> = {
 const COLUMNS: ColumnDef[] = [
   { key: "title", labelKey: "columns.title" },
   { key: "company", labelKey: "columns.company", className: COLUMN_VISIBILITY.company },
+  { key: "location", labelKey: "columns.location", className: COLUMN_VISIBILITY.location },
   { key: "sourceSite", labelKey: "columns.platform", className: COLUMN_VISIBILITY.sourceSite },
   { key: "postedAt", labelKey: "columns.postedAt", className: COLUMN_VISIBILITY.postedAt },
   { key: "cvLabel", labelKey: "columns.cv", className: COLUMN_VISIBILITY.cvLabel },
@@ -704,6 +708,9 @@ function AnalysisTableRow({
       <TableCell className={COLUMN_VISIBILITY.company}>
         {analysis.jobOffer.company ?? "—"}
       </TableCell>
+      <TableCell className={COLUMN_VISIBILITY.location}>
+        {analysis.jobOffer.location ?? "—"}
+      </TableCell>
       <TableCell className={COLUMN_VISIBILITY.sourceSite}>
         {sourceSiteLabel(analysis.jobOffer.sourceSite)}
       </TableCell>
@@ -790,6 +797,7 @@ function AnalysisCard({
             </p>
             <p className="text-sm text-muted">
               {analysis.jobOffer.company ?? "—"} ·{" "}
+              {analysis.jobOffer.location ?? "—"} ·{" "}
               {sourceSiteLabel(analysis.jobOffer.sourceSite)}
             </p>
           </div>

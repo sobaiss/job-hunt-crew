@@ -17,6 +17,7 @@ function analysis(over: Partial<AnalysisDetail> = {}): AnalysisDetail {
       id: "job1",
       title: "Backend Engineer",
       company: "Acme",
+      location: "Paris",
       sourceSite: "OTHER",
       postedAt: null,
       sourceUrl: "https://example.com/jobs/job1",

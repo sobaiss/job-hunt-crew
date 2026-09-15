@@ -76,6 +76,7 @@ export type AnalysisSummary = {
     id: string;
     title: string | null;
     company: string | null;
+    location: string | null;
     /** A `JobOfferSourceSite` enum value (e.g. `"FRANCE_TRAVAIL"`) — the
      *  Analyses table's "Plateforme" column (issue #63). */
     sourceSite: string;

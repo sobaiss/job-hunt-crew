@@ -37,11 +37,10 @@ export function AnalysisRow({ analysis }: { analysis: AnalysisSummary }) {
           <span className="truncate font-medium">
             {analysis.jobOffer.title ?? t("jobOfferFallback")}
           </span>
-          {analysis.jobOffer.company && (
-            <span className="truncate text-sm text-muted">
-              {analysis.jobOffer.company}
-            </span>
-          )}
+          <span className="truncate text-sm text-muted">
+            {analysis.jobOffer.company ?? "—"} ·{" "}
+            {analysis.jobOffer.location ?? "—"}
+          </span>
           <span className="text-xs text-muted">
             {t("vsCv", { label: analysis.cvVersion.label })}
           </span>

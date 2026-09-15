@@ -70,9 +70,10 @@ export function AnalysisQuickView({
               <SheetTitle>
                 {analysis.jobOffer.title ?? t("jobOfferFallback")}
               </SheetTitle>
-              {analysis.jobOffer.company && (
-                <p className="text-sm text-muted">{analysis.jobOffer.company}</p>
-              )}
+              <p className="text-sm text-muted">
+                {analysis.jobOffer.company ?? "—"} ·{" "}
+                {analysis.jobOffer.location ?? "—"}
+              </p>
             </SheetHeader>
 
             <Button asChild variant="outline" size="sm" className="w-fit">

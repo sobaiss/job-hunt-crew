@@ -42,6 +42,7 @@ function summary(overrides: Record<string, unknown> = {}) {
       id: "job1",
       title: "Backend Engineer",
       company: "Acme Inc",
+      location: "Paris",
       sourceSite: "FRANCE_TRAVAIL",
       postedAt: "2026-07-01T00:00:00.000Z",
       sourceUrl: "https://example.com/jobs/job1",
@@ -69,7 +70,7 @@ describe("AnalysesDashboardPage", () => {
     __setUrl("/analyses");
   });
 
-  it("shows a loading state, then a flat table row per analysis with title, company, platform, CV, score and a link", async () => {
+  it("shows a loading state, then a flat table row per analysis with title, company, location, platform, CV, score and a link", async () => {
     server.use(
       http.get("/api/analyses", () =>
         HttpResponse.json({ analyses: [summary()] }),
@@ -82,12 +83,41 @@ describe("AnalysesDashboardPage", () => {
 
     expect(await screen.findByText("Backend Engineer")).toBeInTheDocument();
     expect(screen.getByText("Acme Inc")).toBeInTheDocument();
+    expect(screen.getByText("Paris")).toBeInTheDocument();
     expect(screen.getByText("France Travail")).toBeInTheDocument();
     expect(screen.getByRole("cell", { name: "Grad CV" })).toBeInTheDocument();
     expect(screen.getByText("87")).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "Open the job offer" }),
     ).toHaveAttribute("href", "https://example.com/jobs/job1");
+  });
+
+  it("falls back to a '—' placeholder for company, location and publication date when the offer has none, in both the table and card layout (issue #116)", async () => {
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            summary({
+              jobOffer: {
+                ...summary().jobOffer,
+                company: null,
+                location: null,
+                postedAt: null,
+              },
+            }),
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Backend Engineer");
+
+    // Company, location and posted-at cells each render the "—" placeholder,
+    // never a blank cell or a literal "null"/"None" string.
+    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(3);
+    expect(screen.queryByText("null")).not.toBeInTheDocument();
+    expect(screen.queryByText("None")).not.toBeInTheDocument();
   });
 
   it("collapses columns in the order CV, Platform, Posted, Company as space runs out, keeping Position/Score/Status/Link always visible (issue #69)", async () => {
@@ -150,6 +180,7 @@ describe("AnalysesDashboardPage", () => {
       expect(screen.queryByRole("table")).not.toBeInTheDocument();
       const card = within(title.closest("[tabindex]") as HTMLElement);
       expect(card.getByText("Acme Inc", { exact: false })).toBeInTheDocument();
+      expect(card.getByText("Paris", { exact: false })).toBeInTheDocument();
       expect(card.getByText("87")).toBeInTheDocument();
       expect(card.getByText("To apply")).toBeInTheDocument();
 
@@ -932,6 +963,31 @@ describe("AnalysesDashboardPage", () => {
     ).toHaveAttribute("href", "/analyses/compare/job1");
   });
 
+  it("shows the offer's location in the Quick view, falling back to a placeholder for company and location when missing (issue #116)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            detail({
+              jobOffer: {
+                ...summary().jobOffer,
+                company: null,
+                location: null,
+              },
+            }),
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await user.click(await screen.findByText("Backend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    expect(quickView.getByText("— · —")).toBeInTheDocument();
+  });
+
   it("does not open the Quick view when the Lien icon is clicked", async () => {
     const user = userEvent.setup();
     server.use(
@@ -1145,6 +1201,32 @@ describe("AnalysesDashboardPage", () => {
 });
 
 describe("AnalysisDetailPage", () => {
+  it("shows the offer's company and location, falling back to a placeholder for either when missing (issue #116)", async () => {
+    server.use(
+      http.get("/api/analyses/a1", () => HttpResponse.json({ analysis: detail() })),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />);
+
+    expect(await screen.findByText("Acme Inc · Paris")).toBeInTheDocument();
+  });
+
+  it("shows the placeholder for company and location when the offer has neither (issue #116)", async () => {
+    server.use(
+      http.get("/api/analyses/a1", () =>
+        HttpResponse.json({
+          analysis: detail({
+            jobOffer: { ...summary().jobOffer, company: null, location: null },
+          }),
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />);
+
+    expect(await screen.findByText("— · —")).toBeInTheDocument();
+  });
+
   it("lays out the score and all five result categories", async () => {
     server.use(
       http.get("/api/analyses/a1", () =>

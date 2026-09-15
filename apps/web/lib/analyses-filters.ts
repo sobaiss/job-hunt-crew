@@ -65,6 +65,7 @@ export function filterAnalyses(
 export type AnalysesSortColumn =
   | "title"
   | "company"
+  | "location"
   | "sourceSite"
   | "postedAt"
   | "cvLabel"
@@ -87,6 +88,7 @@ export const DEFAULT_ANALYSES_SORT: AnalysesSortState = {
 const SORT_COLUMNS: readonly AnalysesSortColumn[] = [
   "title",
   "company",
+  "location",
   "sourceSite",
   "postedAt",
   "cvLabel",
@@ -103,6 +105,8 @@ function sortValue(
       return analysis.jobOffer.title;
     case "company":
       return analysis.jobOffer.company;
+    case "location":
+      return analysis.jobOffer.location;
     case "sourceSite":
       return analysis.jobOffer.sourceSite;
     case "postedAt":

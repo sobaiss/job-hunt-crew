@@ -212,6 +212,7 @@
     "columns": {
       "title": "Position",
       "company": "Company",
+      "location": "Location",
       "platform": "Platform",
       "postedAt": "Posted",
       "cv": "CV",
