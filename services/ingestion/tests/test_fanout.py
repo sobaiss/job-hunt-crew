@@ -24,6 +24,8 @@ from py_db.models import (
     ScoutRun,
     Scoutrunstatus,
     Scoutstatus,
+    SiteConfig,
+    Siteconfigsitekey,
     User,
 )
 from py_db.session import make_engine, make_session_factory
@@ -220,6 +222,131 @@ async def test_link_discovered_offers_reuses_globally_deduplicated_job_offer():
             await session.commit()
 
             offers = (await session.scalars(select(JobOffer).where(JobOffer.sourceUrl == shared_url))).all()
+            for offer in offers:
+                await session.delete(offer)
+            job = await session.get(IngestionJob, ingestion_job_id)
+            if job is not None:
+                await session.delete(job)
+            user = await session.get(User, user_id)
+            if user is not None:
+                await session.delete(user)
+            await session.commit()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_link_discovered_offers_tags_source_site_from_site_search_ingestion_job():
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id = f"test-user-{uuid.uuid4()}"
+    ingestion_job_id = f"test-job-{uuid.uuid4()}"
+    url = f"https://linkedin.com/jobs/{uuid.uuid4()}"
+
+    async with session_factory() as session:
+        # LINKEDIN's SiteConfig row is unique-keyed by siteKey and already
+        # exists from the seed data (packages/prisma/prisma/seed.js) — reuse
+        # it rather than inserting a duplicate.
+        site_config = await session.scalar(
+            select(SiteConfig).where(SiteConfig.siteKey == Siteconfigsitekey.LINKEDIN)
+        )
+        assert site_config is not None, "expected seeded LINKEDIN SiteConfig row"
+        site_config_id = site_config.id
+
+        session.add(User(id=user_id, updatedAt=_now()))
+        session.add(
+            IngestionJob(
+                id=ingestion_job_id,
+                userId=user_id,
+                mode=Ingestionmode.SITE_SEARCH,
+                maxOffers=25,
+                status=Ingestionjobstatus.RUNNING,
+                siteConfigId=site_config_id,
+                updatedAt=_now(),
+            )
+        )
+        await session.commit()
+
+    try:
+        async with session_factory() as session:
+            ingestion_job = await session.get(IngestionJob, ingestion_job_id)
+            job_offers = await link_discovered_offers(session, ingestion_job, [url])
+
+        # A SITE_SEARCH job targeting LinkedIn's SiteConfig should tag the
+        # newly discovered offer with LINKEDIN, not the generic OTHER a
+        # hardcoded default previously always produced.
+        assert len(job_offers) == 1
+        assert job_offers[0].sourceSite == Joboffersourcesite.LINKEDIN
+
+        async with session_factory() as session:
+            offer = await session.scalar(select(JobOffer).where(JobOffer.sourceUrl == url))
+            assert offer.sourceSite == Joboffersourcesite.LINKEDIN
+    finally:
+        async with session_factory() as session:
+            links = (
+                await session.scalars(
+                    select(IngestionJobOffer).where(IngestionJobOffer.ingestionJobId == ingestion_job_id)
+                )
+            ).all()
+            for link in links:
+                await session.delete(link)
+            await session.commit()
+
+            offers = (await session.scalars(select(JobOffer).where(JobOffer.sourceUrl == url))).all()
+            for offer in offers:
+                await session.delete(offer)
+            job = await session.get(IngestionJob, ingestion_job_id)
+            if job is not None:
+                await session.delete(job)
+            user = await session.get(User, user_id)
+            if user is not None:
+                await session.delete(user)
+            await session.commit()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_link_discovered_offers_defaults_to_other_for_url_mode_job_without_site_config():
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id = f"test-user-{uuid.uuid4()}"
+    ingestion_job_id = f"test-job-{uuid.uuid4()}"
+    url = f"https://example.com/jobs/{uuid.uuid4()}"
+
+    async with session_factory() as session:
+        session.add(User(id=user_id, updatedAt=_now()))
+        session.add(
+            IngestionJob(
+                id=ingestion_job_id,
+                userId=user_id,
+                mode=Ingestionmode.LISTING_URL,
+                maxOffers=25,
+                status=Ingestionjobstatus.RUNNING,
+                updatedAt=_now(),
+            )
+        )
+        await session.commit()
+
+    try:
+        async with session_factory() as session:
+            ingestion_job = await session.get(IngestionJob, ingestion_job_id)
+            job_offers = await link_discovered_offers(session, ingestion_job, [url])
+
+        # A LISTING_URL job has no siteConfigId, so this regression case
+        # confirms the fix leaves that mode's existing OTHER tagging intact.
+        assert len(job_offers) == 1
+        assert job_offers[0].sourceSite == Joboffersourcesite.OTHER
+    finally:
+        async with session_factory() as session:
+            links = (
+                await session.scalars(
+                    select(IngestionJobOffer).where(IngestionJobOffer.ingestionJobId == ingestion_job_id)
+                )
+            ).all()
+            for link in links:
+                await session.delete(link)
+            await session.commit()
+
+            offers = (await session.scalars(select(JobOffer).where(JobOffer.sourceUrl == url))).all()
             for offer in offers:
                 await session.delete(offer)
             job = await session.get(IngestionJob, ingestion_job_id)

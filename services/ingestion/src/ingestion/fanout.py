@@ -13,6 +13,7 @@ from py_db.models import (
     JobOffer,
     Jobofferextractionstatus,
     Joboffersourcesite,
+    SiteConfig,
 )
 from py_db.scout_matching import analyses_created_for_scout_run, lexical_similarity, scout_max_analyses_per_run
 from sqlalchemy import select
@@ -42,6 +43,22 @@ def dedupe_and_cap_urls(urls: list[str], max_offers: int) -> list[str]:
     return deduped[:max_offers]
 
 
+async def _resolve_source_site(session: AsyncSession, ingestion_job: IngestionJob) -> Joboffersourcesite:
+    """The `JobOfferSourceSite` a newly discovered offer from `ingestion_job`
+    should be tagged with: the site actually targeted by a SITE_SEARCH job's
+    `siteConfigId`, when that site has a matching `JobOfferSourceSite` value
+    (true for every HTML-scraped site today). Falls back to OTHER for a
+    SINGLE_URL/LISTING_URL job (no `siteConfigId`) or a site key with no
+    corresponding source-site value.
+    """
+    if ingestion_job.siteConfigId is None:
+        return Joboffersourcesite.OTHER
+    site_config = await session.get(SiteConfig, ingestion_job.siteConfigId)
+    if site_config is None:
+        return Joboffersourcesite.OTHER
+    return Joboffersourcesite.__members__.get(site_config.siteKey.value, Joboffersourcesite.OTHER)
+
+
 async def link_discovered_offers(
     session: AsyncSession,
     ingestion_job: IngestionJob,
@@ -50,11 +67,16 @@ async def link_discovered_offers(
     """Dedupes+caps `urls` at `ingestion_job.maxOffers` (M3-T3), then for
     each retained URL gets-or-creates a globally-deduplicated JobOffer (by
     sourceUrl, PRD Section 6 dedup design decision) and links it to
-    `ingestion_job` via an IngestionJobOffer join row. Does not run the
-    scrape/extraction pipeline against the linked offers — `process_job_offer`
-    / `link_and_process_offers` (M3-T4) build on this retained set.
+    `ingestion_job` via an IngestionJobOffer join row. A newly created
+    JobOffer's `sourceSite` is resolved from `ingestion_job`'s targeted
+    `SiteConfig` (see `_resolve_source_site`); an offer that already existed
+    (globally deduplicated by sourceUrl) keeps its original `sourceSite`.
+    Does not run the scrape/extraction pipeline against the linked offers —
+    `process_job_offer` / `link_and_process_offers` (M3-T4) build on this
+    retained set.
     """
     retained_urls = dedupe_and_cap_urls(urls, ingestion_job.maxOffers)
+    source_site = await _resolve_source_site(session, ingestion_job)
 
     job_offers: list[JobOffer] = []
     for url in retained_urls:
@@ -63,7 +85,7 @@ async def link_discovered_offers(
             job_offer = JobOffer(
                 id=str(uuid.uuid4()),
                 sourceUrl=url,
-                sourceSite=Joboffersourcesite.OTHER,
+                sourceSite=source_site,
                 extractionStatus=Jobofferextractionstatus.PENDING,
                 updatedAt=_now(),
             )
