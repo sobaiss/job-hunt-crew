@@ -7,6 +7,7 @@ directly, per that module's design intent.
 """
 
 import json
+import re
 from datetime import UTC, datetime
 
 from py_db.models import JobOffer, Jobofferextractionstatus
@@ -15,6 +16,7 @@ from py_db.structured_logging import get_logger, log_stage_event
 from pydantic import BaseModel, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .json_ld import find_job_posting, job_posting_fields
 from .llm_json import parse_llm_json
 from .llm_provider import LLMProvider, get_llm_provider
 from .s3_client import S3_BUCKET, make_s3_client
@@ -26,12 +28,16 @@ STAGE = "extract"
 MAX_ATTEMPTS = 3
 MAX_HTML_CHARS = 20000
 
+_SCRIPT_OR_STYLE_RE = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL)
+
 SYSTEM_PROMPT = (
     "You extract structured data from the raw HTML of a job posting. "
     "Respond with ONLY a single JSON object, no markdown fences, no commentary, "
     "matching this shape: "
-    '{"description": string, "requirements": [string], "salary": string|null, '
-    '"contractType": string|null, "remotePolicy": string|null, "seniority": string|null}.'
+    '{"title": string|null, "company": string|null, "location": string|null, '
+    '"postedAt": string|null, "description": string, "requirements": [string], '
+    '"salary": string|null, "contractType": string|null, "remotePolicy": string|null, '
+    '"seniority": string|null}. "postedAt" must be an ISO 8601 date if known, else null.'
 )
 
 
@@ -44,8 +50,28 @@ class JobOfferStructuredData(BaseModel):
     seniority: str | None = None
 
 
+class JobOfferLLMExtraction(JobOfferStructuredData):
+    title: str | None = None
+    company: str | None = None
+    location: str | None = None
+    postedAt: str | None = None
+
+
 class ExtractionError(Exception):
     pass
+
+
+def _strip_non_visible(html: str) -> str:
+    return _SCRIPT_OR_STYLE_RE.sub("", html)
+
+
+def _parse_posted_at(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).replace(tzinfo=None)
+    except ValueError:
+        return None
 
 
 def _now() -> datetime:
@@ -54,9 +80,9 @@ def _now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-def _parse_llm_output(raw: str) -> JobOfferStructuredData:
+def _parse_llm_output(raw: str) -> JobOfferLLMExtraction:
     data = parse_llm_json(raw)
-    return JobOfferStructuredData.model_validate(data)
+    return JobOfferLLMExtraction.model_validate(data)
 
 
 async def extract_job_offer(
@@ -108,11 +134,43 @@ async def extract_job_offer(
 
     s3 = make_s3_client()
     obj = s3.get_object(Bucket=S3_BUCKET, Key=job_offer.rawContentKey)
-    html = obj["Body"].read().decode("utf-8")[:MAX_HTML_CHARS]
+    raw_html = obj["Body"].read().decode("utf-8")
+
+    job_posting = find_job_posting(raw_html)
+    if job_posting is not None:
+        fields = job_posting_fields(job_posting)
+        if fields["title"]:
+            job_offer.title = fields["title"]
+            job_offer.company = fields["company"]
+            job_offer.location = fields["location"]
+            job_offer.postedAt = fields["postedAt"]
+            job_offer.extractionStatus = Jobofferextractionstatus.READY
+            job_offer.errorMessage = None
+            job_offer.updatedAt = _now()
+            await session.commit()
+            log_stage_event(
+                logger,
+                stage=STAGE,
+                status="SUCCEEDED",
+                job_offer_id=job_offer_id,
+                analysis_id=analysis_id,
+                ingestion_job_id=ingestion_job_id,
+            )
+            await record_pipeline_event(
+                session,
+                stage=STAGE,
+                status="SUCCEEDED",
+                message=f"job_offer_id={job_offer_id}",
+                analysis_id=analysis_id,
+                ingestion_job_id=ingestion_job_id,
+            )
+            return job_offer
+
+    html = _strip_non_visible(raw_html)[:MAX_HTML_CHARS]
 
     provider = llm_provider or get_llm_provider()
 
-    last_error: Exception | None = None
+    last_error: Exception | str | None = None
     for _attempt in range(1, MAX_ATTEMPTS + 1):
         try:
             raw = provider.generate(system=SYSTEM_PROMPT, prompt=html)
@@ -121,7 +179,17 @@ async def extract_job_offer(
             last_error = exc
             continue
 
-        job_offer.structuredData = structured.model_dump()
+        if not structured.title:
+            last_error = "LLM output did not resolve a title"
+            continue
+
+        job_offer.title = structured.title
+        job_offer.company = structured.company
+        job_offer.location = structured.location
+        job_offer.postedAt = _parse_posted_at(structured.postedAt)
+        job_offer.structuredData = JobOfferStructuredData(
+            **structured.model_dump(exclude={"title", "company", "location", "postedAt"})
+        ).model_dump()
         job_offer.extractionStatus = Jobofferextractionstatus.READY
         job_offer.errorMessage = None
         job_offer.updatedAt = _now()

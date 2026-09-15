@@ -27,6 +27,7 @@ from ingestion.s3_client import S3_BUCKET, raw_scrape_key
 
 VALID_LLM_OUTPUT = json.dumps(
     {
+        "title": "Senior Backend Engineer",
         "description": "Senior Backend Engineer role.",
         "requirements": ["5+ years Python"],
         "salary": None,

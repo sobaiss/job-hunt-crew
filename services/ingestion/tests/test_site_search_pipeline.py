@@ -29,7 +29,8 @@ from ingestion.site_search_pipeline import run_site_search_ingestion
 
 FIXTURE_OFFER_HTML = "<html><body><h1>Senior Backend Engineer</h1></body></html>"
 VALID_LLM_OUTPUT = (
-    '{"description": "Senior Backend Engineer role.", "requirements": ["5+ years Python"], '
+    '{"title": "Senior Backend Engineer", '
+    '"description": "Senior Backend Engineer role.", "requirements": ["5+ years Python"], '
     '"salary": null, "contractType": "full_time", "remotePolicy": "remote", "seniority": "senior"}'
 )
 

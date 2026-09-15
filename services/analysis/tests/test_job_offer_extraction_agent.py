@@ -35,6 +35,10 @@ async def _delete_pipeline_events(session_factory, job_offer_id: str) -> None:
 FIXTURE_HTML = "<html><body><h1>Senior Backend Engineer</h1><p>5 years Python required.</p></body></html>"
 VALID_LLM_OUTPUT = json.dumps(
     {
+        "title": "Senior Backend Engineer",
+        "company": "Acme Corp",
+        "location": "Paris, France",
+        "postedAt": "2026-09-01",
         "description": "Senior Backend Engineer role focused on Python services.",
         "requirements": ["5+ years Python", "AWS experience"],
         "salary": "€60k-€75k",
@@ -43,6 +47,28 @@ VALID_LLM_OUTPUT = json.dumps(
         "seniority": "senior",
     }
 )
+
+JSON_LD_HTML = """
+<html><head>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org/",
+  "@type": "JobPosting",
+  "title": "Staff Platform Engineer",
+  "hiringOrganization": {"@type": "Organization", "name": "Globex"},
+  "jobLocation": {
+    "@type": "Place",
+    "address": {
+      "@type": "PostalAddress",
+      "addressLocality": "Lyon",
+      "addressCountry": "FR"
+    }
+  },
+  "datePosted": "2026-08-15T00:00:00Z"
+}
+</script>
+</head><body><h1>Staff Platform Engineer</h1></body></html>
+"""
 
 
 class StubLLMProvider(LLMProvider):
@@ -99,12 +125,17 @@ async def test_extract_job_offer_structures_content_and_sets_ready():
             assert job_offer.extractionStatus == Jobofferextractionstatus.READY
             assert job_offer.structuredData["description"]
             assert job_offer.structuredData["requirements"] == ["5+ years Python", "AWS experience"]
+            assert job_offer.title == "Senior Backend Engineer"
+            assert job_offer.company == "Acme Corp"
+            assert job_offer.location == "Paris, France"
 
         async with session_factory() as session:
             reloaded = await session.get(JobOffer, job_offer_id)
             assert reloaded.extractionStatus == Jobofferextractionstatus.READY
             assert "description" in reloaded.structuredData
             assert "requirements" in reloaded.structuredData
+            assert "title" not in reloaded.structuredData
+            assert reloaded.title == "Senior Backend Engineer"
         assert provider.calls == 1
     finally:
         s3.delete_object(Bucket=S3_BUCKET, Key=raw_content_key)
@@ -169,6 +200,118 @@ async def test_extract_job_offer_succeeds_on_retry_after_one_malformed_attempt()
             job_offer = await extract_job_offer(session, job_offer_id, llm_provider=provider)
             assert job_offer.extractionStatus == Jobofferextractionstatus.READY
         assert provider.calls == 2
+    finally:
+        s3.delete_object(Bucket=S3_BUCKET, Key=raw_content_key)
+        await _delete_pipeline_events(session_factory, job_offer_id)
+        async with session_factory() as session:
+            job_offer = await session.get(JobOffer, job_offer_id)
+            if job_offer is not None:
+                await session.delete(job_offer)
+                await session.commit()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_extract_job_offer_reads_fields_from_json_ld_without_calling_llm():
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    job_offer_id = f"test-{uuid.uuid4()}"
+    raw_content_key = f"raw-scrapes/{job_offer_id}.html"
+    s3 = _s3_client()
+    s3.put_object(Bucket=S3_BUCKET, Key=raw_content_key, Body=JSON_LD_HTML.encode("utf-8"), ContentType="text/html")
+
+    await _make_scraped_job_offer(session_factory, job_offer_id, raw_content_key)
+    provider = StubLLMProvider([VALID_LLM_OUTPUT])
+
+    try:
+        async with session_factory() as session:
+            job_offer = await extract_job_offer(session, job_offer_id, llm_provider=provider)
+            assert job_offer.extractionStatus == Jobofferextractionstatus.READY
+            assert job_offer.title == "Staff Platform Engineer"
+            assert job_offer.company == "Globex"
+            assert job_offer.location == "Lyon, FR"
+            assert job_offer.postedAt == datetime(2026, 8, 15)
+
+        async with session_factory() as session:
+            reloaded = await session.get(JobOffer, job_offer_id)
+            assert reloaded.title == "Staff Platform Engineer"
+            assert reloaded.structuredData is None
+        # JSON-LD resolved everything needed; no LLM call was made.
+        assert provider.calls == 0
+    finally:
+        s3.delete_object(Bucket=S3_BUCKET, Key=raw_content_key)
+        await _delete_pipeline_events(session_factory, job_offer_id)
+        async with session_factory() as session:
+            job_offer = await session.get(JobOffer, job_offer_id)
+            if job_offer is not None:
+                await session.delete(job_offer)
+                await session.commit()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_extract_job_offer_finds_json_ld_beyond_old_truncation_cutoff():
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    job_offer_id = f"test-{uuid.uuid4()}"
+    raw_content_key = f"raw-scrapes/{job_offer_id}.html"
+    # Padding pushes the JSON-LD block well past the old MAX_HTML_CHARS (20000)
+    # cutoff; the search must run against the full, untruncated HTML.
+    padding = "<!-- padding -->" * 3000
+    html = f"<html><head>{padding}</head><body>{JSON_LD_HTML}</body></html>"
+    assert len(html) > 20000
+    s3 = _s3_client()
+    s3.put_object(Bucket=S3_BUCKET, Key=raw_content_key, Body=html.encode("utf-8"), ContentType="text/html")
+
+    await _make_scraped_job_offer(session_factory, job_offer_id, raw_content_key)
+    provider = StubLLMProvider([VALID_LLM_OUTPUT])
+
+    try:
+        async with session_factory() as session:
+            job_offer = await extract_job_offer(session, job_offer_id, llm_provider=provider)
+            assert job_offer.extractionStatus == Jobofferextractionstatus.READY
+            assert job_offer.title == "Staff Platform Engineer"
+        assert provider.calls == 0
+    finally:
+        s3.delete_object(Bucket=S3_BUCKET, Key=raw_content_key)
+        await _delete_pipeline_events(session_factory, job_offer_id)
+        async with session_factory() as session:
+            job_offer = await session.get(JobOffer, job_offer_id)
+            if job_offer is not None:
+                await session.delete(job_offer)
+                await session.commit()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_extract_job_offer_marks_failed_when_no_tier_resolves_a_title():
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    job_offer_id = f"test-{uuid.uuid4()}"
+    raw_content_key = f"raw-scrapes/{job_offer_id}.html"
+    s3 = _s3_client()
+    s3.put_object(Bucket=S3_BUCKET, Key=raw_content_key, Body=FIXTURE_HTML.encode("utf-8"), ContentType="text/html")
+
+    await _make_scraped_job_offer(session_factory, job_offer_id, raw_content_key)
+    no_title_output = json.dumps(
+        {
+            "title": None,
+            "description": "Some role.",
+            "requirements": [],
+        }
+    )
+    provider = StubLLMProvider([no_title_output])
+
+    try:
+        async with session_factory() as session:
+            with pytest.raises(ExtractionError):
+                await extract_job_offer(session, job_offer_id, llm_provider=provider)
+
+        async with session_factory() as session:
+            reloaded = await session.get(JobOffer, job_offer_id)
+            assert reloaded.extractionStatus == Jobofferextractionstatus.FAILED
+            assert reloaded.title is None
+        assert provider.calls == MAX_ATTEMPTS
     finally:
         s3.delete_object(Bucket=S3_BUCKET, Key=raw_content_key)
         await _delete_pipeline_events(session_factory, job_offer_id)

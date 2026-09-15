@@ -52,6 +52,7 @@ FIXTURE_LISTING_HTML = (
 )
 VALID_LLM_OUTPUT = json.dumps(
     {
+        "title": "Senior Backend Engineer",
         "description": "Senior Backend Engineer role.",
         "requirements": ["5+ years Python"],
         "salary": None,

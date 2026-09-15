@@ -9,7 +9,7 @@ Fetching one JobOffer's raw HTML by its source URL and storing it in S3, ahead o
 _Avoid_: Fetch — fetch is the HTTP call; scrape is the whole stage, including the S3 write and status transition.
 
 **Extraction** (JobOffer):
-Turning a JobOffer's raw scraped HTML into its structured data (description, requirements, salary, contract type, remote policy, seniority) via the Analysis context's `JobOfferExtractionAgent`.
+Turning a JobOffer's raw scraped HTML into its structured data (title, company, location, postedAt, description, requirements, salary, contract type, remote policy, seniority) via the Analysis context's `JobOfferExtractionAgent`. A missing title means extraction failed — every other field may legitimately come back empty (docs/adr/0010).
 _Avoid_: Parsing — parsing is CVVersion's term, owned by the Analysis context.
 
 **Listing fetch**:

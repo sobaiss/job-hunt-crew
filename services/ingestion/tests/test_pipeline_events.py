@@ -47,6 +47,7 @@ FIXTURE_HTML = "<html><body><h1>Senior Backend Engineer</h1></body></html>"
 
 JOB_OFFER_LLM_OUTPUT = json.dumps(
     {
+        "title": "Senior Backend Engineer",
         "description": "Senior Backend Engineer role focused on Python services.",
         "requirements": ["5+ years Python", "AWS experience"],
         "salary": "€60k-€75k",
