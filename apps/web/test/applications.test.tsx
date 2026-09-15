@@ -48,6 +48,22 @@ describe("ApplicationsPage — list", () => {
     expect(within(row).getByText("Draft")).toBeInTheDocument();
   });
 
+  it("shows the '—' placeholder, not a blank line, when the offer has no company", async () => {
+    server.use(
+      http.get("/api/applications", () =>
+        HttpResponse.json({
+          applications: [application({ jobOffer: { id: "job1", title: "Backend Engineer", company: null } })],
+        }),
+      ),
+    );
+
+    renderWithProviders(<ApplicationsPage />);
+
+    expect(await screen.findByText("Backend Engineer")).toBeInTheDocument();
+    const row = screen.getByRole("listitem");
+    expect(within(row).getByText("—")).toBeInTheDocument();
+  });
+
   it("shows an empty state when there are no Applications", async () => {
     server.use(
       http.get("/api/applications", () => HttpResponse.json({ applications: [] })),
@@ -184,6 +200,24 @@ describe("ApplicationDetailPage", () => {
       "href",
       "/scouts?open=scout-1",
     );
+  });
+
+  it("shows the '—' placeholder, not a blank line, when the offer has no company", async () => {
+    server.use(
+      http.get("/api/applications/app-1", () =>
+        HttpResponse.json({
+          application: {
+            ...application({ jobOffer: { id: "job1", title: "Backend Engineer", company: null } }),
+            statusEvents: [],
+          },
+        }),
+      ),
+    );
+
+    renderWithProviders(<ApplicationDetailPage />);
+
+    expect(await screen.findByText("Backend Engineer")).toBeInTheDocument();
+    expect(screen.getByText("—")).toBeInTheDocument();
   });
 
   it("shows the empty timeline state when no StatusEvents exist yet", async () => {

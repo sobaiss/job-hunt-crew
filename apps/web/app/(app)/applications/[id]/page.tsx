@@ -59,9 +59,7 @@ export default function ApplicationDetailPage() {
         <h1 className="font-serif text-2xl font-semibold">
           {application.jobOffer.title ?? t("list.jobOfferFallback")}
         </h1>
-        {application.jobOffer.company && (
-          <p className="text-sm text-muted">{application.jobOffer.company}</p>
-        )}
+        <p className="text-sm text-muted">{application.jobOffer.company ?? "—"}</p>
         <p className="text-sm text-muted">{t("list.vsCv", { label: application.cvVersion.label })}</p>
         <div className="flex flex-wrap gap-4 text-sm">
           <Link href={`/analyses/${application.analysisId}`} className="text-accent hover:underline">

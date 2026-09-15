@@ -217,11 +217,9 @@ export function BatchResultView({ ingestionJobId }: { ingestionJobId: string }) 
                     <span className="truncate font-medium">
                       {analysis.jobOffer.title ?? t("jobOfferFallback")}
                     </span>
-                    {analysis.jobOffer.company && (
-                      <span className="truncate text-sm text-muted">
-                        {analysis.jobOffer.company}
-                      </span>
-                    )}
+                    <span className="truncate text-sm text-muted">
+                      {analysis.jobOffer.company ?? "—"}
+                    </span>
                     <span className="text-xs text-muted">
                       {t("vsCv", { label: analysis.cvVersion.label })}
                     </span>
@@ -252,11 +250,9 @@ export function BatchResultView({ ingestionJobId }: { ingestionJobId: string }) 
                     <span className="truncate font-medium">
                       {row.title ?? t("jobOfferFallback")}
                     </span>
-                    {row.company && (
-                      <span className="truncate text-sm text-muted">
-                        {row.company}
-                      </span>
-                    )}
+                    <span className="truncate text-sm text-muted">
+                      {row.company ?? "—"}
+                    </span>
                   </div>
                   <Badge variant="secondary" className="shrink-0">
                     {t("quotaSkipped")}

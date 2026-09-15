@@ -33,9 +33,9 @@ export function ApplicationRow({ application }: { application: Application }) {
           <span className="truncate font-medium">
             {application.jobOffer.title ?? t("list.jobOfferFallback")}
           </span>
-          {application.jobOffer.company && (
-            <span className="truncate text-sm text-muted">{application.jobOffer.company}</span>
-          )}
+          <span className="truncate text-sm text-muted">
+            {application.jobOffer.company ?? "—"}
+          </span>
           <span className="text-xs text-muted">
             {t("list.vsCv", { label: application.cvVersion.label })} ·{" "}
             {t("list.updated", { date: new Date(application.updatedAt).toLocaleDateString() })}
