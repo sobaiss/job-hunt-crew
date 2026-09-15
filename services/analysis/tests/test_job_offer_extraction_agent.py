@@ -1,6 +1,7 @@
 import json
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 
 import boto3
 import pytest
@@ -16,6 +17,8 @@ from analysis.job_offer_extraction_agent import (
 )
 from analysis.llm_provider import LLMProvider
 from analysis.s3_client import S3_BUCKET
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 async def _delete_pipeline_events(session_factory, job_offer_id: str) -> None:
@@ -92,13 +95,15 @@ def _s3_client():
     )
 
 
-async def _make_scraped_job_offer(session_factory, job_offer_id, raw_content_key):
+async def _make_scraped_job_offer(
+    session_factory, job_offer_id, raw_content_key, source_site=Joboffersourcesite.OTHER
+):
     async with session_factory() as session:
         session.add(
             JobOffer(
                 id=job_offer_id,
                 sourceUrl=f"https://example.com/jobs/{job_offer_id}",
-                sourceSite=Joboffersourcesite.OTHER,
+                sourceSite=source_site,
                 extractionStatus=Jobofferextractionstatus.SCRAPED,
                 rawContentKey=raw_content_key,
                 updatedAt=datetime.now(UTC).replace(tzinfo=None),
@@ -312,6 +317,119 @@ async def test_extract_job_offer_marks_failed_when_no_tier_resolves_a_title():
             assert reloaded.extractionStatus == Jobofferextractionstatus.FAILED
             assert reloaded.title is None
         assert provider.calls == MAX_ATTEMPTS
+    finally:
+        s3.delete_object(Bucket=S3_BUCKET, Key=raw_content_key)
+        await _delete_pipeline_events(session_factory, job_offer_id)
+        async with session_factory() as session:
+            job_offer = await session.get(JobOffer, job_offer_id)
+            if job_offer is not None:
+                await session.delete(job_offer)
+                await session.commit()
+        await engine.dispose()
+
+
+# Per-site regression fixtures (#118): real sample offer pages captured live
+# from each currently active scraped site, guarding against a future site
+# change silently breaking extraction. Indeed, Glassdoor, and Welcome to the
+# Jungle are not represented here: live fetches during this session hit
+# Indeed's "Additional Verification"/captcha wall, Glassdoor's Cloudflare
+# captcha, and WTTJ's AWS WAF challenge page (HTTP 202, empty body) rather
+# than the real offer page, so no real fixture could be captured for them
+# without a headless browser or manual capture step -- both out of scope
+# here (see #118's "Blocked by" notes).
+HELLOWORK_SAMPLE_HTML = (FIXTURES_DIR / "hellowork_sample_offer.html").read_text(encoding="utf-8")
+LINKEDIN_SAMPLE_HTML = (FIXTURES_DIR / "linkedin_sample_offer.html").read_text(encoding="utf-8")
+
+# LinkedIn's guest job page (unauthenticated, as scraped) carries no JobPosting
+# JSON-LD block, so it falls through to the LLM tier same as any other site
+# without one. This canned response mirrors what the real page visibly shows
+# (title/company/location h1, org link, and location text; "1 week ago"
+# resolved against the capture date), since a real LLM call isn't made in tests.
+LINKEDIN_LLM_OUTPUT = json.dumps(
+    {
+        "title": "Senior Backend Developer",
+        "company": "papernest",
+        "location": "Paris, Île-de-France, France",
+        "postedAt": "2026-09-08",
+        "description": "Senior Backend Developer role at papernest.",
+        "requirements": [],
+        "salary": None,
+        "contractType": "full_time",
+        "remotePolicy": None,
+        "seniority": "senior",
+    }
+)
+
+
+@pytest.mark.asyncio
+async def test_extract_job_offer_hellowork_regression_fixture():
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    job_offer_id = f"test-{uuid.uuid4()}"
+    raw_content_key = f"raw-scrapes/{job_offer_id}.html"
+    s3 = _s3_client()
+    s3.put_object(
+        Bucket=S3_BUCKET,
+        Key=raw_content_key,
+        Body=HELLOWORK_SAMPLE_HTML.encode("utf-8"),
+        ContentType="text/html",
+    )
+
+    await _make_scraped_job_offer(
+        session_factory, job_offer_id, raw_content_key, source_site=Joboffersourcesite.HELLOWORK
+    )
+    provider = StubLLMProvider([VALID_LLM_OUTPUT])
+
+    try:
+        async with session_factory() as session:
+            job_offer = await extract_job_offer(session, job_offer_id, llm_provider=provider)
+            assert job_offer.extractionStatus == Jobofferextractionstatus.READY
+            assert job_offer.title == "Développeur - Développeuse PL-SQL H/F"
+            assert job_offer.company == "Proxiad"
+            assert job_offer.location == "76000, Rouen, Normandie, FR"
+            assert job_offer.postedAt == datetime(2026, 9, 15, 0, 11, 18)
+        # Real page carries a JobPosting JSON-LD block; no LLM call needed.
+        assert provider.calls == 0
+    finally:
+        s3.delete_object(Bucket=S3_BUCKET, Key=raw_content_key)
+        await _delete_pipeline_events(session_factory, job_offer_id)
+        async with session_factory() as session:
+            job_offer = await session.get(JobOffer, job_offer_id)
+            if job_offer is not None:
+                await session.delete(job_offer)
+                await session.commit()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_extract_job_offer_linkedin_regression_fixture():
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    job_offer_id = f"test-{uuid.uuid4()}"
+    raw_content_key = f"raw-scrapes/{job_offer_id}.html"
+    s3 = _s3_client()
+    s3.put_object(
+        Bucket=S3_BUCKET,
+        Key=raw_content_key,
+        Body=LINKEDIN_SAMPLE_HTML.encode("utf-8"),
+        ContentType="text/html",
+    )
+
+    await _make_scraped_job_offer(
+        session_factory, job_offer_id, raw_content_key, source_site=Joboffersourcesite.LINKEDIN
+    )
+    provider = StubLLMProvider([LINKEDIN_LLM_OUTPUT])
+
+    try:
+        async with session_factory() as session:
+            job_offer = await extract_job_offer(session, job_offer_id, llm_provider=provider)
+            assert job_offer.extractionStatus == Jobofferextractionstatus.READY
+            assert job_offer.title == "Senior Backend Developer"
+            assert job_offer.company == "papernest"
+            assert job_offer.location == "Paris, Île-de-France, France"
+            assert job_offer.postedAt == datetime(2026, 9, 8)
+        # Real page has no JobPosting JSON-LD block; falls through to the LLM tier.
+        assert provider.calls == 1
     finally:
         s3.delete_object(Bucket=S3_BUCKET, Key=raw_content_key)
         await _delete_pipeline_events(session_factory, job_offer_id)
