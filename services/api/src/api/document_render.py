@@ -8,7 +8,6 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
 from fpdf import FPDF
-from fpdf.enums import XPos, YPos
 from py_db.section_type import SectionType
 
 _MARGIN_MM = 20
@@ -91,6 +90,38 @@ class _Line:
     section_type: SectionType | None = None
 
 
+# #107: `**bold**` is matched before `*italic*` in the alternation so that,
+# for a leftmost match at the same position, a `**` pair is never parsed as
+# an `*` pair with a leftover `*`.
+_EMPHASIS_RE = re.compile(r"(\*\*[^*]+?\*\*|\*[^*]+?\*)")
+
+
+@dataclass(frozen=True)
+class _Span:
+    text: str
+    bold: bool = False
+    italic: bool = False
+
+
+def _parse_emphasis(text: str) -> list[_Span]:
+    """Splits a line's text into plain/bold/italic spans on `**`/`*`
+    delimiters (#107). Not a full inline-Markdown parser — no nesting, no
+    escaping — matching this module's existing restricted-subset scope
+    (docs/adr/0009).
+    """
+    spans: list[_Span] = []
+    for token in _EMPHASIS_RE.split(text):
+        if not token:
+            continue
+        if token.startswith("**"):
+            spans.append(_Span(token[2:-2], bold=True))
+        elif token.startswith("*"):
+            spans.append(_Span(token[1:-1], italic=True))
+        else:
+            spans.append(_Span(token))
+    return spans
+
+
 def _parse_section_type(raw: str) -> SectionType | None:
     try:
         return SectionType(raw)
@@ -142,16 +173,6 @@ def _latin1_safe(text: str) -> str:
     so unsupported characters are replaced rather than raising.
     """
     return text.encode("latin-1", errors="replace").decode("latin-1")
-
-
-def _block(pdf: FPDF, line_height: float, text: str, *, width: float = 0) -> None:
-    """multi_cell defaults to leaving the cursor at the right margin
-    (new_x=XPos.RIGHT), which starves the next call of width. `new_x=LEFT`
-    returns the cursor to wherever this cell started (the page margin for a
-    full-width block, or a column's own x for a sidebar/main block — #99),
-    so the next line in the same column keeps its width.
-    """
-    pdf.multi_cell(width, line_height, text, new_x=XPos.LEFT, new_y=YPos.NEXT)
 
 
 _STYLED_ARCHETYPES = ("SINGLE_COLUMN", "SIDEBAR_MAIN")
@@ -208,6 +229,43 @@ def _heading_treatment(style_profile: dict, section_type: SectionType | None) ->
     return style_profile.get("sections", {}).get(section_type.value, {}).get("headingTreatment")
 
 
+def _write_pdf_spans(
+    pdf: FPDF,
+    line_height: float,
+    text: str,
+    *,
+    font: str,
+    size: float,
+    bold: bool,
+    color: tuple[int, int, int],
+    width: float,
+    x: float | None,
+) -> None:
+    """Writes one line's text span-by-span (#107: `**bold**`/`*italic*`
+    toggle font style mid-line), replacing a single `multi_cell` call.
+    `write()` wraps at the page's right margin and, on a manual line break,
+    returns to the page's *left* margin rather than to an arbitrary column
+    x — so for a SIDEBAR_MAIN column (`x` given, `width` non-zero) both
+    margins are temporarily narrowed to the column's bounds for this call
+    and restored after, keeping multi-line column text wrapping inside the
+    column instead of bleeding back to the page margin (#99).
+    """
+    pdf.set_text_color(*color)
+    original_l_margin, original_r_margin = pdf.l_margin, pdf.r_margin
+    if x is not None and width:
+        pdf.set_left_margin(x)
+        pdf.set_right_margin(pdf.w - (x + width))
+    for span in _parse_emphasis(text) or [_Span("")]:
+        style = ("B" if bold or span.bold else "") + ("I" if span.italic else "")
+        pdf.set_font(font, style=style, size=size)
+        pdf.write(line_height, _latin1_safe(span.text))
+    pdf.ln(line_height)
+    if x is not None and width:
+        pdf.set_left_margin(original_l_margin)
+        pdf.set_right_margin(original_r_margin)
+    pdf.set_text_color(0, 0, 0)
+
+
 def _render_pdf_lines(
     pdf: FPDF,
     lines: list[_Line],
@@ -238,34 +296,34 @@ def _render_pdf_lines(
                 (treatment or {}).get("font", {}).get("family"), body_font
             )
             color = _hex_to_rgb((treatment or {}).get("color")) or body_color
-            pdf.set_text_color(*color)
-            pdf.set_font(font, style="B", size=round(base_size * font_scale))
             line_height = (8 if line.kind is _LineKind.HEADING1 else 7) * font_scale
-            _block(pdf, line_height, _latin1_safe(line.text), width=width)
-            pdf.set_text_color(0, 0, 0)
+            _write_pdf_spans(
+                pdf, line_height, line.text, font=font, size=round(base_size * font_scale),
+                bold=True, color=color, width=width, x=x,
+            )
         elif line.kind is _LineKind.HEADING3:
             # #106: a `###` heading never picks up a profile's per-SectionType
             # treatment — CvTailoringAgent only tags top-level headings, so
             # this always renders in the template's plain default style.
-            pdf.set_text_color(*body_color)
-            pdf.set_font(body_font, style="B", size=round(_BODY_FONT_SIZE * font_scale))
-            _block(pdf, 6 * font_scale, _latin1_safe(line.text), width=width)
-            pdf.set_text_color(0, 0, 0)
+            _write_pdf_spans(
+                pdf, 6 * font_scale, line.text, font=body_font, size=round(_BODY_FONT_SIZE * font_scale),
+                bold=True, color=body_color, width=width, x=x,
+            )
         elif line.kind is _LineKind.RULE:
             rule_width = width if width else pdf.w - pdf.l_margin - pdf.r_margin
             rule_y = pdf.get_y() + font_scale
             pdf.line(pdf.get_x(), rule_y, pdf.get_x() + rule_width, rule_y)
             pdf.ln(4 * font_scale)
         elif line.kind is _LineKind.BULLET:
-            pdf.set_text_color(*body_color)
-            pdf.set_font(body_font, size=round(_BODY_FONT_SIZE * font_scale))
-            _block(pdf, 6 * font_scale, _latin1_safe(f"- {line.text}"), width=width)
-            pdf.set_text_color(0, 0, 0)
+            _write_pdf_spans(
+                pdf, 6 * font_scale, f"- {line.text}", font=body_font, size=round(_BODY_FONT_SIZE * font_scale),
+                bold=False, color=body_color, width=width, x=x,
+            )
         else:
-            pdf.set_text_color(*body_color)
-            pdf.set_font(body_font, size=round(_BODY_FONT_SIZE * font_scale))
-            _block(pdf, 6 * font_scale, _latin1_safe(line.text), width=width)
-            pdf.set_text_color(0, 0, 0)
+            _write_pdf_spans(
+                pdf, 6 * font_scale, line.text, font=body_font, size=round(_BODY_FONT_SIZE * font_scale),
+                bold=False, color=body_color, width=width, x=x,
+            )
 
 
 def _render_pdf_sidebar_main(
@@ -351,8 +409,10 @@ def render_markdown_to_pdf(*, markdown_content: str, style_profile: dict | None 
     """Renders a GeneratedDocument's Markdown to PDF bytes using a single
     built-in template, starting directly with the document's own content
     (#105 — no auto-added title). Headings and bullets get their own
-    styling; everything else is a plain paragraph. When `style_profile` is a
-    SINGLE_COLUMN StyleProfile (#98), body text and each SectionType-tagged
+    styling; everything else is a plain paragraph. `**bold**`/`*italic*`
+    spans within any line's text render as real emphasis (#107). When
+    `style_profile` is a SINGLE_COLUMN StyleProfile (#98), body text and
+    each SectionType-tagged
     heading use that profile's font family and colors instead of the
     template default. A SIDEBAR_MAIN StyleProfile (#99) additionally splits
     rendering into a fixed-width sidebar and a reflowing main column per the
@@ -381,6 +441,30 @@ def _apply_docx_run_style(
         run.font.color.rgb = RGBColor(*color)
     if font_size_pt:
         run.font.size = Pt(font_size_pt)
+
+
+def _add_docx_runs(
+    paragraph,
+    text: str,
+    *,
+    font_name: str | None,
+    color: tuple[int, int, int] | None,
+    font_size_pt: float | None,
+) -> None:
+    """Adds `text` to `paragraph` as one run per `**bold**`/`*italic*` span
+    (#107), each still getting the paragraph's own font/color/size — a
+    span's bold/italic is layered on top of, not instead of, the base
+    style. `run.bold`/`run.italic` are left unset (inheriting the
+    paragraph's style, e.g. "Heading 3"'s own bold) rather than forced
+    False for a non-emphasized span.
+    """
+    for span in _parse_emphasis(text) or [_Span("")]:
+        run = paragraph.add_run(span.text)
+        if span.bold:
+            run.bold = True
+        if span.italic:
+            run.italic = True
+        _apply_docx_run_style(run, font_name=font_name, color=color, font_size_pt=font_size_pt)
 
 
 def _docx_needs_one_page_reduction(*, profile: dict | None, lines: list[_Line]) -> bool:
@@ -423,28 +507,25 @@ def _add_docx_line(
     """
     if line.kind in (_LineKind.HEADING1, _LineKind.HEADING2):
         level = 1 if line.kind is _LineKind.HEADING1 else 2
-        paragraph = container.add_paragraph(line.text, style=f"Heading {level}")
+        paragraph = container.add_paragraph(style=f"Heading {level}")
         treatment = profile and _heading_treatment(profile, line.section_type)
         font_name = _docx_font_name(treatment.get("font")) if treatment else None
         color = _hex_to_rgb(treatment.get("color")) if treatment else None
         heading_size = heading1_size if line.kind is _LineKind.HEADING1 else heading2_size
-        if font_name or color or heading_size:
-            for run in paragraph.runs:
-                _apply_docx_run_style(run, font_name=font_name, color=color, font_size_pt=heading_size)
+        _add_docx_runs(paragraph, line.text, font_name=font_name, color=color, font_size_pt=heading_size)
     elif line.kind is _LineKind.HEADING3:
         # #106: never a profile's per-SectionType treatment here — CvTailoringAgent
         # only tags top-level headings, so this always uses the plain default style.
-        container.add_paragraph(line.text, style="Heading 3")
+        paragraph = container.add_paragraph(style="Heading 3")
+        _add_docx_runs(paragraph, line.text, font_name=None, color=None, font_size_pt=None)
     elif line.kind is _LineKind.RULE:
         _add_docx_horizontal_rule(container)
     elif line.kind is _LineKind.BULLET:
-        paragraph = container.add_paragraph(line.text, style="List Bullet")
-        for run in paragraph.runs:
-            _apply_docx_run_style(run, font_name=body_font_name, color=body_color, font_size_pt=body_size)
+        paragraph = container.add_paragraph(style="List Bullet")
+        _add_docx_runs(paragraph, line.text, font_name=body_font_name, color=body_color, font_size_pt=body_size)
     else:
-        paragraph = container.add_paragraph(line.text)
-        for run in paragraph.runs:
-            _apply_docx_run_style(run, font_name=body_font_name, color=body_color, font_size_pt=body_size)
+        paragraph = container.add_paragraph()
+        _add_docx_runs(paragraph, line.text, font_name=body_font_name, color=body_color, font_size_pt=body_size)
 
 
 def _render_docx_sidebar_main(
@@ -487,7 +568,9 @@ def render_markdown_to_docx(*, markdown_content: str, style_profile: dict | None
     built-in template, starting directly with the document's own content
     (#105 — no auto-added title), mirroring render_markdown_to_pdf's
     heading/bullet styling via python-docx's built-in Heading/List Bullet
-    styles. When `style_profile` is a SINGLE_COLUMN StyleProfile (#98), body
+    styles. `**bold**`/`*italic*` spans within any line's text become
+    separate runs with `bold`/`italic` set (#107). When `style_profile` is a
+    SINGLE_COLUMN StyleProfile (#98), body
     text and each SectionType-tagged heading get that profile's font and
     colors, with any font outside a small curated cross-platform set
     replaced by its family's entry instead of used literally (#100). A

@@ -376,3 +376,57 @@ def test_render_markdown_to_docx_existing_heading_and_bullet_handling_unaffected
     assert styles["Title"] == "Heading 1"
     assert styles["Subheading"] == "Heading 2"
     assert styles["A bullet"] == "List Bullet"
+
+
+def test_render_markdown_to_docx_renders_bold_and_italic_spans_in_paragraph():
+    markdown_content = "This is **bold** and this is *italic* text.\n"
+    docx_bytes = render_markdown_to_docx(markdown_content=markdown_content)
+    document = Document(BytesIO(docx_bytes))
+    paragraph = next(p for p in document.paragraphs if p.text == "This is bold and this is italic text.")
+    runs = paragraph.runs
+    bold_run = next(r for r in runs if r.text == "bold")
+    italic_run = next(r for r in runs if r.text == "italic")
+    assert bold_run.bold is True
+    assert italic_run.italic is True
+    plain_run = next(r for r in runs if r.text == "This is ")
+    assert plain_run.bold is not True
+    assert plain_run.italic is not True
+
+
+def test_render_markdown_to_docx_renders_emphasis_inside_bullet():
+    markdown_content = "- A **bold** bullet\n"
+    docx_bytes = render_markdown_to_docx(markdown_content=markdown_content)
+    document = Document(BytesIO(docx_bytes))
+    paragraph = next(p for p in document.paragraphs if p.text == "A bold bullet")
+    bold_run = next(r for r in paragraph.runs if r.text == "bold")
+    assert bold_run.bold is True
+
+
+def test_render_markdown_to_docx_renders_emphasis_inside_heading():
+    markdown_content = "## A **bold** heading\n"
+    docx_bytes = render_markdown_to_docx(markdown_content=markdown_content)
+    document = Document(BytesIO(docx_bytes))
+    paragraph = next(p for p in document.paragraphs if p.text == "A bold heading")
+    assert paragraph.style.name == "Heading 2"
+    bold_run = next(r for r in paragraph.runs if r.text == "bold")
+    assert bold_run.bold is True
+
+
+def test_render_markdown_to_docx_plain_text_without_emphasis_is_unaffected():
+    docx_bytes = render_markdown_to_docx(markdown_content="Plain text with no markers.")
+    document = Document(BytesIO(docx_bytes))
+    paragraph = next(p for p in document.paragraphs if p.text == "Plain text with no markers.")
+    assert len(paragraph.runs) == 1
+    assert paragraph.runs[0].bold is not True
+    assert paragraph.runs[0].italic is not True
+
+
+def test_render_markdown_to_pdf_renders_emphasis_without_error():
+    markdown_content = (
+        "## A **bold** heading\n\n"
+        "A paragraph with **bold** and *italic* text.\n\n"
+        "- A **bold** bullet\n"
+    )
+    pdf_bytes = render_markdown_to_pdf(markdown_content=markdown_content)
+    assert pdf_bytes.startswith(b"%PDF")
+    assert len(pdf_bytes) > 0
