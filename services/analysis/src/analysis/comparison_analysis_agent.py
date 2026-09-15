@@ -12,6 +12,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ValidationError
 
+from .llm_json import parse_llm_json
 from .llm_provider import LLMProvider, get_llm_provider
 
 MAX_ATTEMPTS = 3
@@ -57,12 +58,7 @@ class ComparisonAnalysisError(Exception):
 
 
 def _parse_llm_output(raw: str) -> ComparisonResult:
-    text = raw.strip()
-    if text.startswith("```"):
-        text = text.strip("`")
-        if text.startswith("json"):
-            text = text[len("json") :]
-    data = json.loads(text)
+    data = parse_llm_json(raw)
     return ComparisonResult.model_validate(data)
 
 
