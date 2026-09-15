@@ -47,6 +47,11 @@ SYSTEM_PROMPT = (
     f"{_SECTION_TYPE_VOCABULARY}. Use OTHER if none fits. This tag must never "
     "be visible to the candidate reading the CV — it is for downstream "
     "software only, never prose, never inside the heading text itself. "
+    "Formatting: use only #, ##, and ### headings, - or * bullets, "
+    "**bold** and *italic* emphasis, and --- horizontal rules — this is the "
+    "exact Markdown subset the renderer supports. Do not use tables, "
+    "numbered lists, links, or blockquotes; the renderer does not render "
+    "them specially and they would show up as literal characters. "
     "Respond with ONLY the tailored CV as Markdown prose — no JSON, no "
     "commentary, no markdown code fences."
 )

@@ -53,6 +53,28 @@ def test_run_cover_letter_writer_returns_the_provider_text():
     assert "en" in provider.last_system
 
 
+def test_run_cover_letter_writer_system_prompt_names_supported_markdown_constructs():
+    provider = StubLLMProvider(["Dear Hiring Manager, ...\n\nSincerely, Jane"])
+
+    run_cover_letter_writer(
+        cv_markdown=CV_MARKDOWN,
+        job_offer_structured_data=JOB_OFFER_STRUCTURED_DATA,
+        matched_skills=MATCHED_SKILLS,
+        missing_skills=MISSING_SKILLS,
+        llm_provider=provider,
+    )
+
+    system = provider.last_system
+    assert "###" in system
+    assert "**bold**" in system
+    assert "*italic*" in system
+    assert "---" in system
+    assert "-" in system or "*" in system
+    lowered = system.lower()
+    for unsupported in ("table", "numbered list", "link", "blockquote"):
+        assert unsupported in lowered
+
+
 def test_run_cover_letter_writer_retries_on_empty_response_then_succeeds():
     provider = StubLLMProvider(["", "   ", "Dear Hiring Manager, ..."])
 

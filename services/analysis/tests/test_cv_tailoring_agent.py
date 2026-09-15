@@ -69,6 +69,28 @@ def test_run_cv_tailoring_system_prompt_instructs_section_type_tagging():
     assert "never" in system.lower() and "visible" in system.lower()
 
 
+def test_run_cv_tailoring_system_prompt_names_supported_markdown_constructs():
+    provider = StubLLMProvider(["# Jane Doe\n\n## Skills\n\n- Python\n"])
+
+    run_cv_tailoring(
+        cv_markdown=CV_MARKDOWN,
+        job_offer_structured_data=JOB_OFFER_STRUCTURED_DATA,
+        matched_skills=MATCHED_SKILLS,
+        missing_skills=MISSING_SKILLS,
+        llm_provider=provider,
+    )
+
+    system = provider.last_system
+    assert "###" in system
+    assert "**bold**" in system
+    assert "*italic*" in system
+    assert "---" in system
+    assert "-" in system or "*" in system
+    lowered = system.lower()
+    for unsupported in ("table", "numbered list", "link", "blockquote"):
+        assert unsupported in lowered
+
+
 def test_run_cv_tailoring_retries_on_empty_response_then_succeeds():
     provider = StubLLMProvider(["", "# Jane Doe tailored"])
 

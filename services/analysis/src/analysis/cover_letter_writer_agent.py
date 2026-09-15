@@ -40,6 +40,11 @@ SYSTEM_PROMPT = (
     "re-word freely, but never invent or embellish anything the CV does not "
     "contain. Lean on the matched skills to surface relevant experience that "
     "answers the offer. Write the letter in {language}. "
+    "Formatting: use only #, ##, and ### headings, - or * bullets, "
+    "**bold** and *italic* emphasis, and --- horizontal rules — this is the "
+    "exact Markdown subset the renderer supports. Do not use tables, "
+    "numbered lists, links, or blockquotes; the renderer does not render "
+    "them specially and they would show up as literal characters. "
     "Respond with ONLY the cover letter body as Markdown prose — no JSON, no "
     "commentary, no markdown code fences."
 )
