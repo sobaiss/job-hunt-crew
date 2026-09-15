@@ -15,6 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { GeneratedDocumentPreview } from "@/components/generated-document-preview";
 import { BffError } from "@/lib/bff-client";
 
 // "Generate documents" on a completed Analysis (issue #58, Scout slice 6):
@@ -121,9 +122,7 @@ function DocumentCard({
           </>
         ) : (
           <>
-            <pre className="whitespace-pre-wrap text-sm text-foreground">
-              {document.markdownContent}
-            </pre>
+            <GeneratedDocumentPreview markdown={document.markdownContent} />
             {document.status === "READY" && (
               <div className="flex items-center gap-4">
                 <div className="flex items-center gap-2">

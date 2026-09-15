@@ -1381,7 +1381,9 @@ describe("AnalysisDetailPage", () => {
     );
 
     expect(await screen.findByText("Dear Hiring Manager, ...")).toBeInTheDocument();
-    expect(screen.getByText("# Jane Doe tailored")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Jane Doe tailored" }),
+    ).toBeInTheDocument();
 
     const downloadLinks = screen.getAllByRole("link", { name: /^download$/i });
     expect(downloadLinks).toHaveLength(2);
