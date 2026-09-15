@@ -1,4 +1,4 @@
-// Seeds the 5 SiteConfig rows for PRD Section 8.5's Mode 3 site picker.
+// Seeds the SiteConfig rows for PRD Section 8.5's Mode 3 site picker.
 // Run via `pnpm prisma db seed` (invoked by prisma migrate dev / directly).
 //
 // filterParamMapping maps a generic filter key to that site's own param name.
@@ -133,6 +133,35 @@ const siteConfigs = [
     enabled: true,
     notes:
       "Strong anti-bot measures; best-effort HTML scraping per PRD Section 14.",
+  },
+  {
+    siteKey: "HELLOWORK",
+    displayName: "HelloWork",
+    baseUrl: "https://www.hellowork.com",
+    searchUrlTemplate:
+      "https://www.hellowork.com/fr-fr/emploi/recherche.html?k={keywords}&l={location}&c={contractType}&ray=20&st=relevance&cod=all&msa=0",
+    filterParamMapping: {
+      keywords: "k",
+      location: "l",
+      contractType: "c",
+    },
+    listItemSelector: "[data-cy='serpCard']",
+    offerLinkSelector: "a[data-cy='offerTitle']",
+    offerTitleSelector: "a[data-cy='offerTitle']",
+    integrationType: "HTML_SCRAPE",
+    apiBaseUrl: null,
+    requiresJsRendering: false,
+    antiBotRiskLevel: "MEDIUM",
+    enabled: false,
+    notes:
+      "HTML scraping; best-effort per PRD Section 14. hellowork.com's robots.txt " +
+      "disallows /fr-fr/emploi/recherche.html (and query-string URLs broadly) — " +
+      "scraped anyway as an accepted MVP risk, consistent with the project's " +
+      "documented posture for its higher-risk sites. postedWithin and remote " +
+      "filters are deliberately unmapped: HelloWork's own vocabulary for those " +
+      "facets doesn't match the app's canonical filter values. Pagination beyond " +
+      "the first results page is unverified. Ships disabled pending a live " +
+      "scraping smoke test (see follow-up ticket) before candidates can select it.",
   },
 ];
 

@@ -59,6 +59,29 @@ def _france_travail_site_config() -> SiteConfig:
     )
 
 
+def _hellowork_site_config() -> SiteConfig:
+    # Mirrors packages/prisma/prisma/seed.js's HELLOWORK row.
+    return SiteConfig(
+        id="site-hellowork",
+        siteKey=Siteconfigsitekey.HELLOWORK,
+        displayName="HelloWork",
+        baseUrl="https://www.hellowork.com",
+        searchUrlTemplate=(
+            "https://www.hellowork.com/fr-fr/emploi/recherche.html?k={keywords}&l={location}"
+            "&c={contractType}&ray=20&st=relevance&cod=all&msa=0"
+        ),
+        filterParamMapping={
+            "keywords": "k",
+            "location": "l",
+            "contractType": "c",
+        },
+        integrationType=Siteconfigintegrationtype.HTML_SCRAPE,
+        requiresJsRendering=False,
+        antiBotRiskLevel=Siteconfigantibotrisklevel.MEDIUM,
+        enabled=False,
+    )
+
+
 def test_build_search_url_html_scrape_fills_template_from_filters():
     filters = {
         "keywords": "software engineer",
@@ -82,6 +105,28 @@ def test_build_search_url_html_scrape_blanks_unset_optional_filters():
     url = build_search_url(_indeed_site_config(), filters)
 
     assert url == "https://www.indeed.com/jobs?q=software%20engineer&l=Paris&fromage=&jt=&remotejob="
+
+
+def test_build_search_url_hellowork_fills_template_and_keeps_fixed_defaults():
+    filters = {"keywords": "ingenieur", "location": "Paris", "contractType": "CDI"}
+
+    url = build_search_url(_hellowork_site_config(), filters)
+
+    assert url == (
+        "https://www.hellowork.com/fr-fr/emploi/recherche.html?k=ingenieur&l=Paris"
+        "&c=CDI&ray=20&st=relevance&cod=all&msa=0"
+    )
+
+
+def test_build_search_url_hellowork_ignores_posted_within_and_remote_filters():
+    # HelloWork's template has no {postedWithin}/{remote} tokens (#110): those
+    # filters are deliberately left unwired rather than silently mismapped.
+    filters = {"keywords": "ingenieur", "postedWithin": "7d", "remote": "remote"}
+
+    url = build_search_url(_hellowork_site_config(), filters)
+
+    assert "7d" not in url
+    assert "remote" not in url
 
 
 def test_build_search_url_official_api_builds_query_from_filter_param_mapping():
@@ -161,6 +206,16 @@ def test_extract_offer_id_falls_back_to_last_path_segment_for_candidate_url():
     )
 
     assert offer_id == "213CTNR"
+
+
+def test_extract_offer_id_falls_back_to_last_path_segment_for_hellowork():
+    # HelloWork's filterParamMapping has no "id" entry (#110) — offer urls are
+    # shaped /fr-fr/emplois/{numericId}.html, so the fallback branch applies.
+    offer_id = extract_offer_id(
+        _hellowork_site_config(), "https://www.hellowork.com/fr-fr/emplois/12345678.html"
+    )
+
+    assert offer_id == "12345678.html"
 
 
 def test_extract_offer_id_prefers_the_query_param_over_the_path_segment():

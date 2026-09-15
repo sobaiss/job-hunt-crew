@@ -73,6 +73,16 @@ def _glassdoor_site_config() -> SiteConfig:
     )
 
 
+def _hellowork_site_config() -> SiteConfig:
+    # Mirrors packages/prisma/prisma/seed.js's HELLOWORK row.
+    return _site_config(
+        site_key=Siteconfigsitekey.HELLOWORK,
+        list_item_selector="[data-cy='serpCard']",
+        offer_link_selector="a[data-cy='offerTitle']",
+        offer_title_selector="a[data-cy='offerTitle']",
+    )
+
+
 def _linkedin_fixture_html(n: int) -> str:
     items = "".join(
         f'<li><a class="base-card__full-link" href="/jobs/view/{i}">'
@@ -108,6 +118,14 @@ def _glassdoor_fixture_html(n: int) -> str:
     return f"<html><body>{items}</body></html>"
 
 
+def _hellowork_fixture_html(n: int) -> str:
+    items = "".join(
+        f'<div data-cy="serpCard"><a data-cy="offerTitle" href="/fr-fr/emplois/{i}.html">Job {i}</a></div>'
+        for i in range(n)
+    )
+    return f"<html><body>{items}</body></html>"
+
+
 @pytest.mark.parametrize(
     ("site_config_factory", "fixture_factory", "expected_path_template"),
     [
@@ -115,8 +133,9 @@ def _glassdoor_fixture_html(n: int) -> str:
         (_indeed_site_config, _indeed_fixture_html, "/rc/clk?jk={i}"),
         (_wttj_site_config, _wttj_fixture_html, "/fr/companies/acme/jobs/{i}"),
         (_glassdoor_site_config, _glassdoor_fixture_html, "/job-listing/job-{i}"),
+        (_hellowork_site_config, _hellowork_fixture_html, "/fr-fr/emplois/{i}.html"),
     ],
-    ids=["linkedin", "indeed", "wttj", "glassdoor"],
+    ids=["linkedin", "indeed", "wttj", "glassdoor", "hellowork"],
 )
 def test_extract_offer_urls_via_site_config_finds_five_offer_links(
     site_config_factory, fixture_factory, expected_path_template

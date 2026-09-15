@@ -93,6 +93,7 @@ class Joboffersourcesite(str, enum.Enum):
     WTTJ = 'WTTJ'
     GLASSDOOR = 'GLASSDOOR'
     OTHER = 'OTHER'
+    HELLOWORK = 'HELLOWORK'
 
 
 class Scoutrunstatus(str, enum.Enum):
@@ -126,6 +127,7 @@ class Siteconfigsitekey(str, enum.Enum):
     FRANCE_TRAVAIL = 'FRANCE_TRAVAIL'
     WTTJ = 'WTTJ'
     GLASSDOOR = 'GLASSDOOR'
+    HELLOWORK = 'HELLOWORK'
 
 
 class JobOffer(Base):

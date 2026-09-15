@@ -128,6 +128,7 @@ enum JobOfferSourceSite {
   FRANCE_TRAVAIL
   WTTJ
   GLASSDOOR
+  HELLOWORK
   OTHER
 }
 
@@ -229,6 +230,7 @@ enum SiteConfigSiteKey {
   FRANCE_TRAVAIL
   WTTJ
   GLASSDOOR
+  HELLOWORK
 }
 
 enum SiteConfigIntegrationType {
