@@ -152,7 +152,7 @@ const siteConfigs = [
     apiBaseUrl: null,
     requiresJsRendering: false,
     antiBotRiskLevel: "MEDIUM",
-    enabled: false,
+    enabled: true,
     notes:
       "HTML scraping; best-effort per PRD Section 14. hellowork.com's robots.txt " +
       "disallows /fr-fr/emploi/recherche.html (and query-string URLs broadly) — " +
@@ -160,8 +160,9 @@ const siteConfigs = [
       "documented posture for its higher-risk sites. postedWithin and remote " +
       "filters are deliberately unmapped: HelloWork's own vocabulary for those " +
       "facets doesn't match the app's canonical filter values. Pagination beyond " +
-      "the first results page is unverified. Ships disabled pending a live " +
-      "scraping smoke test (see follow-up ticket) before candidates can select it.",
+      "the first results page is unverified. Live scraping smoke test (#113) " +
+      "confirmed listItemSelector/offerLinkSelector match hellowork.com's " +
+      "current markup and a discovered offer page scrapes end-to-end; enabled.",
   },
 ];
 

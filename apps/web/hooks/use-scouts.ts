@@ -27,6 +27,7 @@ export const SCOUT_SITE_KEYS = [
   "INDEED",
   "WTTJ",
   "GLASSDOOR",
+  "HELLOWORK",
 ] as const;
 export type ScoutSiteKey = (typeof SCOUT_SITE_KEYS)[number];
 

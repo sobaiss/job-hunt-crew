@@ -18,10 +18,17 @@ def test_list_site_configs_returns_seeded_enabled_sites():
     body = response.json()
     assert "siteConfigs" in body
     site_configs = body["siteConfigs"]
-    assert len(site_configs) == 5
+    assert len(site_configs) == 6
 
     site_keys = {row["siteKey"] for row in site_configs}
-    assert site_keys == {"LINKEDIN", "INDEED", "FRANCE_TRAVAIL", "WTTJ", "GLASSDOOR"}
+    assert site_keys == {
+        "LINKEDIN",
+        "INDEED",
+        "FRANCE_TRAVAIL",
+        "WTTJ",
+        "GLASSDOOR",
+        "HELLOWORK",
+    }
     assert all(row["enabled"] is True for row in site_configs)
 
     display_names = [row["displayName"] for row in site_configs]
