@@ -330,15 +330,20 @@ async def test_extract_job_offer_marks_failed_when_no_tier_resolves_a_title():
 
 # Per-site regression fixtures (#118): real sample offer pages captured live
 # from each currently active scraped site, guarding against a future site
-# change silently breaking extraction. Indeed, Glassdoor, and Welcome to the
-# Jungle are not represented here: live fetches during this session hit
-# Indeed's "Additional Verification"/captcha wall, Glassdoor's Cloudflare
-# captcha, and WTTJ's AWS WAF challenge page (HTTP 202, empty body) rather
-# than the real offer page, so no real fixture could be captured for them
-# without a headless browser or manual capture step -- both out of scope
-# here (see #118's "Blocked by" notes).
+# change silently breaking extraction. Indeed and Glassdoor are not
+# represented here: live fetches during this session, via a headless
+# browser (not just a browser User-Agent on a plain HTTP fetch), still hit
+# Indeed's "Additional Verification" captcha wall and Glassdoor's Cloudflare
+# captcha challenge -- both are interactive challenges a headless browser
+# cannot solve unattended. WTTJ's AWS WAF challenge, by contrast, is a
+# JS-execution challenge with no CAPTCHA step, so a headless browser (with
+# cookie-consent dismissed) passes it and reaches the real offer page,
+# fixtured below. Closing Indeed/Glassdoor out still needs a manual capture
+# step from a real logged-in/JS-rendered browser session (see #118's
+# "Blocked by" notes).
 HELLOWORK_SAMPLE_HTML = (FIXTURES_DIR / "hellowork_sample_offer.html").read_text(encoding="utf-8")
 LINKEDIN_SAMPLE_HTML = (FIXTURES_DIR / "linkedin_sample_offer.html").read_text(encoding="utf-8")
+WTTJ_SAMPLE_HTML = (FIXTURES_DIR / "wttj_sample_offer.html").read_text(encoding="utf-8")
 
 # LinkedIn's guest job page (unauthenticated, as scraped) carries no JobPosting
 # JSON-LD block, so it falls through to the LLM tier same as any other site
@@ -430,6 +435,49 @@ async def test_extract_job_offer_linkedin_regression_fixture():
             assert job_offer.postedAt == datetime(2026, 9, 8)
         # Real page has no JobPosting JSON-LD block; falls through to the LLM tier.
         assert provider.calls == 1
+    finally:
+        s3.delete_object(Bucket=S3_BUCKET, Key=raw_content_key)
+        await _delete_pipeline_events(session_factory, job_offer_id)
+        async with session_factory() as session:
+            job_offer = await session.get(JobOffer, job_offer_id)
+            if job_offer is not None:
+                await session.delete(job_offer)
+                await session.commit()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_extract_job_offer_wttj_regression_fixture():
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    job_offer_id = f"test-{uuid.uuid4()}"
+    raw_content_key = f"raw-scrapes/{job_offer_id}.html"
+    s3 = _s3_client()
+    s3.put_object(
+        Bucket=S3_BUCKET,
+        Key=raw_content_key,
+        Body=WTTJ_SAMPLE_HTML.encode("utf-8"),
+        ContentType="text/html",
+    )
+
+    await _make_scraped_job_offer(
+        session_factory, job_offer_id, raw_content_key, source_site=Joboffersourcesite.WTTJ
+    )
+    provider = StubLLMProvider([VALID_LLM_OUTPUT])
+
+    try:
+        async with session_factory() as session:
+            job_offer = await extract_job_offer(session, job_offer_id, llm_provider=provider)
+            assert job_offer.extractionStatus == Jobofferextractionstatus.READY
+            assert job_offer.title == "Développeur Full Stack .NET / Angular / IAAugmenté- H/F"
+            assert job_offer.company == "Groupe TF1"
+            assert job_offer.location == (
+                "Boulogne-Billancourt, Ile-de-France, France, 92100, "
+                "Boulogne-Billancourt, Hauts-de-Seine, FR"
+            )
+            assert job_offer.postedAt == datetime(2026, 9, 3, 10, 21, 29)
+        # Real page carries a JobPosting JSON-LD block; no LLM call needed.
+        assert provider.calls == 0
     finally:
         s3.delete_object(Bucket=S3_BUCKET, Key=raw_content_key)
         await _delete_pipeline_events(session_factory, job_offer_id)
