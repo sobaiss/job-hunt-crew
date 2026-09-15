@@ -4,6 +4,8 @@ from enum import Enum
 from io import BytesIO
 
 from docx import Document
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
@@ -76,7 +78,9 @@ class _LineKind(Enum):
     BLANK = "blank"
     HEADING1 = "heading1"
     HEADING2 = "heading2"
+    HEADING3 = "heading3"
     BULLET = "bullet"
+    RULE = "rule"
     PARAGRAPH = "paragraph"
 
 
@@ -97,11 +101,14 @@ def _parse_section_type(raw: str) -> SectionType | None:
 def _classify_lines(markdown_content: str) -> list[_Line]:
     """Splits a GeneratedDocument's Markdown into classified lines, shared by
     every renderer below. Deliberately not a full Markdown parser — the
-    generation agents only ever produce this small subset (`#`/`##`
-    headings, `-`/`*` bullets, blank lines, plain paragraphs — see
-    cover_letter_writer_agent.py / cv_tailoring_agent.py). A `<!--
-    SectionType: X -->` comment right below a heading (#97) is stripped and
-    attached to that heading instead of being emitted as its own line.
+    generation agents only ever produce this small target set (`#`/`##`/`###`
+    headings, `-`/`*` bullets, a `---` rule, blank lines, plain paragraphs —
+    see cover_letter_writer_agent.py / cv_tailoring_agent.py and docs/adr/0009).
+    A `<!-- SectionType: X -->` comment right below a heading (#97) is
+    stripped and attached to that heading instead of being emitted as its
+    own line — only for `#`/`##` (#106: CvTailoringAgent only tags top-level
+    section headings, so a `###` heading never receives StyleProfile
+    treatment via this mechanism).
     """
     lines: list[_Line] = []
     for raw_line in markdown_content.splitlines():
@@ -114,10 +121,14 @@ def _classify_lines(markdown_content: str) -> list[_Line]:
             if lines and lines[-1].kind in (_LineKind.HEADING1, _LineKind.HEADING2):
                 lines[-1] = replace(lines[-1], section_type=_parse_section_type(comment_match.group(1)))
             continue
-        if line.startswith("# "):
-            lines.append(_Line(_LineKind.HEADING1, line.removeprefix("# ")))
+        if line.startswith("### "):
+            lines.append(_Line(_LineKind.HEADING3, line.removeprefix("### ")))
         elif line.startswith("## "):
             lines.append(_Line(_LineKind.HEADING2, line.removeprefix("## ")))
+        elif line.startswith("# "):
+            lines.append(_Line(_LineKind.HEADING1, line.removeprefix("# ")))
+        elif line == "---":
+            lines.append(_Line(_LineKind.RULE, ""))
         elif line.startswith(("- ", "* ")):
             lines.append(_Line(_LineKind.BULLET, line[2:]))
         else:
@@ -232,6 +243,19 @@ def _render_pdf_lines(
             line_height = (8 if line.kind is _LineKind.HEADING1 else 7) * font_scale
             _block(pdf, line_height, _latin1_safe(line.text), width=width)
             pdf.set_text_color(0, 0, 0)
+        elif line.kind is _LineKind.HEADING3:
+            # #106: a `###` heading never picks up a profile's per-SectionType
+            # treatment — CvTailoringAgent only tags top-level headings, so
+            # this always renders in the template's plain default style.
+            pdf.set_text_color(*body_color)
+            pdf.set_font(body_font, style="B", size=round(_BODY_FONT_SIZE * font_scale))
+            _block(pdf, 6 * font_scale, _latin1_safe(line.text), width=width)
+            pdf.set_text_color(0, 0, 0)
+        elif line.kind is _LineKind.RULE:
+            rule_width = width if width else pdf.w - pdf.l_margin - pdf.r_margin
+            rule_y = pdf.get_y() + font_scale
+            pdf.line(pdf.get_x(), rule_y, pdf.get_x() + rule_width, rule_y)
+            pdf.ln(4 * font_scale)
         elif line.kind is _LineKind.BULLET:
             pdf.set_text_color(*body_color)
             pdf.set_font(body_font, size=round(_BODY_FONT_SIZE * font_scale))
@@ -366,6 +390,20 @@ def _docx_needs_one_page_reduction(*, profile: dict | None, lines: list[_Line]) 
     return total_chars > _DOCX_ONE_PAGE_CHAR_BUDGET
 
 
+def _add_docx_horizontal_rule(container) -> None:
+    """python-docx has no native horizontal-rule element; a bottom-bordered
+    empty paragraph is the standard workaround (#106)."""
+    paragraph = container.add_paragraph()
+    p_bdr = OxmlElement("w:pBdr")
+    bottom = OxmlElement("w:bottom")
+    bottom.set(qn("w:val"), "single")
+    bottom.set(qn("w:sz"), "6")
+    bottom.set(qn("w:space"), "1")
+    bottom.set(qn("w:color"), "auto")
+    p_bdr.append(bottom)
+    paragraph._p.get_or_add_pPr().append(p_bdr)
+
+
 def _add_docx_line(
     container,
     line: _Line,
@@ -393,6 +431,12 @@ def _add_docx_line(
         if font_name or color or heading_size:
             for run in paragraph.runs:
                 _apply_docx_run_style(run, font_name=font_name, color=color, font_size_pt=heading_size)
+    elif line.kind is _LineKind.HEADING3:
+        # #106: never a profile's per-SectionType treatment here — CvTailoringAgent
+        # only tags top-level headings, so this always uses the plain default style.
+        container.add_paragraph(line.text, style="Heading 3")
+    elif line.kind is _LineKind.RULE:
+        _add_docx_horizontal_rule(container)
     elif line.kind is _LineKind.BULLET:
         paragraph = container.add_paragraph(line.text, style="List Bullet")
         for run in paragraph.runs:

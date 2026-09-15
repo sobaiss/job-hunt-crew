@@ -327,3 +327,52 @@ def test_render_markdown_to_docx_one_page_fit_budget_excludes_removed_title():
     document = Document(BytesIO(docx_bytes))
     section = document.sections[0]
     assert section.top_margin != Pt(36)
+
+
+def test_render_markdown_to_pdf_handles_heading3_and_rule():
+    markdown_content = "## Experience\n\n### Senior Engineer\n\nDid things.\n\n---\n\nMore text.\n"
+    pdf_bytes = render_markdown_to_pdf(markdown_content=markdown_content)
+    assert pdf_bytes.startswith(b"%PDF")
+    assert len(pdf_bytes) > 0
+
+
+def test_render_markdown_to_docx_handles_heading3():
+    markdown_content = "### Senior Engineer\n\nDid things.\n"
+    docx_bytes = render_markdown_to_docx(markdown_content=markdown_content)
+    document = Document(BytesIO(docx_bytes))
+    heading_paragraph = next(p for p in document.paragraphs if p.text == "Senior Engineer")
+    assert heading_paragraph.style.name == "Heading 3"
+
+
+def test_render_markdown_to_docx_handles_horizontal_rule():
+    markdown_content = "Some text.\n\n---\n\nMore text.\n"
+    docx_bytes = render_markdown_to_docx(markdown_content=markdown_content)
+    document = Document(BytesIO(docx_bytes))
+    rule_paragraph = next(p for p in document.paragraphs if p.text == "")
+    p_pr_xml = rule_paragraph._p.get_or_add_pPr().xml
+    assert "pBdr" in p_pr_xml
+    assert "bottom" in p_pr_xml
+
+
+def test_render_markdown_to_docx_heading3_never_applies_style_profile_treatment():
+    # EXPERIENCE has a StyleProfile heading treatment, but a `###` heading
+    # never picks it up, even nested under a SectionType comment — #106.
+    markdown_content = "## Experience\n<!-- SectionType: EXPERIENCE -->\n\n### Senior Engineer\n\nDid things.\n"
+    docx_bytes = render_markdown_to_docx(
+        markdown_content=markdown_content, style_profile=_STYLE_PROFILE
+    )
+    document = Document(BytesIO(docx_bytes))
+    heading3_paragraph = next(p for p in document.paragraphs if p.text == "Senior Engineer")
+    assert heading3_paragraph.style.name == "Heading 3"
+    assert heading3_paragraph.runs[0].font.name is None
+    assert heading3_paragraph.runs[0].font.color.rgb is None
+
+
+def test_render_markdown_to_docx_existing_heading_and_bullet_handling_unaffected():
+    markdown_content = "# Title\n\n## Subheading\n\nSome paragraph text.\n\n- A bullet\n"
+    docx_bytes = render_markdown_to_docx(markdown_content=markdown_content)
+    document = Document(BytesIO(docx_bytes))
+    styles = {p.text: p.style.name for p in document.paragraphs}
+    assert styles["Title"] == "Heading 1"
+    assert styles["Subheading"] == "Heading 2"
+    assert styles["A bullet"] == "List Bullet"
