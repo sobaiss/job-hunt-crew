@@ -30,6 +30,7 @@ from py_db.models import Cvfiletype
 from py_db.section_type import SectionType
 from pydantic import BaseModel, ValidationError
 
+from .llm_json import parse_llm_json
 from .llm_provider import LLMProvider
 
 # A heading-sized run/char is one whose font size is at least this multiple
@@ -225,12 +226,7 @@ def _markdown_headings(markdown: str) -> list[str]:
 
 
 def _parse_classification(raw: str) -> _LayoutClassification:
-    text = raw.strip()
-    if text.startswith("```"):
-        text = text.strip("`")
-        if text.startswith("json"):
-            text = text[len("json") :]
-    data = json.loads(text)
+    data = parse_llm_json(raw)
     return _LayoutClassification.model_validate(data)
 
 

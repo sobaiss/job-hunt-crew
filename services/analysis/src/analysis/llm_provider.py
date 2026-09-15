@@ -128,6 +128,18 @@ class OllamaProvider(LLMProvider):
             # OpenAI SDK param, hence extra_body — it turns thinking off so
             # `content` always carries the full answer.
             extra_body={"reasoning_effort": "none"},
+            # Every caller's prompt asks for "ONLY a single JSON object", but
+            # qwen3.5 (the dev default) will occasionally emit a raw quote or
+            # newline inside a string value, breaking `json.loads` with e.g.
+            # "Expecting ',' delimiter" — and since `temperature=0` makes that
+            # output deterministic, the callers' bounded retry (comparison/
+            # extraction/recommendation agents) just repeats the same broken
+            # response 3 times instead of recovering. `response_format`'s
+            # json_object mode constrains decoding to syntactically valid
+            # JSON, which Ollama's OpenAI-compatible endpoint supports, so
+            # this closes the whole error class at the source instead of in
+            # each caller's parser.
+            response_format={"type": "json_object"},
             **optional,
         )
         return response.choices[0].message.content

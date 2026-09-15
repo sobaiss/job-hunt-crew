@@ -127,6 +127,7 @@ def test_ollama_generate_passes_temperature_zero_and_omits_max_tokens(monkeypatc
         ],
         temperature=0,
         extra_body={"reasoning_effort": "none"},
+        response_format={"type": "json_object"},
     )
 
 
@@ -147,6 +148,7 @@ def test_ollama_generate_forwards_max_tokens_when_given(monkeypatch):
         ],
         temperature=0,
         extra_body={"reasoning_effort": "none"},
+        response_format={"type": "json_object"},
         max_tokens=8192,
     )
 
