@@ -16,7 +16,6 @@ def _site_config(
     site_key: Siteconfigsitekey,
     list_item_selector: str | None,
     offer_link_selector: str | None,
-    offer_title_selector: str | None,
 ) -> SiteConfig:
     return SiteConfig(
         id=f"site-{site_key.value.lower()}",
@@ -25,7 +24,6 @@ def _site_config(
         baseUrl=BASE,
         listItemSelector=list_item_selector,
         offerLinkSelector=offer_link_selector,
-        offerTitleSelector=offer_title_selector,
         integrationType=Siteconfigintegrationtype.HTML_SCRAPE,
         requiresJsRendering=False,
         antiBotRiskLevel=Siteconfigantibotrisklevel.MEDIUM,
@@ -39,7 +37,6 @@ def _linkedin_site_config() -> SiteConfig:
         site_key=Siteconfigsitekey.LINKEDIN,
         list_item_selector="ul.jobs-search__results-list > li",
         offer_link_selector="a.base-card__full-link",
-        offer_title_selector="h3.base-search-card__title",
     )
 
 
@@ -49,7 +46,6 @@ def _indeed_site_config() -> SiteConfig:
         site_key=Siteconfigsitekey.INDEED,
         list_item_selector="div.job_seen_beacon",
         offer_link_selector="a.jcs-JobTitle",
-        offer_title_selector="span[title]",
     )
 
 
@@ -59,7 +55,6 @@ def _wttj_site_config() -> SiteConfig:
         site_key=Siteconfigsitekey.WTTJ,
         list_item_selector="li[data-testid='search-results-list-item-wrapper']",
         offer_link_selector="a[data-testid='job-card-link']",
-        offer_title_selector="h4",
     )
 
 
@@ -69,7 +64,6 @@ def _glassdoor_site_config() -> SiteConfig:
         site_key=Siteconfigsitekey.GLASSDOOR,
         list_item_selector="li.react-job-listing",
         offer_link_selector="a.jobLink",
-        offer_title_selector="a.jobLink",
     )
 
 
@@ -79,7 +73,6 @@ def _hellowork_site_config() -> SiteConfig:
         site_key=Siteconfigsitekey.HELLOWORK,
         list_item_selector="[data-cy='serpCard']",
         offer_link_selector="a[data-cy='offerTitle']",
-        offer_title_selector="a[data-cy='offerTitle']",
     )
 
 

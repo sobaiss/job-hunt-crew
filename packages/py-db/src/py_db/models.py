@@ -178,7 +178,6 @@ class SiteConfig(Base):
     filterParamMapping: Mapped[Optional[dict]] = mapped_column(JSONB)
     listItemSelector: Mapped[Optional[str]] = mapped_column(Text)
     offerLinkSelector: Mapped[Optional[str]] = mapped_column(Text)
-    offerTitleSelector: Mapped[Optional[str]] = mapped_column(Text)
     apiBaseUrl: Mapped[Optional[str]] = mapped_column(Text)
     notes: Mapped[Optional[str]] = mapped_column(Text)
 

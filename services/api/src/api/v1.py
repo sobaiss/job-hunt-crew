@@ -85,7 +85,6 @@ class SiteConfigResponse(BaseModel):
     filterParamMapping: dict[str, Any] | None
     listItemSelector: str | None
     offerLinkSelector: str | None
-    offerTitleSelector: str | None
     integrationType: str
     apiBaseUrl: str | None
     requiresJsRendering: bool
@@ -123,7 +122,6 @@ async def list_site_configs(
                 filterParamMapping=row.filterParamMapping,
                 listItemSelector=row.listItemSelector,
                 offerLinkSelector=row.offerLinkSelector,
-                offerTitleSelector=row.offerTitleSelector,
                 integrationType=row.integrationType.value,
                 apiBaseUrl=row.apiBaseUrl,
                 requiresJsRendering=row.requiresJsRendering,

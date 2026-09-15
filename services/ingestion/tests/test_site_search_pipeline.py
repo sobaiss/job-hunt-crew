@@ -89,7 +89,6 @@ def _linkedin_site_config() -> SiteConfig:
         filterParamMapping={"keywords": "keywords"},
         listItemSelector="ul.jobs-search__results-list > li",
         offerLinkSelector="a.base-card__full-link",
-        offerTitleSelector="h3.base-search-card__title",
         integrationType=Siteconfigintegrationtype.HTML_SCRAPE,
         requiresJsRendering=False,
         antiBotRiskLevel=Siteconfigantibotrisklevel.HIGH,

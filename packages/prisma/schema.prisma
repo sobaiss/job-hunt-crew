@@ -254,7 +254,6 @@ model SiteConfig {
   filterParamMapping  Json?
   listItemSelector    String?
   offerLinkSelector   String?
-  offerTitleSelector  String?
   integrationType     SiteConfigIntegrationType
   apiBaseUrl          String?
   requiresJsRendering Boolean                    @default(false)
