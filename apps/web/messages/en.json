@@ -183,7 +183,8 @@
     "quickView": {
       "viewFullAnalysis": "View full analysis",
       "viewOffer": "View job offer",
-      "statusError": "We couldn't update the tracking status. Please try again."
+      "statusError": "We couldn't update the tracking status. Please try again.",
+      "relaunchConfirm": "This will use one of your daily analyses. Continue?"
     },
     "bulk": {
       "selectPageLabel": "Select all on this page",

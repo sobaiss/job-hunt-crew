@@ -1,11 +1,15 @@
 "use client";
 
-import type { RefObject } from "react";
+import { type RefObject, useState } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useQueryClient } from "@tanstack/react-query";
 
-import type { AnalysisDetail } from "@/hooks/use-analyses";
+import {
+  TERMINAL_ANALYSIS_STATUSES,
+  useCreateAnalysis,
+  type AnalysisDetail,
+} from "@/hooks/use-analyses";
 import { useSetApplicationStatus } from "@/hooks/use-applications";
 import {
   TRACKING_STATUS_TRANSITIONS,
@@ -36,6 +40,7 @@ export function AnalysisQuickView({
   pipelineStatusLabel,
   trackingStatusLabel,
   returnFocusRef,
+  onRelaunched,
 }: {
   analysis: AnalysisDetail | null;
   open: boolean;
@@ -46,17 +51,33 @@ export function AnalysisQuickView({
    *  Radix's own default only restores focus to a `SheetTrigger`, and this
    *  Quick view is opened programmatically from a table row instead. */
   returnFocusRef: RefObject<HTMLElement | null>;
+  /** Called with the new Analysis's id after a successful "Relancer
+   *  l'analyse" (#124) — the page switches the Quick view to it and
+   *  invalidates the Analyses list so the new row appears there too. */
+  onRelaunched: (newId: string) => void;
 }) {
   const t = useTranslations("analyses");
   const td = useTranslations("analyses.detail");
   const queryClient = useQueryClient();
   const setApplicationStatus = useSetApplicationStatus();
+  const relaunch = useCreateAnalysis();
+  const [relaunchConfirming, setRelaunchConfirming] = useState(false);
 
   const tracking = analysis ? trackingStatusOf(analysis) : null;
   const result = analysis?.resultJSON ?? null;
+  const isRelaunchable =
+    analysis !== null && TERMINAL_ANALYSIS_STATUSES.has(analysis.status);
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      setRelaunchConfirming(false);
+      relaunch.reset();
+    }
+    onOpenChange(nextOpen);
+  };
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetContent
         className="w-full gap-6 overflow-y-auto sm:max-w-5xl"
         onCloseAutoFocus={(event) => {
@@ -64,6 +85,12 @@ export function AnalysisQuickView({
           returnFocusRef.current?.focus();
         }}
       >
+        {!analysis && open && (
+          <p role="status" className="text-sm text-muted">
+            {td("loading")}
+          </p>
+        )}
+
         {analysis && (
           <>
             <SheetHeader>
@@ -135,6 +162,69 @@ export function AnalysisQuickView({
                 {setApplicationStatus.isError && (
                   <p role="alert" className="text-sm text-destructive">
                     {t("quickView.statusError")}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {isRelaunchable && (
+              <div className="flex flex-col gap-2">
+                {relaunchConfirming ? (
+                  <div className="flex flex-col items-start gap-2">
+                    <p className="text-sm text-muted">
+                      {t("quickView.relaunchConfirm")}
+                    </p>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={relaunch.isPending}
+                        onClick={() =>
+                          relaunch.mutate(
+                            {
+                              jobOfferId: analysis.jobOffer.id,
+                              cvVersionId: analysis.cvVersionId,
+                            },
+                            {
+                              onSuccess: (data) => {
+                                setRelaunchConfirming(false);
+                                queryClient.invalidateQueries({
+                                  queryKey: ["analyses"],
+                                });
+                                onRelaunched(data.analysisId);
+                              },
+                            },
+                          )
+                        }
+                      >
+                        {t("bulk.generateConfirmAction")}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={relaunch.isPending}
+                        onClick={() => setRelaunchConfirming(false)}
+                      >
+                        {t("bulk.cancel")}
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-fit"
+                    onClick={() => setRelaunchConfirming(true)}
+                  >
+                    {td("retry")}
+                  </Button>
+                )}
+                {relaunch.isError && (
+                  <p role="alert" className="text-sm text-destructive">
+                    {td("retryError")}
                   </p>
                 )}
               </div>

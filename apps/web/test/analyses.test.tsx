@@ -1199,6 +1199,124 @@ describe("AnalysesDashboardPage", () => {
     expect(await quickView.findAllByText("Queued…")).toHaveLength(2);
   });
 
+  it("does not show \"Relancer l'analyse\" for a non-terminal analysis in the Quick view (issue #124)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [detail({ status: "RUNNING_CREW", resultJSON: null })],
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await user.click(await screen.findByText("Backend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    await quickView.findByText("Running");
+    expect(
+      quickView.queryByRole("button", { name: "Run it again" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("relaunches a COMPLETED analysis from the Quick view after confirmation, carrying the same offer/CV pair, and switches to the new one (issue #124)", async () => {
+    const user = userEvent.setup();
+    let analyses = [detail({ status: "COMPLETED" })];
+    let createBody: unknown = null;
+    server.use(
+      http.get("/api/analyses", () => HttpResponse.json({ analyses })),
+      http.post("/api/analyses", async ({ request }) => {
+        createBody = await request.json();
+        analyses = [
+          ...analyses,
+          detail({
+            id: "a2",
+            status: "RUNNING_CREW",
+            resultJSON: null,
+            matchScore: null,
+          }),
+        ];
+        return HttpResponse.json({ analysisId: "a2" });
+      }),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await user.click(await screen.findByText("Backend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    await user.click(quickView.getByRole("button", { name: "Run it again" }));
+
+    expect(
+      quickView.getByText(/This will use one of your daily analyses/),
+    ).toBeInTheDocument();
+
+    await user.click(quickView.getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() =>
+      expect(quickView.getByText("Running")).toBeInTheDocument(),
+    );
+    expect(createBody).toEqual({ jobOfferId: "job1", cvVersionId: "cv1" });
+  });
+
+  it("cancels the relaunch confirmation without calling the create-analysis request (issue #124)", async () => {
+    const user = userEvent.setup();
+    let createCalls = 0;
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({ analyses: [detail({ status: "COMPLETED" })] }),
+      ),
+      http.post("/api/analyses", () => {
+        createCalls += 1;
+        return HttpResponse.json({ analysisId: "a2" });
+      }),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await user.click(await screen.findByText("Backend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    await user.click(quickView.getByRole("button", { name: "Run it again" }));
+    await user.click(quickView.getByRole("button", { name: "Cancel" }));
+
+    expect(
+      quickView.queryByText(/This will use one of your daily analyses/),
+    ).not.toBeInTheDocument();
+    expect(quickView.getByRole("button", { name: "Run it again" })).toBeInTheDocument();
+    expect(createCalls).toBe(0);
+  });
+
+  it("shows an inline error and stays on the original analysis when a Quick view relaunch fails (issue #124)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            detail({ status: "FAILED", resultJSON: null, errorMessage: "LLM timed out" }),
+          ],
+        }),
+      ),
+      http.post("/api/analyses", () =>
+        HttpResponse.json({ error: "boom" }, { status: 500 }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await user.click(await screen.findByText("Backend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    await user.click(quickView.getByRole("button", { name: "Run it again" }));
+    await user.click(quickView.getByRole("button", { name: "Confirm" }));
+
+    expect(
+      await quickView.findByText(
+        "We couldn't start a new analysis. Please try again.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      quickView.getByRole("heading", { name: "Backend Engineer" }),
+    ).toBeInTheDocument();
+  });
+
   it("refetches the analyses list on demand, showing a busy state while in flight, without resetting search or filters (issue #121)", async () => {
     const user = userEvent.setup();
     let callCount = 0;

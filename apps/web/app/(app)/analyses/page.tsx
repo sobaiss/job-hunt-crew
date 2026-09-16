@@ -628,13 +628,20 @@ function AnalysesTable() {
 
       <AnalysisQuickView
         analysis={quickViewAnalysis}
-        open={quickViewAnalysis !== null}
+        // `quickViewId !== null` (not `quickViewAnalysis !== null`): right
+        // after a successful relaunch (#124) the Quick view switches to the
+        // new id before the invalidated list query has refetched it, so
+        // `quickViewAnalysis` is briefly null — checking `quickViewId` keeps
+        // the Sheet open through that gap instead of having Radix treat it
+        // as a close, mirroring the CV-versions panel's Replace flow.
+        open={quickViewId !== null}
         onOpenChange={(open) => {
           if (!open) setQuickViewId(null);
         }}
         pipelineStatusLabel={pipelineStatusLabel}
         trackingStatusLabel={trackingStatusLabel}
         returnFocusRef={quickViewTriggerRef}
+        onRelaunched={(newId) => setQuickViewId(newId)}
       />
     </main>
   );
