@@ -572,6 +572,7 @@
       "empty": "Aucune version de CV téléversée pour l'instant.",
       "showSuperseded": "Afficher les versions de CV remplacées",
       "importCv": "Importer un CV",
+      "refresh": "Actualiser",
       "columns": {
         "label": "Libellé",
         "file": "Fichier",

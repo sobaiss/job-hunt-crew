@@ -3,6 +3,7 @@
 import { Fragment, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
+import { RefreshCw } from "lucide-react";
 
 import {
   useCvVersions,
@@ -108,9 +109,23 @@ export default function CvVersionsPage() {
     <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-10 p-8">
       <div className="flex items-center justify-between gap-4">
         <h1 className="font-serif text-2xl font-semibold">{t("title")}</h1>
-        <Button asChild size="sm">
-          <Link href="/cv-versions/new">{t("list.importCv")}</Link>
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={list.isFetching}
+            onClick={() => list.refetch()}
+          >
+            <RefreshCw
+              className={list.isFetching ? "size-4 animate-spin" : "size-4"}
+            />
+            {t("list.refresh")}
+          </Button>
+          <Button asChild size="sm">
+            <Link href="/cv-versions/new">{t("list.importCv")}</Link>
+          </Button>
+        </div>
       </div>
 
       <section className="flex flex-col gap-4">

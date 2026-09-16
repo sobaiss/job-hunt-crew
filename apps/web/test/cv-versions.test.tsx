@@ -401,6 +401,65 @@ describe("CvVersionsPage — list", () => {
 
     expect(screen.queryByText("Old CV")).toBeNull();
   });
+
+  it("refetches the CV versions list on demand, showing a busy state while in flight, without resetting the show-superseded toggle or sort (issue #123)", async () => {
+    const user = userEvent.setup();
+    let callCount = 0;
+    let resolveSecondCall: () => void = () => {};
+    const secondCallGate = new Promise<void>((resolve) => {
+      resolveSecondCall = resolve;
+    });
+    server.use(
+      http.get("/api/cv-versions", async () => {
+        callCount += 1;
+        const isRefresh = callCount === 2;
+        if (isRefresh) {
+          await secondCallGate;
+        }
+        return HttpResponse.json({
+          cvVersions: [
+            cvVersion({
+              id: "cv1",
+              label: "Old CV",
+              supersededById: "cv2",
+            }),
+            cvVersion({
+              id: "cv2",
+              label: callCount >= 2 ? "New CV (updated)" : "New CV",
+            }),
+          ],
+        });
+      }),
+    );
+
+    renderWithProviders(<CvVersionsPage />);
+    expect(await screen.findByText("New CV")).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("checkbox", { name: "Show superseded CV versions" }),
+    );
+    expect(await screen.findByText("Old CV")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Label" }));
+    const rowLabel = () =>
+      screen.getAllByRole("row").slice(1, 3).map((row) => row.textContent);
+    expect(rowLabel()[0]).toContain("New CV");
+
+    const refreshButton = screen.getByRole("button", { name: "Refresh" });
+    await user.click(refreshButton);
+    expect(refreshButton).toBeDisabled();
+
+    resolveSecondCall();
+    await waitFor(() => expect(refreshButton).not.toBeDisabled());
+
+    expect(callCount).toBe(2);
+    expect(screen.getByText("New CV (updated)")).toBeInTheDocument();
+    expect(
+      screen.getByRole("checkbox", { name: "Show superseded CV versions" }),
+    ).toBeChecked();
+    expect(screen.getByText("Old CV")).toBeInTheDocument();
+    expect(rowLabel()[0]).toContain("New CV (updated)");
+  });
 });
 
 describe("CvVersionsPage — replace (from the panel, issue #82)", () => {

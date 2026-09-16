@@ -572,6 +572,7 @@
       "empty": "No CV versions uploaded yet.",
       "showSuperseded": "Show superseded CV versions",
       "importCv": "Import a CV",
+      "refresh": "Refresh",
       "columns": {
         "label": "Label",
         "file": "File",
