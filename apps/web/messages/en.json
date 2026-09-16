@@ -172,6 +172,7 @@
   "analyses": {
     "title": "Your analyses",
     "loading": "Loading your analyses",
+    "refresh": "Refresh",
     "empty": "No analyses requested yet.",
     "noMatches": "No analyses match your filters.",
     "loadError": "We couldn't load your analyses. Please try again.",

@@ -172,6 +172,7 @@
   "analyses": {
     "title": "Vos analyses",
     "loading": "Chargement de vos analyses",
+    "refresh": "Actualiser",
     "empty": "Aucune analyse demandée pour l'instant.",
     "noMatches": "Aucune analyse ne correspond à vos filtres.",
     "loadError": "Impossible de charger vos analyses. Veuillez réessayer.",

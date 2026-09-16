@@ -1198,6 +1198,68 @@ describe("AnalysesDashboardPage", () => {
 
     expect(await quickView.findAllByText("Queued…")).toHaveLength(2);
   });
+
+  it("refetches the analyses list on demand, showing a busy state while in flight, without resetting search or filters (issue #121)", async () => {
+    const user = userEvent.setup();
+    let callCount = 0;
+    let resolveSecondCall: () => void = () => {};
+    const secondCallGate = new Promise<void>((resolve) => {
+      resolveSecondCall = resolve;
+    });
+    server.use(
+      http.get("/api/analyses", async () => {
+        callCount += 1;
+        const isRefresh = callCount === 2;
+        if (isRefresh) {
+          await secondCallGate;
+        }
+        return HttpResponse.json({
+          analyses: [
+            summary({
+              id: "s1",
+              jobOffer: {
+                id: "j1",
+                title: "Backend Engineer",
+                company: "Acme Inc",
+                sourceSite: "FRANCE_TRAVAIL",
+                postedAt: "2026-07-01T00:00:00.000Z",
+                sourceUrl: "https://example.com/jobs/j1",
+              },
+            }),
+            summary({
+              id: "s2",
+              jobOffer: {
+                id: "j2",
+                title: callCount >= 2 ? "Frontend Developer (updated)" : "Frontend Developer",
+                company: "Globex",
+                sourceSite: "LINKEDIN",
+                postedAt: "2026-07-02T00:00:00.000Z",
+                sourceUrl: "https://example.com/jobs/j2",
+              },
+            }),
+          ],
+        });
+      }),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    expect(await screen.findByText("Frontend Developer")).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Search"), "developer");
+    expect(screen.queryByText("Backend Engineer")).not.toBeInTheDocument();
+
+    const refreshButton = screen.getByRole("button", { name: "Refresh" });
+    await user.click(refreshButton);
+    expect(refreshButton).toBeDisabled();
+
+    resolveSecondCall();
+    await waitFor(() => expect(refreshButton).not.toBeDisabled());
+
+    expect(callCount).toBe(2);
+    expect(screen.getByText("Frontend Developer (updated)")).toBeInTheDocument();
+    expect(screen.getByLabelText("Search")).toHaveValue("developer");
+    expect(screen.queryByText("Backend Engineer")).not.toBeInTheDocument();
+  });
 });
 
 describe("AnalysisDetailPage", () => {

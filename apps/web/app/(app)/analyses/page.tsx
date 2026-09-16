@@ -4,7 +4,7 @@ import { Suspense, useCallback, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, ArrowUpDown, ExternalLink } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, ExternalLink, RefreshCw } from "lucide-react";
 
 import { useAnalyses, type AnalysisSummary } from "@/hooks/use-analyses";
 import { useBulkSetApplicationStatus } from "@/hooks/use-applications";
@@ -103,7 +103,7 @@ function AnalysesTable() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const { data: analyses, isPending, isError } = useAnalyses();
+  const { data: analyses, isPending, isError, isFetching, refetch } = useAnalyses();
   const queryClient = useQueryClient();
   const bulkSetApplicationStatus = useBulkSetApplicationStatus();
   const bulkCreateGeneratedDocuments = useBulkCreateGeneratedDocuments();
@@ -301,7 +301,19 @@ function AnalysesTable() {
 
   return (
     <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 p-8">
-      <h1 className="font-serif text-2xl font-semibold">{t("title")}</h1>
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="font-serif text-2xl font-semibold">{t("title")}</h1>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={isFetching}
+          onClick={() => refetch()}
+        >
+          <RefreshCw className={isFetching ? "size-4 animate-spin" : "size-4"} />
+          {t("refresh")}
+        </Button>
+      </div>
 
       {isPending && (
         <div
