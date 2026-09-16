@@ -1,4 +1,4 @@
-.PHONY: up down migrate seed clean-analyses clean-analyses-scout worker worker-once
+.PHONY: up down migrate seed clean-analyses clean-analyses-scout clean-analyses-failed worker worker-once
 
 # Start local infrastructure (Postgres, MinIO, ElasticMQ, Step Functions
 # Local, api, worker). The `migrate` service applies pending Prisma
@@ -55,6 +55,24 @@ clean-analyses-scout:
 	count=$$($(PSQL) -tAc "SELECT count(*) FROM \"Analysis\" WHERE \"scoutId\" = '$(SCOUT_ID)';"); \
 	echo "Deleting $$count analyses for Scout \"$$label\" ($(SCOUT_ID))..."; \
 	$(PSQL) -c "DELETE FROM \"Analysis\" WHERE \"scoutId\" = '$(SCOUT_ID)';"
+
+# Delete every FAILED Analysis row, across all users — a narrower sibling of
+# clean-analyses for routine cleanup of dead pipeline runs. Same cascade
+# behaviour (PipelineEvent, GeneratedDocument, and Application rows cascade
+# automatically) and the same S3-orphaning caveat: a FAILED Analysis can
+# still carry a populated s3ResultKey (PersistResultLambda can fail to
+# read/parse an object the crew run already wrote), and that S3 object is
+# left behind — this cleans up Postgres only, not the bucket. Without
+# CONFIRM=1 this only reports how many rows it would delete, it does not
+# delete them.
+clean-analyses-failed:
+	@if [ "$(CONFIRM)" = "1" ]; then \
+		$(PSQL) -c "DELETE FROM \"Analysis\" WHERE \"status\" = 'FAILED';"; \
+	else \
+		count=$$($(PSQL) -tAc "SELECT count(*) FROM \"Analysis\" WHERE \"status\" = 'FAILED';"); \
+		echo "This would delete $$count failed analyses across all users."; \
+		echo "Re-run as: make clean-analyses-failed CONFIRM=1"; \
+	fi
 
 # Host env pointing the worker at the running docker-compose infra — the same
 # values as the compose `worker` service, but on localhost instead of the
