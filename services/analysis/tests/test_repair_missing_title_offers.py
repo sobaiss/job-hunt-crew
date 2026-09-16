@@ -24,7 +24,9 @@ def _offer(
         sourceUrl=f"https://example.com/jobs/{job_offer_id}",
         sourceSite=source_site,
         extractionStatus=(
-            Jobofferextractionstatus.READY if title else Jobofferextractionstatus.SCRAPED
+            Jobofferextractionstatus.READY
+            if title
+            else Jobofferextractionstatus.SCRAPED
         ),
         title=title,
         rawContentKey=raw_content_key,
@@ -47,12 +49,21 @@ async def test_select_offers_missing_title_excludes_complete_and_france_travail_
     session_factory = make_session_factory(engine)
 
     missing_title = _offer(source_site=Joboffersourcesite.OTHER, title=None)
-    already_complete = _offer(source_site=Joboffersourcesite.OTHER, title="Backend Engineer")
+    already_complete = _offer(
+        source_site=Joboffersourcesite.OTHER, title="Backend Engineer"
+    )
     france_travail_missing_title = _offer(
         source_site=Joboffersourcesite.FRANCE_TRAVAIL, title=None
     )
-    never_scraped = _offer(source_site=Joboffersourcesite.LINKEDIN, title=None, raw_content_key=None)
-    offers = [missing_title, already_complete, france_travail_missing_title, never_scraped]
+    never_scraped = _offer(
+        source_site=Joboffersourcesite.LINKEDIN, title=None, raw_content_key=None
+    )
+    offers = [
+        missing_title,
+        already_complete,
+        france_travail_missing_title,
+        never_scraped,
+    ]
 
     try:
         async with session_factory() as session:
@@ -76,11 +87,18 @@ async def test_repair_missing_title_offers_delegates_to_extraction_step_per_offe
 
     missing_title_1 = _offer(source_site=Joboffersourcesite.OTHER, title=None)
     missing_title_2 = _offer(source_site=Joboffersourcesite.LINKEDIN, title=None)
-    already_complete = _offer(source_site=Joboffersourcesite.OTHER, title="Backend Engineer")
+    already_complete = _offer(
+        source_site=Joboffersourcesite.OTHER, title="Backend Engineer"
+    )
     france_travail_missing_title = _offer(
         source_site=Joboffersourcesite.FRANCE_TRAVAIL, title=None
     )
-    offers = [missing_title_1, missing_title_2, already_complete, france_travail_missing_title]
+    offers = [
+        missing_title_1,
+        missing_title_2,
+        already_complete,
+        france_travail_missing_title,
+    ]
 
     calls: list[str] = []
 
@@ -97,7 +115,9 @@ async def test_repair_missing_title_offers_delegates_to_extraction_step_per_offe
             await session.commit()
 
         async with session_factory() as session:
-            repaired_ids = await repair_missing_title_offers(session, extract_fn=fake_extract_fn)
+            repaired_ids = await repair_missing_title_offers(
+                session, extract_fn=fake_extract_fn
+            )
 
         assert set(calls) == {missing_title_1.id, missing_title_2.id}
         assert set(repaired_ids) == {missing_title_1.id, missing_title_2.id}
@@ -133,7 +153,9 @@ async def test_repair_missing_title_offers_skips_offer_that_fails_extraction_aga
             await session.commit()
 
         async with session_factory() as session:
-            repaired_ids = await repair_missing_title_offers(session, extract_fn=fake_extract_fn)
+            repaired_ids = await repair_missing_title_offers(
+                session, extract_fn=fake_extract_fn
+            )
 
         assert repaired_ids == [repairable.id]
     finally:

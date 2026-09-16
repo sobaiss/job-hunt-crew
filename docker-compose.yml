@@ -133,6 +133,9 @@ services:
       # "Run now" on a Scout is rate-limited to once an hour by default;
       # override locally (e.g. 0) to relaunch a Scout on demand in dev.
       SCOUT_RUN_RATE_LIMIT_SECONDS: ${SCOUT_RUN_RATE_LIMIT_SECONDS:-3600}
+      # POST /v1/analyses enforces this per-user daily cap (default 50);
+      # override locally to raise it for repeated testing.
+      DAILY_ANALYSIS_CAP: ${DAILY_ANALYSIS_CAP:-50}
     depends_on:
       postgres:
         condition: service_healthy
@@ -224,6 +227,10 @@ services:
       # inject an empty string, which is *not* the same as unset).
       FRANCE_TRAVAIL_CLIENT_ID: ${FRANCE_TRAVAIL_CLIENT_ID:-}
       FRANCE_TRAVAIL_CLIENT_SECRET: ${FRANCE_TRAVAIL_CLIENT_SECRET:-}
+      # Same per-user daily Analysis cap create_analyses_for_ready_offers
+      # enforces during a Scout/ingestion fan-out — kept equal to api's above
+      # so the two never drift (py_db/quota.py is their shared source of truth).
+      DAILY_ANALYSIS_CAP: ${DAILY_ANALYSIS_CAP:-50}
     depends_on:
       postgres:
         condition: service_healthy

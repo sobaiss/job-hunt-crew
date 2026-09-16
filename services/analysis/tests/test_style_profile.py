@@ -33,7 +33,15 @@ class StubLLMProvider(LLMProvider):
         self._response = response
         self.calls = 0
 
-    def generate(self, *, system: str, prompt: str, max_tokens: int | None = None) -> str:
+    def generate(
+        self,
+        *,
+        system: str,
+        prompt: str,
+        max_tokens: int | None = None,
+        response_schema=None,
+        temperature: float | None = None,
+    ) -> str:
         self.calls += 1
         return self._response
 
@@ -54,7 +62,9 @@ def _build_fixture_pdf_bytes() -> bytes:
         b"BT /F1 11 Tf 0 0 0 rg 100 650 Td "
         b"(Senior Backend Engineer Acme Corp 2019 2024) Tj ET"
     )
-    objects.append(b"<< /Length %d >>\nstream\n" % len(content) + content + b"\nendstream")
+    objects.append(
+        b"<< /Length %d >>\nstream\n" % len(content) + content + b"\nendstream"
+    )
 
     buf = bytearray(b"%PDF-1.4\n")
     offsets = [0]
@@ -120,7 +130,12 @@ def test_build_style_profile_extracts_docx_margins_and_fonts():
     )
 
     assert profile["layoutArchetype"] == "SIDEBAR_MAIN"
-    assert profile["margins"] == {"top": 72.0, "bottom": 72.0, "left": 90.0, "right": 90.0}
+    assert profile["margins"] == {
+        "top": 72.0,
+        "bottom": 72.0,
+        "left": 90.0,
+        "right": 90.0,
+    }
     assert profile["fonts"]["name"] == "Calibri"
     assert profile["onePageFit"] is True
     assert profile["sections"]["EXPERIENCE"]["region"] == "MAIN"

@@ -31,6 +31,7 @@ RETRY_BACKOFF_RATE = 2.0
 def _sleep(seconds: float) -> None:
     time.sleep(seconds)
 
+
 SYSTEM_PROMPT = (
     "You write a personalised cover letter for a candidate applying to a job offer. "
     "You are given the candidate's CV as Markdown (their full CV/resume), the job "

@@ -59,7 +59,15 @@ class StubLLMProvider(LLMProvider):
         self._response = response
         self.calls = 0
 
-    def generate(self, *, system: str, prompt: str) -> str:
+    def generate(
+        self,
+        *,
+        system: str,
+        prompt: str,
+        max_tokens: int | None = None,
+        response_schema=None,
+        temperature: float | None = None,
+    ) -> str:
         self.calls += 1
         return self._response
 
@@ -137,27 +145,37 @@ async def test_link_discovered_offers_caps_ingestion_job_offer_rows_at_max_offer
         async with session_factory() as session:
             links = (
                 await session.scalars(
-                    select(IngestionJobOffer).where(IngestionJobOffer.ingestionJobId == ingestion_job_id)
+                    select(IngestionJobOffer).where(
+                        IngestionJobOffer.ingestionJobId == ingestion_job_id
+                    )
                 )
             ).all()
             assert len(links) == 25
 
             offers = (
-                await session.scalars(select(JobOffer).where(JobOffer.sourceUrl.in_(urls)))
+                await session.scalars(
+                    select(JobOffer).where(JobOffer.sourceUrl.in_(urls))
+                )
             ).all()
             assert len(offers) == 25
     finally:
         async with session_factory() as session:
             links = (
                 await session.scalars(
-                    select(IngestionJobOffer).where(IngestionJobOffer.ingestionJobId == ingestion_job_id)
+                    select(IngestionJobOffer).where(
+                        IngestionJobOffer.ingestionJobId == ingestion_job_id
+                    )
                 )
             ).all()
             for link in links:
                 await session.delete(link)
             await session.commit()
 
-            offers = (await session.scalars(select(JobOffer).where(JobOffer.sourceUrl.in_(urls)))).all()
+            offers = (
+                await session.scalars(
+                    select(JobOffer).where(JobOffer.sourceUrl.in_(urls))
+                )
+            ).all()
             for offer in offers:
                 await session.delete(offer)
             job = await session.get(IngestionJob, ingestion_job_id)
@@ -195,19 +213,27 @@ async def test_link_discovered_offers_reuses_globally_deduplicated_job_offer():
     try:
         async with session_factory() as session:
             ingestion_job = await session.get(IngestionJob, ingestion_job_id)
-            job_offers = await link_discovered_offers(session, ingestion_job, [shared_url, shared_url])
+            job_offers = await link_discovered_offers(
+                session, ingestion_job, [shared_url, shared_url]
+            )
 
         # Same URL discovered twice -> deduped to a single retained URL,
         # and only one JobOffer row exists globally for that sourceUrl.
         assert len(job_offers) == 1
 
         async with session_factory() as session:
-            offers = (await session.scalars(select(JobOffer).where(JobOffer.sourceUrl == shared_url))).all()
+            offers = (
+                await session.scalars(
+                    select(JobOffer).where(JobOffer.sourceUrl == shared_url)
+                )
+            ).all()
             assert len(offers) == 1
 
             links = (
                 await session.scalars(
-                    select(IngestionJobOffer).where(IngestionJobOffer.ingestionJobId == ingestion_job_id)
+                    select(IngestionJobOffer).where(
+                        IngestionJobOffer.ingestionJobId == ingestion_job_id
+                    )
                 )
             ).all()
             assert len(links) == 1
@@ -215,14 +241,20 @@ async def test_link_discovered_offers_reuses_globally_deduplicated_job_offer():
         async with session_factory() as session:
             links = (
                 await session.scalars(
-                    select(IngestionJobOffer).where(IngestionJobOffer.ingestionJobId == ingestion_job_id)
+                    select(IngestionJobOffer).where(
+                        IngestionJobOffer.ingestionJobId == ingestion_job_id
+                    )
                 )
             ).all()
             for link in links:
                 await session.delete(link)
             await session.commit()
 
-            offers = (await session.scalars(select(JobOffer).where(JobOffer.sourceUrl == shared_url))).all()
+            offers = (
+                await session.scalars(
+                    select(JobOffer).where(JobOffer.sourceUrl == shared_url)
+                )
+            ).all()
             for offer in offers:
                 await session.delete(offer)
             job = await session.get(IngestionJob, ingestion_job_id)
@@ -279,20 +311,26 @@ async def test_link_discovered_offers_tags_source_site_from_site_search_ingestio
         assert job_offers[0].sourceSite == Joboffersourcesite.LINKEDIN
 
         async with session_factory() as session:
-            offer = await session.scalar(select(JobOffer).where(JobOffer.sourceUrl == url))
+            offer = await session.scalar(
+                select(JobOffer).where(JobOffer.sourceUrl == url)
+            )
             assert offer.sourceSite == Joboffersourcesite.LINKEDIN
     finally:
         async with session_factory() as session:
             links = (
                 await session.scalars(
-                    select(IngestionJobOffer).where(IngestionJobOffer.ingestionJobId == ingestion_job_id)
+                    select(IngestionJobOffer).where(
+                        IngestionJobOffer.ingestionJobId == ingestion_job_id
+                    )
                 )
             ).all()
             for link in links:
                 await session.delete(link)
             await session.commit()
 
-            offers = (await session.scalars(select(JobOffer).where(JobOffer.sourceUrl == url))).all()
+            offers = (
+                await session.scalars(select(JobOffer).where(JobOffer.sourceUrl == url))
+            ).all()
             for offer in offers:
                 await session.delete(offer)
             job = await session.get(IngestionJob, ingestion_job_id)
@@ -340,14 +378,18 @@ async def test_link_discovered_offers_defaults_to_other_for_url_mode_job_without
         async with session_factory() as session:
             links = (
                 await session.scalars(
-                    select(IngestionJobOffer).where(IngestionJobOffer.ingestionJobId == ingestion_job_id)
+                    select(IngestionJobOffer).where(
+                        IngestionJobOffer.ingestionJobId == ingestion_job_id
+                    )
                 )
             ).all()
             for link in links:
                 await session.delete(link)
             await session.commit()
 
-            offers = (await session.scalars(select(JobOffer).where(JobOffer.sourceUrl == url))).all()
+            offers = (
+                await session.scalars(select(JobOffer).where(JobOffer.sourceUrl == url))
+            ).all()
             for offer in offers:
                 await session.delete(offer)
             job = await session.get(IngestionJob, ingestion_job_id)
@@ -392,26 +434,40 @@ async def test_link_and_process_offers_produces_five_linked_ready_job_offers():
             async with session_factory() as session:
                 ingestion_job = await session.get(IngestionJob, ingestion_job_id)
                 provider = StubLLMProvider()
-                processed = await link_and_process_offers(session, ingestion_job, urls, llm_provider=provider)
+                processed = await link_and_process_offers(
+                    session, ingestion_job, urls, llm_provider=provider
+                )
 
         # PRD 8.4 step 4 / M3-T4 verify: a fixture listing page with 5 links
         # produces exactly 5 linked JobOffer rows, each run through the Mode
         # 1 pipeline (scrape -> extract) to a terminal READY status.
         assert len(processed) == 5
-        assert all(offer.extractionStatus == Jobofferextractionstatus.READY for offer in processed)
+        assert all(
+            offer.extractionStatus == Jobofferextractionstatus.READY
+            for offer in processed
+        )
         assert all(offer.structuredData is not None for offer in processed)
 
         async with session_factory() as session:
             links = (
                 await session.scalars(
-                    select(IngestionJobOffer).where(IngestionJobOffer.ingestionJobId == ingestion_job_id)
+                    select(IngestionJobOffer).where(
+                        IngestionJobOffer.ingestionJobId == ingestion_job_id
+                    )
                 )
             ).all()
             assert len(links) == 5
 
-            offers = (await session.scalars(select(JobOffer).where(JobOffer.sourceUrl.in_(urls)))).all()
+            offers = (
+                await session.scalars(
+                    select(JobOffer).where(JobOffer.sourceUrl.in_(urls))
+                )
+            ).all()
             assert len(offers) == 5
-            assert all(offer.extractionStatus == Jobofferextractionstatus.READY for offer in offers)
+            assert all(
+                offer.extractionStatus == Jobofferextractionstatus.READY
+                for offer in offers
+            )
     finally:
         for job_offer in processed:
             try:
@@ -421,14 +477,20 @@ async def test_link_and_process_offers_produces_five_linked_ready_job_offers():
         async with session_factory() as session:
             links = (
                 await session.scalars(
-                    select(IngestionJobOffer).where(IngestionJobOffer.ingestionJobId == ingestion_job_id)
+                    select(IngestionJobOffer).where(
+                        IngestionJobOffer.ingestionJobId == ingestion_job_id
+                    )
                 )
             ).all()
             for link in links:
                 await session.delete(link)
             await session.commit()
 
-            offers = (await session.scalars(select(JobOffer).where(JobOffer.sourceUrl.in_(urls)))).all()
+            offers = (
+                await session.scalars(
+                    select(JobOffer).where(JobOffer.sourceUrl.in_(urls))
+                )
+            ).all()
             for offer in offers:
                 await session.delete(offer)
             # PipelineEvent.ingestionJobId (M6-T3) has ON DELETE CASCADE at
@@ -438,7 +500,9 @@ async def test_link_and_process_offers_produces_five_linked_ready_job_offers():
             # rather than relying on the DB-level cascade.
             events = (
                 await session.scalars(
-                    select(PipelineEvent).where(PipelineEvent.ingestionJobId == ingestion_job_id)
+                    select(PipelineEvent).where(
+                        PipelineEvent.ingestionJobId == ingestion_job_id
+                    )
                 )
             ).all()
             for event in events:
@@ -481,7 +545,9 @@ async def test_process_job_offer_skips_already_ready_offer():
             async with session_factory() as session:
                 job_offer = await session.get(JobOffer, job_offer_id)
                 provider = StubLLMProvider()
-                result = await process_job_offer(session, job_offer, llm_provider=provider)
+                result = await process_job_offer(
+                    session, job_offer, llm_provider=provider
+                )
 
         assert result.extractionStatus == Jobofferextractionstatus.READY
         assert provider.calls == 0
@@ -520,7 +586,9 @@ async def test_process_job_offer_continues_past_scrape_failure_without_raising()
                 provider = StubLLMProvider()
                 # Must not raise: one offer's scrape failure shouldn't abort
                 # the fan-out for the rest of a listing's offers.
-                result = await process_job_offer(session, job_offer, llm_provider=provider)
+                result = await process_job_offer(
+                    session, job_offer, llm_provider=provider
+                )
 
         assert result.extractionStatus == Jobofferextractionstatus.FAILED
         assert result.errorMessage
@@ -533,7 +601,9 @@ async def test_process_job_offer_continues_past_scrape_failure_without_raising()
             # cascade-delete them, so clean up explicitly.
             events = (
                 await session.scalars(
-                    select(PipelineEvent).where(PipelineEvent.message.contains(job_offer_id))
+                    select(PipelineEvent).where(
+                        PipelineEvent.message.contains(job_offer_id)
+                    )
                 )
             ).all()
             for event in events:
@@ -581,7 +651,9 @@ async def test_link_and_process_offers_rolls_up_partially_completed_with_one_for
             async with session_factory() as session:
                 ingestion_job = await session.get(IngestionJob, ingestion_job_id)
                 provider = StubLLMProvider()
-                processed = await link_and_process_offers(session, ingestion_job, urls, llm_provider=provider)
+                processed = await link_and_process_offers(
+                    session, ingestion_job, urls, llm_provider=provider
+                )
 
         # M3-T5 verify: fixture run with 1 forced failure among 5 offers
         # yields status=PARTIALLY_COMPLETED, failedCount=1.
@@ -600,14 +672,20 @@ async def test_link_and_process_offers_rolls_up_partially_completed_with_one_for
         async with session_factory() as session:
             links = (
                 await session.scalars(
-                    select(IngestionJobOffer).where(IngestionJobOffer.ingestionJobId == ingestion_job_id)
+                    select(IngestionJobOffer).where(
+                        IngestionJobOffer.ingestionJobId == ingestion_job_id
+                    )
                 )
             ).all()
             for link in links:
                 await session.delete(link)
             await session.commit()
 
-            offers = (await session.scalars(select(JobOffer).where(JobOffer.sourceUrl.in_(urls)))).all()
+            offers = (
+                await session.scalars(
+                    select(JobOffer).where(JobOffer.sourceUrl.in_(urls))
+                )
+            ).all()
             for offer in offers:
                 await session.delete(offer)
             # PipelineEvent.ingestionJobId (M6-T3) has ON DELETE CASCADE at
@@ -617,7 +695,9 @@ async def test_link_and_process_offers_rolls_up_partially_completed_with_one_for
             # rather than relying on the DB-level cascade.
             events = (
                 await session.scalars(
-                    select(PipelineEvent).where(PipelineEvent.ingestionJobId == ingestion_job_id)
+                    select(PipelineEvent).where(
+                        PipelineEvent.ingestionJobId == ingestion_job_id
+                    )
                 )
             ).all()
             for event in events:
@@ -663,12 +743,20 @@ async def test_update_ingestion_job_aggregate_completed_when_all_ready():
                 updatedAt=datetime.now(UTC).replace(tzinfo=None),
             )
         )
-        session.add(IngestionJobOffer(id=f"link-{uuid.uuid4()}", ingestionJobId=ingestion_job_id, jobOfferId=job_offer_id))
+        session.add(
+            IngestionJobOffer(
+                id=f"link-{uuid.uuid4()}",
+                ingestionJobId=ingestion_job_id,
+                jobOfferId=job_offer_id,
+            )
+        )
         await session.commit()
 
     try:
         async with session_factory() as session:
-            ingestion_job = await update_ingestion_job_aggregate(session, ingestion_job_id)
+            ingestion_job = await update_ingestion_job_aggregate(
+                session, ingestion_job_id
+            )
 
         assert ingestion_job.discoveredCount == 1
         assert ingestion_job.scrapedCount == 1
@@ -678,7 +766,9 @@ async def test_update_ingestion_job_aggregate_completed_when_all_ready():
         async with session_factory() as session:
             links = (
                 await session.scalars(
-                    select(IngestionJobOffer).where(IngestionJobOffer.ingestionJobId == ingestion_job_id)
+                    select(IngestionJobOffer).where(
+                        IngestionJobOffer.ingestionJobId == ingestion_job_id
+                    )
                 )
             ).all()
             for link in links:
@@ -751,28 +841,47 @@ async def _seed_scout_job(session_factory, *, with_cv_version=True):
                 updatedAt=_now(),
             )
         )
-        session.add(ScoutRun(id=scout_run_id, scoutId=scout_id, status=Scoutrunstatus.RUNNING))
+        session.add(
+            ScoutRun(id=scout_run_id, scoutId=scout_id, status=Scoutrunstatus.RUNNING)
+        )
         await session.commit()
 
     return user_id, scout_cv_version_id, ingestion_job_id, scout_id, scout_run_id
 
 
-async def _cleanup_scout_job(session_factory, *, user_id, cv_version_id, ingestion_job_id, scout_id, scout_run_id, urls):
+async def _cleanup_scout_job(
+    session_factory,
+    *,
+    user_id,
+    cv_version_id,
+    ingestion_job_id,
+    scout_id,
+    scout_run_id,
+    urls,
+):
     async with session_factory() as session:
         links = (
             await session.scalars(
-                select(IngestionJobOffer).where(IngestionJobOffer.ingestionJobId == ingestion_job_id)
+                select(IngestionJobOffer).where(
+                    IngestionJobOffer.ingestionJobId == ingestion_job_id
+                )
             )
         ).all()
         for link in links:
             await session.delete(link)
         await session.commit()
 
-        offers = (await session.scalars(select(JobOffer).where(JobOffer.sourceUrl.in_(urls)))).all()
+        offers = (
+            await session.scalars(select(JobOffer).where(JobOffer.sourceUrl.in_(urls)))
+        ).all()
         for offer in offers:
             await session.delete(offer)
         events = (
-            await session.scalars(select(PipelineEvent).where(PipelineEvent.ingestionJobId == ingestion_job_id))
+            await session.scalars(
+                select(PipelineEvent).where(
+                    PipelineEvent.ingestionJobId == ingestion_job_id
+                )
+            )
         ).all()
         for event in events:
             await session.delete(event)
@@ -805,11 +914,19 @@ async def test_scout_job_extraction_ceiling_skips_low_similarity_offer(monkeypat
     monkeypatch.setenv("SCOUT_MAX_ANALYSES_PER_RUN", "1")
     engine = make_engine()
     session_factory = make_session_factory(engine)
-    user_id, cv_version_id, ingestion_job_id, scout_id, scout_run_id = await _seed_scout_job(session_factory)
+    (
+        user_id,
+        cv_version_id,
+        ingestion_job_id,
+        scout_id,
+        scout_run_id,
+    ) = await _seed_scout_job(session_factory)
     good_url = f"https://example.com/jobs/{uuid.uuid4()}"
     bad_url = f"https://example.com/jobs/{uuid.uuid4()}"
     urls = [good_url, bad_url]
-    good_html = "<html><body>Senior Python Backend Engineer AWS Kubernetes</body></html>"
+    good_html = (
+        "<html><body>Senior Python Backend Engineer AWS Kubernetes</body></html>"
+    )
     bad_html = "<html><body>Pastry Chef cake decoration dessert plating</body></html>"
     s3 = _s3_client()
     processed: list[JobOffer] = []
@@ -822,7 +939,9 @@ async def test_scout_job_extraction_ceiling_skips_low_similarity_offer(monkeypat
             async with session_factory() as session:
                 ingestion_job = await session.get(IngestionJob, ingestion_job_id)
                 provider = StubLLMProvider()
-                processed = await link_and_process_offers(session, ingestion_job, urls, llm_provider=provider)
+                processed = await link_and_process_offers(
+                    session, ingestion_job, urls, llm_provider=provider
+                )
 
         assert provider.calls == 1
 
@@ -862,9 +981,13 @@ async def test_scout_job_without_cv_version_extracts_every_offer_unchanged(monke
     monkeypatch.setenv("SCOUT_MAX_ANALYSES_PER_RUN", "1")
     engine = make_engine()
     session_factory = make_session_factory(engine)
-    user_id, cv_version_id, ingestion_job_id, scout_id, scout_run_id = await _seed_scout_job(
-        session_factory, with_cv_version=False
-    )
+    (
+        user_id,
+        cv_version_id,
+        ingestion_job_id,
+        scout_id,
+        scout_run_id,
+    ) = await _seed_scout_job(session_factory, with_cv_version=False)
     urls = [f"https://example.com/jobs/{uuid.uuid4()}" for _ in range(2)]
     s3 = _s3_client()
     processed: list[JobOffer] = []
@@ -877,10 +1000,15 @@ async def test_scout_job_without_cv_version_extracts_every_offer_unchanged(monke
             async with session_factory() as session:
                 ingestion_job = await session.get(IngestionJob, ingestion_job_id)
                 provider = StubLLMProvider()
-                processed = await link_and_process_offers(session, ingestion_job, urls, llm_provider=provider)
+                processed = await link_and_process_offers(
+                    session, ingestion_job, urls, llm_provider=provider
+                )
 
         assert provider.calls == 2
-        assert all(offer.extractionStatus == Jobofferextractionstatus.READY for offer in processed)
+        assert all(
+            offer.extractionStatus == Jobofferextractionstatus.READY
+            for offer in processed
+        )
 
         async with session_factory() as session:
             ingestion_job = await session.get(IngestionJob, ingestion_job_id)

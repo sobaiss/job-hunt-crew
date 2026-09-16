@@ -184,7 +184,12 @@ def test_drain_loops_each_queue_until_it_is_empty(monkeypatch):
     _noop_handler_for_every_spec(monkeypatch)
     spec = QUEUE_SPECS["cv-conversion"]
     fake = FakeSqs(
-        {spec.queue_url: [[_msg("1", {"cvVersionId": "a"})], [_msg("2", {"cvVersionId": "b"})]]}
+        {
+            spec.queue_url: [
+                [_msg("1", {"cvVersionId": "a"})],
+                [_msg("2", {"cvVersionId": "b"})],
+            ]
+        }
     )
 
     totals = drain(["cv-conversion"], sqs=fake)
@@ -254,7 +259,9 @@ def test_resolve_scout_schedule_tick_is_none_without_scout_intake():
 
 def test_resolve_scout_schedule_tick_resolves_the_scheduler_when_selected(monkeypatch):
     sentinel = object()
-    monkeypatch.setattr("scout.schedule.run_scheduler_tick_once", lambda: sentinel, raising=True)
+    monkeypatch.setattr(
+        "scout.schedule.run_scheduler_tick_once", lambda: sentinel, raising=True
+    )
 
     tick = _resolve_scout_schedule_tick(["scout-intake"])
 
@@ -284,7 +291,9 @@ def test_run_forever_fires_on_tick_on_the_first_sweep(monkeypatch):
     assert ticks == [None]
 
 
-def test_run_forever_does_not_fire_on_tick_again_before_the_interval_elapses(monkeypatch):
+def test_run_forever_does_not_fire_on_tick_again_before_the_interval_elapses(
+    monkeypatch,
+):
     import threading
 
     stop = threading.Event()
@@ -328,5 +337,9 @@ def test_run_forever_tick_exception_is_logged_and_does_not_stop_the_loop(monkeyp
 
     # No exception propagates out of run_forever.
     run_forever(
-        ["scout-intake"], sqs=FakeSqs(), stop=stop, on_tick=boom, tick_interval_seconds=3600
+        ["scout-intake"],
+        sqs=FakeSqs(),
+        stop=stop,
+        on_tick=boom,
+        tick_interval_seconds=3600,
     )

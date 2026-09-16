@@ -20,7 +20,14 @@ import boto3
 import pytest
 from botocore.client import Config
 from docx import Document as DocxDocument
-from py_db.models import CVVersion, Cvconversionstatus, Cvfiletype, Cvstylestatus, PipelineEvent, User
+from py_db.models import (
+    CVVersion,
+    Cvconversionstatus,
+    Cvfiletype,
+    Cvstylestatus,
+    PipelineEvent,
+    User,
+)
 from py_db.session import make_engine, make_session_factory
 from sqlalchemy import select
 
@@ -51,7 +58,15 @@ STYLE_CLASSIFICATION_JSON = (
 class ExplodingLLMProvider(LLMProvider):
     """Any call is a test failure — used where convert_cv must not touch an LLM."""
 
-    def generate(self, *, system: str, prompt: str, max_tokens: int | None = None) -> str:  # pragma: no cover
+    def generate(
+        self,
+        *,
+        system: str,
+        prompt: str,
+        max_tokens: int | None = None,
+        response_schema=None,
+        temperature: float | None = None,
+    ) -> str:  # pragma: no cover
         raise AssertionError("convert_cv must not call the LLM here")
 
 
@@ -62,7 +77,15 @@ class StubLLMProvider(LLMProvider):
         self._responses = list(responses)
         self.calls = 0
 
-    def generate(self, *, system: str, prompt: str, max_tokens: int | None = None) -> str:
+    def generate(
+        self,
+        *,
+        system: str,
+        prompt: str,
+        max_tokens: int | None = None,
+        response_schema=None,
+        temperature: float | None = None,
+    ) -> str:
         self.calls += 1
         return self._responses[min(self.calls, len(self._responses)) - 1]
 
@@ -78,7 +101,9 @@ def _build_fixture_pdf_bytes(text: str) -> bytes:
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
     ]
     content = f"BT /F1 24 Tf 100 700 Td ({text}) Tj ET".encode("latin-1")
-    objects.append(b"<< /Length %d >>\nstream\n" % len(content) + content + b"\nendstream")
+    objects.append(
+        b"<< /Length %d >>\nstream\n" % len(content) + content + b"\nendstream"
+    )
 
     buf = bytearray(b"%PDF-1.4\n")
     offsets = [0]
@@ -135,7 +160,9 @@ def _s3_client():
     )
 
 
-async def _make_pending_cv_version(session_factory, user_id, cv_version_id, file_key, file_type, file_name):
+async def _make_pending_cv_version(
+    session_factory, user_id, cv_version_id, file_key, file_type, file_name
+):
     now = datetime.now(UTC).replace(tzinfo=None)
     async with session_factory() as session:
         session.add(User(id=user_id, updatedAt=now))
@@ -160,7 +187,9 @@ async def _cleanup(engine, session_factory, s3, file_key, user_id, cv_version_id
     async with session_factory() as session:
         events = (
             await session.scalars(
-                select(PipelineEvent).where(PipelineEvent.message.contains(cv_version_id))
+                select(PipelineEvent).where(
+                    PipelineEvent.message.contains(cv_version_id)
+                )
             )
         ).all()
         for event in events:
@@ -180,7 +209,9 @@ async def _cleanup(engine, session_factory, s3, file_key, user_id, cv_version_id
     [(Cvfiletype.MD, "cv.md"), (Cvfiletype.TXT, "cv.txt")],
 )
 @pytest.mark.asyncio
-async def test_convert_cv_stores_text_verbatim_without_calling_the_llm(file_type, file_name):
+async def test_convert_cv_stores_text_verbatim_without_calling_the_llm(
+    file_type, file_name
+):
     engine = make_engine()
     session_factory = make_session_factory(engine)
     user_id = f"test-user-{uuid.uuid4()}"
@@ -218,7 +249,9 @@ async def test_convert_cv_stores_text_verbatim_without_calling_the_llm(file_type
 
             events = (
                 await session.scalars(
-                    select(PipelineEvent).where(PipelineEvent.message.contains(cv_version_id))
+                    select(PipelineEvent).where(
+                        PipelineEvent.message.contains(cv_version_id)
+                    )
                 )
             ).all()
             statuses = {e.status for e in events if e.stage == "convert"}
@@ -261,7 +294,9 @@ async def test_convert_cv_normalises_a_docx_and_extracts_its_style_profile():
             assert reloaded.styleProfile["layoutArchetype"] == "SINGLE_COLUMN"
             events = (
                 await session.scalars(
-                    select(PipelineEvent).where(PipelineEvent.message.contains(cv_version_id))
+                    select(PipelineEvent).where(
+                        PipelineEvent.message.contains(cv_version_id)
+                    )
                 )
             ).all()
             statuses = {e.status for e in events if e.stage == "convert"}
@@ -363,7 +398,9 @@ async def test_convert_cv_normalises_a_pdf_and_extracts_its_style_profile():
             assert reloaded.styleStatus == Cvstylestatus.EXTRACTED
             events = (
                 await session.scalars(
-                    select(PipelineEvent).where(PipelineEvent.message.contains(cv_version_id))
+                    select(PipelineEvent).where(
+                        PipelineEvent.message.contains(cv_version_id)
+                    )
                 )
             ).all()
             statuses = {e.status for e in events if e.stage == "convert"}
@@ -390,7 +427,9 @@ async def test_convert_cv_fails_a_pdf_with_no_extractable_text_without_calling_t
     try:
         async with session_factory() as session:
             with pytest.raises(CVConversionError):
-                await convert_cv(session, cv_version_id, llm_provider=ExplodingLLMProvider())
+                await convert_cv(
+                    session, cv_version_id, llm_provider=ExplodingLLMProvider()
+                )
 
         async with session_factory() as session:
             reloaded = await session.get(CVVersion, cv_version_id)

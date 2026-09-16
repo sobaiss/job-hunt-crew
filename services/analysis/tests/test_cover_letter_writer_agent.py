@@ -27,7 +27,15 @@ class StubLLMProvider(LLMProvider):
         self.model = "stub-model"
         self.last_system: str | None = None
 
-    def generate(self, *, system: str, prompt: str, max_tokens: int | None = None) -> str:
+    def generate(
+        self,
+        *,
+        system: str,
+        prompt: str,
+        max_tokens: int | None = None,
+        response_schema=None,
+        temperature: float | None = None,
+    ) -> str:
         self.calls += 1
         self.last_system = system
         response = self._responses[min(self.calls, len(self._responses)) - 1]
@@ -144,7 +152,9 @@ def test_run_cover_letter_writer_backs_off_between_provider_error_retries(monkey
     assert sleeps == [2, 4]
 
 
-def test_run_cover_letter_writer_raises_after_max_attempts_of_provider_errors(monkeypatch):
+def test_run_cover_letter_writer_raises_after_max_attempts_of_provider_errors(
+    monkeypatch,
+):
     monkeypatch.setattr(cover_letter_writer_agent, "_sleep", lambda seconds: None)
     provider = StubLLMProvider(
         [ConnectionError("boom"), ConnectionError("boom"), ConnectionError("boom")]

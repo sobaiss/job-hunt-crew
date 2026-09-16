@@ -43,7 +43,9 @@ CV_MARKDOWN = "# Jane Doe\n\n## Skills\n\n- Python\n- AWS\n- PostgreSQL\n"
 VALID_COMPARISON_OUTPUT = json.dumps(
     {
         "match_score": 82,
-        "matched_skills": [{"skill": "Python", "evidence": "5+ years Python experience"}],
+        "matched_skills": [
+            {"skill": "Python", "evidence": "5+ years Python experience"}
+        ],
         "missing_skills": [{"skill": "Kubernetes", "importance": "nice_to_have"}],
         "strengths": ["Strong Python background"],
         "weaknesses": ["No Kubernetes experience"],
@@ -69,7 +71,15 @@ class StubLLMProvider(LLMProvider):
         self.calls = 0
         self.model = "stub-model"
 
-    def generate(self, *, system: str, prompt: str, max_tokens: int | None = None) -> str:
+    def generate(
+        self,
+        *,
+        system: str,
+        prompt: str,
+        max_tokens: int | None = None,
+        response_schema=None,
+        temperature: float | None = None,
+    ) -> str:
         self.calls += 1
         return self._responses[min(self.calls, len(self._responses)) - 1]
 
@@ -141,7 +151,9 @@ async def _make_fixture(
         await session.commit()
 
 
-async def _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id):
+async def _cleanup(
+    engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+):
     async with session_factory() as session:
         events = (
             await session.scalars(
@@ -164,7 +176,9 @@ async def _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id
 
 
 @pytest.mark.asyncio
-async def test_run_analysis_pipeline_drives_a_pending_analysis_to_completed(monkeypatch):
+async def test_run_analysis_pipeline_drives_a_pending_analysis_to_completed(
+    monkeypatch,
+):
     import analysis.crew_task as crew_task
 
     monkeypatch.setattr(
@@ -181,7 +195,9 @@ async def test_run_analysis_pipeline_drives_a_pending_analysis_to_completed(monk
         f"test-{uuid.uuid4()}",
         f"test-{uuid.uuid4()}",
     )
-    await _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+    await _make_fixture(
+        session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+    )
     s3 = _s3_client()
     key = analysis_result_key(analysis_id)
 
@@ -203,7 +219,9 @@ async def test_run_analysis_pipeline_drives_a_pending_analysis_to_completed(monk
         assert json.loads(obj["Body"].read())["match_score"] == 82
     finally:
         s3.delete_object(Bucket=S3_BUCKET, Key=key)
-        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+        await _cleanup(
+            engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+        )
 
 
 @pytest.mark.asyncio
@@ -220,7 +238,12 @@ async def test_run_analysis_pipeline_lands_failed_with_message_when_a_step_fails
         f"test-{uuid.uuid4()}",
     )
     await _make_fixture(
-        session_factory, user_id, job_offer_id, cv_version_id, analysis_id, offer_ready=False
+        session_factory,
+        user_id,
+        job_offer_id,
+        cv_version_id,
+        analysis_id,
+        offer_ready=False,
     )
 
     try:
@@ -234,7 +257,9 @@ async def test_run_analysis_pipeline_lands_failed_with_message_when_a_step_fails
             assert reloaded.errorMessage
             assert "rawContentKey" in reloaded.errorMessage
     finally:
-        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+        await _cleanup(
+            engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+        )
 
 
 @pytest.mark.asyncio
@@ -272,7 +297,9 @@ def test_handle_analysis_intake_local_unwraps_records_and_runs_each(monkeypatch)
     assert seen == ["an-aaa", "an-bbb"]
 
 
-def test_handle_analysis_intake_local_swallows_a_pipeline_failure_and_continues(monkeypatch):
+def test_handle_analysis_intake_local_swallows_a_pipeline_failure_and_continues(
+    monkeypatch,
+):
     """A pipeline failure is already persisted as FAILED on the row, so the
     consumer must not let it propagate (and redeliver as a poison message) —
     the remaining records are still processed."""

@@ -36,7 +36,15 @@ class StubLLMProvider(LLMProvider):
         self._responses = list(responses)
         self.calls = 0
 
-    def generate(self, *, system: str, prompt: str) -> str:
+    def generate(
+        self,
+        *,
+        system: str,
+        prompt: str,
+        max_tokens: int | None = None,
+        response_schema=None,
+        temperature: float | None = None,
+    ) -> str:
         self.calls += 1
         return self._responses[min(self.calls, len(self._responses)) - 1]
 
@@ -92,14 +100,20 @@ async def _make_fixture(
         await session.commit()
 
 
-async def _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id):
+async def _cleanup(
+    engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+):
     async with session_factory() as session:
         # PipelineEvent.analysisId (M6-T3) has ON DELETE CASCADE at the DB
         # level, but SQLAlchemy's default relationship handling nulls
         # rather than deletes orphaned children when the parent is removed
         # via the ORM — so delete these explicitly first, same as any other
         # FK'd row, rather than relying on the DB-level cascade.
-        events = (await session.scalars(select(PipelineEvent).where(PipelineEvent.analysisId == analysis_id))).all()
+        events = (
+            await session.scalars(
+                select(PipelineEvent).where(PipelineEvent.analysisId == analysis_id)
+            )
+        ).all()
         for event in events:
             await session.delete(event)
         for model, row_id in (
@@ -153,7 +167,9 @@ async def test_ensure_cv_converted_is_a_noop_when_already_converted(monkeypatch)
             await ensure_cv_converted(session, analysis_id)
         assert calls["n"] == 0
     finally:
-        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+        await _cleanup(
+            engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+        )
 
 
 @pytest.mark.asyncio
@@ -208,7 +224,9 @@ async def test_ensure_cv_converted_runs_conversion_when_not_yet_converted():
             assert reloaded.markdownContent == markdown
     finally:
         s3.delete_object(Bucket=S3_BUCKET, Key=file_key)
-        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+        await _cleanup(
+            engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+        )
 
 
 @pytest.mark.asyncio
@@ -236,7 +254,9 @@ async def test_ensure_offer_extracted_is_a_noop_when_already_ready():
             await ensure_offer_extracted(session, analysis_id, llm_provider=provider)
         assert provider.calls == 0
     finally:
-        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+        await _cleanup(
+            engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+        )
 
 
 @pytest.mark.asyncio
@@ -276,15 +296,23 @@ async def test_mark_analysis_failed_sets_terminal_status_from_plain_cause():
             await mark_analysis_failed(
                 session,
                 analysis_id,
-                {"Error": "CrewTaskError", "Cause": "CVVersion is not CONVERTED with markdownContent"},
+                {
+                    "Error": "CrewTaskError",
+                    "Cause": "CVVersion is not CONVERTED with markdownContent",
+                },
             )
 
         async with session_factory() as session:
             reloaded = await session.get(Analysis, analysis_id)
             assert reloaded.status == Analysisstatus.FAILED
-            assert reloaded.errorMessage == "CVVersion is not CONVERTED with markdownContent"
+            assert (
+                reloaded.errorMessage
+                == "CVVersion is not CONVERTED with markdownContent"
+            )
     finally:
-        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+        await _cleanup(
+            engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+        )
 
 
 @pytest.mark.asyncio
@@ -326,7 +354,9 @@ async def test_mark_analysis_failed_unwraps_json_lambda_error_cause():
             assert reloaded.status == Analysisstatus.FAILED
             assert reloaded.errorMessage == "bounded retries exhausted"
     finally:
-        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+        await _cleanup(
+            engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+        )
 
 
 @pytest.mark.asyncio
@@ -356,14 +386,18 @@ async def test_mark_analysis_failed_does_not_clobber_an_already_failed_analysis(
 
         async with session_factory() as session:
             await mark_analysis_failed(
-                session, analysis_id, {"Error": "States.ALL", "Cause": "generic catch-all cause"}
+                session,
+                analysis_id,
+                {"Error": "States.ALL", "Cause": "generic catch-all cause"},
             )
 
         async with session_factory() as session:
             reloaded = await session.get(Analysis, analysis_id)
             assert reloaded.errorMessage == "original, more specific reason"
     finally:
-        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+        await _cleanup(
+            engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+        )
 
 
 def test_run_comparison_crew_handler_returns_immediately_without_waiting_on_the_crew():

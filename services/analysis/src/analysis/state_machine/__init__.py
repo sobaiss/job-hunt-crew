@@ -53,7 +53,9 @@ def render_definition(
     ASL file's own JSONPaths (`$.analysisId`, `$$.Task.Token`) already use
     `$`, which would collide with Template's `$`-based placeholder syntax.
     """
-    template_text = resources.files(__package__).joinpath("analysis_workflow.asl.json").read_text()
+    template_text = (
+        resources.files(__package__).joinpath("analysis_workflow.asl.json").read_text()
+    )
     rendered = (
         template_text.replace(
             "__ENSURE_CV_CONVERTED_FUNCTION_ARN__",
@@ -66,7 +68,8 @@ def render_definition(
             "__ENSURE_OFFER_EXTRACTED_FUNCTION_ARN__",
             ensure_offer_extracted_arn
             or os.environ.get(
-                "ENSURE_OFFER_EXTRACTED_FUNCTION_ARN", DEFAULT_ENSURE_OFFER_EXTRACTED_ARN
+                "ENSURE_OFFER_EXTRACTED_FUNCTION_ARN",
+                DEFAULT_ENSURE_OFFER_EXTRACTED_ARN,
             ),
         )
         .replace(
@@ -116,7 +119,9 @@ def ensure_state_machine(
     sfn = client or make_sfn_client()
     body = definition or render_definition()
     try:
-        response = sfn.create_state_machine(name=name, definition=body, roleArn=role_arn)
+        response = sfn.create_state_machine(
+            name=name, definition=body, roleArn=role_arn
+        )
         return response["stateMachineArn"]
     except sfn.exceptions.StateMachineAlreadyExists:
         for machine in sfn.list_state_machines()["stateMachines"]:

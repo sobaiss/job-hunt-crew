@@ -39,7 +39,15 @@ class StubLLMProvider(LLMProvider):
     def __init__(self, response=VALID_LLM_OUTPUT):
         self._response = response
 
-    def generate(self, *, system: str, prompt: str) -> str:
+    def generate(
+        self,
+        *,
+        system: str,
+        prompt: str,
+        max_tokens: int | None = None,
+        response_schema=None,
+        temperature: float | None = None,
+    ) -> str:
         return self._response
 
 
@@ -52,6 +60,7 @@ def _s3_client():
         aws_secret_access_key="minioadmin",
         config=Config(s3={"addressing_style": "path"}),
     )
+
 
 LINKEDIN_LISTING_URL = "https://www.linkedin.com/jobs/search?keywords=python"
 
@@ -111,7 +120,9 @@ def _france_travail_site_config() -> SiteConfig:
     )
 
 
-async def _seed_ingestion_job(session_factory, *, mode=Ingestionmode.SITE_SEARCH, site_config_id):
+async def _seed_ingestion_job(
+    session_factory, *, mode=Ingestionmode.SITE_SEARCH, site_config_id
+):
     user_id = f"test-user-{uuid.uuid4()}"
     ingestion_job_id = f"test-job-{uuid.uuid4()}"
     async with session_factory() as session:
@@ -135,7 +146,9 @@ async def _cleanup(session_factory, *, user_id, ingestion_job_id, source_urls=()
     async with session_factory() as session:
         links = (
             await session.scalars(
-                select(IngestionJobOffer).where(IngestionJobOffer.ingestionJobId == ingestion_job_id)
+                select(IngestionJobOffer).where(
+                    IngestionJobOffer.ingestionJobId == ingestion_job_id
+                )
             )
         ).all()
         for link in links:
@@ -143,7 +156,11 @@ async def _cleanup(session_factory, *, user_id, ingestion_job_id, source_urls=()
         await session.commit()
 
         if source_urls:
-            offers = (await session.scalars(select(JobOffer).where(JobOffer.sourceUrl.in_(source_urls)))).all()
+            offers = (
+                await session.scalars(
+                    select(JobOffer).where(JobOffer.sourceUrl.in_(source_urls))
+                )
+            ).all()
             for offer in offers:
                 await session.delete(offer)
 
@@ -153,7 +170,11 @@ async def _cleanup(session_factory, *, user_id, ingestion_job_id, source_urls=()
         # via the ORM — so delete these explicitly first, rather than
         # relying on the DB-level cascade.
         events = (
-            await session.scalars(select(PipelineEvent).where(PipelineEvent.ingestionJobId == ingestion_job_id))
+            await session.scalars(
+                select(PipelineEvent).where(
+                    PipelineEvent.ingestionJobId == ingestion_job_id
+                )
+            )
         ).all()
         for event in events:
             await session.delete(event)
@@ -172,20 +193,30 @@ async def test_run_site_search_ingestion_html_scrape_success_produces_ready_offe
     engine = make_engine()
     session_factory = make_session_factory(engine)
     site_config = _linkedin_site_config()
-    user_id, ingestion_job_id = await _seed_ingestion_job(session_factory, site_config_id=site_config.id)
+    user_id, ingestion_job_id = await _seed_ingestion_job(
+        session_factory, site_config_id=site_config.id
+    )
     source_urls = [f"https://www.linkedin.com/jobs/view/{i}" for i in range(5)]
     s3 = _s3_client()
 
     try:
         with respx.mock:
-            respx.mock.get(LINKEDIN_LISTING_URL).mock(return_value=Response(200, text=LINKEDIN_LISTING_HTML))
+            respx.mock.get(LINKEDIN_LISTING_URL).mock(
+                return_value=Response(200, text=LINKEDIN_LISTING_HTML)
+            )
             for url in source_urls:
-                respx.mock.get(url).mock(return_value=Response(200, text=FIXTURE_OFFER_HTML))
+                respx.mock.get(url).mock(
+                    return_value=Response(200, text=FIXTURE_OFFER_HTML)
+                )
 
             async with session_factory() as session:
                 ingestion_job = await session.get(IngestionJob, ingestion_job_id)
                 result = await run_site_search_ingestion(
-                    session, ingestion_job, site_config, {"keywords": "python"}, llm_provider=StubLLMProvider()
+                    session,
+                    ingestion_job,
+                    site_config,
+                    {"keywords": "python"},
+                    llm_provider=StubLLMProvider(),
                 )
 
         assert result.status == Ingestionjobstatus.COMPLETED
@@ -193,13 +224,22 @@ async def test_run_site_search_ingestion_html_scrape_success_produces_ready_offe
         assert result.errorMessage is None
     finally:
         async with session_factory() as session:
-            offers = (await session.scalars(select(JobOffer).where(JobOffer.sourceUrl.in_(source_urls)))).all()
+            offers = (
+                await session.scalars(
+                    select(JobOffer).where(JobOffer.sourceUrl.in_(source_urls))
+                )
+            ).all()
             for offer in offers:
                 try:
                     s3.delete_object(Bucket=S3_BUCKET, Key=raw_scrape_key(offer.id))
                 except Exception:
                     pass
-        await _cleanup(session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id, source_urls=source_urls)
+        await _cleanup(
+            session_factory,
+            user_id=user_id,
+            ingestion_job_id=ingestion_job_id,
+            source_urls=source_urls,
+        )
         await engine.dispose()
 
 
@@ -208,7 +248,9 @@ async def test_run_site_search_ingestion_html_scrape_listing_fetch_failure_sets_
     engine = make_engine()
     session_factory = make_session_factory(engine)
     site_config = _linkedin_site_config()
-    user_id, ingestion_job_id = await _seed_ingestion_job(session_factory, site_config_id=site_config.id)
+    user_id, ingestion_job_id = await _seed_ingestion_job(
+        session_factory, site_config_id=site_config.id
+    )
 
     try:
         with respx.mock:
@@ -223,7 +265,9 @@ async def test_run_site_search_ingestion_html_scrape_listing_fetch_failure_sets_
         assert result.status == Ingestionjobstatus.FAILED
         assert result.errorMessage
     finally:
-        await _cleanup(session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id)
+        await _cleanup(
+            session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id
+        )
         await engine.dispose()
 
 
@@ -236,11 +280,15 @@ async def test_run_site_search_ingestion_html_scrape_zero_offers_discovered_sets
     engine = make_engine()
     session_factory = make_session_factory(engine)
     site_config = _linkedin_site_config()
-    user_id, ingestion_job_id = await _seed_ingestion_job(session_factory, site_config_id=site_config.id)
+    user_id, ingestion_job_id = await _seed_ingestion_job(
+        session_factory, site_config_id=site_config.id
+    )
 
     try:
         with respx.mock:
-            respx.mock.get(LINKEDIN_LISTING_URL).mock(return_value=Response(200, text=LINKEDIN_BLOCKED_HTML))
+            respx.mock.get(LINKEDIN_LISTING_URL).mock(
+                return_value=Response(200, text=LINKEDIN_BLOCKED_HTML)
+            )
 
             async with session_factory() as session:
                 ingestion_job = await session.get(IngestionJob, ingestion_job_id)
@@ -252,7 +300,9 @@ async def test_run_site_search_ingestion_html_scrape_zero_offers_discovered_sets
         assert result.errorMessage
         assert result.discoveredCount == 0
     finally:
-        await _cleanup(session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id)
+        await _cleanup(
+            session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id
+        )
         await engine.dispose()
 
 
@@ -262,11 +312,15 @@ async def test_run_site_search_ingestion_html_scrape_config_error_sets_failed_wi
     session_factory = make_session_factory(engine)
     site_config = _linkedin_site_config()
     site_config.listItemSelector = None
-    user_id, ingestion_job_id = await _seed_ingestion_job(session_factory, site_config_id=site_config.id)
+    user_id, ingestion_job_id = await _seed_ingestion_job(
+        session_factory, site_config_id=site_config.id
+    )
 
     try:
         with respx.mock:
-            respx.mock.get(LINKEDIN_LISTING_URL).mock(return_value=Response(200, text=LINKEDIN_LISTING_HTML))
+            respx.mock.get(LINKEDIN_LISTING_URL).mock(
+                return_value=Response(200, text=LINKEDIN_LISTING_HTML)
+            )
 
             async with session_factory() as session:
                 ingestion_job = await session.get(IngestionJob, ingestion_job_id)
@@ -277,19 +331,25 @@ async def test_run_site_search_ingestion_html_scrape_config_error_sets_failed_wi
         assert result.status == Ingestionjobstatus.FAILED
         assert result.errorMessage
     finally:
-        await _cleanup(session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id)
+        await _cleanup(
+            session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id
+        )
         await engine.dispose()
 
 
 @pytest.mark.asyncio
-async def test_run_site_search_ingestion_official_api_failure_sets_failed_with_error_message(monkeypatch):
+async def test_run_site_search_ingestion_official_api_failure_sets_failed_with_error_message(
+    monkeypatch,
+):
     monkeypatch.delenv("FRANCE_TRAVAIL_CLIENT_ID", raising=False)
     monkeypatch.delenv("FRANCE_TRAVAIL_CLIENT_SECRET", raising=False)
 
     engine = make_engine()
     session_factory = make_session_factory(engine)
     site_config = _france_travail_site_config()
-    user_id, ingestion_job_id = await _seed_ingestion_job(session_factory, site_config_id=site_config.id)
+    user_id, ingestion_job_id = await _seed_ingestion_job(
+        session_factory, site_config_id=site_config.id
+    )
 
     try:
         async with session_factory() as session:
@@ -301,24 +361,32 @@ async def test_run_site_search_ingestion_official_api_failure_sets_failed_with_e
         assert result.status == Ingestionjobstatus.FAILED
         assert result.errorMessage
     finally:
-        await _cleanup(session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id)
+        await _cleanup(
+            session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id
+        )
         await engine.dispose()
 
 
 @pytest.mark.asyncio
-async def test_run_site_search_ingestion_official_api_success_delegates_to_france_travail(monkeypatch):
+async def test_run_site_search_ingestion_official_api_success_delegates_to_france_travail(
+    monkeypatch,
+):
     monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_ID", "test-client-id")
     monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_SECRET", "test-client-secret")
 
     engine = make_engine()
     session_factory = make_session_factory(engine)
     site_config = _france_travail_site_config()
-    user_id, ingestion_job_id = await _seed_ingestion_job(session_factory, site_config_id=site_config.id)
+    user_id, ingestion_job_id = await _seed_ingestion_job(
+        session_factory, site_config_id=site_config.id
+    )
     source_url = "https://candidat.francetravail.fr/offres/recherche/detail/123ABCD"
 
     try:
         with respx.mock:
-            respx.mock.post(TOKEN_URL).mock(return_value=Response(200, json={"access_token": "fake-token"}))
+            respx.mock.post(TOKEN_URL).mock(
+                return_value=Response(200, json={"access_token": "fake-token"})
+            )
             respx.mock.get(
                 url__startswith="https://api.francetravail.io/partenaire/offresdemploi/v2/offres/search"
             ).mock(
@@ -347,6 +415,9 @@ async def test_run_site_search_ingestion_official_api_success_delegates_to_franc
         assert result.errorMessage is None
     finally:
         await _cleanup(
-            session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id, source_urls=[source_url]
+            session_factory,
+            user_id=user_id,
+            ingestion_job_id=ingestion_job_id,
+            source_urls=[source_url],
         )
         await engine.dispose()

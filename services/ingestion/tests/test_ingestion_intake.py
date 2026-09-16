@@ -39,7 +39,15 @@ VALID_LLM_OUTPUT = json.dumps(
 
 
 class StubLLMProvider(LLMProvider):
-    def generate(self, *, system: str, prompt: str) -> str:
+    def generate(
+        self,
+        *,
+        system: str,
+        prompt: str,
+        max_tokens: int | None = None,
+        response_schema=None,
+        temperature: float | None = None,
+    ) -> str:
         return VALID_LLM_OUTPUT
 
 
@@ -82,7 +90,11 @@ async def _seed_job(session_factory, *, mode, input_url=None, site_config_id=Non
 async def _cleanup(session_factory, *, user_id, ingestion_job_id, source_urls=()):
     s3 = _s3_client()
     async with session_factory() as session:
-        offers = (await session.scalars(select(JobOffer).where(JobOffer.sourceUrl.in_(source_urls)))).all()
+        offers = (
+            await session.scalars(
+                select(JobOffer).where(JobOffer.sourceUrl.in_(source_urls))
+            )
+        ).all()
         for offer in offers:
             try:
                 s3.delete_object(Bucket=S3_BUCKET, Key=raw_scrape_key(offer.id))
@@ -90,7 +102,9 @@ async def _cleanup(session_factory, *, user_id, ingestion_job_id, source_urls=()
                 pass
         links = (
             await session.scalars(
-                select(IngestionJobOffer).where(IngestionJobOffer.ingestionJobId == ingestion_job_id)
+                select(IngestionJobOffer).where(
+                    IngestionJobOffer.ingestionJobId == ingestion_job_id
+                )
             )
         ).all()
         for link in links:
@@ -99,7 +113,11 @@ async def _cleanup(session_factory, *, user_id, ingestion_job_id, source_urls=()
         for offer in offers:
             await session.delete(offer)
         events = (
-            await session.scalars(select(PipelineEvent).where(PipelineEvent.ingestionJobId == ingestion_job_id))
+            await session.scalars(
+                select(PipelineEvent).where(
+                    PipelineEvent.ingestionJobId == ingestion_job_id
+                )
+            )
         ).all()
         for event in events:
             await session.delete(event)
@@ -123,7 +141,11 @@ async def test_dispatch_ingestion_job_single_url_runs_the_pipeline():
 
     try:
         with respx.mock:
-            respx.mock.get(source_url).mock(return_value=Response(200, text="<html><body><h1>Role</h1></body></html>"))
+            respx.mock.get(source_url).mock(
+                return_value=Response(
+                    200, text="<html><body><h1>Role</h1></body></html>"
+                )
+            )
             async with session_factory() as session:
                 result = await dispatch_ingestion_job(
                     session, ingestion_job_id, llm_provider=StubLLMProvider()
@@ -133,7 +155,9 @@ async def test_dispatch_ingestion_job_single_url_runs_the_pipeline():
         assert result.discoveredCount == 1
 
         async with session_factory() as session:
-            offer = await session.scalar(select(JobOffer).where(JobOffer.sourceUrl == source_url))
+            offer = await session.scalar(
+                select(JobOffer).where(JobOffer.sourceUrl == source_url)
+            )
             assert offer.extractionStatus == Jobofferextractionstatus.READY
     finally:
         await _cleanup(
@@ -190,15 +214,22 @@ async def test_dispatch_ingestion_job_single_url_creates_analysis_and_enqueues()
     try:
         with respx.mock:
             respx.mock.get(source_url).mock(
-                return_value=Response(200, text="<html><body><h1>Role</h1></body></html>")
+                return_value=Response(
+                    200, text="<html><body><h1>Role</h1></body></html>"
+                )
             )
             async with session_factory() as session:
                 await dispatch_ingestion_job(
-                    session, ingestion_job_id, llm_provider=StubLLMProvider(), sqs_client=fake_sqs
+                    session,
+                    ingestion_job_id,
+                    llm_provider=StubLLMProvider(),
+                    sqs_client=fake_sqs,
                 )
 
         async with session_factory() as session:
-            offer = await session.scalar(select(JobOffer).where(JobOffer.sourceUrl == source_url))
+            offer = await session.scalar(
+                select(JobOffer).where(JobOffer.sourceUrl == source_url)
+            )
             analyses = (
                 await session.scalars(
                     select(Analysis).where(Analysis.ingestionJobId == ingestion_job_id)
@@ -212,7 +243,9 @@ async def test_dispatch_ingestion_job_single_url_creates_analysis_and_enqueues()
     finally:
         async with session_factory() as session:
             for row in (
-                await session.scalars(select(Analysis).where(Analysis.userId == user_id))
+                await session.scalars(
+                    select(Analysis).where(Analysis.userId == user_id)
+                )
             ).all():
                 await session.delete(row)
             await session.commit()
@@ -255,7 +288,9 @@ async def test_dispatch_ingestion_job_single_url_listing_page_fails_and_creates_
 
     try:
         with respx.mock:
-            respx.mock.get(source_url).mock(return_value=Response(200, text=listing_html))
+            respx.mock.get(source_url).mock(
+                return_value=Response(200, text=listing_html)
+            )
             async with session_factory() as session:
                 result = await dispatch_ingestion_job(
                     session, ingestion_job_id, llm_provider=StubLLMProvider()
@@ -305,7 +340,9 @@ async def test_dispatch_ingestion_job_site_search_without_site_config_raises():
             with pytest.raises(IngestionIntakeError):
                 await dispatch_ingestion_job(session, ingestion_job_id)
     finally:
-        await _cleanup(session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id)
+        await _cleanup(
+            session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id
+        )
         await engine.dispose()
 
 

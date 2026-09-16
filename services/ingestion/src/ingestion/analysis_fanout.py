@@ -143,7 +143,9 @@ async def create_analyses_for_ready_offers(
     already_analysed = set(
         (
             await session.scalars(
-                select(Analysis.jobOfferId).where(Analysis.ingestionJobId == ingestion_job.id)
+                select(Analysis.jobOfferId).where(
+                    Analysis.ingestionJobId == ingestion_job.id
+                )
             )
         ).all()
     )
@@ -178,7 +180,9 @@ async def create_analyses_for_ready_offers(
             ).all()
         )
         result.already_seen_count = len(already_seen_ids)
-        candidate_offer_ids = [oid for oid in pending_offer_ids if oid not in already_seen_ids]
+        candidate_offer_ids = [
+            oid for oid in pending_offer_ids if oid not in already_seen_ids
+        ]
 
         # Per-run ceiling (issue #55): rank the survivors by lexical
         # similarity to the Scout's base CV and only carry forward whatever
@@ -212,7 +216,9 @@ async def create_analyses_for_ready_offers(
 
     # Same rule `POST /v1/analyses` enforces, via the shared helper (issue #33).
     cap = daily_analysis_cap()
-    remaining = max(cap - await analyses_requested_today(session, ingestion_job.userId), 0)
+    remaining = max(
+        cap - await analyses_requested_today(session, ingestion_job.userId), 0
+    )
 
     to_create = pending_offer_ids[:remaining]
     skipped = len(pending_offer_ids) - len(to_create)
@@ -257,7 +263,9 @@ async def create_analyses_for_ready_offers(
     return result
 
 
-async def _roll_up_scout_run_if_any(session: AsyncSession, ingestion_job: IngestionJob) -> None:
+async def _roll_up_scout_run_if_any(
+    session: AsyncSession, ingestion_job: IngestionJob
+) -> None:
     """Recompute the owning `ScoutRun`'s progressive counts when `ingestion_job`
     belongs to a Scout run; a no-op for a manual job (issue #54)."""
     if ingestion_job.scoutRunId:

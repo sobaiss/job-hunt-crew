@@ -26,7 +26,10 @@ from sqlalchemy import select
 
 from ingestion.france_travail import TOKEN_URL
 from ingestion.s3_client import S3_BUCKET, raw_scrape_key
-from ingestion.single_url_pipeline import LISTING_PAGE_ERROR_MESSAGE, run_single_url_ingestion
+from ingestion.single_url_pipeline import (
+    LISTING_PAGE_ERROR_MESSAGE,
+    run_single_url_ingestion,
+)
 
 FT_OFFER_PREFIX = "https://api.francetravail.io/partenaire/offresdemploi/v2/offres/"
 FT_OFFER_RESPONSE = {
@@ -38,7 +41,9 @@ FT_OFFER_RESPONSE = {
     "lieuTravail": {"libelle": "31 - Toulouse"},
     "typeContratLibelle": "Contrat à durée indéterminée",
     "competences": [{"libelle": "Kubernetes"}, {"libelle": "Terraform"}],
-    "origineOffre": {"urlOrigine": "https://candidat.francetravail.fr/offres/recherche/detail/213CTNR"},
+    "origineOffre": {
+        "urlOrigine": "https://candidat.francetravail.fr/offres/recherche/detail/213CTNR"
+    },
 }
 
 FIXTURE_OFFER_HTML = "<html><body><h1>Senior Backend Engineer</h1></body></html>"
@@ -68,7 +73,15 @@ class StubLLMProvider(LLMProvider):
         self._response = response
         self.calls = 0
 
-    def generate(self, *, system: str, prompt: str) -> str:
+    def generate(
+        self,
+        *,
+        system: str,
+        prompt: str,
+        max_tokens: int | None = None,
+        response_schema=None,
+        temperature: float | None = None,
+    ) -> str:
         self.calls += 1
         return self._response
 
@@ -111,7 +124,11 @@ async def _seed_job(session_factory, *, input_url):
 async def _cleanup(session_factory, *, user_id, ingestion_job_id, source_urls=()):
     s3 = _s3_client()
     async with session_factory() as session:
-        offers = (await session.scalars(select(JobOffer).where(JobOffer.sourceUrl.in_(source_urls)))).all()
+        offers = (
+            await session.scalars(
+                select(JobOffer).where(JobOffer.sourceUrl.in_(source_urls))
+            )
+        ).all()
         for offer in offers:
             try:
                 s3.delete_object(Bucket=S3_BUCKET, Key=raw_scrape_key(offer.id))
@@ -120,7 +137,9 @@ async def _cleanup(session_factory, *, user_id, ingestion_job_id, source_urls=()
 
         links = (
             await session.scalars(
-                select(IngestionJobOffer).where(IngestionJobOffer.ingestionJobId == ingestion_job_id)
+                select(IngestionJobOffer).where(
+                    IngestionJobOffer.ingestionJobId == ingestion_job_id
+                )
             )
         ).all()
         for link in links:
@@ -131,7 +150,11 @@ async def _cleanup(session_factory, *, user_id, ingestion_job_id, source_urls=()
             await session.delete(offer)
 
         events = (
-            await session.scalars(select(PipelineEvent).where(PipelineEvent.ingestionJobId == ingestion_job_id))
+            await session.scalars(
+                select(PipelineEvent).where(
+                    PipelineEvent.ingestionJobId == ingestion_job_id
+                )
+            )
         ).all()
         for event in events:
             await session.delete(event)
@@ -154,7 +177,9 @@ async def test_run_single_url_ingestion_fresh_url_scrapes_extracts_and_links_rea
 
     try:
         with respx.mock:
-            respx.mock.get(source_url).mock(return_value=Response(200, text=FIXTURE_OFFER_HTML))
+            respx.mock.get(source_url).mock(
+                return_value=Response(200, text=FIXTURE_OFFER_HTML)
+            )
 
             async with session_factory() as session:
                 ingestion_job = await session.get(IngestionJob, ingestion_job_id)
@@ -168,7 +193,9 @@ async def test_run_single_url_ingestion_fresh_url_scrapes_extracts_and_links_rea
         assert result.errorMessage is None
 
         async with session_factory() as session:
-            offer = await session.scalar(select(JobOffer).where(JobOffer.sourceUrl == source_url))
+            offer = await session.scalar(
+                select(JobOffer).where(JobOffer.sourceUrl == source_url)
+            )
             assert offer.extractionStatus == Jobofferextractionstatus.READY
             assert offer.sourceSite == Joboffersourcesite.OTHER
             links = (
@@ -209,14 +236,20 @@ async def test_run_single_url_ingestion_matches_source_site_from_enabled_site_co
 
     try:
         with respx.mock:
-            respx.mock.get(source_url).mock(return_value=Response(200, text=FIXTURE_OFFER_HTML))
+            respx.mock.get(source_url).mock(
+                return_value=Response(200, text=FIXTURE_OFFER_HTML)
+            )
 
             async with session_factory() as session:
                 ingestion_job = await session.get(IngestionJob, ingestion_job_id)
-                await run_single_url_ingestion(session, ingestion_job, llm_provider=StubLLMProvider())
+                await run_single_url_ingestion(
+                    session, ingestion_job, llm_provider=StubLLMProvider()
+                )
 
         async with session_factory() as session:
-            offer = await session.scalar(select(JobOffer).where(JobOffer.sourceUrl == source_url))
+            offer = await session.scalar(
+                select(JobOffer).where(JobOffer.sourceUrl == source_url)
+            )
             assert offer.sourceSite == Joboffersourcesite.LINKEDIN
     finally:
         await _cleanup(
@@ -255,14 +288,18 @@ async def test_run_single_url_ingestion_reuses_already_ready_offer_without_rescr
             # already-READY offer is not re-scraped.
             async with session_factory() as session:
                 ingestion_job = await session.get(IngestionJob, ingestion_job_id)
-                result = await run_single_url_ingestion(session, ingestion_job, llm_provider=stub)
+                result = await run_single_url_ingestion(
+                    session, ingestion_job, llm_provider=stub
+                )
 
         assert result.status == Ingestionjobstatus.COMPLETED
         assert result.discoveredCount == 1
         assert stub.calls == 0
 
         async with session_factory() as session:
-            offer = await session.scalar(select(JobOffer).where(JobOffer.sourceUrl == source_url))
+            offer = await session.scalar(
+                select(JobOffer).where(JobOffer.sourceUrl == source_url)
+            )
             assert offer.rawContentKey == "raw-scrapes/pre-existing.html"
     finally:
         await _cleanup(
@@ -296,7 +333,9 @@ async def test_run_single_url_ingestion_retries_previously_failed_offer():
 
     try:
         with respx.mock:
-            respx.mock.get(source_url).mock(return_value=Response(200, text=FIXTURE_OFFER_HTML))
+            respx.mock.get(source_url).mock(
+                return_value=Response(200, text=FIXTURE_OFFER_HTML)
+            )
 
             async with session_factory() as session:
                 ingestion_job = await session.get(IngestionJob, ingestion_job_id)
@@ -308,7 +347,9 @@ async def test_run_single_url_ingestion_retries_previously_failed_offer():
         assert result.scrapedCount == 1
 
         async with session_factory() as session:
-            offer = await session.scalar(select(JobOffer).where(JobOffer.sourceUrl == source_url))
+            offer = await session.scalar(
+                select(JobOffer).where(JobOffer.sourceUrl == source_url)
+            )
             assert offer.extractionStatus == Jobofferextractionstatus.READY
             assert offer.errorMessage is None
     finally:
@@ -335,18 +376,24 @@ async def test_run_single_url_ingestion_detects_listing_page_and_fails_job():
 
     try:
         with respx.mock:
-            respx.mock.get(source_url).mock(return_value=Response(200, text=FIXTURE_LISTING_HTML))
+            respx.mock.get(source_url).mock(
+                return_value=Response(200, text=FIXTURE_LISTING_HTML)
+            )
 
             async with session_factory() as session:
                 ingestion_job = await session.get(IngestionJob, ingestion_job_id)
-                result = await run_single_url_ingestion(session, ingestion_job, llm_provider=stub)
+                result = await run_single_url_ingestion(
+                    session, ingestion_job, llm_provider=stub
+                )
 
         assert result.status == Ingestionjobstatus.FAILED
         assert result.errorMessage == LISTING_PAGE_ERROR_MESSAGE
         assert stub.calls == 0
 
         async with session_factory() as session:
-            offer = await session.scalar(select(JobOffer).where(JobOffer.sourceUrl == source_url))
+            offer = await session.scalar(
+                select(JobOffer).where(JobOffer.sourceUrl == source_url)
+            )
             assert offer.extractionStatus == Jobofferextractionstatus.FAILED
     finally:
         await _cleanup(
@@ -392,14 +439,18 @@ async def test_run_single_url_ingestion_scrape_failure_marks_job_failed():
 async def _require_france_travail_site_config(session_factory):
     async with session_factory() as session:
         seeded = await session.scalar(
-            select(SiteConfig).where(SiteConfig.siteKey == Siteconfigsitekey.FRANCE_TRAVAIL)
+            select(SiteConfig).where(
+                SiteConfig.siteKey == Siteconfigsitekey.FRANCE_TRAVAIL
+            )
         )
     if seeded is None or not seeded.enabled:
         pytest.skip("France Travail SiteConfig not seeded in this database")
 
 
 @pytest.mark.asyncio
-async def test_run_single_url_ingestion_france_travail_url_fetches_via_api_without_scraping(monkeypatch):
+async def test_run_single_url_ingestion_france_travail_url_fetches_via_api_without_scraping(
+    monkeypatch,
+):
     """A SINGLE_URL job whose inputUrl resolves to France Travail (an
     OFFICIAL_API site) is fetched straight from the API into structured data:
     JobOffer goes to READY with no HTML scrape (no S3 rawContentKey) and no
@@ -419,13 +470,19 @@ async def test_run_single_url_ingestion_france_travail_url_fetches_via_api_witho
     try:
         with respx.mock:
             respx.mock.post(TOKEN_URL).mock(
-                return_value=Response(200, json={"access_token": "fake-token", "expires_in": 1499})
+                return_value=Response(
+                    200, json={"access_token": "fake-token", "expires_in": 1499}
+                )
             )
-            respx.mock.get(source_url).mock(return_value=Response(200, json=FT_OFFER_RESPONSE))
+            respx.mock.get(source_url).mock(
+                return_value=Response(200, json=FT_OFFER_RESPONSE)
+            )
 
             async with session_factory() as session:
                 ingestion_job = await session.get(IngestionJob, ingestion_job_id)
-                result = await run_single_url_ingestion(session, ingestion_job, llm_provider=stub)
+                result = await run_single_url_ingestion(
+                    session, ingestion_job, llm_provider=stub
+                )
 
         assert result.status == Ingestionjobstatus.COMPLETED
         assert result.discoveredCount == 1
@@ -434,7 +491,9 @@ async def test_run_single_url_ingestion_france_travail_url_fetches_via_api_witho
         assert stub.calls == 0
 
         async with session_factory() as session:
-            offer = await session.scalar(select(JobOffer).where(JobOffer.sourceUrl == source_url))
+            offer = await session.scalar(
+                select(JobOffer).where(JobOffer.sourceUrl == source_url)
+            )
             assert offer.extractionStatus == Jobofferextractionstatus.READY
             assert offer.sourceSite == Joboffersourcesite.FRANCE_TRAVAIL
             assert offer.rawContentKey is None
@@ -451,7 +510,9 @@ async def test_run_single_url_ingestion_france_travail_url_fetches_via_api_witho
 
 
 @pytest.mark.asyncio
-async def test_run_single_url_ingestion_france_travail_api_401_marks_job_failed(monkeypatch):
+async def test_run_single_url_ingestion_france_travail_api_401_marks_job_failed(
+    monkeypatch,
+):
     """The originally-reported failure: a France Travail offer URL whose API
     fetch 401s must land the job FAILED with an errorMessage and the offer
     FAILED — not raise, and not fall through to an unauthenticated scrape."""
@@ -469,20 +530,26 @@ async def test_run_single_url_ingestion_france_travail_api_401_marks_job_failed(
     try:
         with respx.mock:
             respx.mock.post(TOKEN_URL).mock(
-                return_value=Response(200, json={"access_token": "fake-token", "expires_in": 1499})
+                return_value=Response(
+                    200, json={"access_token": "fake-token", "expires_in": 1499}
+                )
             )
             respx.mock.get(source_url).mock(return_value=Response(401))
 
             async with session_factory() as session:
                 ingestion_job = await session.get(IngestionJob, ingestion_job_id)
-                result = await run_single_url_ingestion(session, ingestion_job, llm_provider=StubLLMProvider())
+                result = await run_single_url_ingestion(
+                    session, ingestion_job, llm_provider=StubLLMProvider()
+                )
 
         assert result.status == Ingestionjobstatus.FAILED
         assert result.errorMessage
         assert result.failedCount == 1
 
         async with session_factory() as session:
-            offer = await session.scalar(select(JobOffer).where(JobOffer.sourceUrl == source_url))
+            offer = await session.scalar(
+                select(JobOffer).where(JobOffer.sourceUrl == source_url)
+            )
             assert offer.extractionStatus == Jobofferextractionstatus.FAILED
             assert offer.errorMessage
     finally:

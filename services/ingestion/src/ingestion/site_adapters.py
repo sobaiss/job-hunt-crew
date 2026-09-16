@@ -8,7 +8,9 @@ class SiteAdapterConfigError(Exception):
     """Raised when a SiteConfig row lacks the selectors an HTML_SCRAPE adapter requires."""
 
 
-def extract_offer_urls_via_site_config(html: str, page_url: str, site_config: SiteConfig) -> list[str]:
+def extract_offer_urls_via_site_config(
+    html: str, page_url: str, site_config: SiteConfig
+) -> list[str]:
     """PRD Section 8.4 step 2 / 8.5 step 4: listing-page offer-URL extraction
     "via SiteConfig selectors if domain matches" — the accurate, per-site
     counterpart to listing.py's `extract_offer_urls` generic "repeated card"

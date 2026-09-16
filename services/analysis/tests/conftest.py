@@ -1,6 +1,9 @@
 import os
 
-os.environ.setdefault("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/job_hunt_crew?schema=public")
+os.environ.setdefault(
+    "DATABASE_URL",
+    "postgresql://postgres:postgres@localhost:5432/job_hunt_crew?schema=public",
+)
 os.environ.setdefault("S3_ENDPOINT", "http://localhost:9000")
 os.environ.setdefault("S3_REGION", "us-east-1")
 os.environ.setdefault("S3_BUCKET", "job-hunt-crew")

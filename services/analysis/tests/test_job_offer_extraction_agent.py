@@ -6,7 +6,12 @@ from pathlib import Path
 import boto3
 import pytest
 from botocore.client import Config
-from py_db.models import JobOffer, Jobofferextractionstatus, Joboffersourcesite, PipelineEvent
+from py_db.models import (
+    JobOffer,
+    Jobofferextractionstatus,
+    Joboffersourcesite,
+    PipelineEvent,
+)
 from py_db.session import make_engine, make_session_factory
 from sqlalchemy import select
 
@@ -28,12 +33,15 @@ async def _delete_pipeline_events(session_factory, job_offer_id: str) -> None:
     async with session_factory() as session:
         events = (
             await session.scalars(
-                select(PipelineEvent).where(PipelineEvent.message.contains(job_offer_id))
+                select(PipelineEvent).where(
+                    PipelineEvent.message.contains(job_offer_id)
+                )
             )
         ).all()
         for event in events:
             await session.delete(event)
         await session.commit()
+
 
 FIXTURE_HTML = "<html><body><h1>Senior Backend Engineer</h1><p>5 years Python required.</p></body></html>"
 VALID_LLM_OUTPUT = json.dumps(
@@ -79,7 +87,15 @@ class StubLLMProvider(LLMProvider):
         self._responses = list(responses)
         self.calls = 0
 
-    def generate(self, *, system: str, prompt: str) -> str:
+    def generate(
+        self,
+        *,
+        system: str,
+        prompt: str,
+        max_tokens: int | None = None,
+        response_schema=None,
+        temperature: float | None = None,
+    ) -> str:
         self.calls += 1
         return self._responses[min(self.calls, len(self._responses)) - 1]
 
@@ -119,17 +135,27 @@ async def test_extract_job_offer_structures_content_and_sets_ready():
     job_offer_id = f"test-{uuid.uuid4()}"
     raw_content_key = f"raw-scrapes/{job_offer_id}.html"
     s3 = _s3_client()
-    s3.put_object(Bucket=S3_BUCKET, Key=raw_content_key, Body=FIXTURE_HTML.encode("utf-8"), ContentType="text/html")
+    s3.put_object(
+        Bucket=S3_BUCKET,
+        Key=raw_content_key,
+        Body=FIXTURE_HTML.encode("utf-8"),
+        ContentType="text/html",
+    )
 
     await _make_scraped_job_offer(session_factory, job_offer_id, raw_content_key)
     provider = StubLLMProvider([VALID_LLM_OUTPUT])
 
     try:
         async with session_factory() as session:
-            job_offer = await extract_job_offer(session, job_offer_id, llm_provider=provider)
+            job_offer = await extract_job_offer(
+                session, job_offer_id, llm_provider=provider
+            )
             assert job_offer.extractionStatus == Jobofferextractionstatus.READY
             assert job_offer.structuredData["description"]
-            assert job_offer.structuredData["requirements"] == ["5+ years Python", "AWS experience"]
+            assert job_offer.structuredData["requirements"] == [
+                "5+ years Python",
+                "AWS experience",
+            ]
             assert job_offer.title == "Senior Backend Engineer"
             assert job_offer.company == "Acme Corp"
             assert job_offer.location == "Paris, France"
@@ -160,7 +186,12 @@ async def test_extract_job_offer_marks_failed_after_bounded_retries_on_malformed
     job_offer_id = f"test-{uuid.uuid4()}"
     raw_content_key = f"raw-scrapes/{job_offer_id}.html"
     s3 = _s3_client()
-    s3.put_object(Bucket=S3_BUCKET, Key=raw_content_key, Body=FIXTURE_HTML.encode("utf-8"), ContentType="text/html")
+    s3.put_object(
+        Bucket=S3_BUCKET,
+        Key=raw_content_key,
+        Body=FIXTURE_HTML.encode("utf-8"),
+        ContentType="text/html",
+    )
 
     await _make_scraped_job_offer(session_factory, job_offer_id, raw_content_key)
     provider = StubLLMProvider(["not valid json"])
@@ -195,14 +226,21 @@ async def test_extract_job_offer_succeeds_on_retry_after_one_malformed_attempt()
     job_offer_id = f"test-{uuid.uuid4()}"
     raw_content_key = f"raw-scrapes/{job_offer_id}.html"
     s3 = _s3_client()
-    s3.put_object(Bucket=S3_BUCKET, Key=raw_content_key, Body=FIXTURE_HTML.encode("utf-8"), ContentType="text/html")
+    s3.put_object(
+        Bucket=S3_BUCKET,
+        Key=raw_content_key,
+        Body=FIXTURE_HTML.encode("utf-8"),
+        ContentType="text/html",
+    )
 
     await _make_scraped_job_offer(session_factory, job_offer_id, raw_content_key)
     provider = StubLLMProvider(["not valid json", VALID_LLM_OUTPUT])
 
     try:
         async with session_factory() as session:
-            job_offer = await extract_job_offer(session, job_offer_id, llm_provider=provider)
+            job_offer = await extract_job_offer(
+                session, job_offer_id, llm_provider=provider
+            )
             assert job_offer.extractionStatus == Jobofferextractionstatus.READY
         assert provider.calls == 2
     finally:
@@ -223,14 +261,21 @@ async def test_extract_job_offer_reads_fields_from_json_ld_without_calling_llm()
     job_offer_id = f"test-{uuid.uuid4()}"
     raw_content_key = f"raw-scrapes/{job_offer_id}.html"
     s3 = _s3_client()
-    s3.put_object(Bucket=S3_BUCKET, Key=raw_content_key, Body=JSON_LD_HTML.encode("utf-8"), ContentType="text/html")
+    s3.put_object(
+        Bucket=S3_BUCKET,
+        Key=raw_content_key,
+        Body=JSON_LD_HTML.encode("utf-8"),
+        ContentType="text/html",
+    )
 
     await _make_scraped_job_offer(session_factory, job_offer_id, raw_content_key)
     provider = StubLLMProvider([VALID_LLM_OUTPUT])
 
     try:
         async with session_factory() as session:
-            job_offer = await extract_job_offer(session, job_offer_id, llm_provider=provider)
+            job_offer = await extract_job_offer(
+                session, job_offer_id, llm_provider=provider
+            )
             assert job_offer.extractionStatus == Jobofferextractionstatus.READY
             assert job_offer.title == "Staff Platform Engineer"
             assert job_offer.company == "Globex"
@@ -266,14 +311,21 @@ async def test_extract_job_offer_finds_json_ld_beyond_old_truncation_cutoff():
     html = f"<html><head>{padding}</head><body>{JSON_LD_HTML}</body></html>"
     assert len(html) > 20000
     s3 = _s3_client()
-    s3.put_object(Bucket=S3_BUCKET, Key=raw_content_key, Body=html.encode("utf-8"), ContentType="text/html")
+    s3.put_object(
+        Bucket=S3_BUCKET,
+        Key=raw_content_key,
+        Body=html.encode("utf-8"),
+        ContentType="text/html",
+    )
 
     await _make_scraped_job_offer(session_factory, job_offer_id, raw_content_key)
     provider = StubLLMProvider([VALID_LLM_OUTPUT])
 
     try:
         async with session_factory() as session:
-            job_offer = await extract_job_offer(session, job_offer_id, llm_provider=provider)
+            job_offer = await extract_job_offer(
+                session, job_offer_id, llm_provider=provider
+            )
             assert job_offer.extractionStatus == Jobofferextractionstatus.READY
             assert job_offer.title == "Staff Platform Engineer"
         assert provider.calls == 0
@@ -295,7 +347,12 @@ async def test_extract_job_offer_marks_failed_when_no_tier_resolves_a_title():
     job_offer_id = f"test-{uuid.uuid4()}"
     raw_content_key = f"raw-scrapes/{job_offer_id}.html"
     s3 = _s3_client()
-    s3.put_object(Bucket=S3_BUCKET, Key=raw_content_key, Body=FIXTURE_HTML.encode("utf-8"), ContentType="text/html")
+    s3.put_object(
+        Bucket=S3_BUCKET,
+        Key=raw_content_key,
+        Body=FIXTURE_HTML.encode("utf-8"),
+        ContentType="text/html",
+    )
 
     await _make_scraped_job_offer(session_factory, job_offer_id, raw_content_key)
     no_title_output = json.dumps(
@@ -341,8 +398,12 @@ async def test_extract_job_offer_marks_failed_when_no_tier_resolves_a_title():
 # fixtured below. Closing Indeed/Glassdoor out still needs a manual capture
 # step from a real logged-in/JS-rendered browser session (see #118's
 # "Blocked by" notes).
-HELLOWORK_SAMPLE_HTML = (FIXTURES_DIR / "hellowork_sample_offer.html").read_text(encoding="utf-8")
-LINKEDIN_SAMPLE_HTML = (FIXTURES_DIR / "linkedin_sample_offer.html").read_text(encoding="utf-8")
+HELLOWORK_SAMPLE_HTML = (FIXTURES_DIR / "hellowork_sample_offer.html").read_text(
+    encoding="utf-8"
+)
+LINKEDIN_SAMPLE_HTML = (FIXTURES_DIR / "linkedin_sample_offer.html").read_text(
+    encoding="utf-8"
+)
 WTTJ_SAMPLE_HTML = (FIXTURES_DIR / "wttj_sample_offer.html").read_text(encoding="utf-8")
 
 # LinkedIn's guest job page (unauthenticated, as scraped) carries no JobPosting
@@ -381,13 +442,18 @@ async def test_extract_job_offer_hellowork_regression_fixture():
     )
 
     await _make_scraped_job_offer(
-        session_factory, job_offer_id, raw_content_key, source_site=Joboffersourcesite.HELLOWORK
+        session_factory,
+        job_offer_id,
+        raw_content_key,
+        source_site=Joboffersourcesite.HELLOWORK,
     )
     provider = StubLLMProvider([VALID_LLM_OUTPUT])
 
     try:
         async with session_factory() as session:
-            job_offer = await extract_job_offer(session, job_offer_id, llm_provider=provider)
+            job_offer = await extract_job_offer(
+                session, job_offer_id, llm_provider=provider
+            )
             assert job_offer.extractionStatus == Jobofferextractionstatus.READY
             assert job_offer.title == "Développeur - Développeuse PL-SQL H/F"
             assert job_offer.company == "Proxiad"
@@ -421,13 +487,18 @@ async def test_extract_job_offer_linkedin_regression_fixture():
     )
 
     await _make_scraped_job_offer(
-        session_factory, job_offer_id, raw_content_key, source_site=Joboffersourcesite.LINKEDIN
+        session_factory,
+        job_offer_id,
+        raw_content_key,
+        source_site=Joboffersourcesite.LINKEDIN,
     )
     provider = StubLLMProvider([LINKEDIN_LLM_OUTPUT])
 
     try:
         async with session_factory() as session:
-            job_offer = await extract_job_offer(session, job_offer_id, llm_provider=provider)
+            job_offer = await extract_job_offer(
+                session, job_offer_id, llm_provider=provider
+            )
             assert job_offer.extractionStatus == Jobofferextractionstatus.READY
             assert job_offer.title == "Senior Backend Developer"
             assert job_offer.company == "papernest"
@@ -461,15 +532,23 @@ async def test_extract_job_offer_wttj_regression_fixture():
     )
 
     await _make_scraped_job_offer(
-        session_factory, job_offer_id, raw_content_key, source_site=Joboffersourcesite.WTTJ
+        session_factory,
+        job_offer_id,
+        raw_content_key,
+        source_site=Joboffersourcesite.WTTJ,
     )
     provider = StubLLMProvider([VALID_LLM_OUTPUT])
 
     try:
         async with session_factory() as session:
-            job_offer = await extract_job_offer(session, job_offer_id, llm_provider=provider)
+            job_offer = await extract_job_offer(
+                session, job_offer_id, llm_provider=provider
+            )
             assert job_offer.extractionStatus == Jobofferextractionstatus.READY
-            assert job_offer.title == "Développeur Full Stack .NET / Angular / IAAugmenté- H/F"
+            assert (
+                job_offer.title
+                == "Développeur Full Stack .NET / Angular / IAAugmenté- H/F"
+            )
             assert job_offer.company == "Groupe TF1"
             assert job_offer.location == (
                 "Boulogne-Billancourt, Ile-de-France, France, 92100, "

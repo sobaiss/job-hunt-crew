@@ -95,9 +95,13 @@ async def _match_site_config(session: AsyncSession, url: str) -> SiteConfig | No
     if not target:
         return None
 
-    configs = (await session.scalars(select(SiteConfig).where(SiteConfig.enabled.is_(True)))).all()
+    configs = (
+        await session.scalars(select(SiteConfig).where(SiteConfig.enabled.is_(True)))
+    ).all()
     for config in configs:
-        if _host_matches(target, config.baseUrl) or _host_matches(target, config.apiBaseUrl):
+        if _host_matches(target, config.baseUrl) or _host_matches(
+            target, config.apiBaseUrl
+        ):
             return config
     return None
 
@@ -108,7 +112,9 @@ def _source_site_for(site_config: SiteConfig | None) -> Joboffersourcesite:
     return _SITE_KEY_TO_SOURCE_SITE.get(site_config.siteKey, Joboffersourcesite.OTHER)
 
 
-async def _fail(session: AsyncSession, ingestion_job: IngestionJob, message: str) -> IngestionJob:
+async def _fail(
+    session: AsyncSession, ingestion_job: IngestionJob, message: str
+) -> IngestionJob:
     ingestion_job.status = Ingestionjobstatus.FAILED
     ingestion_job.errorMessage = message
     ingestion_job.updatedAt = _now()
@@ -146,7 +152,9 @@ async def run_single_url_ingestion(
     """
     url = (ingestion_job.inputUrl or "").strip()
     if not url:
-        return await _fail(session, ingestion_job, "SINGLE_URL ingestion job has no inputUrl")
+        return await _fail(
+            session, ingestion_job, "SINGLE_URL ingestion job has no inputUrl"
+        )
 
     site_config = await _match_site_config(session, url)
 
@@ -194,7 +202,10 @@ async def run_single_url_ingestion(
 
     # OFFICIAL_API site (France Travail): the API returns structured data, so
     # fetch the offer directly and skip scrape + LLM extraction entirely.
-    if site_config is not None and site_config.integrationType == Siteconfigintegrationtype.OFFICIAL_API:
+    if (
+        site_config is not None
+        and site_config.integrationType == Siteconfigintegrationtype.OFFICIAL_API
+    ):
         offer_id = extract_offer_id(site_config, url)
         if not offer_id:
             job_offer.extractionStatus = Jobofferextractionstatus.FAILED
@@ -208,7 +219,12 @@ async def run_single_url_ingestion(
 
         try:
             await ingest_france_travail_single_offer(
-                session, ingestion_job, site_config, job_offer, offer_id, http_client=http_client
+                session,
+                ingestion_job,
+                site_config,
+                job_offer,
+                offer_id,
+                http_client=http_client,
             )
         except FranceTravailApiError:
             # The offer is already FAILED + errorMessage'd by the call above;
@@ -220,14 +236,19 @@ async def run_single_url_ingestion(
     # HTML_SCRAPE site (or no matching SiteConfig): Mode 1 scrape + extraction.
     try:
         await scrape_job_offer(
-            session, job_offer.id, http_client=http_client, ingestion_job_id=ingestion_job.id
+            session,
+            job_offer.id,
+            http_client=http_client,
+            ingestion_job_id=ingestion_job.id,
         )
     except ScrapeError:
         await update_ingestion_job_aggregate(session, ingestion_job.id)
         return await session.get(IngestionJob, ingestion_job.id)
 
     job_offer = await session.get(JobOffer, job_offer.id)
-    if looks_like_listing(_read_scraped_html(job_offer.rawContentKey), job_offer.sourceUrl):
+    if looks_like_listing(
+        _read_scraped_html(job_offer.rawContentKey), job_offer.sourceUrl
+    ):
         job_offer.extractionStatus = Jobofferextractionstatus.FAILED
         job_offer.errorMessage = LISTING_PAGE_ERROR_MESSAGE
         job_offer.updatedAt = _now()
@@ -237,7 +258,10 @@ async def run_single_url_ingestion(
 
     try:
         await extract_job_offer(
-            session, job_offer.id, llm_provider=llm_provider, ingestion_job_id=ingestion_job.id
+            session,
+            job_offer.id,
+            llm_provider=llm_provider,
+            ingestion_job_id=ingestion_job.id,
         )
     except ExtractionError:
         pass

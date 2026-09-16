@@ -56,7 +56,8 @@ async def repair_missing_title_offers(
             await extract_fn(session, offer.id)
         except ExtractionError:
             logger.warning(
-                "repair_missing_title_offers.skip", extra={"fields": {"job_offer_id": offer.id}}
+                "repair_missing_title_offers.skip",
+                extra={"fields": {"job_offer_id": offer.id}},
             )
             continue
         repaired.append(offer.id)
@@ -71,7 +72,12 @@ async def _main() -> None:
             repaired_ids = await repair_missing_title_offers(session)
         logger.info(
             "repair_missing_title_offers.done",
-            extra={"fields": {"repaired_count": len(repaired_ids), "repaired_ids": repaired_ids}},
+            extra={
+                "fields": {
+                    "repaired_count": len(repaired_ids),
+                    "repaired_ids": repaired_ids,
+                }
+            },
         )
     finally:
         await engine.dispose()

@@ -49,7 +49,10 @@ FIXTURE_SEARCH_RESPONSE = {
             "experienceLibelle": "3 ans",
             "salaire": {"libelle": "Selon profil"},
             "competences": [{"libelle": "Python"}, {"libelle": "SQL"}],
-            "origineOffre": {"origine": "1", "urlOrigine": "https://candidat.francetravail.fr/offres/recherche/detail/123ABCD"},
+            "origineOffre": {
+                "origine": "1",
+                "urlOrigine": "https://candidat.francetravail.fr/offres/recherche/detail/123ABCD",
+            },
         },
         {
             "id": "456EFGH",
@@ -99,7 +102,9 @@ def _now():
 
 def _mock_token(respx_mock):
     respx_mock.post(TOKEN_URL).mock(
-        return_value=Response(200, json={"access_token": "fake-token", "expires_in": 1499})
+        return_value=Response(
+            200, json={"access_token": "fake-token", "expires_in": 1499}
+        )
     )
 
 
@@ -111,18 +116,22 @@ async def test_search_offers_returns_resultats_given_valid_filters(monkeypatch):
 
     with respx.mock:
         _mock_token(respx.mock)
-        respx.mock.get(url__startswith="https://api.francetravail.io/partenaire/offresdemploi/v2/offres/search").mock(
-            return_value=Response(200, json=FIXTURE_SEARCH_RESPONSE)
-        )
+        respx.mock.get(
+            url__startswith="https://api.francetravail.io/partenaire/offresdemploi/v2/offres/search"
+        ).mock(return_value=Response(200, json=FIXTURE_SEARCH_RESPONSE))
 
-        offers = await search_offers(site_config, {"keywords": "python", "location": "Paris"})
+        offers = await search_offers(
+            site_config, {"keywords": "python", "location": "Paris"}
+        )
 
     assert len(offers) == 2
     assert offers[0]["intitule"] == "Ingénieur logiciel backend"
 
 
 @pytest.mark.asyncio
-async def test_get_access_token_falls_back_to_default_scope_when_env_var_is_empty(monkeypatch):
+async def test_get_access_token_falls_back_to_default_scope_when_env_var_is_empty(
+    monkeypatch,
+):
     """Regression: docker-compose passes `FRANCE_TRAVAIL_SCOPE` through as
     `${VAR:-}`, so the var is *present but empty* in the worker. That must
     still send DEFAULT_SCOPE — an empty `scope=` makes the token endpoint 400.
@@ -136,7 +145,9 @@ async def test_get_access_token_falls_back_to_default_scope_when_env_var_is_empt
 
     with respx.mock:
         token_route = respx.mock.post(TOKEN_URL).mock(
-            return_value=Response(200, json={"access_token": "fake-token", "expires_in": 1499})
+            return_value=Response(
+                200, json={"access_token": "fake-token", "expires_in": 1499}
+            )
         )
         respx.mock.get(
             url__startswith="https://api.francetravail.io/partenaire/offresdemploi/v2/offres/search"
@@ -149,7 +160,9 @@ async def test_get_access_token_falls_back_to_default_scope_when_env_var_is_empt
 
 
 @pytest.mark.asyncio
-async def test_search_offers_translates_posted_within_token_to_creation_date_window(monkeypatch):
+async def test_search_offers_translates_posted_within_token_to_creation_date_window(
+    monkeypatch,
+):
     """Regression: France Travail returns 400 for `minCreationDate=24h` -- the
     relative `postedWithin` token must be resolved to an absolute ISO-8601 UTC
     instant ("2022-10-23T08:15:42Z") and paired with `maxCreationDate`.
@@ -164,7 +177,8 @@ async def test_search_offers_translates_posted_within_token_to_creation_date_win
         ).mock(return_value=Response(200, json=FIXTURE_SEARCH_RESPONSE))
 
         await search_offers(
-            _france_travail_site_config(), {"keywords": "symfony", "postedWithin": "24h"}
+            _france_travail_site_config(),
+            {"keywords": "symfony", "postedWithin": "24h"},
         )
 
     sent = route.calls.last.request.url
@@ -191,7 +205,8 @@ async def test_search_offers_omits_creation_date_for_posted_within_any(monkeypat
         ).mock(return_value=Response(200, json=FIXTURE_SEARCH_RESPONSE))
 
         await search_offers(
-            _france_travail_site_config(), {"keywords": "symfony", "postedWithin": "any"}
+            _france_travail_site_config(),
+            {"keywords": "symfony", "postedWithin": "any"},
         )
 
     params = dict(route.calls.last.request.url.params)
@@ -215,14 +230,18 @@ async def test_search_offers_raises_on_token_failure(monkeypatch):
     monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_SECRET", "wrong-secret")
 
     with respx.mock:
-        respx.mock.post(TOKEN_URL).mock(return_value=Response(401, json={"error": "invalid_client"}))
+        respx.mock.post(TOKEN_URL).mock(
+            return_value=Response(401, json={"error": "invalid_client"})
+        )
 
         with pytest.raises(FranceTravailApiError):
             await search_offers(_france_travail_site_config(), {"keywords": "python"})
 
 
 @pytest.mark.asyncio
-async def test_ingest_france_travail_offers_creates_ready_job_offers_end_to_end(monkeypatch):
+async def test_ingest_france_travail_offers_creates_ready_job_offers_end_to_end(
+    monkeypatch,
+):
     monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_ID", "test-client-id")
     monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_SECRET", "test-client-secret")
 
@@ -257,18 +276,28 @@ async def test_ingest_france_travail_offers_creates_ready_job_offers_end_to_end(
             async with session_factory() as session:
                 ingestion_job = await session.get(IngestionJob, ingestion_job_id)
                 job_offers = await ingest_france_travail_offers(
-                    session, ingestion_job, site_config, {"keywords": "python", "location": "Paris"}
+                    session,
+                    ingestion_job,
+                    site_config,
+                    {"keywords": "python", "location": "Paris"},
                 )
 
         # >=1 offer returned end-to-end, per this task's literal verify wording.
         assert len(job_offers) == 2
-        assert all(offer.extractionStatus == Jobofferextractionstatus.READY for offer in job_offers)
-        assert all(offer.sourceSite == Joboffersourcesite.FRANCE_TRAVAIL for offer in job_offers)
+        assert all(
+            offer.extractionStatus == Jobofferextractionstatus.READY
+            for offer in job_offers
+        )
+        assert all(
+            offer.sourceSite == Joboffersourcesite.FRANCE_TRAVAIL
+            for offer in job_offers
+        )
 
         async with session_factory() as session:
             offer1 = await session.scalar(
                 select(JobOffer).where(
-                    JobOffer.sourceUrl == "https://candidat.francetravail.fr/offres/recherche/detail/123ABCD"
+                    JobOffer.sourceUrl
+                    == "https://candidat.francetravail.fr/offres/recherche/detail/123ABCD"
                 )
             )
             assert offer1 is not None
@@ -278,14 +307,19 @@ async def test_ingest_france_travail_offers_creates_ready_job_offers_end_to_end(
 
             offer2 = await session.scalar(
                 select(JobOffer).where(
-                    JobOffer.sourceUrl == "https://candidat.francetravail.fr/offres/recherche/detail/456EFGH"
+                    JobOffer.sourceUrl
+                    == "https://candidat.francetravail.fr/offres/recherche/detail/456EFGH"
                 )
             )
-            assert offer2 is not None, "offer without origineOffre.urlOrigine should fall back to the detail URL"
+            assert offer2 is not None, (
+                "offer without origineOffre.urlOrigine should fall back to the detail URL"
+            )
 
             links = (
                 await session.scalars(
-                    select(IngestionJobOffer).where(IngestionJobOffer.ingestionJobId == ingestion_job_id)
+                    select(IngestionJobOffer).where(
+                        IngestionJobOffer.ingestionJobId == ingestion_job_id
+                    )
                 )
             ).all()
             assert len(links) == 2
@@ -299,7 +333,9 @@ async def test_ingest_france_travail_offers_creates_ready_job_offers_end_to_end(
         async with session_factory() as session:
             links = (
                 await session.scalars(
-                    select(IngestionJobOffer).where(IngestionJobOffer.ingestionJobId == ingestion_job_id)
+                    select(IngestionJobOffer).where(
+                        IngestionJobOffer.ingestionJobId == ingestion_job_id
+                    )
                 )
             ).all()
             for link in links:
@@ -332,7 +368,9 @@ async def test_ingest_france_travail_offers_creates_ready_job_offers_end_to_end(
 
 
 @pytest.mark.asyncio
-async def test_ingest_france_travail_offers_marks_ingestion_job_failed_on_api_error(monkeypatch):
+async def test_ingest_france_travail_offers_marks_ingestion_job_failed_on_api_error(
+    monkeypatch,
+):
     """PRD Section 8.5 step 5: "per-site failure ... marks the IngestionJob
     FAILED/PARTIALLY_COMPLETED with a clear errorMessage — never a silent
     zero-result return." A search/auth failure must not raise past this
@@ -388,7 +426,9 @@ async def test_ingest_france_travail_offers_marks_ingestion_job_failed_on_api_er
 
 
 @pytest.mark.asyncio
-async def test_ingest_france_travail_offers_reuses_globally_deduplicated_job_offer(monkeypatch):
+async def test_ingest_france_travail_offers_reuses_globally_deduplicated_job_offer(
+    monkeypatch,
+):
     monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_ID", "test-client-id")
     monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_SECRET", "test-client-secret")
 
@@ -425,11 +465,15 @@ async def test_ingest_france_travail_offers_reuses_globally_deduplicated_job_off
 
             async with session_factory() as session:
                 job_a = await session.get(IngestionJob, job_a_id)
-                await ingest_france_travail_offers(session, job_a, site_config, {"keywords": "python"})
+                await ingest_france_travail_offers(
+                    session, job_a, site_config, {"keywords": "python"}
+                )
 
             async with session_factory() as session:
                 job_b = await session.get(IngestionJob, job_b_id)
-                await ingest_france_travail_offers(session, job_b, site_config, {"keywords": "python"})
+                await ingest_france_travail_offers(
+                    session, job_b, site_config, {"keywords": "python"}
+                )
 
         async with session_factory() as session:
             offers = (
@@ -440,13 +484,17 @@ async def test_ingest_france_travail_offers_reuses_globally_deduplicated_job_off
                     )
                 )
             ).all()
-            assert len(offers) == 1, "the same France Travail offer must not be duplicated across ingestion jobs"
+            assert len(offers) == 1, (
+                "the same France Travail offer must not be duplicated across ingestion jobs"
+            )
     finally:
         async with session_factory() as session:
             for job_id in (job_a_id, job_b_id):
                 links = (
                     await session.scalars(
-                        select(IngestionJobOffer).where(IngestionJobOffer.ingestionJobId == job_id)
+                        select(IngestionJobOffer).where(
+                            IngestionJobOffer.ingestionJobId == job_id
+                        )
                     )
                 ).all()
                 for link in links:
@@ -455,7 +503,8 @@ async def test_ingest_france_travail_offers_reuses_globally_deduplicated_job_off
 
             offer = await session.scalar(
                 select(JobOffer).where(
-                    JobOffer.sourceUrl == "https://candidat.francetravail.fr/offres/recherche/detail/123ABCD"
+                    JobOffer.sourceUrl
+                    == "https://candidat.francetravail.fr/offres/recherche/detail/123ABCD"
                 )
             )
             if offer is not None:
@@ -565,19 +614,25 @@ async def _seed_single_offer_job(session_factory, *, source_url):
     return user_id, ingestion_job_id, job_offer_id
 
 
-async def _cleanup_single_offer_job(session_factory, *, user_id, ingestion_job_id, job_offer_id):
+async def _cleanup_single_offer_job(
+    session_factory, *, user_id, ingestion_job_id, job_offer_id
+):
     from py_db.models import PipelineEvent
 
     async with session_factory() as session:
         for link in (
             await session.scalars(
-                select(IngestionJobOffer).where(IngestionJobOffer.ingestionJobId == ingestion_job_id)
+                select(IngestionJobOffer).where(
+                    IngestionJobOffer.ingestionJobId == ingestion_job_id
+                )
             )
         ).all():
             await session.delete(link)
         for event in (
             await session.scalars(
-                select(PipelineEvent).where(PipelineEvent.ingestionJobId == ingestion_job_id)
+                select(PipelineEvent).where(
+                    PipelineEvent.ingestionJobId == ingestion_job_id
+                )
             )
         ).all():
             await session.delete(event)
@@ -612,7 +667,9 @@ async def test_ingest_france_travail_single_offer_populates_ready_offer(monkeypa
     try:
         with respx.mock:
             _mock_token(respx.mock)
-            respx.mock.get(source_url).mock(return_value=Response(200, json=FIXTURE_OFFER_RESPONSE))
+            respx.mock.get(source_url).mock(
+                return_value=Response(200, json=FIXTURE_OFFER_RESPONSE)
+            )
 
             async with session_factory() as session:
                 ingestion_job = await session.get(IngestionJob, ingestion_job_id)
@@ -642,7 +699,9 @@ async def test_ingest_france_travail_single_offer_populates_ready_offer(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_ingest_france_travail_single_offer_marks_offer_failed_on_api_error(monkeypatch):
+async def test_ingest_france_travail_single_offer_marks_offer_failed_on_api_error(
+    monkeypatch,
+):
     monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_ID", "test-client-id")
     monkeypatch.setenv("FRANCE_TRAVAIL_CLIENT_SECRET", "test-client-secret")
 

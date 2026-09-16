@@ -276,7 +276,11 @@ def run_forever(
     client = sqs or make_sqs_client()
     specs = [QUEUE_SPECS[n] for n in queue_names]
     stop = stop or threading.Event()
-    interval = tick_interval_seconds if tick_interval_seconds is not None else SCOUT_SCHEDULE_TICK_SECONDS
+    interval = (
+        tick_interval_seconds
+        if tick_interval_seconds is not None
+        else SCOUT_SCHEDULE_TICK_SECONDS
+    )
     next_tick = time.monotonic()
     logger.info(
         "worker.start",
@@ -321,7 +325,9 @@ def main() -> int:
     stop = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.set())
-    run_forever(queue_names, stop=stop, on_tick=_resolve_scout_schedule_tick(queue_names))
+    run_forever(
+        queue_names, stop=stop, on_tick=_resolve_scout_schedule_tick(queue_names)
+    )
     return 0
 
 

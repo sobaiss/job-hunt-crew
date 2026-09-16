@@ -76,7 +76,9 @@ async def run_generation_pipeline(
     """
     document = await session.get(GeneratedDocument, generated_document_id)
     if document is None:
-        raise GenerationPipelineError(f"GeneratedDocument {generated_document_id} not found")
+        raise GenerationPipelineError(
+            f"GeneratedDocument {generated_document_id} not found"
+        )
 
     document.status = Generateddocumentstatus.GENERATING
     document.updatedAt = _now()
@@ -92,7 +94,9 @@ async def run_generation_pipeline(
         or cv_version is None
         or not cv_version.markdownContent
     ):
-        message = f"GeneratedDocument {generated_document_id} is missing a prerequisite row"
+        message = (
+            f"GeneratedDocument {generated_document_id} is missing a prerequisite row"
+        )
         document.status = Generateddocumentstatus.FAILED
         document.errorMessage = message
         document.updatedAt = _now()
@@ -134,7 +138,9 @@ async def run_generation_pipeline(
         raise GenerationPipelineError(message) from exc
 
     s3 = s3_client or make_s3_client()
-    key = generated_document_key(analysis.userId, document.analysisId, document.type.value)
+    key = generated_document_key(
+        analysis.userId, document.analysisId, document.type.value
+    )
     s3.put_object(
         Bucket=S3_BUCKET,
         Key=key,

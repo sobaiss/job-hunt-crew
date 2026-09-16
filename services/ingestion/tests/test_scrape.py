@@ -6,7 +6,12 @@ import pytest
 import respx
 from botocore.client import Config
 from httpx import Response
-from py_db.models import JobOffer, Jobofferextractionstatus, Joboffersourcesite, PipelineEvent
+from py_db.models import (
+    JobOffer,
+    Jobofferextractionstatus,
+    Joboffersourcesite,
+    PipelineEvent,
+)
 from py_db.session import make_engine, make_session_factory
 from sqlalchemy import select
 
@@ -21,12 +26,15 @@ async def _delete_pipeline_events(session_factory, job_offer_id: str) -> None:
     async with session_factory() as session:
         events = (
             await session.scalars(
-                select(PipelineEvent).where(PipelineEvent.message.contains(job_offer_id))
+                select(PipelineEvent).where(
+                    PipelineEvent.message.contains(job_offer_id)
+                )
             )
         ).all()
         for event in events:
             await session.delete(event)
         await session.commit()
+
 
 FIXTURE_URL = "https://example.com/jobs/fixture-123"
 FIXTURE_HTML = "<html><body><h1>Senior Backend Engineer</h1></body></html>"

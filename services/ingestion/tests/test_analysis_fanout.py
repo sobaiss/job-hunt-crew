@@ -41,7 +41,9 @@ def _now():
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-async def _seed(session_factory, *, offer_statuses, with_cv_version=True, analyses_today=0):
+async def _seed(
+    session_factory, *, offer_statuses, with_cv_version=True, analyses_today=0
+):
     user_id = f"test-user-{uuid.uuid4()}"
     cv_version_id = f"test-cv-{uuid.uuid4()}" if with_cv_version else None
     ingestion_job_id = f"test-job-{uuid.uuid4()}"
@@ -133,7 +135,9 @@ async def _cleanup(session_factory, *, user_id, ingestion_job_id, all_offer_ids)
             await session.delete(row)
         for row in (
             await session.scalars(
-                select(IngestionJobOffer).where(IngestionJobOffer.ingestionJobId == ingestion_job_id)
+                select(IngestionJobOffer).where(
+                    IngestionJobOffer.ingestionJobId == ingestion_job_id
+                )
             )
         ).all():
             await session.delete(row)
@@ -200,7 +204,12 @@ async def test_creates_one_analysis_per_ready_offer_and_enqueues():
         )
         assert all(m[0] == ANALYSIS_INTAKE_QUEUE_URL for m in fake_sqs.messages)
     finally:
-        await _cleanup(session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id, all_offer_ids=all_offer_ids)
+        await _cleanup(
+            session_factory,
+            user_id=user_id,
+            ingestion_job_id=ingestion_job_id,
+            all_offer_ids=all_offer_ids,
+        )
         await engine.dispose()
 
 
@@ -235,7 +244,12 @@ async def test_skips_non_ready_offers():
         assert [r.jobOfferId for r in rows] == [offer_ids[0]]
         assert len(fake_sqs.messages) == 1
     finally:
-        await _cleanup(session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id, all_offer_ids=all_offer_ids)
+        await _cleanup(
+            session_factory,
+            user_id=user_id,
+            ingestion_job_id=ingestion_job_id,
+            all_offer_ids=all_offer_ids,
+        )
         await engine.dispose()
 
 
@@ -273,7 +287,12 @@ async def test_idempotent_on_second_call():
         assert len(rows) == 2
         assert len(fake_sqs.messages) == 2
     finally:
-        await _cleanup(session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id, all_offer_ids=all_offer_ids)
+        await _cleanup(
+            session_factory,
+            user_id=user_id,
+            ingestion_job_id=ingestion_job_id,
+            all_offer_ids=all_offer_ids,
+        )
         await engine.dispose()
 
 
@@ -305,7 +324,12 @@ async def test_quota_cap_limits_creation_and_records_skip(monkeypatch):
         assert job.quotaSkippedCount == 1
         assert job.errorMessage is None
     finally:
-        await _cleanup(session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id, all_offer_ids=all_offer_ids)
+        await _cleanup(
+            session_factory,
+            user_id=user_id,
+            ingestion_job_id=ingestion_job_id,
+            all_offer_ids=all_offer_ids,
+        )
         await engine.dispose()
 
 
@@ -341,7 +365,12 @@ async def test_owner_already_at_cap_creates_none(monkeypatch):
         assert rows == []
         assert job.quotaSkippedCount == 1
     finally:
-        await _cleanup(session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id, all_offer_ids=all_offer_ids)
+        await _cleanup(
+            session_factory,
+            user_id=user_id,
+            ingestion_job_id=ingestion_job_id,
+            all_offer_ids=all_offer_ids,
+        )
         await engine.dispose()
 
 
@@ -374,11 +403,18 @@ async def test_no_cv_version_is_noop():
             ).all()
         assert rows == []
     finally:
-        await _cleanup(session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id, all_offer_ids=all_offer_ids)
+        await _cleanup(
+            session_factory,
+            user_id=user_id,
+            ingestion_job_id=ingestion_job_id,
+            all_offer_ids=all_offer_ids,
+        )
         await engine.dispose()
 
 
-async def _attach_scout_run(session_factory, *, user_id, cv_version_id, ingestion_job_id):
+async def _attach_scout_run(
+    session_factory, *, user_id, cv_version_id, ingestion_job_id
+):
     """Create a Scout + ScoutRun owned by `user_id` and stamp the run id onto
     `ingestion_job_id.scoutRunId` — mirrors what `dispatch_scout_run` does when
     it fans a Scout run out to `ingestion-intake`."""
@@ -411,11 +447,16 @@ async def _attach_scout_run(session_factory, *, user_id, cv_version_id, ingestio
     return scout_id, scout_run_id
 
 
-async def _set_offer_content(session_factory, offer_id, *, title, description="", requirements=None):
+async def _set_offer_content(
+    session_factory, offer_id, *, title, description="", requirements=None
+):
     async with session_factory() as session:
         offer = await session.get(JobOffer, offer_id)
         offer.title = title
-        offer.structuredData = {"description": description, "requirements": requirements or []}
+        offer.structuredData = {
+            "description": description,
+            "requirements": requirements or [],
+        }
         await session.commit()
 
 
@@ -476,7 +517,12 @@ async def test_tags_analyses_with_scout_id_for_a_scout_run():
             scout_run_id=scout_run_id,
             ingestion_job_id=ingestion_job_id,
         )
-        await _cleanup(session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id, all_offer_ids=all_offer_ids)
+        await _cleanup(
+            session_factory,
+            user_id=user_id,
+            ingestion_job_id=ingestion_job_id,
+            all_offer_ids=all_offer_ids,
+        )
         await engine.dispose()
 
 
@@ -493,7 +539,9 @@ async def test_manual_job_leaves_scout_id_null():
     try:
         async with session_factory() as session:
             ingestion_job = await session.get(IngestionJob, ingestion_job_id)
-            await create_analyses_for_ready_offers(session, ingestion_job, sqs_client=fake_sqs)
+            await create_analyses_for_ready_offers(
+                session, ingestion_job, sqs_client=fake_sqs
+            )
 
         async with session_factory() as session:
             rows = (
@@ -503,7 +551,12 @@ async def test_manual_job_leaves_scout_id_null():
             ).all()
         assert [r.scoutId for r in rows] == [None]
     finally:
-        await _cleanup(session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id, all_offer_ids=all_offer_ids)
+        await _cleanup(
+            session_factory,
+            user_id=user_id,
+            ingestion_job_id=ingestion_job_id,
+            all_offer_ids=all_offer_ids,
+        )
         await engine.dispose()
 
 
@@ -530,7 +583,9 @@ async def test_scout_run_counts_roll_up_after_fanout():
     try:
         async with session_factory() as session:
             ingestion_job = await session.get(IngestionJob, ingestion_job_id)
-            await create_analyses_for_ready_offers(session, ingestion_job, sqs_client=fake_sqs)
+            await create_analyses_for_ready_offers(
+                session, ingestion_job, sqs_client=fake_sqs
+            )
 
         async with session_factory() as session:
             run = await session.get(ScoutRun, scout_run_id)
@@ -546,7 +601,12 @@ async def test_scout_run_counts_roll_up_after_fanout():
             scout_run_id=scout_run_id,
             ingestion_job_id=ingestion_job_id,
         )
-        await _cleanup(session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id, all_offer_ids=all_offer_ids)
+        await _cleanup(
+            session_factory,
+            user_id=user_id,
+            ingestion_job_id=ingestion_job_id,
+            all_offer_ids=all_offer_ids,
+        )
         await engine.dispose()
 
 
@@ -556,7 +616,10 @@ async def test_scout_run_rolls_up_failures_when_no_offer_is_analysable():
     session_factory = make_session_factory(engine)
     user_id, cv_version_id, ingestion_job_id, _, all_offer_ids = await _seed(
         session_factory,
-        offer_statuses=[Jobofferextractionstatus.FAILED, Jobofferextractionstatus.FAILED],
+        offer_statuses=[
+            Jobofferextractionstatus.FAILED,
+            Jobofferextractionstatus.FAILED,
+        ],
     )
     scout_id, scout_run_id = await _attach_scout_run(
         session_factory,
@@ -591,7 +654,12 @@ async def test_scout_run_rolls_up_failures_when_no_offer_is_analysable():
             scout_run_id=scout_run_id,
             ingestion_job_id=ingestion_job_id,
         )
-        await _cleanup(session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id, all_offer_ids=all_offer_ids)
+        await _cleanup(
+            session_factory,
+            user_id=user_id,
+            ingestion_job_id=ingestion_job_id,
+            all_offer_ids=all_offer_ids,
+        )
         await engine.dispose()
 
 
@@ -655,7 +723,12 @@ async def test_cross_run_dedup_skips_offer_already_seen_by_scout():
             scout_run_id=scout_run_id,
             ingestion_job_id=ingestion_job_id,
         )
-        await _cleanup(session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id, all_offer_ids=all_offer_ids)
+        await _cleanup(
+            session_factory,
+            user_id=user_id,
+            ingestion_job_id=ingestion_job_id,
+            all_offer_ids=all_offer_ids,
+        )
         await engine.dispose()
 
 
@@ -679,7 +752,9 @@ async def test_run_limit_prerank_keeps_the_most_similar_offer(monkeypatch):
     )
     async with session_factory() as session:
         cv = await session.get(CVVersion, cv_version_id)
-        cv.markdownContent = "Senior Python Backend Engineer with AWS Kubernetes experience"
+        cv.markdownContent = (
+            "Senior Python Backend Engineer with AWS Kubernetes experience"
+        )
         await session.commit()
     await _set_offer_content(
         session_factory,
@@ -722,12 +797,19 @@ async def test_run_limit_prerank_keeps_the_most_similar_offer(monkeypatch):
             scout_run_id=scout_run_id,
             ingestion_job_id=ingestion_job_id,
         )
-        await _cleanup(session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id, all_offer_ids=all_offer_ids)
+        await _cleanup(
+            session_factory,
+            user_id=user_id,
+            ingestion_job_id=ingestion_job_id,
+            all_offer_ids=all_offer_ids,
+        )
         await engine.dispose()
 
 
 @pytest.mark.asyncio
-async def test_run_limit_ceiling_counts_analyses_from_other_jobs_on_the_run(monkeypatch):
+async def test_run_limit_ceiling_counts_analyses_from_other_jobs_on_the_run(
+    monkeypatch,
+):
     """issue #55: the per-run ceiling is spent across every site's
     IngestionJob on the run, not reset per job — a second site's fan-out sees
     the budget the first site's fan-out already used."""
@@ -816,12 +898,19 @@ async def test_run_limit_ceiling_counts_analyses_from_other_jobs_on_the_run(monk
             scout_run_id=scout_run_id,
             ingestion_job_id=ingestion_job_id,
         )
-        await _cleanup(session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id, all_offer_ids=all_offer_ids)
+        await _cleanup(
+            session_factory,
+            user_id=user_id,
+            ingestion_job_id=ingestion_job_id,
+            all_offer_ids=all_offer_ids,
+        )
         await engine.dispose()
 
 
 @pytest.mark.asyncio
-async def test_scout_run_rolls_up_already_seen_run_limit_and_cap_skipped_counts(monkeypatch):
+async def test_scout_run_rolls_up_already_seen_run_limit_and_cap_skipped_counts(
+    monkeypatch,
+):
     monkeypatch.setenv("SCOUT_MAX_ANALYSES_PER_RUN", "1")
     monkeypatch.setenv("DAILY_ANALYSIS_CAP", "1000")
     engine = make_engine()
@@ -841,7 +930,9 @@ async def test_scout_run_rolls_up_already_seen_run_limit_and_cap_skipped_counts(
     try:
         async with session_factory() as session:
             ingestion_job = await session.get(IngestionJob, ingestion_job_id)
-            await create_analyses_for_ready_offers(session, ingestion_job, sqs_client=fake_sqs)
+            await create_analyses_for_ready_offers(
+                session, ingestion_job, sqs_client=fake_sqs
+            )
 
         async with session_factory() as session:
             run = await session.get(ScoutRun, scout_run_id)
@@ -855,5 +946,10 @@ async def test_scout_run_rolls_up_already_seen_run_limit_and_cap_skipped_counts(
             scout_run_id=scout_run_id,
             ingestion_job_id=ingestion_job_id,
         )
-        await _cleanup(session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id, all_offer_ids=all_offer_ids)
+        await _cleanup(
+            session_factory,
+            user_id=user_id,
+            ingestion_job_id=ingestion_job_id,
+            all_offer_ids=all_offer_ids,
+        )
         await engine.dispose()

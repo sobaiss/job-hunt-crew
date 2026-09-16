@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .json_ld import find_job_posting, job_posting_fields
 from .llm_json import parse_llm_json
-from .llm_provider import LLMProvider, get_llm_provider
+from .llm_provider import LLMProvider, get_llm_provider, retry_temperature
 from .s3_client import S3_BUCKET, make_s3_client
 
 logger = get_logger(__name__)
@@ -28,7 +28,9 @@ STAGE = "extract"
 MAX_ATTEMPTS = 3
 MAX_HTML_CHARS = 20000
 
-_SCRIPT_OR_STYLE_RE = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL)
+_SCRIPT_OR_STYLE_RE = re.compile(
+    r"<(script|style)\b[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL
+)
 
 SYSTEM_PROMPT = (
     "You extract structured data from the raw HTML of a job posting. "
@@ -59,6 +61,9 @@ class JobOfferLLMExtraction(JobOfferStructuredData):
 
 class ExtractionError(Exception):
     pass
+
+
+_RESPONSE_SCHEMA = JobOfferLLMExtraction.model_json_schema()
 
 
 def _strip_non_visible(html: str) -> str:
@@ -171,9 +176,14 @@ async def extract_job_offer(
     provider = llm_provider or get_llm_provider()
 
     last_error: Exception | str | None = None
-    for _attempt in range(1, MAX_ATTEMPTS + 1):
+    for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
-            raw = provider.generate(system=SYSTEM_PROMPT, prompt=html)
+            raw = provider.generate(
+                system=SYSTEM_PROMPT,
+                prompt=html,
+                response_schema=_RESPONSE_SCHEMA,
+                temperature=retry_temperature(attempt),
+            )
             structured = _parse_llm_output(raw)
         except (json.JSONDecodeError, ValidationError, TypeError) as exc:
             last_error = exc
@@ -188,7 +198,9 @@ async def extract_job_offer(
         job_offer.location = structured.location
         job_offer.postedAt = _parse_posted_at(structured.postedAt)
         job_offer.structuredData = JobOfferStructuredData(
-            **structured.model_dump(exclude={"title", "company", "location", "postedAt"})
+            **structured.model_dump(
+                exclude={"title", "company", "location", "postedAt"}
+            )
         ).model_dump()
         job_offer.extractionStatus = Jobofferextractionstatus.READY
         job_offer.errorMessage = None
@@ -213,7 +225,9 @@ async def extract_job_offer(
         return job_offer
 
     job_offer.extractionStatus = Jobofferextractionstatus.FAILED
-    job_offer.errorMessage = f"Extraction failed after {MAX_ATTEMPTS} attempts: {last_error}"
+    job_offer.errorMessage = (
+        f"Extraction failed after {MAX_ATTEMPTS} attempts: {last_error}"
+    )
     job_offer.updatedAt = _now()
     await session.commit()
     log_stage_event(

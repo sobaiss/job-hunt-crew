@@ -52,7 +52,17 @@ DOCX_DEFAULT_FONT_NAME = "Calibri"
 MAX_MARKDOWN_CHARS = 8000
 CLASSIFICATION_MAX_TOKENS = 2048
 
-_SERIF_KEYWORDS = ("times", "georgia", "garamond", "cambria", "book", "serif", "georgia", "minion", "palatino")
+_SERIF_KEYWORDS = (
+    "times",
+    "georgia",
+    "garamond",
+    "cambria",
+    "book",
+    "serif",
+    "georgia",
+    "minion",
+    "palatino",
+)
 _MONOSPACE_KEYWORDS = ("mono", "courier", "consolas", "menlo")
 
 CLASSIFICATION_SYSTEM_PROMPT = (
@@ -135,15 +145,25 @@ def _extract_pdf_style(file_bytes: bytes) -> dict:
         body_chars = [c for c in chars if c["size"] < heading_threshold]
         heading_chars = [c for c in chars if c["size"] >= heading_threshold] or chars
 
-        body_font = Counter(c["fontname"] for c in (body_chars or chars)).most_common(1)[0][0]
-        heading_font = Counter(c["fontname"] for c in heading_chars).most_common(1)[0][0]
+        body_font = Counter(c["fontname"] for c in (body_chars or chars)).most_common(
+            1
+        )[0][0]
+        heading_font = Counter(c["fontname"] for c in heading_chars).most_common(1)[0][
+            0
+        ]
 
         body_colors = Counter(
             _color_to_hex(c["non_stroking_color"]) for c in (body_chars or chars)
         )
-        heading_colors = Counter(_color_to_hex(c["non_stroking_color"]) for c in heading_chars)
-        accent_color = next((color for color, _ in body_colors.most_common() if color), None)
-        heading_color = next((color for color, _ in heading_colors.most_common() if color), None)
+        heading_colors = Counter(
+            _color_to_hex(c["non_stroking_color"]) for c in heading_chars
+        )
+        accent_color = next(
+            (color for color, _ in body_colors.most_common() if color), None
+        )
+        heading_color = next(
+            (color for color, _ in heading_colors.most_common() if color), None
+        )
 
         left = min(c["x0"] for c in chars)
         right = first_page.width - max(c["x1"] for c in chars)
@@ -181,7 +201,9 @@ def _extract_docx_style(file_bytes: bytes) -> dict:
             continue
         total_chars += len(text)
         style_name = (paragraph.style.name if paragraph.style else "") or ""
-        is_heading = style_name.lower().startswith("heading") or style_name.lower() == "title"
+        is_heading = (
+            style_name.lower().startswith("heading") or style_name.lower() == "title"
+        )
         fonts = heading_fonts if is_heading else body_fonts
         colors = heading_colors if is_heading else body_colors
         runs = paragraph.runs or [None]
@@ -189,15 +211,23 @@ def _extract_docx_style(file_bytes: bytes) -> dict:
             name = (run.font.name if run else None) or DOCX_DEFAULT_FONT_NAME
             fonts[name] += 1
             rgb = None
-            if run is not None and run.font.color is not None and run.font.color.type is not None:
+            if (
+                run is not None
+                and run.font.color is not None
+                and run.font.color.type is not None
+            ):
                 rgb = str(run.font.color.rgb)
             if rgb:
                 colors[rgb] += 1
 
-    body_font = body_fonts.most_common(1)[0][0] if body_fonts else DOCX_DEFAULT_FONT_NAME
+    body_font = (
+        body_fonts.most_common(1)[0][0] if body_fonts else DOCX_DEFAULT_FONT_NAME
+    )
     heading_font = heading_fonts.most_common(1)[0][0] if heading_fonts else body_font
     accent_color = f"#{body_colors.most_common(1)[0][0]}" if body_colors else None
-    heading_color = f"#{heading_colors.most_common(1)[0][0]}" if heading_colors else None
+    heading_color = (
+        f"#{heading_colors.most_common(1)[0][0]}" if heading_colors else None
+    )
 
     return {
         "bodyFont": _font_descriptor(body_font),
@@ -240,12 +270,16 @@ def _classify_layout_and_sections(
         + markdown[:MAX_MARKDOWN_CHARS]
     )
     raw = llm_provider.generate(
-        system=CLASSIFICATION_SYSTEM_PROMPT, prompt=prompt, max_tokens=CLASSIFICATION_MAX_TOKENS
+        system=CLASSIFICATION_SYSTEM_PROMPT,
+        prompt=prompt,
+        max_tokens=CLASSIFICATION_MAX_TOKENS,
     )
     try:
         return _parse_classification(raw)
     except (json.JSONDecodeError, ValidationError, TypeError) as exc:
-        raise StyleProfileError(f"malformed layout/section classification: {exc}") from exc
+        raise StyleProfileError(
+            f"malformed layout/section classification: {exc}"
+        ) from exc
 
 
 def build_style_profile(
@@ -271,9 +305,13 @@ def build_style_profile(
 
     headings = _markdown_headings(markdown)
     if not headings:
-        raise StyleProfileError("no headings found in the Markdown rendition to classify")
+        raise StyleProfileError(
+            "no headings found in the Markdown rendition to classify"
+        )
 
-    classification = _classify_layout_and_sections(markdown, headings, llm_provider=llm_provider)
+    classification = _classify_layout_and_sections(
+        markdown, headings, llm_provider=llm_provider
+    )
 
     heading_treatment = {
         "font": deterministic["headingFont"],

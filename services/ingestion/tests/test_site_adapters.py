@@ -6,7 +6,10 @@ from py_db.models import (
     Siteconfigsitekey,
 )
 
-from ingestion.site_adapters import SiteAdapterConfigError, extract_offer_urls_via_site_config
+from ingestion.site_adapters import (
+    SiteAdapterConfigError,
+    extract_offer_urls_via_site_config,
+)
 
 BASE = "https://example.com"
 
@@ -82,7 +85,9 @@ def _linkedin_fixture_html(n: int) -> str:
         f'<h3 class="base-search-card__title">Job {i}</h3></a></li>'
         for i in range(n)
     )
-    return f'<html><body><ul class="jobs-search__results-list">{items}</ul></body></html>'
+    return (
+        f'<html><body><ul class="jobs-search__results-list">{items}</ul></body></html>'
+    )
 
 
 def _indeed_fixture_html(n: int) -> str:

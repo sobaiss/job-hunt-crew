@@ -63,7 +63,9 @@ def extract_offer_urls(html: str, page_url: str) -> list[str]:
     return urls
 
 
-def looks_like_listing(html: str, page_url: str, *, threshold: int = LISTING_LINK_THRESHOLD) -> bool:
+def looks_like_listing(
+    html: str, page_url: str, *, threshold: int = LISTING_LINK_THRESHOLD
+) -> bool:
     """True when `html` looks like a job listing / search-results page rather
     than a single offer: the generic "repeated card" heuristic
     (`extract_offer_urls`) finds more than `threshold` distinct offer links.

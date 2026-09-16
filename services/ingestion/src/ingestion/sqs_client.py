@@ -8,7 +8,8 @@ import boto3
 # does for `POST /v1/analyses`. Mirrors services/api/src/api/sqs_client.py's
 # env var name so both producers agree on the same queue.
 ANALYSIS_INTAKE_QUEUE_URL = os.environ.get(
-    "SQS_ANALYSIS_INTAKE_QUEUE_URL", "http://localhost:9324/000000000000/analysis-intake"
+    "SQS_ANALYSIS_INTAKE_QUEUE_URL",
+    "http://localhost:9324/000000000000/analysis-intake",
 )
 
 

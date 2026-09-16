@@ -50,7 +50,10 @@ async def ensure_cv_converted(
 
     if cv_version.conversionStatus != Cvconversionstatus.CONVERTED:
         await convert_cv(
-            session, analysis.cvVersionId, llm_provider=llm_provider, analysis_id=analysis_id
+            session,
+            analysis.cvVersionId,
+            llm_provider=llm_provider,
+            analysis_id=analysis_id,
         )
 
 
@@ -70,7 +73,10 @@ async def ensure_offer_extracted(
 
     if job_offer.extractionStatus != Jobofferextractionstatus.READY:
         await extract_job_offer(
-            session, analysis.jobOfferId, llm_provider=llm_provider, analysis_id=analysis_id
+            session,
+            analysis.jobOfferId,
+            llm_provider=llm_provider,
+            analysis_id=analysis_id,
         )
 
 
@@ -130,7 +136,9 @@ def _error_message_from_catch(error: dict) -> str:
     return error.get("Error") or "AnalysisWorkflow step failed"
 
 
-async def mark_analysis_failed(session: AsyncSession, analysis_id: str, error: dict) -> None:
+async def mark_analysis_failed(
+    session: AsyncSession, analysis_id: str, error: dict
+) -> None:
     """PRD Section 10 step 10: the Catch target for every state in
     AnalysisWorkflow, guaranteeing that a step failure — after its Retry is
     exhausted — always lands the Analysis in a terminal FAILED status with a

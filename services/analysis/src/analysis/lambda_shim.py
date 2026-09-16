@@ -57,7 +57,9 @@ class _InvokeRequestHandler(BaseHTTPRequestHandler):
             # "succeeded" with an error-shaped payload as output instead of
             # failing the Task state at all).
             self._respond(
-                200, {"errorMessage": str(exc), "errorType": type(exc).__name__}, function_error=True
+                200,
+                {"errorMessage": str(exc), "errorType": type(exc).__name__},
+                function_error=True,
             )
             return
 
@@ -83,7 +85,9 @@ class _InvokeRequestHandler(BaseHTTPRequestHandler):
         content_length = int(self.headers.get("Content-Length", 0))
         return self.rfile.read(content_length)
 
-    def _respond(self, status: int, body: dict, *, function_error: bool = False) -> None:
+    def _respond(
+        self, status: int, body: dict, *, function_error: bool = False
+    ) -> None:
         data = json.dumps(body).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")

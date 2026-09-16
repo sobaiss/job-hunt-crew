@@ -48,7 +48,9 @@ from analysis.state_machine import ensure_state_machine, make_sfn_client
 VALID_COMPARISON_OUTPUT = json.dumps(
     {
         "match_score": 82,
-        "matched_skills": [{"skill": "Python", "evidence": "5+ years Python experience"}],
+        "matched_skills": [
+            {"skill": "Python", "evidence": "5+ years Python experience"}
+        ],
         "missing_skills": [{"skill": "Kubernetes", "importance": "nice_to_have"}],
         "strengths": ["Strong Python background"],
         "weaknesses": ["No Kubernetes experience"],
@@ -74,7 +76,15 @@ class StubLLMProvider(LLMProvider):
         self.calls = 0
         self.model = "stub-model"
 
-    def generate(self, *, system: str, prompt: str) -> str:
+    def generate(
+        self,
+        *,
+        system: str,
+        prompt: str,
+        max_tokens: int | None = None,
+        response_schema=None,
+        temperature: float | None = None,
+    ) -> str:
         self.calls += 1
         return self._responses[min(self.calls, len(self._responses)) - 1]
 
@@ -110,7 +120,9 @@ def state_machine_arn(lambda_shim_server):
     return ensure_state_machine(client, name=f"AnalysisWorkflowTest-{uuid.uuid4()}")
 
 
-async def _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, analysis_id):
+async def _make_fixture(
+    session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+):
     now = _now()
     async with session_factory() as session:
         session.add(User(id=user_id, updatedAt=now))
@@ -150,14 +162,20 @@ async def _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, a
         await session.commit()
 
 
-async def _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id):
+async def _cleanup(
+    engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+):
     async with session_factory() as session:
         # PipelineEvent.analysisId (M6-T3) has ON DELETE CASCADE at the DB
         # level, but SQLAlchemy's default relationship handling nulls
         # rather than deletes orphaned children when the parent is removed
         # via the ORM — so delete these explicitly first, same as any other
         # FK'd row, rather than relying on the DB-level cascade.
-        events = (await session.scalars(select(PipelineEvent).where(PipelineEvent.analysisId == analysis_id))).all()
+        events = (
+            await session.scalars(
+                select(PipelineEvent).where(PipelineEvent.analysisId == analysis_id)
+            )
+        ).all()
         for event in events:
             await session.delete(event)
         for model, row_id in (
@@ -187,14 +205,20 @@ def _wait_for_state_entered(client, execution_arn, state_name, *, timeout=15):
             continue
         for event in history["events"]:
             details = event.get("stateEnteredEventDetails")
-            if event["type"] == "TaskStateEntered" and details and details["name"] == state_name:
+            if (
+                event["type"] == "TaskStateEntered"
+                and details
+                and details["name"] == state_name
+            ):
                 return history["events"]
         time.sleep(0.5)
     raise AssertionError(f"execution never entered state {state_name!r}")
 
 
 @pytest.mark.asyncio
-async def test_analysis_workflow_execution_reaches_run_comparison_crew(state_machine_arn, monkeypatch):
+async def test_analysis_workflow_execution_reaches_run_comparison_crew(
+    state_machine_arn, monkeypatch
+):
     # Stubbed so this test never depends on (or makes real network calls
     # against) whatever LLM credentials happen to be configured in the
     # environment it runs in — its own scope (M5-T2) is the state machine's
@@ -202,7 +226,9 @@ async def test_analysis_workflow_execution_reaches_run_comparison_crew(state_mac
     # own success/failure handling (that's M5-T3, exercised with its own
     # stub by test_analysis_workflow_execution_completes_via_run_comparison_crew
     # below).
-    monkeypatch.setattr(crew_task, "get_llm_provider", lambda: StubLLMProvider(["not valid json"]))
+    monkeypatch.setattr(
+        crew_task, "get_llm_provider", lambda: StubLLMProvider(["not valid json"])
+    )
 
     engine = make_engine()
     session_factory = make_session_factory(engine)
@@ -212,13 +238,18 @@ async def test_analysis_workflow_execution_reaches_run_comparison_crew(state_mac
         f"test-cv-{uuid.uuid4()}",
         f"test-analysis-{uuid.uuid4()}",
     )
-    await _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+    await _make_fixture(
+        session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+    )
 
     try:
         sfn_client = make_sfn_client()
         async with session_factory() as session:
             execution_arn = await start_analysis_workflow(
-                session, analysis_id, sfn_client=sfn_client, state_machine_arn=state_machine_arn
+                session,
+                analysis_id,
+                sfn_client=sfn_client,
+                state_machine_arn=state_machine_arn,
             )
 
         async with session_factory() as session:
@@ -228,7 +259,9 @@ async def test_analysis_workflow_execution_reaches_run_comparison_crew(state_mac
 
         events = _wait_for_state_entered(sfn_client, execution_arn, "RunComparisonCrew")
         entered_states = [
-            e["stateEnteredEventDetails"]["name"] for e in events if e["type"] == "TaskStateEntered"
+            e["stateEnteredEventDetails"]["name"]
+            for e in events
+            if e["type"] == "TaskStateEntered"
         ]
         assert entered_states == [
             "EnsureCVConverted",
@@ -251,7 +284,9 @@ async def test_analysis_workflow_execution_reaches_run_comparison_crew(state_mac
             description = sfn_client.describe_execution(executionArn=execution_arn)
         assert description["status"] == "SUCCEEDED"
     finally:
-        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+        await _cleanup(
+            engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+        )
 
 
 @pytest.mark.asyncio
@@ -278,7 +313,9 @@ async def test_analysis_workflow_execution_completes_via_run_comparison_crew(
         f"test-cv-{uuid.uuid4()}",
         f"test-analysis-{uuid.uuid4()}",
     )
-    await _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+    await _make_fixture(
+        session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+    )
     s3 = _s3_client()
     key = analysis_result_key(analysis_id)
 
@@ -286,7 +323,10 @@ async def test_analysis_workflow_execution_completes_via_run_comparison_crew(
         sfn_client = make_sfn_client()
         async with session_factory() as session:
             execution_arn = await start_analysis_workflow(
-                session, analysis_id, sfn_client=sfn_client, state_machine_arn=state_machine_arn
+                session,
+                analysis_id,
+                sfn_client=sfn_client,
+                state_machine_arn=state_machine_arn,
             )
 
         _wait_for_state_entered(sfn_client, execution_arn, "RunComparisonCrew")
@@ -313,7 +353,9 @@ async def test_analysis_workflow_execution_completes_via_run_comparison_crew(
             assert reloaded.s3ResultKey == key
     finally:
         s3.delete_object(Bucket=S3_BUCKET, Key=key)
-        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+        await _cleanup(
+            engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+        )
 
 
 @pytest.mark.asyncio
@@ -342,13 +384,18 @@ async def test_analysis_workflow_retries_then_fails_via_mark_analysis_failed(
         f"test-cv-{uuid.uuid4()}",
         f"test-analysis-{uuid.uuid4()}",
     )
-    await _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+    await _make_fixture(
+        session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+    )
 
     try:
         sfn_client = make_sfn_client()
         async with session_factory() as session:
             execution_arn = await start_analysis_workflow(
-                session, analysis_id, sfn_client=sfn_client, state_machine_arn=state_machine_arn
+                session,
+                analysis_id,
+                sfn_client=sfn_client,
+                state_machine_arn=state_machine_arn,
             )
 
         deadline = time.monotonic() + 45
@@ -375,7 +422,9 @@ async def test_analysis_workflow_retries_then_fails_via_mark_analysis_failed(
             assert reloaded.errorMessage
             assert "forced EnsureOfferExtracted failure" in reloaded.errorMessage
     finally:
-        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+        await _cleanup(
+            engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+        )
 
 
 @pytest.mark.asyncio
@@ -402,13 +451,18 @@ async def test_analysis_workflow_fails_terminally_when_cv_conversion_fails(
         f"test-cv-{uuid.uuid4()}",
         f"test-analysis-{uuid.uuid4()}",
     )
-    await _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+    await _make_fixture(
+        session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+    )
 
     try:
         sfn_client = make_sfn_client()
         async with session_factory() as session:
             execution_arn = await start_analysis_workflow(
-                session, analysis_id, sfn_client=sfn_client, state_machine_arn=state_machine_arn
+                session,
+                analysis_id,
+                sfn_client=sfn_client,
+                state_machine_arn=state_machine_arn,
             )
 
         deadline = time.monotonic() + 45
@@ -425,4 +479,6 @@ async def test_analysis_workflow_fails_terminally_when_cv_conversion_fails(
             assert reloaded.errorMessage
             assert "forced EnsureCVConverted failure" in reloaded.errorMessage
     finally:
-        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+        await _cleanup(
+            engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+        )

@@ -15,7 +15,7 @@ def test_parse_llm_json_strips_markdown_fence():
 
 
 def test_parse_llm_json_strips_bare_fence_without_json_tag():
-    raw = "```\n{\"a\": 1}\n```"
+    raw = '```\n{"a": 1}\n```'
     assert parse_llm_json(raw) == {"a": 1}
 
 

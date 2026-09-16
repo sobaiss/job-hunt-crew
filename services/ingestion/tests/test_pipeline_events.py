@@ -62,7 +62,9 @@ CV_LLM_OUTPUT = "# Jane Doe\n\n## Skills\n\n- Python\n- AWS\n"
 COMPARISON_LLM_OUTPUT = json.dumps(
     {
         "match_score": 82,
-        "matched_skills": [{"skill": "Python", "evidence": "5+ years Python experience"}],
+        "matched_skills": [
+            {"skill": "Python", "evidence": "5+ years Python experience"}
+        ],
         "missing_skills": [],
         "strengths": ["Strong Python background"],
         "weaknesses": [],
@@ -84,7 +86,15 @@ class SequentialStubLLMProvider(LLMProvider):
         self.calls = 0
         self.model = "stub-model"
 
-    def generate(self, *, system: str, prompt: str, max_tokens: int | None = None) -> str:
+    def generate(
+        self,
+        *,
+        system: str,
+        prompt: str,
+        max_tokens: int | None = None,
+        response_schema=None,
+        temperature: float | None = None,
+    ) -> str:
         response = self._responses[self.calls]
         self.calls += 1
         return response
@@ -124,7 +134,9 @@ async def test_full_pipeline_run_produces_a_pipeline_event_per_stage():
     source_url = f"https://example.com/jobs/{job_offer_id}"
     cv_file_key = f"cvs/{user_id}/{cv_version_id}/cv.docx"
 
-    cv_docx_bytes = _build_fixture_docx_bytes("Senior backend engineer with 5 years Python.")
+    cv_docx_bytes = _build_fixture_docx_bytes(
+        "Senior backend engineer with 5 years Python."
+    )
     s3 = _s3_client()
     s3.put_object(
         Bucket=ANALYSIS_S3_BUCKET,
@@ -169,7 +181,12 @@ async def test_full_pipeline_run_produces_a_pipeline_event_per_stage():
         await session.commit()
 
     provider = SequentialStubLLMProvider(
-        [JOB_OFFER_LLM_OUTPUT, CV_LLM_OUTPUT, COMPARISON_LLM_OUTPUT, RECOMMENDATION_LLM_OUTPUT]
+        [
+            JOB_OFFER_LLM_OUTPUT,
+            CV_LLM_OUTPUT,
+            COMPARISON_LLM_OUTPUT,
+            RECOMMENDATION_LLM_OUTPUT,
+        ]
     )
     result_key = analysis_result_key(analysis_id)
 
@@ -180,13 +197,19 @@ async def test_full_pipeline_run_produces_a_pipeline_event_per_stage():
                 await scrape_job_offer(session, job_offer_id)
 
         async with session_factory() as session:
-            await extract_job_offer(session, job_offer_id, llm_provider=provider, analysis_id=analysis_id)
+            await extract_job_offer(
+                session, job_offer_id, llm_provider=provider, analysis_id=analysis_id
+            )
 
         async with session_factory() as session:
-            await convert_cv(session, cv_version_id, llm_provider=provider, analysis_id=analysis_id)
+            await convert_cv(
+                session, cv_version_id, llm_provider=provider, analysis_id=analysis_id
+            )
 
         async with session_factory() as session:
-            await run_crew_task(session, analysis_id, llm_provider=provider, s3_client=s3)
+            await run_crew_task(
+                session, analysis_id, llm_provider=provider, s3_client=s3
+            )
 
         async with session_factory() as session:
             analysis = await persist_analysis_result(session, analysis_id, s3_client=s3)
@@ -222,7 +245,9 @@ async def test_full_pipeline_run_produces_a_pipeline_event_per_stage():
         except Exception:
             pass
         try:
-            s3.delete_object(Bucket=ANALYSIS_S3_BUCKET, Key=raw_scrape_key(job_offer_id))
+            s3.delete_object(
+                Bucket=ANALYSIS_S3_BUCKET, Key=raw_scrape_key(job_offer_id)
+            )
         except Exception:
             pass
         async with session_factory() as session:

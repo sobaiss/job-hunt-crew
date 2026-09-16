@@ -6,7 +6,11 @@ from py_db.models import (
     Siteconfigsitekey,
 )
 
-from ingestion.site_search import SiteSearchConfigError, build_search_url, extract_offer_id
+from ingestion.site_search import (
+    SiteSearchConfigError,
+    build_search_url,
+    extract_offer_id,
+)
 
 
 def _indeed_site_config() -> SiteConfig:
@@ -104,7 +108,10 @@ def test_build_search_url_html_scrape_blanks_unset_optional_filters():
 
     url = build_search_url(_indeed_site_config(), filters)
 
-    assert url == "https://www.indeed.com/jobs?q=software%20engineer&l=Paris&fromage=&jt=&remotejob="
+    assert (
+        url
+        == "https://www.indeed.com/jobs?q=software%20engineer&l=Paris&fromage=&jt=&remotejob="
+    )
 
 
 def test_build_search_url_hellowork_fills_template_and_keeps_fixed_defaults():
@@ -161,7 +168,10 @@ def test_build_search_url_official_api_omits_unset_filters_entirely():
 
     url = build_search_url(_france_travail_site_config(), filters)
 
-    assert url == "https://api.francetravail.io/partenaire/offresdemploi/v2?motsCles=software+engineer"
+    assert (
+        url
+        == "https://api.francetravail.io/partenaire/offresdemploi/v2?motsCles=software+engineer"
+    )
 
 
 def test_build_search_url_official_api_with_no_filters_returns_bare_base_url():
@@ -190,15 +200,21 @@ def test_build_search_url_ignores_the_id_mapping_entry():
     # `id` in filterParamMapping is for offer-detail extraction, not search —
     # a SITE_SEARCH `filters` dict never carries it, so it must not leak into
     # the built query string.
-    url = build_search_url(_france_travail_site_config(), {"keywords": "python", "id": "213CTNR"})
+    url = build_search_url(
+        _france_travail_site_config(), {"keywords": "python", "id": "213CTNR"}
+    )
 
     assert "213CTNR" not in url
-    assert url == "https://api.francetravail.io/partenaire/offresdemploi/v2?motsCles=python"
+    assert (
+        url
+        == "https://api.francetravail.io/partenaire/offresdemploi/v2?motsCles=python"
+    )
 
 
 def test_extract_offer_id_reads_the_mapped_query_param():
     offer_id = extract_offer_id(
-        _indeed_site_config(), "https://fr.indeed.com/viewjob?jk=1a2b3c4d5e6f7g8h&from=serp"
+        _indeed_site_config(),
+        "https://fr.indeed.com/viewjob?jk=1a2b3c4d5e6f7g8h&from=serp",
     )
 
     assert offer_id == "1a2b3c4d5e6f7g8h"
@@ -228,7 +244,8 @@ def test_extract_offer_id_falls_back_to_last_path_segment_for_hellowork():
     # HelloWork's filterParamMapping has no "id" entry (#110) — offer urls are
     # shaped /fr-fr/emplois/{numericId}.html, so the fallback branch applies.
     offer_id = extract_offer_id(
-        _hellowork_site_config(), "https://www.hellowork.com/fr-fr/emplois/12345678.html"
+        _hellowork_site_config(),
+        "https://www.hellowork.com/fr-fr/emplois/12345678.html",
     )
 
     assert offer_id == "12345678.html"

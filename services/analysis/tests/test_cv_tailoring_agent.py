@@ -25,7 +25,15 @@ class StubLLMProvider(LLMProvider):
         self.model = "stub-model"
         self.last_system: str | None = None
 
-    def generate(self, *, system: str, prompt: str, max_tokens: int | None = None) -> str:
+    def generate(
+        self,
+        *,
+        system: str,
+        prompt: str,
+        max_tokens: int | None = None,
+        response_schema=None,
+        temperature: float | None = None,
+    ) -> str:
         self.calls += 1
         self.last_system = system
         response = self._responses[min(self.calls, len(self._responses)) - 1]

@@ -74,7 +74,9 @@ async def persist_analysis_result(
         raise PersistResultError(f"Analysis {analysis_id} not found")
 
     log_stage_event(logger, stage=STAGE, status="STARTED", analysis_id=analysis_id)
-    await record_pipeline_event(session, stage=STAGE, status="STARTED", analysis_id=analysis_id)
+    await record_pipeline_event(
+        session, stage=STAGE, status="STARTED", analysis_id=analysis_id
+    )
 
     s3 = s3_client or make_s3_client()
     resolved_key = key or analysis.s3ResultKey or analysis_result_key(analysis_id)
@@ -84,16 +86,26 @@ async def persist_analysis_result(
         payload = json.loads(obj["Body"].read())
         result = AnalysisResult.model_validate(payload)
     except (json.JSONDecodeError, ValidationError) as exc:
-        message = f"analysis-results object at {resolved_key} failed schema validation: {exc}"
+        message = (
+            f"analysis-results object at {resolved_key} failed schema validation: {exc}"
+        )
         analysis.status = Analysisstatus.FAILED
         analysis.errorMessage = message
         await session.commit()
         await roll_up_scout_run_for_analysis(session, analysis_id)
         log_stage_event(
-            logger, stage=STAGE, status="FAILED", analysis_id=analysis_id, message=message
+            logger,
+            stage=STAGE,
+            status="FAILED",
+            analysis_id=analysis_id,
+            message=message,
         )
         await record_pipeline_event(
-            session, stage=STAGE, status="FAILED", message=message, analysis_id=analysis_id
+            session,
+            stage=STAGE,
+            status="FAILED",
+            message=message,
+            analysis_id=analysis_id,
         )
         raise PersistResultError(message) from exc
 
@@ -109,7 +121,9 @@ async def persist_analysis_result(
     await roll_up_scout_run_for_analysis(session, analysis_id)
 
     log_stage_event(logger, stage=STAGE, status="SUCCEEDED", analysis_id=analysis_id)
-    await record_pipeline_event(session, stage=STAGE, status="SUCCEEDED", analysis_id=analysis_id)
+    await record_pipeline_event(
+        session, stage=STAGE, status="SUCCEEDED", analysis_id=analysis_id
+    )
     return analysis
 
 
@@ -129,7 +143,9 @@ def handle_analysis_result_created(event: dict, context=None) -> None:
                     bucket = record["s3"]["bucket"]["name"]
                     key = record["s3"]["object"]["key"]
                     analysis_id = analysis_id_from_key(key)
-                    await persist_analysis_result(session, analysis_id, bucket=bucket, key=key)
+                    await persist_analysis_result(
+                        session, analysis_id, bucket=bucket, key=key
+                    )
         finally:
             await engine.dispose()
 

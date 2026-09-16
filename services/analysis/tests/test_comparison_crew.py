@@ -37,7 +37,9 @@ CV_MARKDOWN = (
 VALID_COMPARISON_OUTPUT = json.dumps(
     {
         "match_score": 82,
-        "matched_skills": [{"skill": "Python", "evidence": "5+ years Python experience"}],
+        "matched_skills": [
+            {"skill": "Python", "evidence": "5+ years Python experience"}
+        ],
         "missing_skills": [{"skill": "Kubernetes", "importance": "nice_to_have"}],
         "strengths": ["Strong Python background"],
         "weaknesses": ["No Kubernetes experience"],
@@ -63,7 +65,15 @@ class StubLLMProvider(LLMProvider):
         self.calls = 0
         self.model = "stub-model"
 
-    def generate(self, *, system: str, prompt: str) -> str:
+    def generate(
+        self,
+        *,
+        system: str,
+        prompt: str,
+        max_tokens: int | None = None,
+        response_schema=None,
+        temperature: float | None = None,
+    ) -> str:
         self.calls += 1
         return self._responses[min(self.calls, len(self._responses)) - 1]
 
@@ -72,7 +82,9 @@ def _now():
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-async def _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, analysis_id):
+async def _make_fixture(
+    session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+):
     now = _now()
     async with session_factory() as session:
         session.add(User(id=user_id, updatedAt=now))
@@ -112,7 +124,9 @@ async def _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, a
         await session.commit()
 
 
-async def _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id):
+async def _cleanup(
+    engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+):
     async with session_factory() as session:
         for model, row_id in (
             (Analysis, analysis_id),
@@ -136,7 +150,9 @@ async def test_run_analysis_produces_section_8_6_schema_and_completes():
     cv_version_id = f"test-{uuid.uuid4()}"
     analysis_id = f"test-{uuid.uuid4()}"
 
-    await _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+    await _make_fixture(
+        session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+    )
     provider = StubLLMProvider([VALID_COMPARISON_OUTPUT, VALID_RECOMMENDATION_OUTPUT])
 
     try:
@@ -175,7 +191,9 @@ async def test_run_analysis_produces_section_8_6_schema_and_completes():
             assert reloaded.completedAt is not None
         assert provider.calls == 2
     finally:
-        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+        await _cleanup(
+            engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+        )
 
 
 @pytest.mark.asyncio
@@ -187,7 +205,9 @@ async def test_run_analysis_fails_with_error_message_on_malformed_comparison_out
     cv_version_id = f"test-{uuid.uuid4()}"
     analysis_id = f"test-{uuid.uuid4()}"
 
-    await _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+    await _make_fixture(
+        session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+    )
     provider = StubLLMProvider(["not valid json"])
 
     try:
@@ -205,7 +225,9 @@ async def test_run_analysis_fails_with_error_message_on_malformed_comparison_out
         # recommendation-agent calls once the comparison step already failed.
         assert provider.calls == 3
     finally:
-        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+        await _cleanup(
+            engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+        )
 
 
 @pytest.mark.asyncio
@@ -217,7 +239,9 @@ async def test_run_analysis_fails_when_job_offer_not_ready():
     cv_version_id = f"test-{uuid.uuid4()}"
     analysis_id = f"test-{uuid.uuid4()}"
 
-    await _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+    await _make_fixture(
+        session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+    )
     async with session_factory() as session:
         job_offer = await session.get(JobOffer, job_offer_id)
         job_offer.extractionStatus = Jobofferextractionstatus.SCRAPED
@@ -237,4 +261,6 @@ async def test_run_analysis_fails_when_job_offer_not_ready():
             assert reloaded.errorMessage
         assert provider.calls == 0
     finally:
-        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+        await _cleanup(
+            engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+        )

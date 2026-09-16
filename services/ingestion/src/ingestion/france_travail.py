@@ -88,10 +88,14 @@ async def _get_access_token(client: httpx.AsyncClient) -> str:
             f"Failed to obtain France Travail access token: {exc} — {exc.response.text[:500]}"
         ) from exc
     except httpx.HTTPError as exc:
-        raise FranceTravailApiError(f"Failed to obtain France Travail access token: {exc}") from exc
+        raise FranceTravailApiError(
+            f"Failed to obtain France Travail access token: {exc}"
+        ) from exc
     token = response.json().get("access_token")
     if not token:
-        raise FranceTravailApiError("France Travail token response missing access_token")
+        raise FranceTravailApiError(
+            "France Travail token response missing access_token"
+        )
     return token
 
 
@@ -110,7 +114,9 @@ _POSTED_WITHIN_DELTAS: dict[str, timedelta] = {
 _CREATION_DATE_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
 
-def _creation_date_window(filters: dict[str, str]) -> tuple[dict[str, str], dict[str, str]]:
+def _creation_date_window(
+    filters: dict[str, str],
+) -> tuple[dict[str, str], dict[str, str]]:
     """Pull the relative `postedWithin` filter out of `filters` and resolve it
     into the absolute `minCreationDate` / `maxCreationDate` pair France
     Travail's search API expects.
@@ -118,7 +124,9 @@ def _creation_date_window(filters: dict[str, str]) -> tuple[dict[str, str], dict
     Returns `(filters_without_posted_within, creation_date_params)`; the second
     dict is empty for "any" or any unrecognised token (no date filter at all).
     """
-    without_window = {key: value for key, value in filters.items() if key != "postedWithin"}
+    without_window = {
+        key: value for key, value in filters.items() if key != "postedWithin"
+    }
     delta = _POSTED_WITHIN_DELTAS.get((filters.get("postedWithin") or "").strip())
     if delta is None:
         return without_window, {}
@@ -154,7 +162,9 @@ def _offer_posted_at(offre: dict) -> datetime | None:
 def _offer_structured_data(offre: dict) -> dict:
     return {
         "description": offre.get("description"),
-        "requirements": [c.get("libelle") for c in offre.get("competences", []) if c.get("libelle")],
+        "requirements": [
+            c.get("libelle") for c in offre.get("competences", []) if c.get("libelle")
+        ],
         "salary": (offre.get("salaire") or {}).get("libelle"),
         "contractType": offre.get("typeContratLibelle") or offre.get("typeContrat"),
         "remotePolicy": None,
@@ -195,10 +205,14 @@ async def search_offers(
         token = await _get_access_token(client)
         search_url = _build_search_url(site_config, filters)
         try:
-            response = await client.get(search_url, headers={"Authorization": f"Bearer {token}"})
+            response = await client.get(
+                search_url, headers={"Authorization": f"Bearer {token}"}
+            )
             response.raise_for_status()
         except httpx.HTTPError as exc:
-            raise FranceTravailApiError(f"France Travail search request failed: {exc}") from exc
+            raise FranceTravailApiError(
+                f"France Travail search request failed: {exc}"
+            ) from exc
         return response.json().get("resultats", [])
     finally:
         if owns_client:
@@ -231,12 +245,18 @@ async def fetch_offer(
         token = await _get_access_token(client)
         offer_url = f"{site_config.apiBaseUrl.rstrip('/')}{OFFER_PATH}/{offer_id}"
         try:
-            response = await client.get(offer_url, headers={"Authorization": f"Bearer {token}"})
+            response = await client.get(
+                offer_url, headers={"Authorization": f"Bearer {token}"}
+            )
             response.raise_for_status()
         except httpx.HTTPError as exc:
-            raise FranceTravailApiError(f"France Travail offer request failed: {exc}") from exc
+            raise FranceTravailApiError(
+                f"France Travail offer request failed: {exc}"
+            ) from exc
         if response.status_code == 204 or not response.content:
-            raise FranceTravailApiError(f"France Travail returned no content for offer {offer_id}")
+            raise FranceTravailApiError(
+                f"France Travail returned no content for offer {offer_id}"
+            )
         return response.json()
     finally:
         if owns_client:
@@ -282,7 +302,9 @@ async def ingest_france_travail_offers(
 
     job_offers: list[JobOffer] = []
     for url in retained_urls:
-        job_offer = await session.scalar(select(JobOffer).where(JobOffer.sourceUrl == url))
+        job_offer = await session.scalar(
+            select(JobOffer).where(JobOffer.sourceUrl == url)
+        )
         if job_offer is None:
             job_offer = JobOffer(
                 id=str(uuid.uuid4()),
@@ -356,7 +378,9 @@ async def ingest_france_travail_single_offer(
         offre = await fetch_offer(site_config, offer_id, http_client=http_client)
     except FranceTravailApiError as exc:
         job_offer.extractionStatus = Jobofferextractionstatus.FAILED
-        job_offer.errorMessage = f"Failed to fetch France Travail offer {offer_id}: {exc}"
+        job_offer.errorMessage = (
+            f"Failed to fetch France Travail offer {offer_id}: {exc}"
+        )
         job_offer.updatedAt = _now()
         await session.commit()
         log_stage_event(

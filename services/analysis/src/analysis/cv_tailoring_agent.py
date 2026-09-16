@@ -29,6 +29,7 @@ RETRY_BACKOFF_RATE = 2.0
 def _sleep(seconds: float) -> None:
     time.sleep(seconds)
 
+
 _SECTION_TYPE_VOCABULARY = ", ".join(section_type.value for section_type in SectionType)
 
 SYSTEM_PROMPT = (
@@ -99,4 +100,6 @@ def run_cv_tailoring(
             return text
         last_error = ValueError("empty response")
 
-    raise CvTailoringError(f"CVTailoringAgent failed after {MAX_ATTEMPTS} attempts: {last_error}")
+    raise CvTailoringError(
+        f"CVTailoringAgent failed after {MAX_ATTEMPTS} attempts: {last_error}"
+    )

@@ -43,7 +43,11 @@ async def scrape_job_offer(
         raise ScrapeError(f"JobOffer {job_offer_id} not found")
 
     log_stage_event(
-        logger, stage=STAGE, status="STARTED", job_offer_id=job_offer_id, ingestion_job_id=ingestion_job_id
+        logger,
+        stage=STAGE,
+        status="STARTED",
+        job_offer_id=job_offer_id,
+        ingestion_job_id=ingestion_job_id,
     )
     await record_pipeline_event(
         session,
@@ -91,7 +95,9 @@ async def scrape_job_offer(
 
     key = raw_scrape_key(job_offer_id)
     s3 = make_s3_client()
-    s3.put_object(Bucket=S3_BUCKET, Key=key, Body=html.encode("utf-8"), ContentType="text/html")
+    s3.put_object(
+        Bucket=S3_BUCKET, Key=key, Body=html.encode("utf-8"), ContentType="text/html"
+    )
 
     job_offer.rawContentKey = key
     job_offer.extractionStatus = Jobofferextractionstatus.SCRAPED
@@ -99,7 +105,11 @@ async def scrape_job_offer(
     await session.commit()
 
     log_stage_event(
-        logger, stage=STAGE, status="SUCCEEDED", job_offer_id=job_offer_id, ingestion_job_id=ingestion_job_id
+        logger,
+        stage=STAGE,
+        status="SUCCEEDED",
+        job_offer_id=job_offer_id,
+        ingestion_job_id=ingestion_job_id,
     )
     await record_pipeline_event(
         session,

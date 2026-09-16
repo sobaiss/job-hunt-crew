@@ -27,14 +27,26 @@ def test_render_definition_substitutes_function_arns():
     assert definition["States"]["EnsureOfferExtracted"]["Next"] == "RunComparisonCrew"
 
     run_comparison_crew = definition["States"]["RunComparisonCrew"]
-    assert run_comparison_crew["Resource"] == "arn:aws:states:::lambda:invoke.waitForTaskToken"
-    assert run_comparison_crew["Parameters"]["FunctionName"] == "arn:aws:lambda:us-east-1:1:function:crew"
-    assert run_comparison_crew["Parameters"]["Payload"]["analysisId.$"] == "$.analysisId"
-    assert run_comparison_crew["Parameters"]["Payload"]["taskToken.$"] == "$$.Task.Token"
+    assert (
+        run_comparison_crew["Resource"]
+        == "arn:aws:states:::lambda:invoke.waitForTaskToken"
+    )
+    assert (
+        run_comparison_crew["Parameters"]["FunctionName"]
+        == "arn:aws:lambda:us-east-1:1:function:crew"
+    )
+    assert (
+        run_comparison_crew["Parameters"]["Payload"]["analysisId.$"] == "$.analysisId"
+    )
+    assert (
+        run_comparison_crew["Parameters"]["Payload"]["taskToken.$"] == "$$.Task.Token"
+    )
     assert run_comparison_crew["End"] is True
 
     mark_analysis_failed = definition["States"]["MarkAnalysisFailed"]
-    assert mark_analysis_failed["Resource"] == "arn:aws:lambda:us-east-1:1:function:failed"
+    assert (
+        mark_analysis_failed["Resource"] == "arn:aws:lambda:us-east-1:1:function:failed"
+    )
     assert mark_analysis_failed["Parameters"]["analysisId.$"] == "$.analysisId"
     assert mark_analysis_failed["End"] is True
 
@@ -48,9 +60,9 @@ def test_render_definition_defaults_to_local_lambda_shim_arns():
     assert definition["States"]["EnsureOfferExtracted"]["Resource"].endswith(
         ":function:ensure-offer-extracted"
     )
-    assert definition["States"]["RunComparisonCrew"]["Parameters"]["FunctionName"].endswith(
-        ":function:run-comparison-crew"
-    )
+    assert definition["States"]["RunComparisonCrew"]["Parameters"][
+        "FunctionName"
+    ].endswith(":function:run-comparison-crew")
     assert definition["States"]["MarkAnalysisFailed"]["Resource"].endswith(
         ":function:mark-analysis-failed"
     )

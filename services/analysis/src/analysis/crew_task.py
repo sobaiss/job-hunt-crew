@@ -44,7 +44,10 @@ from .analysis_result import AnalysisResult
 from .comparison_analysis_agent import ComparisonAnalysisError, run_comparison_analysis
 from .cv_comparison_input import CVComparisonInputError, load_cv_markdown
 from .llm_provider import LLMProvider, get_llm_provider
-from .recommendation_writer_agent import RecommendationWriterError, run_recommendation_writer
+from .recommendation_writer_agent import (
+    RecommendationWriterError,
+    run_recommendation_writer,
+)
 from .s3_client import S3_BUCKET, analysis_result_key, make_s3_client
 from .state_machine import make_sfn_client
 
@@ -83,7 +86,9 @@ async def run_crew_task(
         raise CrewTaskError(f"Analysis {analysis_id} not found")
 
     log_stage_event(logger, stage=STAGE, status="STARTED", analysis_id=analysis_id)
-    await record_pipeline_event(session, stage=STAGE, status="STARTED", analysis_id=analysis_id)
+    await record_pipeline_event(
+        session, stage=STAGE, status="STARTED", analysis_id=analysis_id
+    )
 
     analysis.status = Analysisstatus.RUNNING_CREW
     analysis.startedAt = _now()
@@ -98,13 +103,23 @@ async def run_crew_task(
         analysis.errorMessage = message
         await session.commit()
         log_stage_event(
-            logger, stage=STAGE, status="FAILED", analysis_id=analysis_id, message=message
+            logger,
+            stage=STAGE,
+            status="FAILED",
+            analysis_id=analysis_id,
+            message=message,
         )
         await record_pipeline_event(
-            session, stage=STAGE, status="FAILED", message=message, analysis_id=analysis_id
+            session,
+            stage=STAGE,
+            status="FAILED",
+            message=message,
+            analysis_id=analysis_id,
         )
         if task_token and sfn is not None:
-            sfn.send_task_failure(taskToken=task_token, error="CrewTaskError", cause=message)
+            sfn.send_task_failure(
+                taskToken=task_token, error="CrewTaskError", cause=message
+            )
 
     job_offer = await session.get(JobOffer, analysis.jobOfferId)
     if (
@@ -164,8 +179,16 @@ async def run_crew_task(
     analysis.errorMessage = None
     await session.commit()
 
-    log_stage_event(logger, stage=STAGE, status="SUCCEEDED", analysis_id=analysis_id, s3_result_key=key)
-    await record_pipeline_event(session, stage=STAGE, status="SUCCEEDED", analysis_id=analysis_id)
+    log_stage_event(
+        logger,
+        stage=STAGE,
+        status="SUCCEEDED",
+        analysis_id=analysis_id,
+        s3_result_key=key,
+    )
+    await record_pipeline_event(
+        session, stage=STAGE, status="SUCCEEDED", analysis_id=analysis_id
+    )
 
     if task_token and sfn is not None:
         sfn.send_task_success(

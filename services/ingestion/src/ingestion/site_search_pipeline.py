@@ -11,7 +11,12 @@ from datetime import UTC, datetime
 
 import httpx
 from analysis.llm_provider import LLMProvider
-from py_db.models import IngestionJob, Ingestionjobstatus, SiteConfig, Siteconfigintegrationtype
+from py_db.models import (
+    IngestionJob,
+    Ingestionjobstatus,
+    SiteConfig,
+    Siteconfigintegrationtype,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .fanout import link_and_process_offers
@@ -27,7 +32,9 @@ def _now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-async def _fail(session: AsyncSession, ingestion_job: IngestionJob, message: str) -> IngestionJob:
+async def _fail(
+    session: AsyncSession, ingestion_job: IngestionJob, message: str
+) -> IngestionJob:
     ingestion_job.status = Ingestionjobstatus.FAILED
     ingestion_job.errorMessage = message
     ingestion_job.updatedAt = _now()
@@ -57,30 +64,44 @@ async def run_site_search_ingestion(
     or silently reporting zero results as success.
     """
     if site_config.integrationType == Siteconfigintegrationtype.OFFICIAL_API:
-        await ingest_france_travail_offers(session, ingestion_job, site_config, filters, http_client=http_client)
+        await ingest_france_travail_offers(
+            session, ingestion_job, site_config, filters, http_client=http_client
+        )
         return await session.get(IngestionJob, ingestion_job.id)
 
     try:
         search_url = build_search_url(site_config, filters)
     except SiteSearchConfigError as exc:
-        return await _fail(session, ingestion_job, f"Failed to build search URL for {site_config.siteKey}: {exc}")
+        return await _fail(
+            session,
+            ingestion_job,
+            f"Failed to build search URL for {site_config.siteKey}: {exc}",
+        )
 
     try:
         pages = await fetch_listing_pages(search_url, http_client=http_client)
     except ListingFetchError as exc:
-        return await _fail(session, ingestion_job, f"Failed to fetch listing for {site_config.siteKey}: {exc}")
+        return await _fail(
+            session,
+            ingestion_job,
+            f"Failed to fetch listing for {site_config.siteKey}: {exc}",
+        )
 
     try:
         seen: set[str] = set()
         urls: list[str] = []
         for page_html in pages:
-            for url in extract_offer_urls_via_site_config(page_html, search_url, site_config):
+            for url in extract_offer_urls_via_site_config(
+                page_html, search_url, site_config
+            ):
                 if url not in seen:
                     seen.add(url)
                     urls.append(url)
     except SiteAdapterConfigError as exc:
         return await _fail(
-            session, ingestion_job, f"Adapter configuration error for {site_config.siteKey}: {exc}"
+            session,
+            ingestion_job,
+            f"Adapter configuration error for {site_config.siteKey}: {exc}",
         )
 
     if not urls:
@@ -91,5 +112,7 @@ async def run_site_search_ingestion(
             "or its HTML structure may have changed",
         )
 
-    await link_and_process_offers(session, ingestion_job, urls, http_client=http_client, llm_provider=llm_provider)
+    await link_and_process_offers(
+        session, ingestion_job, urls, http_client=http_client, llm_provider=llm_provider
+    )
     return await session.get(IngestionJob, ingestion_job.id)

@@ -50,7 +50,9 @@ CV_MARKDOWN = "# Jane Doe\n\n## Skills\n\n- Python\n- AWS\n- PostgreSQL\n"
 VALID_COMPARISON_OUTPUT = json.dumps(
     {
         "match_score": 82,
-        "matched_skills": [{"skill": "Python", "evidence": "5+ years Python experience"}],
+        "matched_skills": [
+            {"skill": "Python", "evidence": "5+ years Python experience"}
+        ],
         "missing_skills": [{"skill": "Kubernetes", "importance": "nice_to_have"}],
         "strengths": ["Strong Python background"],
         "weaknesses": ["No Kubernetes experience"],
@@ -75,7 +77,11 @@ VALID_ANALYSIS_RESULT = {
     "strengths": ["Strong Python background"],
     "weaknesses": ["No Kubernetes experience"],
     "improvement_suggestions": [
-        {"area": "Kubernetes", "suggestion": "Get hands-on Kubernetes experience.", "priority": "medium"}
+        {
+            "area": "Kubernetes",
+            "suggestion": "Get hands-on Kubernetes experience.",
+            "priority": "medium",
+        }
     ],
     "summary": "Strong match on core skills; consider closing the Kubernetes gap.",
     "generated_at": "2026-08-25T00:00:00Z",
@@ -91,7 +97,15 @@ class StubLLMProvider(LLMProvider):
         self.calls = 0
         self.model = "stub-model"
 
-    def generate(self, *, system: str, prompt: str) -> str:
+    def generate(
+        self,
+        *,
+        system: str,
+        prompt: str,
+        max_tokens: int | None = None,
+        response_schema=None,
+        temperature: float | None = None,
+    ) -> str:
         self.calls += 1
         return self._responses[min(self.calls, len(self._responses)) - 1]
 
@@ -115,7 +129,9 @@ def _s3_event(bucket: str, key: str) -> dict:
     return {"Records": [{"s3": {"bucket": {"name": bucket}, "object": {"key": key}}}]}
 
 
-async def _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, analysis_id, *, status):
+async def _make_fixture(
+    session_factory, user_id, job_offer_id, cv_version_id, analysis_id, *, status
+):
     now = _now()
     async with session_factory() as session:
         session.add(User(id=user_id, updatedAt=now))
@@ -155,14 +171,20 @@ async def _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, a
         await session.commit()
 
 
-async def _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id):
+async def _cleanup(
+    engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+):
     async with session_factory() as session:
         # PipelineEvent.analysisId (M6-T3) has ON DELETE CASCADE at the DB
         # level, but SQLAlchemy's default relationship handling nulls
         # rather than deletes orphaned children when the parent is removed
         # via the ORM — so delete these explicitly first, same as any other
         # FK'd row, rather than relying on the DB-level cascade.
-        events = (await session.scalars(select(PipelineEvent).where(PipelineEvent.analysisId == analysis_id))).all()
+        events = (
+            await session.scalars(
+                select(PipelineEvent).where(PipelineEvent.analysisId == analysis_id)
+            )
+        ).all()
         for event in events:
             await session.delete(event)
         for model, row_id in (
@@ -201,7 +223,12 @@ async def test_analysis_workflow_reaches_completed_purely_from_s3_event_lambda()
     analysis_id = f"test-{uuid.uuid4()}"
 
     await _make_fixture(
-        session_factory, user_id, job_offer_id, cv_version_id, analysis_id, status=Analysisstatus.QUEUED
+        session_factory,
+        user_id,
+        job_offer_id,
+        cv_version_id,
+        analysis_id,
+        status=Analysisstatus.QUEUED,
     )
     provider = StubLLMProvider([VALID_COMPARISON_OUTPUT, VALID_RECOMMENDATION_OUTPUT])
     s3 = _s3_client()
@@ -211,7 +238,9 @@ async def test_analysis_workflow_reaches_completed_purely_from_s3_event_lambda()
         # M5-T3's Fargate task step: writes the S3 object, stops at
         # AWAITING_RESULT (never COMPLETED).
         async with session_factory() as session:
-            await run_crew_task(session, analysis_id, llm_provider=provider, s3_client=s3)
+            await run_crew_task(
+                session, analysis_id, llm_provider=provider, s3_client=s3
+            )
 
         async with session_factory() as session:
             reloaded = await session.get(Analysis, analysis_id)
@@ -221,7 +250,9 @@ async def test_analysis_workflow_reaches_completed_purely_from_s3_event_lambda()
         # M5-T4's step: a synthetic S3 ObjectCreated event drives the sole
         # terminal-state write.
         async with session_factory() as session:
-            persisted = await persist_analysis_result(session, analysis_id, s3_client=s3)
+            persisted = await persist_analysis_result(
+                session, analysis_id, s3_client=s3
+            )
             assert persisted.status == Analysisstatus.COMPLETED
             assert persisted.matchScore == 82
             assert persisted.resultJSON["job_offer_id"] == job_offer_id
@@ -249,7 +280,9 @@ async def test_analysis_workflow_reaches_completed_purely_from_s3_event_lambda()
             assert statuses == {"STARTED", "SUCCEEDED"}
     finally:
         s3.delete_object(Bucket=S3_BUCKET, Key=key)
-        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+        await _cleanup(
+            engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+        )
 
 
 def test_handle_analysis_result_created_persists_from_s3_event_shape():
@@ -292,13 +325,27 @@ def test_handle_analysis_result_created_persists_from_s3_event_shape():
 
     def _teardown():
         engine = make_engine()
-        return _cleanup(engine, make_session_factory(engine), user_id, job_offer_id, cv_version_id, analysis_id)
+        return _cleanup(
+            engine,
+            make_session_factory(engine),
+            user_id,
+            job_offer_id,
+            cv_version_id,
+            analysis_id,
+        )
 
     asyncio.run(_setup())
     s3 = _s3_client()
     key = analysis_result_key(analysis_id)
-    body = dict(VALID_ANALYSIS_RESULT, job_offer_id=job_offer_id, cv_version_id=cv_version_id)
-    s3.put_object(Bucket=S3_BUCKET, Key=key, Body=json.dumps(body).encode("utf-8"), ContentType="application/json")
+    body = dict(
+        VALID_ANALYSIS_RESULT, job_offer_id=job_offer_id, cv_version_id=cv_version_id
+    )
+    s3.put_object(
+        Bucket=S3_BUCKET,
+        Key=key,
+        Body=json.dumps(body).encode("utf-8"),
+        ContentType="application/json",
+    )
 
     try:
         handle_analysis_result_created(_s3_event(S3_BUCKET, key))
@@ -322,11 +369,21 @@ async def test_persist_analysis_result_fails_on_malformed_json_without_partial_w
     analysis_id = f"test-{uuid.uuid4()}"
 
     await _make_fixture(
-        session_factory, user_id, job_offer_id, cv_version_id, analysis_id, status=Analysisstatus.AWAITING_RESULT
+        session_factory,
+        user_id,
+        job_offer_id,
+        cv_version_id,
+        analysis_id,
+        status=Analysisstatus.AWAITING_RESULT,
     )
     s3 = _s3_client()
     key = analysis_result_key(analysis_id)
-    s3.put_object(Bucket=S3_BUCKET, Key=key, Body=b"not valid json", ContentType="application/json")
+    s3.put_object(
+        Bucket=S3_BUCKET,
+        Key=key,
+        Body=b"not valid json",
+        ContentType="application/json",
+    )
 
     try:
         async with session_factory() as session:
@@ -341,7 +398,9 @@ async def test_persist_analysis_result_fails_on_malformed_json_without_partial_w
             assert reloaded.matchScore is None
     finally:
         s3.delete_object(Bucket=S3_BUCKET, Key=key)
-        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+        await _cleanup(
+            engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+        )
 
 
 @pytest.mark.asyncio
@@ -354,7 +413,12 @@ async def test_persist_analysis_result_fails_on_schema_violation_without_partial
     analysis_id = f"test-{uuid.uuid4()}"
 
     await _make_fixture(
-        session_factory, user_id, job_offer_id, cv_version_id, analysis_id, status=Analysisstatus.AWAITING_RESULT
+        session_factory,
+        user_id,
+        job_offer_id,
+        cv_version_id,
+        analysis_id,
+        status=Analysisstatus.AWAITING_RESULT,
     )
     s3 = _s3_client()
     key = analysis_result_key(analysis_id)
@@ -378,7 +442,9 @@ async def test_persist_analysis_result_fails_on_schema_violation_without_partial
             assert reloaded.resultJSON is None
     finally:
         s3.delete_object(Bucket=S3_BUCKET, Key=key)
-        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+        await _cleanup(
+            engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+        )
 
 
 @pytest.mark.asyncio
@@ -396,7 +462,12 @@ async def test_persist_result_rolls_up_owning_scout_run():
     ingestion_job_id = f"test-job-{uuid.uuid4()}"
 
     await _make_fixture(
-        session_factory, user_id, job_offer_id, cv_version_id, analysis_id, status=Analysisstatus.QUEUED
+        session_factory,
+        user_id,
+        job_offer_id,
+        cv_version_id,
+        analysis_id,
+        status=Analysisstatus.QUEUED,
     )
     async with session_factory() as session:
         session.add(
@@ -412,7 +483,9 @@ async def test_persist_result_rolls_up_owning_scout_run():
                 updatedAt=_now(),
             )
         )
-        session.add(ScoutRun(id=scout_run_id, scoutId=scout_id, status=Scoutrunstatus.RUNNING))
+        session.add(
+            ScoutRun(id=scout_run_id, scoutId=scout_id, status=Scoutrunstatus.RUNNING)
+        )
         session.add(
             IngestionJob(
                 id=ingestion_job_id,
@@ -436,7 +509,9 @@ async def test_persist_result_rolls_up_owning_scout_run():
 
     try:
         async with session_factory() as session:
-            await run_crew_task(session, analysis_id, llm_provider=provider, s3_client=s3)
+            await run_crew_task(
+                session, analysis_id, llm_provider=provider, s3_client=s3
+            )
         async with session_factory() as session:
             await persist_analysis_result(session, analysis_id, s3_client=s3)
 
@@ -463,4 +538,6 @@ async def test_persist_result_rolls_up_owning_scout_run():
                 if row is not None:
                     await session.delete(row)
             await session.commit()
-        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+        await _cleanup(
+            engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+        )

@@ -14,7 +14,7 @@ from pydantic import BaseModel, ValidationError
 
 from .comparison_analysis_agent import ComparisonResult
 from .llm_json import parse_llm_json
-from .llm_provider import LLMProvider, get_llm_provider
+from .llm_provider import LLMProvider, get_llm_provider, retry_temperature
 
 MAX_ATTEMPTS = 3
 
@@ -44,6 +44,9 @@ class RecommendationWriterError(Exception):
     pass
 
 
+_RESPONSE_SCHEMA = RecommendationResult.model_json_schema()
+
+
 def _parse_llm_output(raw: str) -> RecommendationResult:
     data = parse_llm_json(raw)
     return RecommendationResult.model_validate(data)
@@ -62,9 +65,14 @@ def run_recommendation_writer(
     prompt = comparison_result.model_dump_json()
 
     last_error: Exception | None = None
-    for _attempt in range(1, MAX_ATTEMPTS + 1):
+    for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
-            raw = provider.generate(system=SYSTEM_PROMPT, prompt=prompt)
+            raw = provider.generate(
+                system=SYSTEM_PROMPT,
+                prompt=prompt,
+                response_schema=_RESPONSE_SCHEMA,
+                temperature=retry_temperature(attempt),
+            )
             return _parse_llm_output(raw)
         except (json.JSONDecodeError, ValidationError, TypeError) as exc:
             last_error = exc

@@ -15,7 +15,11 @@ from py_db.models import (
     Joboffersourcesite,
     SiteConfig,
 )
-from py_db.scout_matching import analyses_created_for_scout_run, lexical_similarity, scout_max_analyses_per_run
+from py_db.scout_matching import (
+    analyses_created_for_scout_run,
+    lexical_similarity,
+    scout_max_analyses_per_run,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -43,7 +47,9 @@ def dedupe_and_cap_urls(urls: list[str], max_offers: int) -> list[str]:
     return deduped[:max_offers]
 
 
-async def _resolve_source_site(session: AsyncSession, ingestion_job: IngestionJob) -> Joboffersourcesite:
+async def _resolve_source_site(
+    session: AsyncSession, ingestion_job: IngestionJob
+) -> Joboffersourcesite:
     """The `JobOfferSourceSite` a newly discovered offer from `ingestion_job`
     should be tagged with: the site actually targeted by a SITE_SEARCH job's
     `siteConfigId`, when that site has a matching `JobOfferSourceSite` value
@@ -56,7 +62,9 @@ async def _resolve_source_site(session: AsyncSession, ingestion_job: IngestionJo
     site_config = await session.get(SiteConfig, ingestion_job.siteConfigId)
     if site_config is None:
         return Joboffersourcesite.OTHER
-    return Joboffersourcesite.__members__.get(site_config.siteKey.value, Joboffersourcesite.OTHER)
+    return Joboffersourcesite.__members__.get(
+        site_config.siteKey.value, Joboffersourcesite.OTHER
+    )
 
 
 async def link_discovered_offers(
@@ -80,7 +88,9 @@ async def link_discovered_offers(
 
     job_offers: list[JobOffer] = []
     for url in retained_urls:
-        job_offer = await session.scalar(select(JobOffer).where(JobOffer.sourceUrl == url))
+        job_offer = await session.scalar(
+            select(JobOffer).where(JobOffer.sourceUrl == url)
+        )
         if job_offer is None:
             job_offer = JobOffer(
                 id=str(uuid.uuid4()),
@@ -132,19 +142,28 @@ async def process_job_offer(
     per-job scraped/failed counts is M3-T5's scope. `ingestion_job_id` tags
     the scrape/extract PipelineEvent/log rows emitted along the way (M6-T3).
     """
-    if job_offer.extractionStatus in (Jobofferextractionstatus.READY, Jobofferextractionstatus.FAILED):
+    if job_offer.extractionStatus in (
+        Jobofferextractionstatus.READY,
+        Jobofferextractionstatus.FAILED,
+    ):
         return job_offer
 
     try:
         await scrape_job_offer(
-            session, job_offer.id, http_client=http_client, ingestion_job_id=ingestion_job_id
+            session,
+            job_offer.id,
+            http_client=http_client,
+            ingestion_job_id=ingestion_job_id,
         )
     except ScrapeError:
         return await session.get(JobOffer, job_offer.id)
 
     try:
         await extract_job_offer(
-            session, job_offer.id, llm_provider=llm_provider, ingestion_job_id=ingestion_job_id
+            session,
+            job_offer.id,
+            llm_provider=llm_provider,
+            ingestion_job_id=ingestion_job_id,
         )
     except ExtractionError:
         pass
@@ -162,11 +181,17 @@ async def _scrape_step(
     """The scrape half of `process_job_offer`, split out so a Scout job's
     extraction ceiling (issue #55) can scrape every discovered offer before
     ranking which ones proceed to extraction."""
-    if job_offer.extractionStatus in (Jobofferextractionstatus.READY, Jobofferextractionstatus.FAILED):
+    if job_offer.extractionStatus in (
+        Jobofferextractionstatus.READY,
+        Jobofferextractionstatus.FAILED,
+    ):
         return job_offer
     try:
         return await scrape_job_offer(
-            session, job_offer.id, http_client=http_client, ingestion_job_id=ingestion_job_id
+            session,
+            job_offer.id,
+            http_client=http_client,
+            ingestion_job_id=ingestion_job_id,
         )
     except ScrapeError:
         return await session.get(JobOffer, job_offer.id)
@@ -183,7 +208,10 @@ async def _extract_step(
     reason as `_scrape_step`."""
     try:
         await extract_job_offer(
-            session, job_offer.id, llm_provider=llm_provider, ingestion_job_id=ingestion_job_id
+            session,
+            job_offer.id,
+            llm_provider=llm_provider,
+            ingestion_job_id=ingestion_job_id,
         )
     except ExtractionError:
         pass
@@ -221,11 +249,20 @@ async def _scrape_all_then_extract_within_ceiling(
     `ingestion_job.extractionSkippedCount`.
     """
     scraped = [
-        await _scrape_step(session, job_offer, http_client=http_client, ingestion_job_id=ingestion_job.id)
+        await _scrape_step(
+            session,
+            job_offer,
+            http_client=http_client,
+            ingestion_job_id=ingestion_job.id,
+        )
         for job_offer in job_offers
     ]
 
-    candidates = [offer for offer in scraped if offer.extractionStatus == Jobofferextractionstatus.SCRAPED]
+    candidates = [
+        offer
+        for offer in scraped
+        if offer.extractionStatus == Jobofferextractionstatus.SCRAPED
+    ]
     cv_version = await session.get(CVVersion, ingestion_job.cvVersionId)
     cv_text = cv_version.markdownContent if cv_version is not None else None
     texts = {offer.id: await _raw_scrape_text(offer) for offer in candidates}
@@ -235,14 +272,17 @@ async def _scrape_all_then_extract_within_ceiling(
         key=lambda oid: -lexical_similarity(texts[oid], cv_text),
     )
     budget = max(
-        scout_max_analyses_per_run() - await analyses_created_for_scout_run(session, ingestion_job.scoutRunId),
+        scout_max_analyses_per_run()
+        - await analyses_created_for_scout_run(session, ingestion_job.scoutRunId),
         0,
     )
     to_extract_ids = set(ranked_ids[:budget])
     skipped_count = len(ranked_ids) - len(to_extract_ids)
 
     if skipped_count:
-        ingestion_job.extractionSkippedCount = (ingestion_job.extractionSkippedCount or 0) + skipped_count
+        ingestion_job.extractionSkippedCount = (
+            ingestion_job.extractionSkippedCount or 0
+        ) + skipped_count
         ingestion_job.updatedAt = _now()
         await session.commit()
 
@@ -250,7 +290,10 @@ async def _scrape_all_then_extract_within_ceiling(
     for offer in scraped:
         if offer.id in to_extract_ids:
             offer = await _extract_step(
-                session, offer, llm_provider=llm_provider, ingestion_job_id=ingestion_job.id
+                session,
+                offer,
+                llm_provider=llm_provider,
+                ingestion_job_id=ingestion_job.id,
             )
         processed.append(offer)
     return processed
@@ -278,7 +321,11 @@ async def link_and_process_offers(
     job_offers = await link_discovered_offers(session, ingestion_job, urls)
     if ingestion_job.scoutRunId and ingestion_job.cvVersionId:
         processed = await _scrape_all_then_extract_within_ceiling(
-            session, ingestion_job, job_offers, http_client=http_client, llm_provider=llm_provider
+            session,
+            ingestion_job,
+            job_offers,
+            http_client=http_client,
+            llm_provider=llm_provider,
         )
     else:
         processed = [
@@ -295,7 +342,9 @@ async def link_and_process_offers(
     return processed
 
 
-async def update_ingestion_job_aggregate(session: AsyncSession, ingestion_job_id: str) -> IngestionJob:
+async def update_ingestion_job_aggregate(
+    session: AsyncSession, ingestion_job_id: str
+) -> IngestionJob:
     """PRD Section 8.4 step 5: recomputes `discoveredCount`/`scrapedCount`/
     `failedCount` from the JobOffers currently linked to `ingestion_job_id`
     and rolls up `status`:
@@ -322,10 +371,22 @@ async def update_ingestion_job_aggregate(session: AsyncSession, ingestion_job_id
     ).all()
 
     discovered_count = len(linked_offers)
-    scraped_count = sum(1 for offer in linked_offers if offer.extractionStatus == Jobofferextractionstatus.READY)
-    failed_count = sum(1 for offer in linked_offers if offer.extractionStatus == Jobofferextractionstatus.FAILED)
+    scraped_count = sum(
+        1
+        for offer in linked_offers
+        if offer.extractionStatus == Jobofferextractionstatus.READY
+    )
+    failed_count = sum(
+        1
+        for offer in linked_offers
+        if offer.extractionStatus == Jobofferextractionstatus.FAILED
+    )
     ceiling_skipped_count = (
-        sum(1 for offer in linked_offers if offer.extractionStatus == Jobofferextractionstatus.SCRAPED)
+        sum(
+            1
+            for offer in linked_offers
+            if offer.extractionStatus == Jobofferextractionstatus.SCRAPED
+        )
         if ingestion_job.scoutRunId
         else 0
     )
@@ -338,7 +399,9 @@ async def update_ingestion_job_aggregate(session: AsyncSession, ingestion_job_id
         status = Ingestionjobstatus.COMPLETED
     elif failed_count == discovered_count:
         status = Ingestionjobstatus.FAILED
-        error_message = f"All {discovered_count} discovered offers failed to scrape/extract"
+        error_message = (
+            f"All {discovered_count} discovered offers failed to scrape/extract"
+        )
     else:
         status = Ingestionjobstatus.PARTIALLY_COMPLETED
         error_message = f"{failed_count} of {discovered_count} discovered offers failed to scrape/extract"

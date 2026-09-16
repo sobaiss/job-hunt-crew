@@ -85,14 +85,18 @@ async def dispatch_ingestion_job(
         )
     else:
         ingestion_job.status = Ingestionjobstatus.FAILED
-        ingestion_job.errorMessage = f"Unsupported ingestion mode {ingestion_job.mode.value}"
+        ingestion_job.errorMessage = (
+            f"Unsupported ingestion mode {ingestion_job.mode.value}"
+        )
         ingestion_job.updatedAt = _now()
         await session.commit()
         await session.refresh(ingestion_job)
         return ingestion_job
 
     ingestion_job = await session.get(IngestionJob, ingestion_job_id)
-    await create_analyses_for_ready_offers(session, ingestion_job, sqs_client=sqs_client)
+    await create_analyses_for_ready_offers(
+        session, ingestion_job, sqs_client=sqs_client
+    )
     return await session.get(IngestionJob, ingestion_job_id)
 
 

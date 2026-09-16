@@ -52,7 +52,9 @@ def build_search_url(site_config: SiteConfig, filters: dict[str, str]) -> str:
     # the API layer stores unset optional filters as an explicit `None`
     # (services/api's `_optional_string`), so `or ""` is needed to catch that
     # case too and avoid stringifying it into a literal "None" in the URL.
-    values = {name: quote(str(filters.get(name) or ""), safe="") for name in field_names}
+    values = {
+        name: quote(str(filters.get(name) or ""), safe="") for name in field_names
+    }
     return site_config.searchUrlTemplate.format(**values)
 
 

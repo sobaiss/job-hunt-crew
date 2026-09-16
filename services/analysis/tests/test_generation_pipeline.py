@@ -55,7 +55,15 @@ class StubLLMProvider(LLMProvider):
         self.calls = 0
         self.model = "stub-model"
 
-    def generate(self, *, system: str, prompt: str, max_tokens: int | None = None) -> str:
+    def generate(
+        self,
+        *,
+        system: str,
+        prompt: str,
+        max_tokens: int | None = None,
+        response_schema=None,
+        temperature: float | None = None,
+    ) -> str:
         self.calls += 1
         return self._responses[min(self.calls, len(self._responses)) - 1]
 
@@ -76,7 +84,14 @@ def _now():
 
 
 async def _make_fixture(
-    session_factory, user_id, job_offer_id, cv_version_id, analysis_id, document_id, *, doc_type
+    session_factory,
+    user_id,
+    job_offer_id,
+    cv_version_id,
+    analysis_id,
+    document_id,
+    *,
+    doc_type,
 ):
     now = _now()
     async with session_factory() as session:
@@ -130,7 +145,15 @@ async def _make_fixture(
         await session.commit()
 
 
-async def _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id, document_id):
+async def _cleanup(
+    engine,
+    session_factory,
+    user_id,
+    job_offer_id,
+    cv_version_id,
+    analysis_id,
+    document_id,
+):
     async with session_factory() as session:
         for model, row_id in (
             (GeneratedDocument, document_id),
@@ -174,7 +197,10 @@ async def test_run_generation_pipeline_writes_cover_letter_markdown_and_complete
                 session, document_id, llm_provider=provider, s3_client=s3
             )
             assert document.status == Generateddocumentstatus.READY
-            assert document.markdownContent == "Dear Hiring Manager, I am excited to apply..."
+            assert (
+                document.markdownContent
+                == "Dear Hiring Manager, I am excited to apply..."
+            )
             assert document.errorMessage is None
 
         expected_key = generated_document_key(user_id, analysis_id, "COVER_LETTER")
@@ -185,10 +211,24 @@ async def test_run_generation_pipeline_writes_cover_letter_markdown_and_complete
             assert reloaded.s3Key == expected_key
 
         obj = s3.get_object(Bucket=S3_BUCKET, Key=expected_key)
-        assert obj["Body"].read().decode("utf-8") == "Dear Hiring Manager, I am excited to apply..."
+        assert (
+            obj["Body"].read().decode("utf-8")
+            == "Dear Hiring Manager, I am excited to apply..."
+        )
     finally:
-        s3.delete_object(Bucket=S3_BUCKET, Key=generated_document_key(user_id, analysis_id, "COVER_LETTER"))
-        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id, document_id)
+        s3.delete_object(
+            Bucket=S3_BUCKET,
+            Key=generated_document_key(user_id, analysis_id, "COVER_LETTER"),
+        )
+        await _cleanup(
+            engine,
+            session_factory,
+            user_id,
+            job_offer_id,
+            cv_version_id,
+            analysis_id,
+            document_id,
+        )
 
 
 @pytest.mark.asyncio
@@ -215,7 +255,9 @@ async def test_run_generation_pipeline_fails_with_error_message_on_empty_provide
     try:
         async with session_factory() as session:
             with pytest.raises(GenerationPipelineError):
-                await run_generation_pipeline(session, document_id, llm_provider=provider)
+                await run_generation_pipeline(
+                    session, document_id, llm_provider=provider
+                )
 
         async with session_factory() as session:
             reloaded = await session.get(GeneratedDocument, document_id)
@@ -224,7 +266,15 @@ async def test_run_generation_pipeline_fails_with_error_message_on_empty_provide
             assert reloaded.markdownContent is None
             assert reloaded.s3Key is None
     finally:
-        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id, document_id)
+        await _cleanup(
+            engine,
+            session_factory,
+            user_id,
+            job_offer_id,
+            cv_version_id,
+            analysis_id,
+            document_id,
+        )
 
 
 def test_handle_generation_intake_local_unwraps_records_and_runs_each(monkeypatch):
@@ -237,7 +287,9 @@ def test_handle_generation_intake_local_unwraps_records_and_runs_each(monkeypatc
     async def _fake_pipeline(session, document_id, **kwargs):
         seen.append(document_id)
 
-    monkeypatch.setattr(generation_pipeline_module, "run_generation_pipeline", _fake_pipeline)
+    monkeypatch.setattr(
+        generation_pipeline_module, "run_generation_pipeline", _fake_pipeline
+    )
 
     handle_generation_intake_local(
         {
@@ -251,7 +303,9 @@ def test_handle_generation_intake_local_unwraps_records_and_runs_each(monkeypatc
     assert seen == ["gd-aaa", "gd-bbb"]
 
 
-def test_handle_generation_intake_local_swallows_a_pipeline_failure_and_continues(monkeypatch):
+def test_handle_generation_intake_local_swallows_a_pipeline_failure_and_continues(
+    monkeypatch,
+):
     """A pipeline failure is already persisted as FAILED on the row, so the
     consumer must not let it propagate (and redeliver as a poison message) —
     the remaining records are still processed."""
@@ -262,7 +316,9 @@ def test_handle_generation_intake_local_swallows_a_pipeline_failure_and_continue
         if document_id == "gd-bad":
             raise GenerationPipelineError("missing prerequisite row")
 
-    monkeypatch.setattr(generation_pipeline_module, "run_generation_pipeline", _fake_pipeline)
+    monkeypatch.setattr(
+        generation_pipeline_module, "run_generation_pipeline", _fake_pipeline
+    )
 
     handle_generation_intake_local(
         {

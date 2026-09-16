@@ -36,7 +36,9 @@ CV_MARKDOWN = "# Jane Doe\n\n## Skills\n\n- Python\n- AWS\n- PostgreSQL\n"
 VALID_COMPARISON_OUTPUT = json.dumps(
     {
         "match_score": 82,
-        "matched_skills": [{"skill": "Python", "evidence": "5+ years Python experience"}],
+        "matched_skills": [
+            {"skill": "Python", "evidence": "5+ years Python experience"}
+        ],
         "missing_skills": [{"skill": "Kubernetes", "importance": "nice_to_have"}],
         "strengths": ["Strong Python background"],
         "weaknesses": ["No Kubernetes experience"],
@@ -63,7 +65,15 @@ class StubLLMProvider(LLMProvider):
         self.model = "stub-model"
         self.prompts: list[tuple[str, str]] = []
 
-    def generate(self, *, system: str, prompt: str) -> str:
+    def generate(
+        self,
+        *,
+        system: str,
+        prompt: str,
+        max_tokens: int | None = None,
+        response_schema=None,
+        temperature: float | None = None,
+    ) -> str:
         self.calls += 1
         self.prompts.append((system, prompt))
         return self._responses[min(self.calls, len(self._responses)) - 1]
@@ -96,7 +106,9 @@ def _now():
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-async def _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, analysis_id):
+async def _make_fixture(
+    session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+):
     now = _now()
     async with session_factory() as session:
         session.add(User(id=user_id, updatedAt=now))
@@ -136,14 +148,20 @@ async def _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, a
         await session.commit()
 
 
-async def _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id):
+async def _cleanup(
+    engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+):
     async with session_factory() as session:
         # PipelineEvent.analysisId (M6-T3) has ON DELETE CASCADE at the DB
         # level, but SQLAlchemy's default relationship handling nulls
         # rather than deletes orphaned children when the parent is removed
         # via the ORM — so delete these explicitly first, same as any other
         # FK'd row, rather than relying on the DB-level cascade.
-        events = (await session.scalars(select(PipelineEvent).where(PipelineEvent.analysisId == analysis_id))).all()
+        events = (
+            await session.scalars(
+                select(PipelineEvent).where(PipelineEvent.analysisId == analysis_id)
+            )
+        ).all()
         for event in events:
             await session.delete(event)
         for model, row_id in (
@@ -168,7 +186,9 @@ async def test_run_crew_task_writes_result_to_s3_and_reports_task_success():
     cv_version_id = f"test-{uuid.uuid4()}"
     analysis_id = f"test-{uuid.uuid4()}"
 
-    await _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+    await _make_fixture(
+        session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+    )
     provider = StubLLMProvider([VALID_COMPARISON_OUTPUT, VALID_RECOMMENDATION_OUTPUT])
     sfn = StubSfnClient()
     s3 = _s3_client()
@@ -213,7 +233,9 @@ async def test_run_crew_task_writes_result_to_s3_and_reports_task_success():
             assert reloaded.completedAt is None
     finally:
         s3.delete_object(Bucket=S3_BUCKET, Key=key)
-        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+        await _cleanup(
+            engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+        )
 
 
 @pytest.mark.asyncio
@@ -225,7 +247,9 @@ async def test_run_crew_task_fails_and_reports_task_failure_on_malformed_output(
     cv_version_id = f"test-{uuid.uuid4()}"
     analysis_id = f"test-{uuid.uuid4()}"
 
-    await _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+    await _make_fixture(
+        session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+    )
     provider = StubLLMProvider(["not valid json"])
     sfn = StubSfnClient()
     s3 = _s3_client()
@@ -258,7 +282,9 @@ async def test_run_crew_task_fails_and_reports_task_failure_on_malformed_output(
         with pytest.raises(s3.exceptions.NoSuchKey):
             s3.get_object(Bucket=S3_BUCKET, Key=key)
     finally:
-        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+        await _cleanup(
+            engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+        )
 
 
 @pytest.mark.asyncio
@@ -274,7 +300,9 @@ async def test_run_crew_task_fails_and_reports_task_failure_on_malformed_recomme
     cv_version_id = f"test-{uuid.uuid4()}"
     analysis_id = f"test-{uuid.uuid4()}"
 
-    await _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+    await _make_fixture(
+        session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+    )
     provider = StubLLMProvider([VALID_COMPARISON_OUTPUT, "not valid json"])
     sfn = StubSfnClient()
     s3 = _s3_client()
@@ -305,7 +333,9 @@ async def test_run_crew_task_fails_and_reports_task_failure_on_malformed_recomme
         with pytest.raises(s3.exceptions.NoSuchKey):
             s3.get_object(Bucket=S3_BUCKET, Key=key)
     finally:
-        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+        await _cleanup(
+            engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+        )
 
 
 @pytest.mark.asyncio
@@ -319,7 +349,9 @@ async def test_run_crew_task_reads_the_markdown_rendition_when_the_cv_is_convert
     cv_version_id = f"test-{uuid.uuid4()}"
     analysis_id = f"test-{uuid.uuid4()}"
 
-    await _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+    await _make_fixture(
+        session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+    )
     cv_markdown = "# Jane Doe\n\n## Skills\n\n- Python\n- AWS\n"
     async with session_factory() as session:
         cv_version = await session.get(CVVersion, cv_version_id)
@@ -353,7 +385,9 @@ async def test_run_crew_task_reads_the_markdown_rendition_when_the_cv_is_convert
         assert json.loads(comparison_prompt)["cv_markdown"] == cv_markdown
     finally:
         s3.delete_object(Bucket=S3_BUCKET, Key=key)
-        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+        await _cleanup(
+            engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+        )
 
 
 @pytest.mark.asyncio
@@ -365,7 +399,9 @@ async def test_run_crew_task_fails_when_cv_not_converted_without_calling_llm():
     cv_version_id = f"test-{uuid.uuid4()}"
     analysis_id = f"test-{uuid.uuid4()}"
 
-    await _make_fixture(session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+    await _make_fixture(
+        session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+    )
     async with session_factory() as session:
         cv_version = await session.get(CVVersion, cv_version_id)
         cv_version.conversionStatus = Cvconversionstatus.PENDING
@@ -379,7 +415,11 @@ async def test_run_crew_task_fails_when_cv_not_converted_without_calling_llm():
         async with session_factory() as session:
             with pytest.raises(CrewTaskError):
                 await run_crew_task(
-                    session, analysis_id, llm_provider=provider, sfn_client=sfn, task_token="tok"
+                    session,
+                    analysis_id,
+                    llm_provider=provider,
+                    sfn_client=sfn,
+                    task_token="tok",
                 )
 
         async with session_factory() as session:
@@ -389,4 +429,6 @@ async def test_run_crew_task_fails_when_cv_not_converted_without_calling_llm():
         assert provider.calls == 0
         assert len(sfn.failures) == 1
     finally:
-        await _cleanup(engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id)
+        await _cleanup(
+            engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+        )

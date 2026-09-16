@@ -89,7 +89,12 @@ def _extract_docx_html(file_bytes: bytes) -> str:
 
 
 async def _emit(
-    session: AsyncSession, *, status: str, message: str, cv_version_id: str, analysis_id: str | None
+    session: AsyncSession,
+    *,
+    status: str,
+    message: str,
+    cv_version_id: str,
+    analysis_id: str | None,
 ) -> None:
     log_stage_event(
         logger,
@@ -206,11 +211,19 @@ async def convert_cv(
         markdown = file_bytes.decode("utf-8", errors="replace")
     elif cv_version.fileType == Cvfiletype.PDF:
         markdown = await _convert_pdf(
-            session, cv_version, file_bytes, llm_provider=llm_provider, analysis_id=analysis_id
+            session,
+            cv_version,
+            file_bytes,
+            llm_provider=llm_provider,
+            analysis_id=analysis_id,
         )
     elif cv_version.fileType == Cvfiletype.DOCX:
         markdown = await _convert_docx(
-            session, cv_version, file_bytes, llm_provider=llm_provider, analysis_id=analysis_id
+            session,
+            cv_version,
+            file_bytes,
+            llm_provider=llm_provider,
+            analysis_id=analysis_id,
         )
     else:
         await _mark_failed(
