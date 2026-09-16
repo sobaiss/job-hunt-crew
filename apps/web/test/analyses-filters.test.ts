@@ -4,6 +4,7 @@ import {
   ANALYSES_PAGE_SIZES,
   DEFAULT_ANALYSES_FILTERS,
   DEFAULT_ANALYSES_SORT,
+  JOB_OFFER_SOURCE_SITES,
   analysesTableStateToParams,
   cvLabelsOf,
   filterAnalyses,
@@ -93,6 +94,30 @@ describe("filterAnalyses", () => {
         search: "frontend",
       }).map((a) => a.id),
     ).toEqual(["a2"]);
+  });
+
+  it("filters by platform, and by location as a case-insensitive substring", () => {
+    expect(
+      filterAnalyses(list, {
+        ...DEFAULT_ANALYSES_FILTERS,
+        platform: "LINKEDIN",
+      }).map((a) => a.id),
+    ).toEqual(["a2"]);
+
+    expect(
+      filterAnalyses(list, {
+        ...DEFAULT_ANALYSES_FILTERS,
+        location: "par",
+      }).map((a) => a.id),
+    ).toEqual(["a1", "a3"]);
+
+    expect(
+      filterAnalyses(list, {
+        ...DEFAULT_ANALYSES_FILTERS,
+        platform: "FRANCE_TRAVAIL",
+        location: "par",
+      }).map((a) => a.id),
+    ).toEqual(["a1"]);
   });
 
   it("filters by Tracking status and by CVVersion label, and combines the two", () => {
@@ -237,6 +262,8 @@ describe("URL query-string state", () => {
       search: "backend",
       status: "REJECTED",
       cvLabel: "Grad CV",
+      platform: "LINKEDIN",
+      location: "lyon",
       sort: { column: "matchScore", direction: "asc" },
       page: 2,
       pageSize: 50,
@@ -251,6 +278,8 @@ describe("URL query-string state", () => {
       search: "",
       status: "all",
       cvLabel: "all",
+      platform: "all",
+      location: "",
       sort: DEFAULT_ANALYSES_SORT,
       page: 1,
       pageSize: 25,
@@ -258,16 +287,28 @@ describe("URL query-string state", () => {
 
     expect(
       parseAnalysesTableState(
-        new URLSearchParams("status=NOT_A_STATUS&sort=bogus&dir=sideways&page=-1&pageSize=999"),
+        new URLSearchParams(
+          "status=NOT_A_STATUS&platform=NOT_A_PLATFORM&sort=bogus&dir=sideways&page=-1&pageSize=999",
+        ),
       ),
     ).toEqual({
       search: "",
       status: "all",
       cvLabel: "all",
+      platform: "all",
+      location: "",
       sort: DEFAULT_ANALYSES_SORT,
       page: 1,
       pageSize: 25,
     });
+  });
+
+  it("accepts exactly the 7 JobOfferSourceSite values as the platform param", () => {
+    for (const platform of JOB_OFFER_SOURCE_SITES) {
+      expect(
+        parseAnalysesTableState(new URLSearchParams(`platform=${platform}`)).platform,
+      ).toBe(platform);
+    }
   });
 
   it("rejects a raw pipeline AnalysisStatus as a status param — the filter is Tracking status now", () => {
@@ -289,6 +330,8 @@ describe("URL query-string state", () => {
       search: "",
       status: "all",
       cvLabel: "all",
+      platform: "all",
+      location: "",
       sort: DEFAULT_ANALYSES_SORT,
       page: 1,
       pageSize: 25,
@@ -296,6 +339,8 @@ describe("URL query-string state", () => {
     expect(params.has("q")).toBe(false);
     expect(params.has("status")).toBe(false);
     expect(params.has("cv")).toBe(false);
+    expect(params.has("platform")).toBe(false);
+    expect(params.has("location")).toBe(false);
     // Sort, page and pageSize are always written explicitly.
     expect(params.get("sort")).toBe("postedAt");
     expect(params.get("dir")).toBe("desc");

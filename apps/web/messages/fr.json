@@ -209,7 +209,11 @@
       "statusLabel": "Statut",
       "statusAll": "Tous les statuts",
       "cvLabel": "Version de CV",
-      "cvAll": "Toutes les versions de CV"
+      "cvAll": "Toutes les versions de CV",
+      "platformLabel": "Plateforme",
+      "platformAll": "Toutes les plateformes",
+      "locationLabel": "Localisation",
+      "locationPlaceholder": "Ville ou région"
     },
     "columns": {
       "title": "Poste",
@@ -706,7 +710,8 @@
       "FRANCE_TRAVAIL": "France Travail",
       "WTTJ": "Welcome to the Jungle",
       "GLASSDOOR": "Glassdoor",
-      "OTHER": "Autre"
+      "OTHER": "Autre",
+      "HELLOWORK": "HelloWork"
     }
   }
 }

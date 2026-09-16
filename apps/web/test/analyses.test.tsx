@@ -84,7 +84,7 @@ describe("AnalysesDashboardPage", () => {
     expect(await screen.findByText("Backend Engineer")).toBeInTheDocument();
     expect(screen.getByText("Acme Inc")).toBeInTheDocument();
     expect(screen.getByText("Paris")).toBeInTheDocument();
-    expect(screen.getByText("France Travail")).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "France Travail" })).toBeInTheDocument();
     expect(screen.getByRole("cell", { name: "Grad CV" })).toBeInTheDocument();
     expect(screen.getByText("87")).toBeInTheDocument();
     expect(
@@ -410,6 +410,137 @@ describe("AnalysesDashboardPage", () => {
     await user.selectOptions(screen.getByLabelText("CV version"), "Grad CV");
     expect(screen.queryByText("Frontend Developer")).not.toBeInTheDocument();
     expect(screen.getByText("No analyses match your filters.")).toBeInTheDocument();
+  });
+
+  it("filters by platform and by location, combining with each other and the existing filters (issue #125)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            summary({
+              id: "s1",
+              jobOffer: {
+                id: "j1",
+                title: "Backend Engineer",
+                company: "Acme",
+                location: "Paris",
+                sourceSite: "FRANCE_TRAVAIL",
+                postedAt: "2026-07-01T00:00:00.000Z",
+                sourceUrl: "https://example.com/jobs/j1",
+              },
+              cvVersion: { label: "Grad CV" },
+            }),
+            summary({
+              id: "s2",
+              jobOffer: {
+                id: "j2",
+                title: "Frontend Developer",
+                company: "Globex",
+                location: "Lyon",
+                sourceSite: "LINKEDIN",
+                postedAt: "2026-07-02T00:00:00.000Z",
+                sourceUrl: "https://example.com/jobs/j2",
+              },
+              cvVersion: { label: "Grad CV" },
+            }),
+            summary({
+              id: "s3",
+              jobOffer: {
+                id: "j3",
+                title: "Platform Engineer",
+                company: "Initech",
+                location: "Paris",
+                sourceSite: "HELLOWORK",
+                postedAt: "2026-07-03T00:00:00.000Z",
+                sourceUrl: "https://example.com/jobs/j3",
+              },
+              cvVersion: { label: "Grad CV" },
+            }),
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    expect(await screen.findByText("Backend Engineer")).toBeInTheDocument();
+
+    // Platform options include a correctly-translated HelloWork label, not a
+    // raw enum value.
+    expect(
+      within(screen.getByLabelText("Platform")).getByRole("option", {
+        name: "HelloWork",
+      }),
+    ).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("Platform"), "HELLOWORK");
+    expect(screen.queryByText("Backend Engineer")).not.toBeInTheDocument();
+    expect(screen.queryByText("Frontend Developer")).not.toBeInTheDocument();
+    expect(screen.getByText("Platform Engineer")).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("Platform"), "all");
+    await user.type(screen.getByLabelText("Location"), "par");
+    expect(screen.getByText("Backend Engineer")).toBeInTheDocument();
+    expect(screen.getByText("Platform Engineer")).toBeInTheDocument();
+    expect(screen.queryByText("Frontend Developer")).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("Platform"), "FRANCE_TRAVAIL");
+    expect(screen.getByText("Backend Engineer")).toBeInTheDocument();
+    expect(screen.queryByText("Platform Engineer")).not.toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText("Location"));
+    expect(screen.getByText("Backend Engineer")).toBeInTheDocument();
+    expect(screen.queryByText("Frontend Developer")).not.toBeInTheDocument();
+  });
+
+  it("restores the platform filter and location search from the URL, and writes them back on change (issue #125)", async () => {
+    const user = userEvent.setup();
+    __setUrl("/analyses?platform=LINKEDIN&location=lyon");
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            summary({
+              id: "s1",
+              jobOffer: {
+                id: "j1",
+                title: "Backend Engineer",
+                company: "Acme",
+                location: "Paris",
+                sourceSite: "FRANCE_TRAVAIL",
+                postedAt: "2026-07-01T00:00:00.000Z",
+                sourceUrl: "https://example.com/jobs/j1",
+              },
+            }),
+            summary({
+              id: "s2",
+              jobOffer: {
+                id: "j2",
+                title: "Frontend Developer",
+                company: "Globex",
+                location: "Lyon",
+                sourceSite: "LINKEDIN",
+                postedAt: "2026-07-02T00:00:00.000Z",
+                sourceUrl: "https://example.com/jobs/j2",
+              },
+            }),
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+
+    expect(await screen.findByText("Frontend Developer")).toBeInTheDocument();
+    expect(screen.queryByText("Backend Engineer")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Platform")).toHaveValue("LINKEDIN");
+    expect(screen.getByLabelText("Location")).toHaveValue("lyon");
+
+    await user.selectOptions(screen.getByLabelText("Platform"), "all");
+    await waitFor(() => {
+      const url = new URL(__getUrl(), "http://localhost");
+      expect(url.searchParams.has("platform")).toBe(false);
+    });
   });
 
   it("sorts by a column when its header is clicked, toggling direction on a repeat click", async () => {

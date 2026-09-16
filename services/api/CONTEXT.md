@@ -40,6 +40,10 @@ _Avoid_: Site adapter — that's the Ingestion-context code that reads a SiteCon
 One requested comparison of a JobOffer against a CVVersion, tracked from request through its terminal completed/failed state. Every Analysis is created by an IngestionJob and carries its `ingestionJobId`.
 _Avoid_: Comparison, report
 
+**Re-run** (a.k.a. Retry / "Relancer l'analyse"):
+Creating a new, unrelated Analysis for a JobOffer/CVVersion pair a candidate already analysed — via the same `POST /v1/analyses` a first-time Analysis uses. Deliberately not a supersede: unlike CVVersion (replace) and GeneratedDocument (regenerate), there is no `supersededById` link back to the Analysis it re-runs from, and the earlier Analysis stays listed in its own right (docs/adr/0011). Three surfaces trigger it: the Analysis detail page's own retry on a `FAILED` Analysis (labelled "Relancer l'analyse" / "Run it again"), the "already analysed" shortcut on `/analyses/new` (labelled "Re-run"), and the Quick view's own action on a `COMPLETED` or `FAILED` Analysis (defined in [Web](../../apps/web/CONTEXT.md)'s context) — which should reuse the detail page's existing "Relancer l'analyse" copy rather than the `/analyses/new` wording, since that's the copy the product actually asked for here.
+_Avoid_: Supersede, Replace, Regenerate (all three deliberately don't apply — see above). The product copy itself is inconsistent between "Retry" and "Re-run" for this one action; that's a pre-existing naming split across two screens, not a new distinction to preserve.
+
 **Analysis batch**:
 The set of Analyses sharing one IngestionJob — every JobOffer that IngestionJob discovered, each matched against the single CVVersion it carries. It has no row of its own: it is exactly the Analyses for one `ingestionJobId`, and is what the multi-offer result view lists, ranked by Match score.
 _Avoid_: Match run, matching job — there is deliberately no dedicated entity, see ADR 0002.

@@ -8,6 +8,18 @@ import { TRACKING_STATUSES, trackingStatusOf, type TrackingStatus } from "@/lib/
 // keeps this state in the URL query string (via `parseAnalysesTableState` /
 // `analysesTableStateToParams`) so it survives a refresh and is shareable.
 
+/** Every `JobOfferSourceSite` enum value the platform filter (#125) offers. */
+export const JOB_OFFER_SOURCE_SITES = [
+  "LINKEDIN",
+  "INDEED",
+  "FRANCE_TRAVAIL",
+  "WTTJ",
+  "GLASSDOOR",
+  "OTHER",
+  "HELLOWORK",
+] as const;
+export type JobOfferSourceSite = (typeof JOB_OFFER_SOURCE_SITES)[number];
+
 export type AnalysesFilterState = {
   /** Substring over JobOffer title + company, case-insensitive. */
   search: string;
@@ -17,12 +29,18 @@ export type AnalysesFilterState = {
   status: TrackingStatus | "all";
   /** A `cvVersion.label`, or `"all"` for no CVVersion filter. */
   cvLabel: string | "all";
+  /** A `JobOfferSourceSite`, or `"all"` for no platform filter (#125). */
+  platform: JobOfferSourceSite | "all";
+  /** Substring over JobOffer location, case-insensitive (#125). */
+  location: string;
 };
 
 export const DEFAULT_ANALYSES_FILTERS: AnalysesFilterState = {
   search: "",
   status: "all",
   cvLabel: "all",
+  platform: "all",
+  location: "",
 };
 
 /** Distinct CVVersion labels present in the list, in first-seen order. */
@@ -41,21 +59,30 @@ function matchesSearch(analysis: AnalysisSummary, term: string): boolean {
   return haystack.includes(needle);
 }
 
+function matchesLocation(analysis: AnalysisSummary, term: string): boolean {
+  const needle = term.trim().toLowerCase();
+  if (!needle) return true;
+  return (analysis.jobOffer.location ?? "").toLowerCase().includes(needle);
+}
+
 /**
  * Narrow the analyses to those matching the search term, the Tracking status
- * filter and the CVVersion filter. A specific Tracking status bucket only
- * ever matches a `COMPLETED` Analysis — a still-running or `FAILED` one has
- * no bucket and is excluded from every filter but `"all"`.
+ * filter, the CVVersion filter, the platform filter and the location search
+ * (#125) — all combined with AND. A specific Tracking status bucket only ever
+ * matches a `COMPLETED` Analysis — a still-running or `FAILED` one has no
+ * bucket and is excluded from every filter but `"all"`.
  */
 export function filterAnalyses(
   analyses: AnalysisSummary[],
-  { search, status, cvLabel }: AnalysesFilterState,
+  { search, status, cvLabel, platform, location }: AnalysesFilterState,
 ): AnalysisSummary[] {
   return analyses.filter(
     (analysis) =>
       matchesSearch(analysis, search) &&
       (status === "all" || trackingStatusOf(analysis) === status) &&
-      (cvLabel === "all" || analysis.cvVersion.label === cvLabel),
+      (cvLabel === "all" || analysis.cvVersion.label === cvLabel) &&
+      (platform === "all" || analysis.jobOffer.sourceSite === platform) &&
+      matchesLocation(analysis, location),
   );
 }
 
@@ -183,6 +210,7 @@ export function parseAnalysesTableState(
 ): AnalysesTableState {
   const status = params.get("status");
   const cvLabel = params.get("cv");
+  const platform = params.get("platform");
   const column = params.get("sort");
   const direction = params.get("dir");
   const page = Number(params.get("page"));
@@ -194,6 +222,10 @@ export function parseAnalysesTableState(
       ? (status as TrackingStatus)
       : "all",
     cvLabel: cvLabel ?? "all",
+    platform: JOB_OFFER_SOURCE_SITES.includes(platform as JobOfferSourceSite)
+      ? (platform as JobOfferSourceSite)
+      : "all",
+    location: params.get("location") ?? DEFAULT_ANALYSES_TABLE_STATE.location,
     sort: {
       column: SORT_COLUMNS.includes(column as AnalysesSortColumn)
         ? (column as AnalysesSortColumn)
@@ -219,6 +251,8 @@ export function analysesTableStateToParams(
   if (state.search) params.set("q", state.search);
   if (state.status !== "all") params.set("status", state.status);
   if (state.cvLabel !== "all") params.set("cv", state.cvLabel);
+  if (state.platform !== "all") params.set("platform", state.platform);
+  if (state.location) params.set("location", state.location);
   params.set("sort", state.sort.column);
   params.set("dir", state.sort.direction);
   params.set("page", String(state.page));

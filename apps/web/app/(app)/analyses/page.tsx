@@ -16,6 +16,7 @@ import {
 import { useMediaQuery } from "@/hooks/use-media-query";
 import {
   ANALYSES_PAGE_SIZES,
+  JOB_OFFER_SOURCE_SITES,
   analysesTableStateToParams,
   cvLabelsOf,
   filterAnalyses,
@@ -388,6 +389,40 @@ function AnalysesTable() {
                 </option>
               ))}
             </select>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="analyses-platform">{t("controls.platformLabel")}</Label>
+            <select
+              id="analyses-platform"
+              className={SELECT_CLASS}
+              value={state.platform}
+              onChange={(event) =>
+                updateState({
+                  platform: event.target.value as AnalysesTableState["platform"],
+                })
+              }
+            >
+              <option value="all">{t("controls.platformAll")}</option>
+              {JOB_OFFER_SOURCE_SITES.map((site) => (
+                <option key={site} value={site}>
+                  {sourceSiteLabel(site)}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="analyses-location">{t("controls.locationLabel")}</Label>
+            <Input
+              id="analyses-location"
+              type="search"
+              placeholder={t("controls.locationPlaceholder")}
+              value={state.location}
+              onChange={(event) =>
+                updateState({ location: event.target.value })
+              }
+            />
           </div>
         </div>
       )}
