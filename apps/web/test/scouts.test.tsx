@@ -419,6 +419,62 @@ describe("ScoutsPage — list", () => {
       panel.queryByRole("link", { name: "View full detail" }),
     ).not.toBeInTheDocument();
   });
+
+  it("refetches the scouts list on demand, showing a busy state while in flight, without resetting the show-archived toggle or sort (issue #122)", async () => {
+    const user = userEvent.setup();
+    let callCount = 0;
+    let resolveSecondCall: () => void = () => {};
+    const secondCallGate = new Promise<void>((resolve) => {
+      resolveSecondCall = resolve;
+    });
+    server.use(
+      http.get("/api/scouts", async () => {
+        callCount += 1;
+        const isRefresh = callCount === 2;
+        if (isRefresh) {
+          await secondCallGate;
+        }
+        return HttpResponse.json({
+          scouts: [
+            scout({
+              id: "scout-archived",
+              label: "Old Scout",
+              status: "ARCHIVED",
+            }),
+            scout({
+              id: "scout-active",
+              label: callCount >= 2 ? "Active Scout (updated)" : "Active Scout",
+            }),
+          ],
+        });
+      }),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+    );
+
+    renderWithProviders(<ScoutsPage />);
+    expect(await screen.findByText("Active Scout")).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("checkbox", { name: "Show archived Scouts" }),
+    );
+    expect(await screen.findByText("Old Scout")).toBeInTheDocument();
+
+    const refreshButton = screen.getByRole("button", { name: "Refresh" });
+    await user.click(refreshButton);
+    expect(refreshButton).toBeDisabled();
+
+    resolveSecondCall();
+    await waitFor(() => expect(refreshButton).not.toBeDisabled());
+
+    expect(callCount).toBe(2);
+    expect(screen.getByText("Active Scout (updated)")).toBeInTheDocument();
+    expect(
+      screen.getByRole("checkbox", { name: "Show archived Scouts" }),
+    ).toBeChecked();
+    expect(screen.getByText("Old Scout")).toBeInTheDocument();
+  });
 });
 
 describe("NewScoutPage — create form", () => {

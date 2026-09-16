@@ -4,6 +4,7 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { RefreshCw } from "lucide-react";
 
 import { useScouts, type ScoutStatus } from "@/hooks/use-scouts";
 import { useCvVersions } from "@/hooks/use-cv-versions";
@@ -45,7 +46,7 @@ function statusVariant(
 
 function ScoutsPageContent() {
   const t = useTranslations("scouts");
-  const { data: scouts, isPending, isError } = useScouts();
+  const { data: scouts, isPending, isError, isFetching, refetch } = useScouts();
   const { data: cvVersions } = useCvVersions();
   const router = useRouter();
   const pathname = usePathname();
@@ -115,9 +116,21 @@ function ScoutsPageContent() {
           <h1 className="font-serif text-2xl font-semibold">{t("title")}</h1>
           <p className="text-sm text-muted">{t("list.subtitle")}</p>
         </div>
-        <Button asChild className="shrink-0">
-          <Link href="/scouts/new">{t("list.new")}</Link>
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={isFetching}
+            onClick={() => refetch()}
+          >
+            <RefreshCw className={isFetching ? "size-4 animate-spin" : "size-4"} />
+            {t("list.refresh")}
+          </Button>
+          <Button asChild>
+            <Link href="/scouts/new">{t("list.new")}</Link>
+          </Button>
+        </div>
       </div>
 
       <label className="flex items-center gap-2 self-end text-sm">

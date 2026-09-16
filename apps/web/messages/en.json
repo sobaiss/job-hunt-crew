@@ -393,6 +393,7 @@
       "loadError": "We couldn't load your Scouts. Please try again.",
       "empty": "You don't have any Scouts yet.",
       "new": "New Scout",
+      "refresh": "Refresh",
       "neverRun": "Never run",
       "showArchived": "Show archived Scouts",
       "sites": "{count, plural, one {# site} other {# sites}}",

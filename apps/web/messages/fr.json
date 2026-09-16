@@ -393,6 +393,7 @@
       "loadError": "Impossible de charger vos Scouts. Veuillez réessayer.",
       "empty": "Vous n'avez encore aucun Scout.",
       "new": "Nouveau Scout",
+      "refresh": "Actualiser",
       "neverRun": "Jamais exécuté",
       "showArchived": "Afficher les Scouts archivés",
       "sites": "{count, plural, one {# site} other {# sites}}",
