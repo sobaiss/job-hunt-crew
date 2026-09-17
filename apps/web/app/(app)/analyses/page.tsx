@@ -4,7 +4,7 @@ import { Suspense, useCallback, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, ArrowUpDown, ExternalLink, RefreshCw } from "lucide-react";
+import { ExternalLink, RefreshCw } from "lucide-react";
 
 import {
   TERMINAL_ANALYSIS_STATUSES,
@@ -20,6 +20,7 @@ import {
   useGeneratedDocumentsStatuses,
 } from "@/hooks/use-generated-documents";
 import { useMediaQuery } from "@/hooks/use-media-query";
+import { SortableHead } from "@/components/sortable-head";
 import {
   ANALYSES_PAGE_SIZES,
   JOB_OFFER_SOURCE_SITES,
@@ -786,37 +787,6 @@ function AnalysesTable() {
         onRelaunched={(newId) => setQuickViewId(newId)}
       />
     </main>
-  );
-}
-
-function SortableHead({
-  column,
-  label,
-  className,
-  sort,
-  onSort,
-}: {
-  column: AnalysesSortColumn;
-  label: string;
-  className?: string;
-  sort: AnalysesTableState["sort"];
-  onSort: (column: AnalysesSortColumn) => void;
-}) {
-  const active = sort.column === column;
-  const ariaSort = !active ? "none" : sort.direction === "asc" ? "ascending" : "descending";
-  const Icon = !active ? ArrowUpDown : sort.direction === "asc" ? ArrowUp : ArrowDown;
-
-  return (
-    <TableHead aria-sort={ariaSort} className={className}>
-      <button
-        type="button"
-        className="inline-flex items-center gap-1 hover:text-foreground"
-        onClick={() => onSort(column)}
-      >
-        {label}
-        <Icon className="size-3.5" />
-      </button>
-    </TableHead>
   );
 }
 
