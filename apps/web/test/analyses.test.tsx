@@ -998,6 +998,94 @@ describe("AnalysesDashboardPage", () => {
     expect(await screen.findByText("2 ready, 2 failed, 4 total")).toBeInTheDocument();
   });
 
+  it("disables 'Run it again' when nothing selected is relaunchable, enabling it for a partial-eligible selection and naming the skipped count (issue #126)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            summary({ id: "s1", status: "COMPLETED", jobOffer: { ...summary().jobOffer, id: "j1", title: "Offer One" } }),
+            summary({ id: "s2", status: "RUNNING_CREW", jobOffer: { ...summary().jobOffer, id: "j2", title: "Offer Two" } }),
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Offer One");
+
+    await user.click(screen.getByRole("checkbox", { name: "Select Offer Two" }));
+    expect(screen.getByRole("button", { name: "Run it again" })).toBeDisabled();
+
+    await user.click(screen.getByRole("checkbox", { name: "Select Offer One" }));
+    expect(screen.getByRole("button", { name: "Run it again" })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "Run it again" }));
+
+    expect(
+      await screen.findByText("1 analysis will be re-run (1 skipped, still in progress) — 20 remaining today"),
+    ).toBeInTheDocument();
+  });
+
+  it("disables the bulk relaunch confirm when the eligible selection would exceed the remaining analysis quota (issue #126)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            summary({ id: "s1", status: "COMPLETED", jobOffer: { ...summary().jobOffer, id: "j1", title: "Offer One" } }),
+            summary({ id: "s2", status: "FAILED", jobOffer: { ...summary().jobOffer, id: "j2", title: "Offer Two" } }),
+          ],
+        }),
+      ),
+      http.get("/api/analyses/quota", () =>
+        HttpResponse.json({ quota: { cap: 20, used: 19, remaining: 1 } }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Offer One");
+
+    await user.click(screen.getByLabelText("Select all on this page"));
+    await user.click(screen.getByRole("button", { name: "Run it again" }));
+
+    expect(await screen.findByText("Re-run 2 analyses — 1 remaining today")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Confirm" })).toBeDisabled();
+    expect(
+      screen.getByText("Not enough remaining quota today for this many analyses."),
+    ).toBeInTheDocument();
+  });
+
+  it("bulk-relaunches the eligible selection via one POST /analyses per pair, refreshes the list, and reports a partial failure (issue #126)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            summary({ id: "s1", status: "COMPLETED", jobOffer: { ...summary().jobOffer, id: "j1", title: "Offer One" } }),
+            summary({ id: "s2", status: "FAILED", jobOffer: { ...summary().jobOffer, id: "j2", title: "Offer Two" } }),
+          ],
+        }),
+      ),
+      http.post("/api/analyses", async ({ request }) => {
+        const body = (await request.json()) as { jobOfferId: string; cvVersionId: string };
+        if (body.jobOfferId === "j2") {
+          return HttpResponse.json({ error: "Daily analysis limit reached" }, { status: 429 });
+        }
+        return HttpResponse.json({ analysisId: "new-1" }, { status: 202 });
+      }),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Offer One");
+
+    await user.click(screen.getByLabelText("Select all on this page"));
+    await user.click(screen.getByRole("button", { name: "Run it again" }));
+    await user.click(await screen.findByRole("button", { name: "Confirm" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("1 of 2");
+  });
+
   it("clears the selection when the search term, Tracking status filter, or sort changes (issue #67)", async () => {
     const user = userEvent.setup();
     server.use(

@@ -201,7 +201,11 @@
       "cancel": "Cancel",
       "generateInsufficientQuota": "Not enough remaining quota today for this many offers.",
       "generatePartialError": "{failed} of {total} generations failed to start. Please try again for those.",
-      "generateProgress": "{ready} ready, {failed} failed, {total} total"
+      "generateProgress": "{ready} ready, {failed} failed, {total} total",
+      "relaunchConfirm": "{count, plural, one {Re-run # analysis} other {Re-run # analyses}} — {remaining} remaining today",
+      "relaunchConfirmMixed": "{count, plural, one {# analysis} other {# analyses}} will be re-run ({skipped} skipped, still in progress) — {remaining} remaining today",
+      "relaunchInsufficientQuota": "Not enough remaining quota today for this many analyses.",
+      "relaunchPartialError": "{failed} of {total} re-runs failed to start. Please try again for those."
     },
     "controls": {
       "searchLabel": "Search",

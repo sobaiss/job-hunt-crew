@@ -37,7 +37,7 @@ The signed-in overview at `/` — stat tiles (average and best Match score, anal
 _Avoid_: Home, Overview (fine in prose; the term is Dashboard), analyses list (that's Analyses)
 
 **Analyses**:
-The list at `/analyses` — one row per Analysis (no SITE_SEARCH batch grouping; see [API](../../services/api/CONTEXT.md)'s Analysis batch, which this view deliberately no longer folds rows into), as a sortable, filterable table: client-side search (title/company), a location search, Tracking status and platform filters, plus date/score/company/platform sort and multi-select bulk actions. Clicking a row opens its detail in a right-hand slide-over without leaving the list; the slide-over links out to the full Analysis detail page and the Side-by-side comparison for deeper reading. Reached from the Dashboard and the Sidebar.
+The list at `/analyses` — one row per Analysis (no SITE_SEARCH batch grouping; see [API](../../services/api/CONTEXT.md)'s Analysis batch, which this view deliberately no longer folds rows into), as a sortable, filterable table with Column visibility control: client-side search (title/company), a location search, Tracking status and platform filters, plus date/score/company/platform sort and multi-select bulk actions. Clicking a row opens its detail in a right-hand slide-over without leaving the list; the slide-over links out to the full Analysis detail page and the Side-by-side comparison for deeper reading. Reached from the Dashboard and the Sidebar.
 _Avoid_: Dashboard (that's the overview now), analyses page (that's the route), History, batch view (retired from this list — a SITE_SEARCH batch's Analyses now just appear as their own rows, filterable/sortable like any other)
 
 **Quick view**:
@@ -55,9 +55,10 @@ _Avoid_: Layout (too generic), navbar / header (it's a Sidebar now)
 **Agents**:
 The sidebar entry and `/scouts` area where a candidate creates and manages
 Scouts (defined in [API](../../services/api/CONTEXT.md)'s context) — a
-sortable, full-width table (Label, Status, Base CV, Sites, Last run,
-Relevant finds; Archived Scouts hidden by default behind a "show archived"
-toggle, mirroring CV versions' superseded filter) and a create/edit form.
+sortable, full-width table with Column visibility control (Label, Status,
+Base CV, Sites, Last run, Relevant finds; Archived Scouts hidden by default
+behind a "show archived" toggle, mirroring CV versions' superseded filter)
+and a create/edit form.
 Clicking a table row opens the Scout panel, which is the only place a
 Scout's config, run history, patterns, and Finds are shown — there is no
 separate detail page (docs/adr/0007).
@@ -90,12 +91,16 @@ _Avoid_: Tracker (fine in prose; the nav label and route area is
 "Applications")
 
 **CV versions**:
-The `/cv-versions` page — a sortable table of a candidate's CVVersions (defined in [API](../../services/api/CONTEXT.md)'s context): label, file name/type, size, upload date, Conversion status, and a default/superseded indicator. Clicking a row opens the CV panel. Reconvert and Set default act directly from a table row; uploading a new CV is its own `/cv-versions/new` route (reached via an "Importer un CV" action here), which returns to this table on success. Replacing supersedes the row rather than overwriting or deleting it (docs/adr/0005): the superseded CVVersion drops out of this table and out of the CvVersionPicker by default, reachable again only through an explicit "show superseded" filter — Reconvert stays available on a superseded row, but Set default and Replace do not.
+The `/cv-versions` page — a sortable table, with Column visibility control, of a candidate's CVVersions (defined in [API](../../services/api/CONTEXT.md)'s context): label, file name/type, size, upload date, Conversion status, and a default/superseded indicator. Clicking a row opens the CV panel. Reconvert and Set default act directly from a table row; uploading a new CV is its own `/cv-versions/new` route (reached via an "Importer un CV" action here), which returns to this table on success. Replacing supersedes the row rather than overwriting or deleting it (docs/adr/0005): the superseded CVVersion drops out of this table and out of the CvVersionPicker by default, reachable again only through an explicit "show superseded" filter — Reconvert stays available on a superseded row, but Set default and Replace do not.
 _Avoid_: CV management, My CVs (fine in prose; the nav label and route area is "CV-versions")
 
 **CV panel**:
 The right-hand slide-over opened by clicking a CV-versions-table row: the CVVersion's Markdown rendition (fetched only while the panel is open, never inlined in the table) plus its full info, and its actions — Replace, Reconvert, Set default. A successful Replace switches the panel to the newly created CVVersion rather than closing it or lingering on the now-superseded row.
 _Avoid_: Quick view (that's the Analyses-list slide-over — different content and actions; this is CV-versions' own), side bar / slide bar (a candidate's own phrasing that reads as the left-nav Sidebar or a mistranslation of "slide-over" — got issue #84 pointed at the wrong component once already; this is the CV panel)
+
+**Column visibility**:
+A per-table, per-browser preference (localStorage only, no server sync) for which data columns show in the Analyses, CV versions, and Agents tables — every column visible by default, each table's primary column always shown, selection/action columns excluded from the toggle. Long values in these tables (titles, company/location, CV/Scout labels, CV file names) are truncated to a fixed length with the full text in a tooltip on hover.
+_Avoid_: Column settings, table preferences
 
 **Settings**:
 The `/settings` page — theme, Locale, and read-only account details (name and email from the Session), plus sign out. No account deletion (there is no API for it).

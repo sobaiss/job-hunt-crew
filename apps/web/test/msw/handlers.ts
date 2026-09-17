@@ -48,6 +48,13 @@ export const handlers = [
   http.get("/api/generated-documents/quota", () =>
     HttpResponse.json({ quota: { cap: 20, used: 0, remaining: 20 } }),
   ),
+  // The Analyses table's bulk "Relancer l'analyse" action (issue #126) reads
+  // the remaining daily analysis quota unconditionally on load; default to a
+  // generous budget so suites exercising other parts of the page don't have
+  // to stub it. Quota-threshold tests override with `server.use`.
+  http.get("/api/analyses/quota", () =>
+    HttpResponse.json({ quota: { cap: 20, used: 0, remaining: 20 } }),
+  ),
 ];
 
 const ZERO_APPLICATION_STATS_WINDOW = {

@@ -205,6 +205,41 @@ export function useCreateAnalysis() {
   });
 }
 
+/**
+ * Bulk "Relancer l'analyse" (issue #126): fires {@link useCreateAnalysis}'s
+ * same `POST /api/analyses` call once per `{jobOfferId, cvVersionId}` pair via
+ * `Promise.allSettled` — mirrors `useBulkCreateGeneratedDocuments`'s fan-out so
+ * one daily-cap 429 or invalid pair doesn't abort the rest. Returns the pairs
+ * that failed (by their originating Analysis id, for the partial-error count)
+ * and the freshly created Analysis ids.
+ */
+export function useBulkCreateAnalyses() {
+  return useMutation({
+    mutationFn: async (
+      pairs: { analysisId: string; jobOfferId: string; cvVersionId: string }[],
+    ) => {
+      const results = await Promise.allSettled(
+        pairs.map((pair) =>
+          bff.post<{ analysisId: string }>("/analyses", {
+            jobOfferId: pair.jobOfferId,
+            cvVersionId: pair.cvVersionId,
+          }),
+        ),
+      );
+      const failedAnalysisIds = pairs
+        .filter((_, i) => results[i]!.status === "rejected")
+        .map((pair) => pair.analysisId);
+      const newAnalysisIds = results
+        .filter(
+          (result): result is PromiseFulfilledResult<{ analysisId: string }> =>
+            result.status === "fulfilled",
+        )
+        .map((result) => result.value.analysisId);
+      return { failedAnalysisIds, newAnalysisIds };
+    },
+  });
+}
+
 export type KnownOfferResult =
   | { kind: "unknown" }
   | { kind: "ready"; jobOfferId: string; existingAnalysisId: string | null };

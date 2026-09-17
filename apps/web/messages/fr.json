@@ -201,7 +201,11 @@
       "cancel": "Annuler",
       "generateInsufficientQuota": "Quota restant insuffisant aujourd'hui pour ce nombre d'offres.",
       "generatePartialError": "{failed} génération(s) sur {total} n'ont pas pu démarrer. Veuillez réessayer pour celles-ci.",
-      "generateProgress": "{ready} prêt(s), {failed} échoué(s), {total} au total"
+      "generateProgress": "{ready} prêt(s), {failed} échoué(s), {total} au total",
+      "relaunchConfirm": "{count, plural, one {Relancer # analyse} other {Relancer # analyses}} — {remaining} restantes aujourd'hui",
+      "relaunchConfirmMixed": "{count, plural, one {# analyse sera relancée} other {# analyses seront relancées}} ({skipped} ignorée(s), encore en cours) — {remaining} restantes aujourd'hui",
+      "relaunchInsufficientQuota": "Quota restant insuffisant aujourd'hui pour ce nombre d'analyses.",
+      "relaunchPartialError": "{failed} relance(s) sur {total} n'ont pas pu démarrer. Veuillez réessayer pour celles-ci."
     },
     "controls": {
       "searchLabel": "Rechercher",

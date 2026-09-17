@@ -6,7 +6,13 @@ import { useTranslations } from "next-intl";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, ArrowUpDown, ExternalLink, RefreshCw } from "lucide-react";
 
-import { useAnalyses, type AnalysisSummary } from "@/hooks/use-analyses";
+import {
+  TERMINAL_ANALYSIS_STATUSES,
+  useAnalyses,
+  useAnalysisQuota,
+  useBulkCreateAnalyses,
+  type AnalysisSummary,
+} from "@/hooks/use-analyses";
 import { useBulkSetApplicationStatus } from "@/hooks/use-applications";
 import {
   useBulkCreateGeneratedDocuments,
@@ -97,6 +103,7 @@ const COLUMNS: ColumnDef[] = [
 
 function AnalysesTable() {
   const t = useTranslations("analyses");
+  const td = useTranslations("analyses.detail");
   const sourceSiteLabel = useEnumLabel("sourceSite");
   const pipelineStatusLabel = useEnumLabel("analysisStatus");
   const trackingStatusLabel = useEnumLabel("trackingStatus");
@@ -109,6 +116,8 @@ function AnalysesTable() {
   const bulkSetApplicationStatus = useBulkSetApplicationStatus();
   const bulkCreateGeneratedDocuments = useBulkCreateGeneratedDocuments();
   const { data: generatedDocumentsQuota } = useGeneratedDocumentsQuota();
+  const bulkCreateAnalyses = useBulkCreateAnalyses();
+  const { data: analysisQuota } = useAnalysisQuota();
 
   // Multi-select (#67): ids selected across however many pages the user has
   // extended the selection to via the "select all matching filters" banner —
@@ -122,6 +131,15 @@ function AnalysesTable() {
   const [bulkGenerateConfirming, setBulkGenerateConfirming] = useState(false);
   const [bulkGenerationDocumentIds, setBulkGenerationDocumentIds] = useState<string[]>([]);
   const bulkGenerationStatuses = useGeneratedDocumentsStatuses(bulkGenerationDocumentIds);
+
+  // Bulk "Relancer l'analyse" (#126): unlike the two bulk actions above, only
+  // a COMPLETED or FAILED Analysis is relaunchable (see the Quick view's own
+  // `isRelaunchable`), and `POST /analyses` has no server-side check that
+  // would reject a non-terminal one — it would just kick off a redundant,
+  // quota-consuming re-run instead of failing. So the eligible subset is
+  // filtered client-side rather than firing for the whole selection like
+  // `handleBulkStatusChange`/`handleConfirmBulkGenerate` do.
+  const [bulkRelaunchConfirming, setBulkRelaunchConfirming] = useState(false);
 
   // Which Analysis's Quick view (#65) is open, if any — looked up by id
   // rather than held as the row's data so it always reflects the latest
@@ -178,6 +196,7 @@ function AnalysesTable() {
         setBulkError(null);
         setBulkGenerateConfirming(false);
         setBulkGenerationDocumentIds([]);
+        setBulkRelaunchConfirming(false);
       }
     },
     [state, router, pathname],
@@ -268,6 +287,39 @@ function AnalysesTable() {
             t("bulk.generatePartialError", {
               failed: failedAnalysisIds.length,
               total: analysisIds.length,
+            }),
+          );
+        }
+      },
+    });
+  };
+
+  const eligibleForRelaunch = useMemo(
+    () => selectedAnalyses.filter((a) => TERMINAL_ANALYSIS_STATUSES.has(a.status)),
+    [selectedAnalyses],
+  );
+  const eligibleRelaunchCount = eligibleForRelaunch.length;
+  const skippedRelaunchCount = selectedIds.size - eligibleRelaunchCount;
+  const remainingAnalysisQuota = analysisQuota?.remaining;
+  const insufficientRelaunchQuota =
+    remainingAnalysisQuota !== undefined && eligibleRelaunchCount > remainingAnalysisQuota;
+
+  const handleConfirmBulkRelaunch = () => {
+    setBulkError(null);
+    const pairs = eligibleForRelaunch.map((a) => ({
+      analysisId: a.id,
+      jobOfferId: a.jobOffer.id,
+      cvVersionId: a.cvVersionId,
+    }));
+    bulkCreateAnalyses.mutate(pairs, {
+      onSuccess: ({ failedAnalysisIds }) => {
+        setBulkRelaunchConfirming(false);
+        queryClient.invalidateQueries({ queryKey: ["analyses"] });
+        if (failedAnalysisIds.length > 0) {
+          setBulkError(
+            t("bulk.relaunchPartialError", {
+              failed: failedAnalysisIds.length,
+              total: pairs.length,
             }),
           );
         }
@@ -450,6 +502,7 @@ function AnalysesTable() {
               setBulkError(null);
               setBulkGenerateConfirming(false);
               setBulkGenerationDocumentIds([]);
+              setBulkRelaunchConfirming(false);
             }}
           >
             {t("bulk.clearSelection")}
@@ -475,9 +528,24 @@ function AnalysesTable() {
               variant="outline"
               size="sm"
               disabled={bulkCreateGeneratedDocuments.isPending}
-              onClick={() => setBulkGenerateConfirming(true)}
+              onClick={() => {
+                setBulkRelaunchConfirming(false);
+                setBulkGenerateConfirming(true);
+              }}
             >
               {t("bulk.generateDocuments")}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={eligibleRelaunchCount === 0 || bulkCreateAnalyses.isPending}
+              onClick={() => {
+                setBulkGenerateConfirming(false);
+                setBulkRelaunchConfirming(true);
+              }}
+            >
+              {td("retry")}
             </Button>
           </div>
           {bulkError && (
@@ -522,6 +590,45 @@ function AnalysesTable() {
             <p className="w-full text-sm text-muted">
               {t("bulk.generateProgress", bulkGenerationSummary)}
             </p>
+          )}
+          {bulkRelaunchConfirming && (
+            <div className="flex w-full flex-col gap-2 rounded-md border border-border bg-background p-3">
+              <p className="text-sm">
+                {skippedRelaunchCount > 0
+                  ? t("bulk.relaunchConfirmMixed", {
+                      count: eligibleRelaunchCount,
+                      skipped: skippedRelaunchCount,
+                      remaining: remainingAnalysisQuota ?? 0,
+                    })
+                  : t("bulk.relaunchConfirm", {
+                      count: eligibleRelaunchCount,
+                      remaining: remainingAnalysisQuota ?? 0,
+                    })}
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={insufficientRelaunchQuota || bulkCreateAnalyses.isPending}
+                  onClick={handleConfirmBulkRelaunch}
+                >
+                  {t("bulk.generateConfirmAction")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setBulkRelaunchConfirming(false)}
+                >
+                  {t("bulk.cancel")}
+                </Button>
+              </div>
+              {insufficientRelaunchQuota && (
+                <p role="alert" className="text-sm text-destructive">
+                  {t("bulk.relaunchInsufficientQuota")}
+                </p>
+              )}
+            </div>
           )}
         </div>
       )}
