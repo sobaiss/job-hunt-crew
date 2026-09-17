@@ -7,6 +7,12 @@ import { http, HttpResponse } from "msw";
 export const handlers = [
   http.get("/api/example", () => HttpResponse.json({ ok: true })),
   http.get("/api/auth/session", () => HttpResponse.json({})),
+  // The Admin area landing page (issue #138); default to an administrateur
+  // response since only that Plan ever reaches the page's own layout gate.
+  // Suites exercising the 403/401 path override with `server.use`.
+  http.get("/api/admin/me", () =>
+    HttpResponse.json({ userId: "admin-1", plan: "ADMINISTRATEUR" }),
+  ),
   // The Dashboard reads the site catalogue to name a grouped SITE_SEARCH batch
   // row (issue #34). Default to an empty catalogue so suites that don't care
   // about grouping don't have to stub it; grouping tests override with

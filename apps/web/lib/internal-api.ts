@@ -3,6 +3,8 @@
 // app/api/* BFF proxy routes) that must reach Postgres/S3/SQS without ever
 // depending on Prisma/aws-sdk directly, per the M7 frontend/backend split.
 
+import type { Plan } from "@/types/next-auth";
+
 const API_BASE_URL = process.env.API_BASE_URL || "http://localhost:8000";
 const INTERNAL_API_SECRET = process.env.INTERNAL_API_SECRET || "";
 
@@ -50,7 +52,7 @@ export async function upsertUser(params: {
   email: string;
   name?: string | null;
   image?: string | null;
-}): Promise<string> {
+}): Promise<{ userId: string; plan: Plan }> {
   const res = await internalApiFetch("/internal/users/upsert", {
     method: "POST",
     body: JSON.stringify({
@@ -62,6 +64,6 @@ export async function upsertUser(params: {
   if (!res.ok) {
     throw new Error(`Failed to upsert user (${res.status})`);
   }
-  const data = (await res.json()) as { userId: string };
-  return data.userId;
+  const data = (await res.json()) as { userId: string; plan: Plan };
+  return data;
 }

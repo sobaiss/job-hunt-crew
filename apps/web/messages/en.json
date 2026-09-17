@@ -158,6 +158,13 @@
       "signOut": "Sign out"
     }
   },
+  "admin": {
+    "title": "Admin",
+    "description": "Reachable only by an Administrator.",
+    "loading": "Loading…",
+    "signedInAs": "Signed in as {userId} ({plan})",
+    "error": "Couldn't confirm admin access."
+  },
   "theme": {
     "label": "Change theme",
     "light": "Light",

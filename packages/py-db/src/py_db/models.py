@@ -228,6 +228,8 @@ class User(Base):
 
     Account: Mapped[list['Account']] = relationship('Account', back_populates='User_')
     CVVersion: Mapped[list['CVVersion']] = relationship('CVVersion', back_populates='User_')
+    QuotaAuditEvent_actorUserId: Mapped[list['QuotaAuditEvent']] = relationship('QuotaAuditEvent', foreign_keys='[QuotaAuditEvent.actorUserId]', back_populates='User_')
+    QuotaAuditEvent_targetUserId: Mapped[list['QuotaAuditEvent']] = relationship('QuotaAuditEvent', foreign_keys='[QuotaAuditEvent.targetUserId]', back_populates='User1')
     QuotaOverride: Mapped[list['QuotaOverride']] = relationship('QuotaOverride', back_populates='User_')
     Session: Mapped[list['Session']] = relationship('Session', back_populates='User_')
     Scout: Mapped[list['Scout']] = relationship('Scout', back_populates='User_')
@@ -318,6 +320,26 @@ class CVVersion(Base):
     Analysis: Mapped[list['Analysis']] = relationship('Analysis', back_populates='CVVersion_')
     Application: Mapped[list['Application']] = relationship('Application', back_populates='CVVersion_')
     GeneratedDocument: Mapped[list['GeneratedDocument']] = relationship('GeneratedDocument', back_populates='CVVersion_')
+
+
+class QuotaAuditEvent(Base):
+    __tablename__ = 'QuotaAuditEvent'
+    __table_args__ = (
+        ForeignKeyConstraint(['actorUserId'], ['User.id'], ondelete='CASCADE', onupdate='CASCADE', name='QuotaAuditEvent_actorUserId_fkey'),
+        ForeignKeyConstraint(['targetUserId'], ['User.id'], ondelete='SET NULL', onupdate='CASCADE', name='QuotaAuditEvent_targetUserId_fkey'),
+        PrimaryKeyConstraint('id', name='QuotaAuditEvent_pkey')
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    actorUserId: Mapped[str] = mapped_column(Text, nullable=False)
+    field: Mapped[str] = mapped_column(Text, nullable=False)
+    createdAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False, server_default=text('CURRENT_TIMESTAMP'))
+    targetUserId: Mapped[Optional[str]] = mapped_column(Text)
+    oldValue: Mapped[Optional[str]] = mapped_column(Text)
+    newValue: Mapped[Optional[str]] = mapped_column(Text)
+
+    User_: Mapped['User'] = relationship('User', foreign_keys=[actorUserId], back_populates='QuotaAuditEvent_actorUserId')
+    User1: Mapped[Optional['User']] = relationship('User', foreign_keys=[targetUserId], back_populates='QuotaAuditEvent_targetUserId')
 
 
 class QuotaOverride(Base):

@@ -35,6 +35,8 @@ model User {
   scouts         Scout[]
   applications   Application[]
   quotaOverrides QuotaOverride[]
+  quotaAuditEventsActed    QuotaAuditEvent[] @relation("QuotaAuditEventActor")
+  quotaAuditEventsTargeted QuotaAuditEvent[] @relation("QuotaAuditEventTarget")
 }
 
 enum QuotaKind {
@@ -72,6 +74,23 @@ model QuotaOverride {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, quotaKind])
+}
+
+// Append-only provenance trail for an Administrator's edit to a
+// QuotaOverride, a PlanQuotaDefault, or a User's Plan (docs/adr/0013,
+// issue #138) — actor, target user (absent for a PlanQuotaDefault edit,
+// which isn't scoped to one User), field, old/new value, timestamp.
+model QuotaAuditEvent {
+  id           String   @id @default(cuid())
+  actorUserId  String
+  targetUserId String?
+  field        String
+  oldValue     String?
+  newValue     String?
+  createdAt    DateTime @default(now())
+
+  actor  User  @relation("QuotaAuditEventActor", fields: [actorUserId], references: [id], onDelete: Cascade)
+  target User? @relation("QuotaAuditEventTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
 }
 
 model Account {

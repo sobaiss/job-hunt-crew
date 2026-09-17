@@ -71,13 +71,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   callbacks: {
     async jwt({ token, user }) {
       if (user?.email) {
-        token.userId = await upsertUser({ email: user.email, name: user.name, image: user.image });
+        const upserted = await upsertUser({ email: user.email, name: user.name, image: user.image });
+        token.userId = upserted.userId;
+        token.plan = upserted.plan;
       }
       return token;
     },
     session({ session, token }) {
       if (typeof token.userId === "string") {
         session.user.id = token.userId;
+      }
+      if (token.plan) {
+        session.user.plan = token.plan;
       }
       return session;
     },

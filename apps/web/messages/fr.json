@@ -158,6 +158,13 @@
       "signOut": "Se déconnecter"
     }
   },
+  "admin": {
+    "title": "Administration",
+    "description": "Accessible uniquement par un administrateur.",
+    "loading": "Chargement…",
+    "signedInAs": "Connecté en tant que {userId} ({plan})",
+    "error": "Impossible de confirmer l'accès administrateur."
+  },
   "theme": {
     "label": "Changer de thème",
     "light": "Clair",

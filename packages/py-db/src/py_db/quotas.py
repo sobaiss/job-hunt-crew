@@ -13,10 +13,20 @@ every User regardless of Plan.
 Hand-written (not sqlacodegen output), like `quota.py`.
 """
 
+import uuid
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import PlanQuotaDefault, Quotakind, QuotaOverride, Scout, Scoutstatus, User
+from .models import (
+    PlanQuotaDefault,
+    QuotaAuditEvent,
+    Quotakind,
+    QuotaOverride,
+    Scout,
+    Scoutstatus,
+    User,
+)
 
 
 async def effective_quota(session: AsyncSession, user_id: str, kind: Quotakind) -> int | None:
@@ -57,3 +67,32 @@ async def active_scout_count(
     if exclude_id is not None:
         stmt = stmt.where(Scout.id != exclude_id)
     return int((await session.scalar(stmt)) or 0)
+
+
+def record_quota_audit_event(
+    session: AsyncSession,
+    *,
+    actor_user_id: str,
+    target_user_id: str | None,
+    field: str,
+    old_value: str | None,
+    new_value: str | None,
+) -> QuotaAuditEvent:
+    """Stages one QuotaAuditEvent row for an Administrator's edit to a
+    QuotaOverride, a PlanQuotaDefault, or a User's Plan (issue #138).
+
+    Unlike `record_pipeline_event`, this does not commit: every admin
+    mutation (#139/#140) must write its audit event in the same transaction
+    as the change it records, so a caller adds this row alongside its own
+    changes and commits once.
+    """
+    event = QuotaAuditEvent(
+        id=str(uuid.uuid4()),
+        actorUserId=actor_user_id,
+        targetUserId=target_user_id,
+        field=field,
+        oldValue=old_value,
+        newValue=new_value,
+    )
+    session.add(event)
+    return event

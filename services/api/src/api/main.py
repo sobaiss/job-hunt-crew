@@ -5,6 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from py_db.session import make_engine, make_session_factory
 
+from .admin import router as admin_router
 from .internal import router as internal_router
 from .v1 import router as v1_router
 
@@ -25,6 +26,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="job-hunt-crew api", lifespan=lifespan)
 app.include_router(internal_router)
 app.include_router(v1_router)
+app.include_router(admin_router)
 
 INTERNAL_API_SECRET_HEADER = "x-internal-api-secret"
 # Only these three paths (FastAPI's auto-generated docs) are ever exempt from

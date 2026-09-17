@@ -30,6 +30,7 @@ class UpsertUserRequest(BaseModel):
 
 class UpsertUserResponse(BaseModel):
     userId: str
+    plan: str
 
 
 @router.post("/users/upsert", response_model=UpsertUserResponse)
@@ -58,7 +59,7 @@ async def upsert_user(
             user.image = req.image
         user.updatedAt = _now()
     await session.commit()
-    return UpsertUserResponse(userId=user.id)
+    return UpsertUserResponse(userId=user.id, plan=user.plan.value)
 
 
 class VerificationTokenRequest(BaseModel):
