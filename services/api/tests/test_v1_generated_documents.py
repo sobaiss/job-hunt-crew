@@ -17,10 +17,13 @@ from py_db.models import (
     Generateddocumentstatus,
     JobOffer,
     Joboffersourcesite,
+    Plan,
+    PlanQuotaDefault,
+    Quotakind,
     User,
 )
 from py_db.session import make_engine, make_session_factory
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 
 from api.main import app
 from api.sqs_client import GENERATION_INTAKE_QUEUE_URL, make_sqs_client
@@ -81,6 +84,52 @@ def user_id():
     uid = asyncio.run(_create_user())
     yield uid
     asyncio.run(_delete_user(uid))
+
+
+async def _free_plan_default(kind: Quotakind) -> int | None:
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            return await session.scalar(
+                select(PlanQuotaDefault.limit).where(
+                    PlanQuotaDefault.plan == Plan.FREE, PlanQuotaDefault.quotaKind == kind
+                )
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _set_free_plan_default(kind: Quotakind, limit: int | None) -> None:
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            await session.execute(
+                update(PlanQuotaDefault)
+                .where(PlanQuotaDefault.plan == Plan.FREE, PlanQuotaDefault.quotaKind == kind)
+                .values(limit=limit)
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+
+@pytest.fixture
+def documents_daily_cap():
+    """Temporarily overrides FREE's `PlanQuotaDefault` for `DOCUMENTS_DAILY`
+    — `user_id` above creates a plain FREE-plan User (issue #135), so this is
+    the fixture cap tests use instead of the retired `DAILY_GENERATION_CAP`
+    env var (issue #137), matching test_v1_analyses.py's `analyses_daily_cap`
+    pattern.
+    """
+    original = asyncio.run(_free_plan_default(Quotakind.DOCUMENTS_DAILY))
+
+    def _apply(limit: int | None) -> None:
+        asyncio.run(_set_free_plan_default(Quotakind.DOCUMENTS_DAILY, limit))
+
+    yield _apply
+    asyncio.run(_set_free_plan_default(Quotakind.DOCUMENTS_DAILY, original))
 
 
 def _drain_generation_intake() -> list[dict]:
@@ -665,8 +714,10 @@ def test_regenerate_generated_document_is_user_scoped(user_id):
         asyncio.run(_delete_user(other))
 
 
-def test_regenerate_generated_document_respects_daily_generation_cap(user_id, monkeypatch):
-    monkeypatch.setenv("DAILY_GENERATION_CAP", "2")
+def test_regenerate_generated_document_respects_daily_generation_cap(
+    documents_daily_cap, user_id
+):
+    documents_daily_cap(2)
     with TestClient(app) as client:
         cv = _make_cv_version(client, user_id)
         analysis_id = asyncio.run(
@@ -693,8 +744,10 @@ def test_get_generated_documents_quota_requires_user_id_header():
     assert response.status_code == 401
 
 
-def test_get_generated_documents_quota_reports_cap_used_and_remaining(user_id, monkeypatch):
-    monkeypatch.setenv("DAILY_GENERATION_CAP", "3")
+def test_get_generated_documents_quota_reports_cap_used_and_remaining(
+    documents_daily_cap, user_id
+):
+    documents_daily_cap(3)
     with TestClient(app) as client:
         before = client.get("/v1/generated-documents/quota", headers=_headers(user_id))
         assert before.status_code == 200
@@ -721,8 +774,8 @@ def test_get_generated_documents_quota_reports_cap_used_and_remaining(user_id, m
             asyncio.run(_delete_user(other_user_id))
 
 
-def test_get_generated_documents_quota_never_negative_remaining(user_id, monkeypatch):
-    monkeypatch.setenv("DAILY_GENERATION_CAP", "1")
+def test_get_generated_documents_quota_never_negative_remaining(documents_daily_cap, user_id):
+    documents_daily_cap(1)
     with TestClient(app) as client:
         cv = _make_cv_version(client, user_id)
         analysis_id = asyncio.run(
@@ -734,3 +787,41 @@ def test_get_generated_documents_quota_never_negative_remaining(user_id, monkeyp
             "/v1/generated-documents/quota", headers=_headers(user_id)
         ).json()["quota"]
     assert quota == {"cap": 1, "used": 2, "remaining": 0}
+
+
+def test_get_generated_documents_quota_unlimited_when_effective_quota_is_none(
+    documents_daily_cap, user_id
+):
+    documents_daily_cap(None)
+    with TestClient(app) as client:
+        quota = client.get(
+            "/v1/generated-documents/quota", headers=_headers(user_id)
+        ).json()["quota"]
+    assert quota == {"cap": None, "used": 0, "remaining": None}
+
+
+def test_create_generated_documents_returns_429_once_daily_cap_reached(
+    documents_daily_cap, user_id
+):
+    # A single create call produces 2 rows (COVER_LETTER + TAILORED_CV), so a
+    # cap of 2 is already exhausted by the first call.
+    documents_daily_cap(2)
+    with TestClient(app) as client:
+        cv = _make_cv_version(client, user_id)
+        first_analysis_id = asyncio.run(
+            _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.COMPLETED)
+        )
+        first = client.post(
+            f"/v1/analyses/{first_analysis_id}/generated-documents", headers=_headers(user_id)
+        )
+        assert first.status_code == 202
+        _drain_generation_intake()
+
+        second_analysis_id = asyncio.run(
+            _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.COMPLETED)
+        )
+        second = client.post(
+            f"/v1/analyses/{second_analysis_id}/generated-documents", headers=_headers(user_id)
+        )
+        assert second.status_code == 429
+        assert _drain_generation_intake() == []

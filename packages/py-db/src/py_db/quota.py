@@ -1,28 +1,27 @@
-"""Per-user Analysis usage counters (issue #33, extended by #136).
+"""Per-user Analysis/GeneratedDocument usage counters (issue #33, extended by
+#136 and #137).
 
-`analyses_requested_today` and `analyses_requested_this_month` are read by
-`POST /v1/analyses` (services/api) and by the ingestion fan-out that turns a
-multi-offer `IngestionJob` into `Analysis` rows
-(`create_analyses_for_ready_offers` in services/ingestion) against the
+`analyses_requested_today`, `analyses_requested_this_month`, and
+`generated_documents_created_today` are read by `POST /v1/analyses`
+(services/api), the `.../generated-documents` create/regenerate routes, and
+the ingestion fan-out that turns a multi-offer `IngestionJob` into `Analysis`
+rows (`create_analyses_for_ready_offers` in services/ingestion) against the
 ceilings `py_db.quotas.effective_quota` resolves for `QuotaKind.ANALYSES_DAILY`
-/ `QuotaKind.ANALYSES_MONTHLY` — this module is their single source of truth
-for the *usage* side of that comparison, so the two call sites can never
-drift. The caps themselves no longer live here (see `py_db.quotas`); the flat
-`DAILY_ANALYSIS_CAP` env var this module used to read is retired
-(docs/adr/0014).
+/ `QuotaKind.ANALYSES_MONTHLY` / `QuotaKind.DOCUMENTS_DAILY` — this module is
+their single source of truth for the *usage* side of that comparison, so the
+call sites can never drift. The caps themselves no longer live here (see
+`py_db.quotas`); the flat `DAILY_ANALYSIS_CAP`/`DAILY_GENERATION_CAP` env vars
+this module used to read are retired (docs/adr/0014).
 
 Hand-written (not sqlacodegen output), like `pipeline_events.py`.
 """
 
-import os
 from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import Analysis, GeneratedDocument
-
-DEFAULT_DAILY_GENERATION_CAP = 20
 
 
 def _start_of_today() -> datetime:
@@ -55,22 +54,6 @@ async def analyses_requested_this_month(session: AsyncSession, user_id: str) -> 
         .where(Analysis.userId == user_id, Analysis.requestedAt >= _start_of_month())
     )
     return count or 0
-
-
-def daily_generation_cap() -> int:
-    """`DAILY_GENERATION_CAP` from the environment, or
-    `DEFAULT_DAILY_GENERATION_CAP` when it is unset, non-numeric, or not a
-    positive integer. Separate budget from the Analysis counters above (issue
-    #58's "Regenerate ... bounded by a daily cap (default 20)"). Slated to
-    move onto the Plan/QuotaKind system in #137, same as the Analysis caps
-    did in #136.
-    """
-    raw = os.environ.get("DAILY_GENERATION_CAP")
-    try:
-        parsed = int(raw) if raw else None
-    except ValueError:
-        parsed = None
-    return parsed if parsed is not None and parsed > 0 else DEFAULT_DAILY_GENERATION_CAP
 
 
 async def generated_documents_created_today(session: AsyncSession, user_id: str) -> int:

@@ -35,7 +35,6 @@ from py_db.application_stats import compute_application_stats, stats_window_sinc
 from py_db.quota import (
     analyses_requested_this_month,
     analyses_requested_today,
-    daily_generation_cap,
     generated_documents_created_today,
 )
 from py_db.quotas import active_scout_count, effective_quota
@@ -1848,13 +1847,22 @@ async def create_generated_documents(
     """Creates a COVER_LETTER and a TAILORED_CV GeneratedDocument (PENDING)
     for a completed Analysis and enqueues one generation-intake message per
     row. Requires the Analysis to be COMPLETED — its resultJSON's
-    matched/missing skills steer the generation agents.
+    matched/missing skills steer the generation agents. Bounded by the
+    caller's effective `QuotaKind.DOCUMENTS_DAILY` quota (issue #137); each
+    call counts as 2 documents against that budget.
     """
     analysis = await _owned_analysis(session, analysis_id, user_id)
     if analysis.status != Analysisstatus.COMPLETED:
         raise HTTPException(
             status_code=400,
             detail="Analysis must be COMPLETED before generating documents",
+        )
+
+    cap = await effective_quota(session, user_id, Quotakind.DOCUMENTS_DAILY)
+    if cap is not None and await generated_documents_created_today(session, user_id) >= cap:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Daily document generation limit of {cap} reached. Try again tomorrow.",
         )
 
     await _get_or_create_application(session, analysis, user_id)
@@ -1928,9 +1936,9 @@ async def list_generated_documents(
 
 
 class GeneratedDocumentsQuota(BaseModel):
-    cap: int
+    cap: int | None
     used: int
-    remaining: int
+    remaining: int | None
 
 
 class GeneratedDocumentsQuotaResponse(BaseModel):
@@ -1944,17 +1952,19 @@ async def get_generated_documents_quota(
     user_id: str = Depends(require_user_id),
     session: AsyncSession = Depends(get_session),
 ) -> GeneratedDocumentsQuotaResponse:
-    """The caller's per-user daily document-generation budget: `cap`
-    (`DAILY_GENERATION_CAP`), how many `GeneratedDocument` rows they've `used`
-    since 00:00 UTC, and how many `remaining` (floored at 0). Backs the bulk
-    "Générer les documents" pre-confirm estimate (issue #68) — the same shared
-    `py_db.quota` rule `POST .../generated-documents` and `.../regenerate`
-    enforce.
+    """The caller's per-user daily document-generation budget: `cap` (the
+    caller's effective `QuotaKind.DOCUMENTS_DAILY` quota, `None` when
+    unlimited), how many `GeneratedDocument` rows they've `used` since 00:00
+    UTC, and how many `remaining` (floored at 0, `None` when unlimited).
+    Backs the bulk "Générer les documents" pre-confirm estimate (issue #68) —
+    the same `effective_quota` rule `POST .../generated-documents` and
+    `.../regenerate` enforce.
     """
-    cap = daily_generation_cap()
+    cap = await effective_quota(session, user_id, Quotakind.DOCUMENTS_DAILY)
     used = await generated_documents_created_today(session, user_id)
+    remaining = None if cap is None else max(cap - used, 0)
     return GeneratedDocumentsQuotaResponse(
-        quota=GeneratedDocumentsQuota(cap=cap, used=used, remaining=max(cap - used, 0))
+        quota=GeneratedDocumentsQuota(cap=cap, used=used, remaining=remaining)
     )
 
 
@@ -1990,7 +2000,8 @@ async def regenerate_generated_document(
     the superseded row's supersededById at the new one so only the latest
     shows in `GET /analyses/{id}/generated-documents` (issue #58). A document
     already PENDING/GENERATING is 409 (nothing to regenerate yet); bounded by
-    `DAILY_GENERATION_CAP` (default 20), separate from the analysis cap.
+    the caller's effective `QuotaKind.DOCUMENTS_DAILY` quota (issue #137),
+    separate from the analysis cap.
     """
     document = await session.get(GeneratedDocument, document_id)
     if document is None:
@@ -2005,8 +2016,8 @@ async def regenerate_generated_document(
             status_code=409, detail="Document generation is already in progress"
         )
 
-    cap = daily_generation_cap()
-    if await generated_documents_created_today(session, user_id) >= cap:
+    cap = await effective_quota(session, user_id, Quotakind.DOCUMENTS_DAILY)
+    if cap is not None and await generated_documents_created_today(session, user_id) >= cap:
         raise HTTPException(
             status_code=429,
             detail=f"Daily document generation limit of {cap} reached. Try again tomorrow.",

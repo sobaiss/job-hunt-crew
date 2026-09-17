@@ -65,7 +65,7 @@ export function useAnalysisGeneratedDocuments(analysisId: string) {
  * /api/generated-documents/{id}/regenerate`): the API creates a fresh
  * PENDING row of the same type and supersedes this one, so the caller
  * should swap to polling the returned row's id. 409 if the document is
- * still PENDING/GENERATING; 429 if DAILY_GENERATION_CAP is exhausted. */
+ * still PENDING/GENERATING; 429 if the caller's DOCUMENTS_DAILY quota is exhausted. */
 export function useRegenerateGeneratedDocument(id: string) {
   return useMutation({
     mutationFn: () =>
