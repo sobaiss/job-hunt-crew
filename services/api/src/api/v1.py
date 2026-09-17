@@ -33,8 +33,8 @@ from py_db.models import (
 )
 from py_db.application_stats import compute_application_stats, stats_window_since
 from py_db.quota import (
+    analyses_requested_this_month,
     analyses_requested_today,
-    daily_analysis_cap,
     daily_generation_cap,
     generated_documents_created_today,
 )
@@ -996,13 +996,21 @@ async def list_analyses(
 
 
 class AnalysisQuota(BaseModel):
-    cap: int
+    cap: int | None
     used: int
-    remaining: int
+    remaining: int | None
 
 
 class AnalysisQuotaResponse(BaseModel):
+    # `quota` is the daily window, kept under its original field name for the
+    # existing frontend consumer (`useAnalysisQuota`) — #141 retires this
+    # whole endpoint in favour of `GET /v1/quotas` and drops the alias then.
     quota: AnalysisQuota
+    monthly: AnalysisQuota
+
+
+def _quota(cap: int | None, used: int) -> AnalysisQuota:
+    return AnalysisQuota(cap=cap, used=used, remaining=None if cap is None else max(cap - used, 0))
 
 
 # Declared before `/analyses/{analysis_id}` so "quota" is matched here rather
@@ -1012,17 +1020,21 @@ async def get_analyses_quota(
     user_id: str = Depends(require_user_id),
     session: AsyncSession = Depends(get_session),
 ) -> AnalysisQuotaResponse:
-    """The caller's per-user daily analysis budget: `cap`
-    (`DAILY_ANALYSIS_CAP`), how many `Analysis` rows they have `used` since
-    00:00 UTC, and how many `remaining` (floored at 0). Backs the "Analyse
+    """The caller's per-user Analysis budget for both windows the Plan/
+    QuotaKind system enforces (issue #136): `quota` is the daily window,
+    `monthly` the calendar-month one. Each reports `cap` (the User's
+    effective quota for that `QuotaKind`, `None` when unlimited), how many
+    `Analysis` rows they have `used` since the window opened, and how many
+    `remaining` (floored at 0, `None` when unlimited). Backs the "Analyse
     several offers" pre-submit estimate — "up to N analyses will run — M left
-    today" (issue #33). Same shared `py_db.quota` rule `POST /v1/analyses`
-    enforces for its 429.
+    today" (issue #33). Same `effective_quota` rule `POST /v1/analyses`
+    enforces for its 429s.
     """
-    cap = daily_analysis_cap()
-    used = await analyses_requested_today(session, user_id)
+    daily_cap = await effective_quota(session, user_id, Quotakind.ANALYSES_DAILY)
+    monthly_cap = await effective_quota(session, user_id, Quotakind.ANALYSES_MONTHLY)
     return AnalysisQuotaResponse(
-        quota=AnalysisQuota(cap=cap, used=used, remaining=max(cap - used, 0))
+        quota=_quota(daily_cap, await analyses_requested_today(session, user_id)),
+        monthly=_quota(monthly_cap, await analyses_requested_this_month(session, user_id)),
     )
 
 
@@ -1057,11 +1069,21 @@ async def create_analysis(
     if cv_version is None or cv_version.userId != user_id:
         raise HTTPException(status_code=400, detail="Unknown cvVersionId")
 
-    daily_cap = daily_analysis_cap()
-    if await analyses_requested_today(session, user_id) >= daily_cap:
+    daily_cap = await effective_quota(session, user_id, Quotakind.ANALYSES_DAILY)
+    if daily_cap is not None and await analyses_requested_today(session, user_id) >= daily_cap:
         raise HTTPException(
             status_code=429,
             detail=f"Daily analysis limit of {daily_cap} reached. Try again tomorrow.",
+        )
+
+    monthly_cap = await effective_quota(session, user_id, Quotakind.ANALYSES_MONTHLY)
+    if (
+        monthly_cap is not None
+        and await analyses_requested_this_month(session, user_id) >= monthly_cap
+    ):
+        raise HTTPException(
+            status_code=429,
+            detail=f"Monthly analysis limit of {monthly_cap} reached. Try again next month.",
         )
 
     analysis = Analysis(

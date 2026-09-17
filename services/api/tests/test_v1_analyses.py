@@ -15,10 +15,13 @@ from py_db.models import (
     Ingestionmode,
     JobOffer,
     Joboffersourcesite,
+    Plan,
+    PlanQuotaDefault,
+    Quotakind,
     User,
 )
 from py_db.session import make_engine, make_session_factory
-from sqlalchemy import delete
+from sqlalchemy import delete, select, update
 
 from api.main import app
 from api.sqs_client import ANALYSIS_INTAKE_QUEUE_URL, make_sqs_client
@@ -157,6 +160,60 @@ def _clean_queue():
     _purge_queue()
 
 
+async def _free_plan_default(kind: Quotakind) -> int | None:
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            return await session.scalar(
+                select(PlanQuotaDefault.limit).where(
+                    PlanQuotaDefault.plan == Plan.FREE, PlanQuotaDefault.quotaKind == kind
+                )
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _set_free_plan_default(kind: Quotakind, limit: int | None) -> None:
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            await session.execute(
+                update(PlanQuotaDefault)
+                .where(PlanQuotaDefault.plan == Plan.FREE, PlanQuotaDefault.quotaKind == kind)
+                .values(limit=limit)
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+
+def _plan_cap_fixture(kind: Quotakind):
+    """Temporarily overrides FREE's `PlanQuotaDefault` for `kind` — `user_id`
+    above creates a plain FREE-plan User (issue #135), so this is the
+    fixture cap tests use instead of the retired `DAILY_ANALYSIS_CAP` env var
+    (issue #136).
+    """
+    original = asyncio.run(_free_plan_default(kind))
+
+    def _apply(limit: int) -> None:
+        asyncio.run(_set_free_plan_default(kind, limit))
+
+    yield _apply
+    asyncio.run(_set_free_plan_default(kind, original))
+
+
+@pytest.fixture
+def analyses_daily_cap():
+    yield from _plan_cap_fixture(Quotakind.ANALYSES_DAILY)
+
+
+@pytest.fixture
+def analyses_monthly_cap():
+    yield from _plan_cap_fixture(Quotakind.ANALYSES_MONTHLY)
+
+
 def test_create_analysis_requires_user_id_header(job_offer_id, cv_version_id):
     with TestClient(app) as client:
         response = client.post(
@@ -212,8 +269,10 @@ def test_create_analysis_success_creates_row_and_enqueues_sqs_message(user_id, j
     assert json.loads(messages[0]["Body"]) == {"analysisId": analysis_id}
 
 
-def test_create_analysis_returns_429_once_daily_cap_reached(monkeypatch, user_id, job_offer_id, cv_version_id):
-    monkeypatch.setenv("DAILY_ANALYSIS_CAP", "1")
+def test_create_analysis_returns_429_once_daily_cap_reached(
+    analyses_daily_cap, user_id, job_offer_id, cv_version_id
+):
+    analyses_daily_cap(1)
     with TestClient(app) as client:
         first = client.post(
             "/v1/analyses",
@@ -231,20 +290,44 @@ def test_create_analysis_returns_429_once_daily_cap_reached(monkeypatch, user_id
     assert "Daily analysis limit of 1 reached" in second.json()["detail"]
 
 
+def test_create_analysis_returns_429_once_monthly_cap_reached(
+    analyses_monthly_cap, user_id, job_offer_id, cv_version_id
+):
+    analyses_monthly_cap(1)
+    with TestClient(app) as client:
+        first = client.post(
+            "/v1/analyses",
+            headers=_headers(user_id),
+            json={"jobOfferId": job_offer_id, "cvVersionId": cv_version_id},
+        )
+        assert first.status_code == 202
+
+        second = client.post(
+            "/v1/analyses",
+            headers=_headers(user_id),
+            json={"jobOfferId": job_offer_id, "cvVersionId": cv_version_id},
+        )
+    assert second.status_code == 429
+    assert "Monthly analysis limit of 1 reached" in second.json()["detail"]
+
+
 def test_get_analyses_quota_requires_user_id_header():
     with TestClient(app) as client:
         response = client.get("/v1/analyses/quota", headers=INTERNAL_SECRET_HEADERS)
     assert response.status_code == 401
 
 
-def test_get_analyses_quota_reports_cap_used_and_remaining(
-    monkeypatch, user_id, job_offer_id, cv_version_id
+def test_get_analyses_quota_reports_cap_used_and_remaining_for_both_windows(
+    analyses_daily_cap, analyses_monthly_cap, user_id, job_offer_id, cv_version_id
 ):
-    monkeypatch.setenv("DAILY_ANALYSIS_CAP", "3")
+    analyses_daily_cap(3)
+    analyses_monthly_cap(30)
     with TestClient(app) as client:
         before = client.get("/v1/analyses/quota", headers=_headers(user_id))
         assert before.status_code == 200
-        assert before.json()["quota"] == {"cap": 3, "used": 0, "remaining": 3}
+        body = before.json()
+        assert body["quota"] == {"cap": 3, "used": 0, "remaining": 3}
+        assert body["monthly"] == {"cap": 30, "used": 0, "remaining": 30}
 
         posted = client.post(
             "/v1/analyses",
@@ -253,34 +336,44 @@ def test_get_analyses_quota_reports_cap_used_and_remaining(
         )
         assert posted.status_code == 202
 
-        after = client.get("/v1/analyses/quota", headers=_headers(user_id))
-        assert after.json()["quota"] == {"cap": 3, "used": 1, "remaining": 2}
+        after = client.get("/v1/analyses/quota", headers=_headers(user_id)).json()
+        assert after["quota"] == {"cap": 3, "used": 1, "remaining": 2}
+        assert after["monthly"] == {"cap": 30, "used": 1, "remaining": 29}
 
         other_user_id = asyncio.run(_create_user())
         try:
-            other = client.get("/v1/analyses/quota", headers=_headers(other_user_id))
-            assert other.json()["quota"] == {"cap": 3, "used": 0, "remaining": 3}
+            other = client.get("/v1/analyses/quota", headers=_headers(other_user_id)).json()
+            assert other["quota"] == {"cap": 3, "used": 0, "remaining": 3}
+            assert other["monthly"] == {"cap": 30, "used": 0, "remaining": 30}
         finally:
             asyncio.run(_delete_user(other_user_id))
 
 
 def test_get_analyses_quota_never_negative_remaining(
-    monkeypatch, user_id, job_offer_id, cv_version_id
+    analyses_daily_cap, analyses_monthly_cap, user_id, job_offer_id, cv_version_id
 ):
-    monkeypatch.setenv("DAILY_ANALYSIS_CAP", "1")
+    analyses_daily_cap(1)
+    analyses_monthly_cap(1)
     with TestClient(app) as client:
         client.post(
             "/v1/analyses",
             headers=_headers(user_id),
             json={"jobOfferId": job_offer_id, "cvVersionId": cv_version_id},
         )
-        client.post(
-            "/v1/analyses",
-            headers=_headers(user_id),
-            json={"jobOfferId": job_offer_id, "cvVersionId": cv_version_id},
-        )
-        quota = client.get("/v1/analyses/quota", headers=_headers(user_id)).json()["quota"]
-    assert quota == {"cap": 1, "used": 1, "remaining": 0}
+        body = client.get("/v1/analyses/quota", headers=_headers(user_id)).json()
+    assert body["quota"] == {"cap": 1, "used": 1, "remaining": 0}
+    assert body["monthly"] == {"cap": 1, "used": 1, "remaining": 0}
+
+
+def test_get_analyses_quota_unlimited_when_effective_quota_is_none(
+    analyses_daily_cap, analyses_monthly_cap, user_id
+):
+    analyses_daily_cap(None)
+    analyses_monthly_cap(None)
+    with TestClient(app) as client:
+        body = client.get("/v1/analyses/quota", headers=_headers(user_id)).json()
+    assert body["quota"] == {"cap": None, "used": 0, "remaining": None}
+    assert body["monthly"] == {"cap": None, "used": 0, "remaining": None}
 
 
 def test_list_and_get_analyses_scoped_to_caller(user_id, job_offer_id, cv_version_id):

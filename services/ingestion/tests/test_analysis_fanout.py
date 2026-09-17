@@ -16,6 +16,9 @@ from py_db.models import (
     JobOffer,
     Jobofferextractionstatus,
     Joboffersourcesite,
+    Plan,
+    PlanQuotaDefault,
+    Quotakind,
     Scout,
     ScoutRun,
     Scoutrunstatus,
@@ -23,10 +26,35 @@ from py_db.models import (
     User,
 )
 from py_db.session import make_engine, make_session_factory
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from ingestion.analysis_fanout import create_analyses_for_ready_offers
 from ingestion.sqs_client import ANALYSIS_INTAKE_QUEUE_URL
+
+
+async def _set_free_plan_default(kind: Quotakind, limit: int | None) -> int | None:
+    """Temporarily overrides FREE's `PlanQuotaDefault` for `kind`, returning
+    the previous value so the caller can restore it — `_seed`'s `User` rows
+    are plain FREE-plan (issue #135), so this replaces the retired
+    `DAILY_ANALYSIS_CAP` env var (issue #136)."""
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            original = await session.scalar(
+                select(PlanQuotaDefault.limit).where(
+                    PlanQuotaDefault.plan == Plan.FREE, PlanQuotaDefault.quotaKind == kind
+                )
+            )
+            await session.execute(
+                update(PlanQuotaDefault)
+                .where(PlanQuotaDefault.plan == Plan.FREE, PlanQuotaDefault.quotaKind == kind)
+                .values(limit=limit)
+            )
+            await session.commit()
+            return original
+    finally:
+        await engine.dispose()
 
 
 class FakeSqs:
@@ -297,8 +325,8 @@ async def test_idempotent_on_second_call():
 
 
 @pytest.mark.asyncio
-async def test_quota_cap_limits_creation_and_records_skip(monkeypatch):
-    monkeypatch.setenv("DAILY_ANALYSIS_CAP", "1")
+async def test_quota_cap_limits_creation_and_records_skip():
+    original = await _set_free_plan_default(Quotakind.ANALYSES_DAILY, 1)
     engine = make_engine()
     session_factory = make_session_factory(engine)
     user_id, _, ingestion_job_id, _, all_offer_ids = await _seed(
@@ -331,11 +359,44 @@ async def test_quota_cap_limits_creation_and_records_skip(monkeypatch):
             all_offer_ids=all_offer_ids,
         )
         await engine.dispose()
+        await _set_free_plan_default(Quotakind.ANALYSES_DAILY, original)
 
 
 @pytest.mark.asyncio
-async def test_owner_already_at_cap_creates_none(monkeypatch):
-    monkeypatch.setenv("DAILY_ANALYSIS_CAP", "1")
+async def test_monthly_quota_cap_limits_creation_and_records_skip():
+    original = await _set_free_plan_default(Quotakind.ANALYSES_MONTHLY, 1)
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id, _, ingestion_job_id, _, all_offer_ids = await _seed(
+        session_factory,
+        offer_statuses=[Jobofferextractionstatus.READY, Jobofferextractionstatus.READY],
+    )
+    fake_sqs = FakeSqs()
+
+    try:
+        async with session_factory() as session:
+            ingestion_job = await session.get(IngestionJob, ingestion_job_id)
+            result = await create_analyses_for_ready_offers(
+                session, ingestion_job, sqs_client=fake_sqs
+            )
+
+        assert len(result.created_analysis_ids) == 1
+        assert result.quota_skipped_count == 1
+        assert len(fake_sqs.messages) == 1
+    finally:
+        await _cleanup(
+            session_factory,
+            user_id=user_id,
+            ingestion_job_id=ingestion_job_id,
+            all_offer_ids=all_offer_ids,
+        )
+        await engine.dispose()
+        await _set_free_plan_default(Quotakind.ANALYSES_MONTHLY, original)
+
+
+@pytest.mark.asyncio
+async def test_owner_already_at_cap_creates_none():
+    original = await _set_free_plan_default(Quotakind.ANALYSES_DAILY, 1)
     engine = make_engine()
     session_factory = make_session_factory(engine)
     user_id, _, ingestion_job_id, _, all_offer_ids = await _seed(
@@ -372,6 +433,7 @@ async def test_owner_already_at_cap_creates_none(monkeypatch):
             all_offer_ids=all_offer_ids,
         )
         await engine.dispose()
+        await _set_free_plan_default(Quotakind.ANALYSES_DAILY, original)
 
 
 @pytest.mark.asyncio
@@ -912,7 +974,6 @@ async def test_scout_run_rolls_up_already_seen_run_limit_and_cap_skipped_counts(
     monkeypatch,
 ):
     monkeypatch.setenv("SCOUT_MAX_ANALYSES_PER_RUN", "1")
-    monkeypatch.setenv("DAILY_ANALYSIS_CAP", "1000")
     engine = make_engine()
     session_factory = make_session_factory(engine)
     user_id, cv_version_id, ingestion_job_id, offer_ids, all_offer_ids = await _seed(

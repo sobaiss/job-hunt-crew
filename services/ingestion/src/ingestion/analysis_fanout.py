@@ -12,13 +12,14 @@ stamps each created `Analysis` with the denormalised `scoutId` so the Scout
 detail view, per-Scout stats, and cross-run dedup can query without a join
 (issue #54).
 
-The per-user daily analysis cap (`DAILY_ANALYSIS_CAP`, default 50, counted
-since 00:00 UTC — the same rule `POST /v1/analyses` enforces) is respected:
-`Analysis` rows are created only up to the owner's remaining budget for the
-day and the number of `READY` offers left unanalysed for that reason is
-recorded on `IngestionJob.quotaSkippedCount` without failing the job. The
-remaining candidate-facing side of partial batches (per-offer "daily limit
-reached" markers on the Batch result view) is issue #33.
+The owner's Plan/QuotaKind daily *and* monthly analysis ceilings
+(`py_db.quotas.effective_quota` for `ANALYSES_DAILY`/`ANALYSES_MONTHLY` —
+the same rule `POST /v1/analyses` enforces, issue #136) are respected:
+`Analysis` rows are created only up to whichever of the two remaining
+budgets is smaller, and the number of `READY` offers left unanalysed for
+that reason is recorded on `IngestionJob.quotaSkippedCount` without failing
+the job. The remaining candidate-facing side of partial batches (per-offer
+"daily limit reached" markers on the Batch result view) is issue #33.
 
 Cost-bounded Scout matching (issue #55): a Scout job's candidate offers go
 through two more gates before the daily cap, neither of which touch the
@@ -57,9 +58,11 @@ from py_db.models import (
     IngestionJobOffer,
     JobOffer,
     Jobofferextractionstatus,
+    Quotakind,
     ScoutRun,
 )
-from py_db.quota import analyses_requested_today, daily_analysis_cap
+from py_db.quota import analyses_requested_this_month, analyses_requested_today
+from py_db.quotas import effective_quota
 from py_db.scout_matching import (
     analyses_created_for_scout_run,
     lexical_similarity,
@@ -103,11 +106,11 @@ async def create_analyses_for_ready_offers(
     """For each `READY` `JobOffer` linked to `ingestion_job` that does not yet
     have an `Analysis` for this job, create one `Analysis` (`userId` +
     `cvVersionId` from the job) and enqueue `{"analysisId": id}` on
-    `analysis-intake`. Stops once the owner's `DAILY_ANALYSIS_CAP` for the
-    day is reached, recording the count of offers left unanalysed on
-    `ingestion_job.quotaSkippedCount`. Idempotent: re-running skips offers that
-    already have an `Analysis` for this job, so an SQS redelivery does not
-    double-create.
+    `analysis-intake`. Stops once the owner's effective daily or monthly
+    Analysis quota (whichever is hit first) is reached, recording the count
+    of offers left unanalysed on `ingestion_job.quotaSkippedCount`.
+    Idempotent: re-running skips offers that already have an `Analysis` for
+    this job, so an SQS redelivery does not double-create.
 
     For a Scout job (`ingestion_job.scoutRunId` set), candidates additionally
     pass cross-run dedup and the per-run ceiling (issue #55) before the daily
@@ -214,13 +217,25 @@ async def create_analyses_for_ready_offers(
         ingestion_job.runLimitSkippedCount = result.run_limit_skipped_count
         ingestion_job.updatedAt = _now()
 
-    # Same rule `POST /v1/analyses` enforces, via the shared helper (issue #33).
-    cap = daily_analysis_cap()
-    remaining = max(
-        cap - await analyses_requested_today(session, ingestion_job.userId), 0
+    # Same rule `POST /v1/analyses` enforces, via the shared resolver (issue #136).
+    daily_cap = await effective_quota(session, ingestion_job.userId, Quotakind.ANALYSES_DAILY)
+    daily_remaining = (
+        None
+        if daily_cap is None
+        else max(daily_cap - await analyses_requested_today(session, ingestion_job.userId), 0)
     )
+    monthly_cap = await effective_quota(session, ingestion_job.userId, Quotakind.ANALYSES_MONTHLY)
+    monthly_remaining = (
+        None
+        if monthly_cap is None
+        else max(
+            monthly_cap - await analyses_requested_this_month(session, ingestion_job.userId), 0
+        )
+    )
+    remainings = [r for r in (daily_remaining, monthly_remaining) if r is not None]
+    remaining = min(remainings) if remainings else None
 
-    to_create = pending_offer_ids[:remaining]
+    to_create = pending_offer_ids if remaining is None else pending_offer_ids[:remaining]
     skipped = len(pending_offer_ids) - len(to_create)
 
     for job_offer_id in to_create:
