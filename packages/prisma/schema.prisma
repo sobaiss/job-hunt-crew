@@ -10,22 +10,68 @@ datasource db {
 // NextAuth.js (Auth.js) Prisma adapter models.
 // See https://authjs.dev/getting-started/adapters/prisma
 
+enum Plan {
+  FREE
+  STANDARD
+  PREMIUM
+  ADMINISTRATEUR
+}
+
 model User {
   id            String    @id @default(cuid())
   name          String?
   email         String?   @unique
   emailVerified DateTime?
   image         String?
+  plan          Plan      @default(FREE)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  accounts      Account[]
-  sessions      Session[]
-  cvVersions    CVVersion[]
-  ingestionJobs IngestionJob[]
-  analyses      Analysis[]
-  scouts        Scout[]
-  applications  Application[]
+  accounts       Account[]
+  sessions       Session[]
+  cvVersions     CVVersion[]
+  ingestionJobs  IngestionJob[]
+  analyses       Analysis[]
+  scouts         Scout[]
+  applications   Application[]
+  quotaOverrides QuotaOverride[]
+}
+
+enum QuotaKind {
+  ACTIVE_SCOUTS
+  ANALYSES_DAILY
+  ANALYSES_MONTHLY
+  DOCUMENTS_DAILY
+}
+
+// Admin-editable, per-Plan ceiling for one QuotaKind; `limit` null means
+// unlimited. A User with no QuotaOverride for a QuotaKind tracks this value
+// live as it changes (docs/adr/0013) rather than a value copied at signup.
+model PlanQuotaDefault {
+  id        String    @id @default(cuid())
+  plan      Plan
+  quotaKind QuotaKind
+  limit     Int?
+  updatedAt DateTime  @updatedAt
+
+  @@unique([plan, quotaKind])
+}
+
+// An Administrator-set per-User ceiling for one QuotaKind, taking precedence
+// over that User's Plan's PlanQuotaDefault (docs/adr/0013). Only exists for a
+// User an Administrator has explicitly customized; `limit` null means
+// unlimited.
+model QuotaOverride {
+  id        String    @id @default(cuid())
+  userId    String
+  quotaKind QuotaKind
+  limit     Int?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, quotaKind])
 }
 
 model Account {

@@ -23,6 +23,7 @@ from py_db.models import (
     Ingestionjobstatus,
     Ingestionmode,
     JobOffer,
+    Quotakind,
     Scout,
     ScoutRun,
     Scoutrunstatus,
@@ -37,6 +38,7 @@ from py_db.quota import (
     daily_generation_cap,
     generated_documents_created_today,
 )
+from py_db.quotas import active_scout_count, effective_quota
 from pydantic import BaseModel
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1112,10 +1114,11 @@ async def get_analysis(
 # CRUD for the saved, self-running search + match configs a Candidate manages
 # from the "Agents" area. Scouts do not run yet — this slice is create / list /
 # get / patch (relabel, reconfigure, pause / resume / archive) plus the
-# MAX_SCOUTS_PER_USER guard. Every route is user-scoped: another user's Scout is
-# a 404, never a 403 (same convention as cv-versions / analyses).
+# QuotaKind.ACTIVE_SCOUTS effective-quota guard (issue #135, replacing the
+# earlier flat MAX_SCOUTS_PER_USER env var). Every route is user-scoped:
+# another user's Scout is a 404, never a 403 (same convention as
+# cv-versions / analyses).
 
-DEFAULT_MAX_SCOUTS_PER_USER = 5
 VALID_SITE_KEYS = ("LINKEDIN", "INDEED", "FRANCE_TRAVAIL", "WTTJ", "GLASSDOOR", "HELLOWORK")
 SCOUT_STATUS_VALUES = ("ACTIVE", "PAUSED", "ARCHIVED")
 DEFAULT_SCOUT_MATCH_THRESHOLD = 70
@@ -1155,15 +1158,6 @@ async def _application_stats_response(
         allTime=ApplicationStatsWindowResponse(**all_time.__dict__),
         last30Days=ApplicationStatsWindowResponse(**last_30_days.__dict__),
     )
-
-
-def _max_scouts_per_user() -> int:
-    raw = os.environ.get("MAX_SCOUTS_PER_USER")
-    try:
-        parsed = int(raw) if raw else None
-    except ValueError:
-        parsed = None
-    return parsed if parsed is not None and parsed > 0 else DEFAULT_MAX_SCOUTS_PER_USER
 
 
 def _normalize_site_keys(value: Any) -> list[str]:
@@ -1221,15 +1215,6 @@ def _normalize_threshold(value: Any) -> int:
     if parsed < 0 or parsed > 100:
         raise HTTPException(status_code=400, detail="matchThreshold must be between 0 and 100")
     return parsed
-
-
-async def _active_scout_count(session: AsyncSession, user_id: str, *, exclude_id: str | None = None) -> int:
-    stmt = select(func.count()).select_from(Scout).where(
-        Scout.userId == user_id, Scout.status == Scoutstatus.ACTIVE
-    )
-    if exclude_id is not None:
-        stmt = stmt.where(Scout.id != exclude_id)
-    return int((await session.scalar(stmt)) or 0)
 
 
 async def _owned_cv_version(session: AsyncSession, cv_version_id: str, user_id: str) -> CVVersion:
@@ -1360,8 +1345,8 @@ async def create_scout(
         else _normalize_threshold(req.matchThreshold)
     )
 
-    cap = _max_scouts_per_user()
-    if await _active_scout_count(session, user_id) >= cap:
+    cap = await effective_quota(session, user_id, Quotakind.ACTIVE_SCOUTS)
+    if cap is not None and await active_scout_count(session, user_id) >= cap:
         raise HTTPException(
             status_code=400,
             detail=(
@@ -1460,8 +1445,8 @@ async def update_scout(
             new_status == Scoutstatus.ACTIVE
             and scout.status != Scoutstatus.ACTIVE
         ):
-            cap = _max_scouts_per_user()
-            if await _active_scout_count(session, user_id, exclude_id=scout.id) >= cap:
+            cap = await effective_quota(session, user_id, Quotakind.ACTIVE_SCOUTS)
+            if cap is not None and await active_scout_count(session, user_id, exclude_id=scout.id) >= cap:
                 raise HTTPException(
                     status_code=400,
                     detail=(

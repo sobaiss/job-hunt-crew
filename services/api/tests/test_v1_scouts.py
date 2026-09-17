@@ -4,9 +4,9 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
-from py_db.models import User
+from py_db.models import Plan, PlanQuotaDefault, Quotakind, User
 from py_db.session import make_engine, make_session_factory
-from sqlalchemy import delete
+from sqlalchemy import delete, select, update
 
 from api.main import app
 
@@ -57,6 +57,55 @@ def user_id():
     uid = asyncio.run(_create_user())
     yield uid
     asyncio.run(_delete_user(uid))
+
+
+async def _free_active_scouts_default() -> int | None:
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            return await session.scalar(
+                select(PlanQuotaDefault.limit).where(
+                    PlanQuotaDefault.plan == Plan.FREE,
+                    PlanQuotaDefault.quotaKind == Quotakind.ACTIVE_SCOUTS,
+                )
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _set_free_active_scouts_default(limit: int | None) -> None:
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            await session.execute(
+                update(PlanQuotaDefault)
+                .where(
+                    PlanQuotaDefault.plan == Plan.FREE,
+                    PlanQuotaDefault.quotaKind == Quotakind.ACTIVE_SCOUTS,
+                )
+                .values(limit=limit)
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+
+@pytest.fixture
+def scout_active_cap():
+    """Temporarily overrides FREE's PlanQuotaDefault for ACTIVE_SCOUTS —
+    `user_id` above creates a plain FREE-plan User (issue #135), so this
+    is the fixture cap tests use instead of the retired MAX_SCOUTS_PER_USER
+    env var.
+    """
+    original = asyncio.run(_free_active_scouts_default())
+
+    def _apply(limit: int) -> None:
+        asyncio.run(_set_free_active_scouts_default(limit))
+
+    yield _apply
+    asyncio.run(_set_free_active_scouts_default(original))
 
 
 def _make_cv_version(client: TestClient, user_id: str, label: str = "Base CV") -> str:
@@ -234,8 +283,8 @@ def test_get_scout_404_for_other_user(user_id):
         asyncio.run(_delete_user(other))
 
 
-def test_max_scouts_per_user_enforced(user_id, monkeypatch):
-    monkeypatch.setenv("MAX_SCOUTS_PER_USER", "2")
+def test_max_scouts_per_user_enforced(user_id, scout_active_cap):
+    scout_active_cap(2)
     with TestClient(app) as client:
         cv = _make_cv_version(client, user_id)
         for i in range(2):
@@ -324,8 +373,8 @@ def test_patch_rejects_empty_body_and_bad_status(user_id):
         )
 
 
-def test_patch_resume_blocked_when_at_active_cap(user_id, monkeypatch):
-    monkeypatch.setenv("MAX_SCOUTS_PER_USER", "1")
+def test_patch_resume_blocked_when_at_active_cap(user_id, scout_active_cap):
+    scout_active_cap(1)
     with TestClient(app) as client:
         cv = _make_cv_version(client, user_id)
         first = client.post(

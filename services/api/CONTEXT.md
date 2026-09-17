@@ -8,6 +8,14 @@ The FastAPI service that is the sole owner of Postgres, S3, and SQS for synchron
 The account record for one candidate, identified by email, keyed by the canonical `userId` every other entity here is scoped to.
 _Avoid_: Candidate, account — "candidate" names the persona in product conversations; `User` is the row every context actually references.
 
+**Plan**:
+A User's usage tier — `free` | `standard` | `premium` | `administrateur` — determining their quota defaults (see PlanQuotaDefault). `administrateur` is a Plan value, not a separate flag: a User on it has no quota ceilings of its own (every QuotaKind resolves to unlimited) and is the only User who can reach the Web context's Admin area. This means administering the system and running one's own job search as a Candidate are mutually exclusive under this model — a deliberate simplification, since nothing in the product today needs one User to be both. New Users default to `free`.
+_Avoid_: Profile — collides with StyleProfile, an unrelated per-CVVersion concept, despite "profile" being the word the product brief uses; Tier, Role — Plan already carries both the usage-tier and (for one value) the access-role meaning, so a separate Role term would imply a distinction this model doesn't make.
+
+**Administrator**:
+A User whose Plan is `administrateur`. The only User who can reach the Web context's Admin area, edit any User's QuotaOverride, edit a Plan's PlanQuotaDefault values, or change another User's Plan.
+_Avoid_: Admin (fine in prose), Superuser
+
 **CVVersion**:
 One labeled, versioned upload of a candidate's CV (PDF, DOCX, Markdown, or plain text). Exactly one per user may be the default; each carries a Markdown rendition and its `conversionStatus`, and — for a PDF/DOCX upload — a StyleProfile and its `styleStatus`. Replacing one never mutates or deletes it — it creates a new CVVersion and sets `supersededById` on the old one (docs/adr/0005), so every Analysis, Application, GeneratedDocument, and Scout that already reference it keep seeing exactly what they always saw.
 _Avoid_: Resume, CV file
@@ -123,3 +131,27 @@ _Avoid_: Audit log
 **Internal API secret**:
 The shared header value that authenticates every call into this context, paired with an `X-User-Id` header this context trusts rather than independently verifying. An accepted MVP boundary, not a signed-request scheme.
 _Avoid_: API key
+
+**QuotaKind**:
+One of the fixed set of things a Plan limits: active Scouts (concurrent count of `ACTIVE` Scouts, no time window), daily Analyses, monthly Analyses, or daily GeneratedDocuments. Replaces the earlier flat, global caps (`MAX_SCOUTS_PER_USER`, `DAILY_ANALYSIS_CAP`, `DAILY_GENERATION_CAP`) that applied identically to every User regardless of Plan (docs/adr/0014). A fixed enum for now — adding a fifth kind is a code change, not an admin-UI action.
+_Avoid_: Agent, active agents — the Web nav label is "Agents," but the counted entity is Scout; this vocabulary never says "agent" for the same reason Scout's own entry doesn't. Resource, metric.
+
+**PlanQuotaDefault**:
+The numeric ceiling (or `null` for unlimited) a Plan sets for one QuotaKind, admin-editable without a deploy. `administrateur`'s PlanQuotaDefault is `null` across every QuotaKind.
+_Avoid_: Default quota, Plan limit
+
+**QuotaOverride**:
+A numeric ceiling (or `null`) an Administrator has set for one User on one QuotaKind, taking precedence over that User's Plan's PlanQuotaDefault. Only exists for a User an Administrator has explicitly customized — a User with no QuotaOverride for a given QuotaKind tracks their Plan's default as it changes over time, rather than a value copied at signup (docs/adr/0013).
+_Avoid_: User quota, custom limit
+
+**Effective quota**:
+The ceiling actually enforced for one User on one QuotaKind: their QuotaOverride if one exists, else their Plan's PlanQuotaDefault. Hard-blocks the corresponding action once reached (create/reactivate for active Scouts, `POST /v1/analyses` for daily/monthly Analyses, document generation for daily GeneratedDocuments) — there is no soft/warn-only mode. Lowering an Effective quota below a User's current active-Scout count never force-pauses their existing Scouts; it only blocks further create/reactivate calls.
+_Avoid_: Quota limit, cap (fine in prose; "cap" is also the pre-existing env-var terminology this replaces)
+
+**QuotaAuditEvent**:
+One append-only entry recording an Administrator's edit to a QuotaOverride, a PlanQuotaDefault, or a User's Plan — actor, target User, field, old/new value, timestamp. A distinct trail from PipelineEvent (pipeline observability) and StatusEvent (an Application's own history): this one exists purely for admin-action provenance.
+_Avoid_: Audit log (ambiguous with PipelineEvent's own "_Avoid_: Audit log" note — this is the admin-provenance trail, not the pipeline one)
+
+**QuotaAlert**:
+A persisted notification for one User crossing 80% ("approaching") or 100%+ ("exceeded") of their Effective quota for one QuotaKind — one fixed threshold pair across every QuotaKind for now. Surfaced in the Web context both as a standing notification-feed entry and as an inline banner on the specific action screen at the moment it would be blocked.
+_Avoid_: Notification (reserved as the general term should a non-quota use arise later), warning

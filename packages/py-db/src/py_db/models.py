@@ -96,6 +96,20 @@ class Joboffersourcesite(str, enum.Enum):
     HELLOWORK = 'HELLOWORK'
 
 
+class Plan(str, enum.Enum):
+    FREE = 'FREE'
+    STANDARD = 'STANDARD'
+    PREMIUM = 'PREMIUM'
+    ADMINISTRATEUR = 'ADMINISTRATEUR'
+
+
+class Quotakind(str, enum.Enum):
+    ACTIVE_SCOUTS = 'ACTIVE_SCOUTS'
+    ANALYSES_DAILY = 'ANALYSES_DAILY'
+    ANALYSES_MONTHLY = 'ANALYSES_MONTHLY'
+    DOCUMENTS_DAILY = 'DOCUMENTS_DAILY'
+
+
 class Scoutrunstatus(str, enum.Enum):
     PENDING = 'PENDING'
     RUNNING = 'RUNNING'
@@ -157,6 +171,20 @@ class JobOffer(Base):
     GeneratedDocument: Mapped[list['GeneratedDocument']] = relationship('GeneratedDocument', back_populates='JobOffer_')
 
 
+class PlanQuotaDefault(Base):
+    __tablename__ = 'PlanQuotaDefault'
+    __table_args__ = (
+        PrimaryKeyConstraint('id', name='PlanQuotaDefault_pkey'),
+        Index('PlanQuotaDefault_plan_quotaKind_key', 'plan', 'quotaKind', unique=True)
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    plan: Mapped[Plan] = mapped_column(Enum(Plan, values_callable=lambda cls: [member.value for member in cls], name='Plan'), nullable=False)
+    quotaKind: Mapped[Quotakind] = mapped_column(Enum(Quotakind, values_callable=lambda cls: [member.value for member in cls], name='QuotaKind'), nullable=False)
+    updatedAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False)
+    limit: Mapped[Optional[int]] = mapped_column(Integer)
+
+
 class SiteConfig(Base):
     __tablename__ = 'SiteConfig'
     __table_args__ = (
@@ -192,6 +220,7 @@ class User(Base):
     id: Mapped[str] = mapped_column(Text, primary_key=True)
     createdAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False, server_default=text('CURRENT_TIMESTAMP'))
     updatedAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False)
+    plan: Mapped[Plan] = mapped_column(Enum(Plan, values_callable=lambda cls: [member.value for member in cls], name='Plan'), nullable=False, server_default=text('\'FREE\'::"Plan"'))
     name: Mapped[Optional[str]] = mapped_column(Text)
     email: Mapped[Optional[str]] = mapped_column(Text)
     emailVerified: Mapped[Optional[datetime.datetime]] = mapped_column(TIMESTAMP(precision=3))
@@ -199,6 +228,7 @@ class User(Base):
 
     Account: Mapped[list['Account']] = relationship('Account', back_populates='User_')
     CVVersion: Mapped[list['CVVersion']] = relationship('CVVersion', back_populates='User_')
+    QuotaOverride: Mapped[list['QuotaOverride']] = relationship('QuotaOverride', back_populates='User_')
     Session: Mapped[list['Session']] = relationship('Session', back_populates='User_')
     Scout: Mapped[list['Scout']] = relationship('Scout', back_populates='User_')
     IngestionJob: Mapped[list['IngestionJob']] = relationship('IngestionJob', back_populates='User_')
@@ -288,6 +318,24 @@ class CVVersion(Base):
     Analysis: Mapped[list['Analysis']] = relationship('Analysis', back_populates='CVVersion_')
     Application: Mapped[list['Application']] = relationship('Application', back_populates='CVVersion_')
     GeneratedDocument: Mapped[list['GeneratedDocument']] = relationship('GeneratedDocument', back_populates='CVVersion_')
+
+
+class QuotaOverride(Base):
+    __tablename__ = 'QuotaOverride'
+    __table_args__ = (
+        ForeignKeyConstraint(['userId'], ['User.id'], ondelete='CASCADE', onupdate='CASCADE', name='QuotaOverride_userId_fkey'),
+        PrimaryKeyConstraint('id', name='QuotaOverride_pkey'),
+        Index('QuotaOverride_userId_quotaKind_key', 'userId', 'quotaKind', unique=True)
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    userId: Mapped[str] = mapped_column(Text, nullable=False)
+    quotaKind: Mapped[Quotakind] = mapped_column(Enum(Quotakind, values_callable=lambda cls: [member.value for member in cls], name='QuotaKind'), nullable=False)
+    createdAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False, server_default=text('CURRENT_TIMESTAMP'))
+    updatedAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False)
+    limit: Mapped[Optional[int]] = mapped_column(Integer)
+
+    User_: Mapped['User'] = relationship('User', back_populates='QuotaOverride')
 
 
 class Session(Base):

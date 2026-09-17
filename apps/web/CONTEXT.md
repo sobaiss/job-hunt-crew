@@ -102,6 +102,14 @@ _Avoid_: Quick view (that's the Analyses-list slide-over — different content a
 A per-table, per-browser preference (localStorage only, no server sync) for which data columns show in the Analyses, CV versions, and Agents tables — every column visible by default, each table's primary column always shown, selection/action columns excluded from the toggle. Long values in these tables (titles, company/location, CV/Scout labels, CV file names) are truncated to a fixed length with the full text in a tooltip on hover.
 _Avoid_: Column settings, table preferences
 
+**Quotas page**:
+A dedicated page/tab showing a Candidate's own Effective quota and current usage (defined in [API](../../services/api/CONTEXT.md)'s context) for every QuotaKind as a progress bar — all four shown regardless of proximity to the limit, not just the ones near capacity. Where a QuotaAlert's persisted feed entries surface alongside the bars.
+_Avoid_: Usage page, Dashboard (that's the overview; this is quota-specific)
+
+**Admin area**:
+The area reachable only by an Administrator (defined in [API](../../services/api/CONTEXT.md)'s context) — a per-user screen (Plan, Effective quotas, current usage, QuotaOverride editing, Plan reassignment) and a reporting screen (a per-user table flagging who's at/over any QuotaKind, plus global aggregate usage stats). Gated by Plan, not a separate route-level password or secondary login.
+_Avoid_: Admin panel (fine in prose), Dashboard (that's the candidate overview)
+
 **Settings**:
 The `/settings` page — theme, Locale, and read-only account details (name and email from the Session), plus sign out. No account deletion (there is no API for it).
 _Avoid_: Preferences, Account page
