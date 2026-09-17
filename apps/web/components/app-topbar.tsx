@@ -18,6 +18,7 @@ import {
   SidebarContent,
   isNavActive,
 } from "@/components/app-sidebar";
+import { QuotaAlertsFeed } from "@/components/quota-alerts-feed";
 
 /**
  * The page title shown in the Topbar. Resolved from the current route against
@@ -70,7 +71,10 @@ export function AppTopbar({ children }: { children?: React.ReactNode }) {
         {title}
       </h1>
 
-      {children && <div className="ml-auto flex items-center gap-2">{children}</div>}
+      <div className="ml-auto flex items-center gap-2">
+        <QuotaAlertsFeed />
+        {children}
+      </div>
     </header>
   );
 }

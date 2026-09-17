@@ -23,6 +23,7 @@ from py_db.models import (
     Ingestionjobstatus,
     Ingestionmode,
     JobOffer,
+    QuotaAlert,
     Quotakind,
     Scout,
     ScoutRun,
@@ -37,7 +38,7 @@ from py_db.quota import (
     analyses_requested_today,
     generated_documents_created_today,
 )
-from py_db.quotas import active_scout_count, effective_quota
+from py_db.quotas import active_scout_count, effective_quota, maybe_record_quota_alert
 from pydantic import BaseModel
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1000,15 +1001,32 @@ class QuotaUsage(BaseModel):
     remaining: int | None
 
 
+class QuotaAlertResponse(BaseModel):
+    id: str
+    quotaKind: str
+    threshold: str
+    createdAt: datetime
+
+
 class QuotasResponse(BaseModel):
     activeScouts: QuotaUsage
     analysesDaily: QuotaUsage
     analysesMonthly: QuotaUsage
     documentsDaily: QuotaUsage
+    alerts: list[QuotaAlertResponse]
 
 
 def _quota_usage(cap: int | None, used: int) -> QuotaUsage:
     return QuotaUsage(cap=cap, used=used, remaining=None if cap is None else max(cap - used, 0))
+
+
+def _quota_alert_response(alert: QuotaAlert) -> QuotaAlertResponse:
+    return QuotaAlertResponse(
+        id=alert.id,
+        quotaKind=alert.quotaKind.value,
+        threshold=alert.threshold.value,
+        createdAt=alert.createdAt,
+    )
 
 
 @router.get("/quotas", response_model=QuotasResponse)
@@ -1025,11 +1043,21 @@ async def get_quotas(
     how many `remaining` (floored at 0, `None` when unlimited) — the same
     `effective_quota` rule Scout create/reactivate, `POST /v1/analyses`, and
     document generation enforce for their own 400/429s.
+
+    `alerts` (issue #142) lists the caller's unread QuotaAlerts, oldest first,
+    for the persisted notification feed and the inline blocked-action banners.
     """
     active_scouts_cap = await effective_quota(session, user_id, Quotakind.ACTIVE_SCOUTS)
     analyses_daily_cap = await effective_quota(session, user_id, Quotakind.ANALYSES_DAILY)
     analyses_monthly_cap = await effective_quota(session, user_id, Quotakind.ANALYSES_MONTHLY)
     documents_daily_cap = await effective_quota(session, user_id, Quotakind.DOCUMENTS_DAILY)
+    alerts = (
+        await session.scalars(
+            select(QuotaAlert)
+            .where(QuotaAlert.userId == user_id, QuotaAlert.readAt.is_(None))
+            .order_by(QuotaAlert.createdAt)
+        )
+    ).all()
     return QuotasResponse(
         activeScouts=_quota_usage(active_scouts_cap, await active_scout_count(session, user_id)),
         analysesDaily=_quota_usage(
@@ -1041,7 +1069,30 @@ async def get_quotas(
         documentsDaily=_quota_usage(
             documents_daily_cap, await generated_documents_created_today(session, user_id)
         ),
+        alerts=[_quota_alert_response(alert) for alert in alerts],
     )
+
+
+@router.post("/quota-alerts/{alert_id}/read", response_model=QuotaAlertResponse)
+async def mark_quota_alert_read(
+    alert_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> QuotaAlertResponse:
+    """Dismisses one unread QuotaAlert from the notification feed (issue
+    #142). Idempotent: marking an already-read alert read again just returns
+    it unchanged rather than erroring.
+    """
+    alert = await session.get(QuotaAlert, alert_id)
+    if alert is None or alert.userId != user_id:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    if alert.readAt is None:
+        alert.readAt = _now()
+        await session.commit()
+        await session.refresh(alert)
+
+    return _quota_alert_response(alert)
 
 
 class CreateAnalysisRequest(BaseModel):
@@ -1076,17 +1127,16 @@ async def create_analysis(
         raise HTTPException(status_code=400, detail="Unknown cvVersionId")
 
     daily_cap = await effective_quota(session, user_id, Quotakind.ANALYSES_DAILY)
-    if daily_cap is not None and await analyses_requested_today(session, user_id) >= daily_cap:
+    daily_used = await analyses_requested_today(session, user_id)
+    if daily_cap is not None and daily_used >= daily_cap:
         raise HTTPException(
             status_code=429,
             detail=f"Daily analysis limit of {daily_cap} reached. Try again tomorrow.",
         )
 
     monthly_cap = await effective_quota(session, user_id, Quotakind.ANALYSES_MONTHLY)
-    if (
-        monthly_cap is not None
-        and await analyses_requested_this_month(session, user_id) >= monthly_cap
-    ):
+    monthly_used = await analyses_requested_this_month(session, user_id)
+    if monthly_cap is not None and monthly_used >= monthly_cap:
         raise HTTPException(
             status_code=429,
             detail=f"Monthly analysis limit of {monthly_cap} reached. Try again next month.",
@@ -1100,6 +1150,19 @@ async def create_analysis(
         status=Analysisstatus.PENDING,
     )
     session.add(analysis)
+    # QuotaAlert issue #142: fired for the QuotaKind(s) this analysis's own
+    # write just moved past an 80%/100% threshold, using +1 since daily_used/
+    # monthly_used were read before this analysis's row was added above.
+    await maybe_record_quota_alert(
+        session, user_id, Quotakind.ANALYSES_DAILY, cap=daily_cap, used_after=daily_used + 1
+    )
+    await maybe_record_quota_alert(
+        session,
+        user_id,
+        Quotakind.ANALYSES_MONTHLY,
+        cap=monthly_cap,
+        used_after=monthly_used + 1,
+    )
     await session.commit()
 
     sqs = make_sqs_client()
@@ -1374,7 +1437,8 @@ async def create_scout(
     )
 
     cap = await effective_quota(session, user_id, Quotakind.ACTIVE_SCOUTS)
-    if cap is not None and await active_scout_count(session, user_id) >= cap:
+    active_count = await active_scout_count(session, user_id)
+    if cap is not None and active_count >= cap:
         raise HTTPException(
             status_code=400,
             detail=(
@@ -1395,6 +1459,11 @@ async def create_scout(
         updatedAt=_now(),
     )
     session.add(scout)
+    # QuotaAlert issue #142: active_count was read before this new ACTIVE
+    # Scout's row was added above, so +1 is its post-write count.
+    await maybe_record_quota_alert(
+        session, user_id, Quotakind.ACTIVE_SCOUTS, cap=cap, used_after=active_count + 1
+    )
     await session.commit()
     await session.refresh(scout)
 
@@ -1474,7 +1543,8 @@ async def update_scout(
             and scout.status != Scoutstatus.ACTIVE
         ):
             cap = await effective_quota(session, user_id, Quotakind.ACTIVE_SCOUTS)
-            if cap is not None and await active_scout_count(session, user_id, exclude_id=scout.id) >= cap:
+            active_count = await active_scout_count(session, user_id, exclude_id=scout.id)
+            if cap is not None and active_count >= cap:
                 raise HTTPException(
                     status_code=400,
                     detail=(
@@ -1482,6 +1552,15 @@ async def update_scout(
                         "Pause or archive one before resuming this one."
                     ),
                 )
+            # QuotaAlert issue #142: active_count excludes this Scout (still
+            # not ACTIVE at read time), so +1 is its post-reactivation count.
+            await maybe_record_quota_alert(
+                session,
+                user_id,
+                Quotakind.ACTIVE_SCOUTS,
+                cap=cap,
+                used_after=active_count + 1,
+            )
         scout.status = new_status
 
     scout.updatedAt = _now()
@@ -1866,7 +1945,8 @@ async def create_generated_documents(
         )
 
     cap = await effective_quota(session, user_id, Quotakind.DOCUMENTS_DAILY)
-    if cap is not None and await generated_documents_created_today(session, user_id) >= cap:
+    documents_used = await generated_documents_created_today(session, user_id)
+    if cap is not None and documents_used >= cap:
         raise HTTPException(
             status_code=429,
             detail=f"Daily document generation limit of {cap} reached. Try again tomorrow.",
@@ -1895,6 +1975,15 @@ async def create_generated_documents(
         for doc_type in (Generateddocumenttype.COVER_LETTER, Generateddocumenttype.TAILORED_CV)
     ]
     session.add_all(documents)
+    # QuotaAlert issue #142: this call creates len(documents) new rows, so
+    # +len(documents) is the post-write count.
+    await maybe_record_quota_alert(
+        session,
+        user_id,
+        Quotakind.DOCUMENTS_DAILY,
+        cap=cap,
+        used_after=documents_used + len(documents),
+    )
     await session.commit()
 
     sqs = make_sqs_client()
@@ -1991,7 +2080,8 @@ async def regenerate_generated_document(
         )
 
     cap = await effective_quota(session, user_id, Quotakind.DOCUMENTS_DAILY)
-    if cap is not None and await generated_documents_created_today(session, user_id) >= cap:
+    documents_used = await generated_documents_created_today(session, user_id)
+    if cap is not None and documents_used >= cap:
         raise HTTPException(
             status_code=429,
             detail=f"Daily document generation limit of {cap} reached. Try again tomorrow.",
@@ -2011,6 +2101,11 @@ async def regenerate_generated_document(
     session.add(new_document)
     document.supersededById = new_document.id
     document.updatedAt = now
+    # QuotaAlert issue #142: documents_used was read before new_document was
+    # added above, so +1 is its post-write count.
+    await maybe_record_quota_alert(
+        session, user_id, Quotakind.DOCUMENTS_DAILY, cap=cap, used_after=documents_used + 1
+    )
     await session.commit()
 
     sqs = make_sqs_client()

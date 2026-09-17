@@ -13,6 +13,7 @@ import {
   type Scout,
 } from "@/hooks/use-scouts";
 import { CvVersionPicker } from "@/components/cv-version-picker";
+import { InlineQuotaBanner } from "@/components/inline-quota-banner";
 import {
   JobFilterFields,
   EMPTY_JOB_FILTERS,
@@ -110,6 +111,8 @@ export function ScoutForm({ scout }: { scout?: Scout }) {
     <Card>
       <CardContent className="py-6">
         <form className="flex flex-col gap-5" onSubmit={onSubmit} noValidate>
+          {!isEdit && <InlineQuotaBanner kinds={["activeScouts"]} />}
+
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="scout-label">{t("labelLabel")}</Label>
             <Input

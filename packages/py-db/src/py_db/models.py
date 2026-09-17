@@ -103,6 +103,11 @@ class Plan(str, enum.Enum):
     ADMINISTRATEUR = 'ADMINISTRATEUR'
 
 
+class Quotaalertthreshold(str, enum.Enum):
+    APPROACHING = 'APPROACHING'
+    EXCEEDED = 'EXCEEDED'
+
+
 class Quotakind(str, enum.Enum):
     ACTIVE_SCOUTS = 'ACTIVE_SCOUTS'
     ANALYSES_DAILY = 'ANALYSES_DAILY'
@@ -228,6 +233,7 @@ class User(Base):
 
     Account: Mapped[list['Account']] = relationship('Account', back_populates='User_')
     CVVersion: Mapped[list['CVVersion']] = relationship('CVVersion', back_populates='User_')
+    QuotaAlert: Mapped[list['QuotaAlert']] = relationship('QuotaAlert', back_populates='User_')
     QuotaAuditEvent_actorUserId: Mapped[list['QuotaAuditEvent']] = relationship('QuotaAuditEvent', foreign_keys='[QuotaAuditEvent.actorUserId]', back_populates='User_')
     QuotaAuditEvent_targetUserId: Mapped[list['QuotaAuditEvent']] = relationship('QuotaAuditEvent', foreign_keys='[QuotaAuditEvent.targetUserId]', back_populates='User1')
     QuotaOverride: Mapped[list['QuotaOverride']] = relationship('QuotaOverride', back_populates='User_')
@@ -320,6 +326,24 @@ class CVVersion(Base):
     Analysis: Mapped[list['Analysis']] = relationship('Analysis', back_populates='CVVersion_')
     Application: Mapped[list['Application']] = relationship('Application', back_populates='CVVersion_')
     GeneratedDocument: Mapped[list['GeneratedDocument']] = relationship('GeneratedDocument', back_populates='CVVersion_')
+
+
+class QuotaAlert(Base):
+    __tablename__ = 'QuotaAlert'
+    __table_args__ = (
+        ForeignKeyConstraint(['userId'], ['User.id'], ondelete='CASCADE', onupdate='CASCADE', name='QuotaAlert_userId_fkey'),
+        PrimaryKeyConstraint('id', name='QuotaAlert_pkey'),
+        Index('QuotaAlert_userId_idx', 'userId')
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    userId: Mapped[str] = mapped_column(Text, nullable=False)
+    quotaKind: Mapped[Quotakind] = mapped_column(Enum(Quotakind, values_callable=lambda cls: [member.value for member in cls], name='QuotaKind'), nullable=False)
+    threshold: Mapped[Quotaalertthreshold] = mapped_column(Enum(Quotaalertthreshold, values_callable=lambda cls: [member.value for member in cls], name='QuotaAlertThreshold'), nullable=False)
+    createdAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False, server_default=text('CURRENT_TIMESTAMP'))
+    readAt: Mapped[Optional[datetime.datetime]] = mapped_column(TIMESTAMP(precision=3))
+
+    User_: Mapped['User'] = relationship('User', back_populates='QuotaAlert')
 
 
 class QuotaAuditEvent(Base):

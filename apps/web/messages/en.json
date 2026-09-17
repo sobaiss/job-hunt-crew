@@ -222,7 +222,16 @@
       "analysesDaily": "Analyses today",
       "analysesMonthly": "Analyses this month",
       "documentsDaily": "Documents today"
-    }
+    },
+    "blocked": "You've reached your {kind} limit. Try again once it resets, or check your Quotas page."
+  },
+  "quotaAlerts": {
+    "label": "Notifications",
+    "unread": "{count, plural, one {# unread} other {# unread}}",
+    "empty": "You're all caught up — no unread alerts.",
+    "dismiss": "Dismiss",
+    "approaching": "You're approaching your {kind} limit.",
+    "exceeded": "You've reached your {kind} limit."
   },
   "theme": {
     "label": "Change theme",

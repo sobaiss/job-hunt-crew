@@ -223,6 +223,7 @@ def test_get_quotas_reports_zero_usage_for_a_fresh_user(
         "analysesDaily": {"cap": 3, "used": 0, "remaining": 3},
         "analysesMonthly": {"cap": 30, "used": 0, "remaining": 30},
         "documentsDaily": {"cap": 4, "used": 0, "remaining": 4},
+        "alerts": [],
     }
 
 
@@ -278,7 +279,108 @@ def test_get_quotas_unlimited_when_effective_quota_is_none(
         "analysesDaily": {"cap": None, "used": 0, "remaining": None},
         "analysesMonthly": {"cap": None, "used": 0, "remaining": None},
         "documentsDaily": {"cap": None, "used": 0, "remaining": None},
+        "alerts": [],
     }
+
+
+def test_get_quotas_surfaces_unread_alerts_and_analysis_crossing_daily_cap_creates_one(
+    active_scouts_cap,
+    analyses_daily_cap,
+    analyses_monthly_cap,
+    documents_daily_cap,
+    user_id,
+    job_offer_id,
+    cv_version_id,
+):
+    """Issue #142: requesting the one Analysis a daily cap of 1 allows moves
+    usage from 0 to 1 — exactly the EXCEEDED crossing — so it both succeeds
+    (200/202, unaffected by this ticket) and inserts one QuotaAlert, which
+    GET /v1/quotas then surfaces as unread.
+    """
+    active_scouts_cap(2)
+    analyses_daily_cap(1)
+    analyses_monthly_cap(30)
+    documents_daily_cap(4)
+    with TestClient(app) as client:
+        analysis_response = client.post(
+            "/v1/analyses",
+            headers=_headers(user_id),
+            json={"jobOfferId": job_offer_id, "cvVersionId": cv_version_id},
+        )
+        assert analysis_response.status_code == 202
+
+        body = client.get("/v1/quotas", headers=_headers(user_id)).json()
+
+    assert len(body["alerts"]) == 1
+    alert = body["alerts"][0]
+    assert alert["quotaKind"] == "ANALYSES_DAILY"
+    assert alert["threshold"] == "EXCEEDED"
+    assert alert["id"]
+    assert alert["createdAt"]
+
+
+def test_marking_a_quota_alert_read_removes_it_from_the_unread_list(
+    active_scouts_cap,
+    analyses_daily_cap,
+    analyses_monthly_cap,
+    documents_daily_cap,
+    user_id,
+    job_offer_id,
+    cv_version_id,
+):
+    active_scouts_cap(2)
+    analyses_daily_cap(1)
+    analyses_monthly_cap(30)
+    documents_daily_cap(4)
+    with TestClient(app) as client:
+        client.post(
+            "/v1/analyses",
+            headers=_headers(user_id),
+            json={"jobOfferId": job_offer_id, "cvVersionId": cv_version_id},
+        )
+        alert_id = client.get("/v1/quotas", headers=_headers(user_id)).json()["alerts"][0]["id"]
+
+        read_response = client.post(
+            f"/v1/quota-alerts/{alert_id}/read", headers=_headers(user_id)
+        )
+        assert read_response.status_code == 200
+
+        body = client.get("/v1/quotas", headers=_headers(user_id)).json()
+
+    assert body["alerts"] == []
+
+
+def test_marking_another_users_quota_alert_read_is_404(
+    active_scouts_cap,
+    analyses_daily_cap,
+    analyses_monthly_cap,
+    documents_daily_cap,
+    user_id,
+    job_offer_id,
+    cv_version_id,
+):
+    active_scouts_cap(2)
+    analyses_daily_cap(1)
+    analyses_monthly_cap(30)
+    documents_daily_cap(4)
+    other_user_id = asyncio.run(_create_user())
+    try:
+        with TestClient(app) as client:
+            client.post(
+                "/v1/analyses",
+                headers=_headers(user_id),
+                json={"jobOfferId": job_offer_id, "cvVersionId": cv_version_id},
+            )
+            alert_id = client.get("/v1/quotas", headers=_headers(user_id)).json()["alerts"][0][
+                "id"
+            ]
+
+            response = client.post(
+                f"/v1/quota-alerts/{alert_id}/read", headers=_headers(other_user_id)
+            )
+        assert response.status_code == 404
+    finally:
+        asyncio.run(_delete_user(other_user_id))
 
 
 def test_get_quotas_scoped_to_caller(

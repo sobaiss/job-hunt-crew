@@ -59,6 +59,7 @@ export const handlers = [
       analysesDaily: { cap: 20, used: 0, remaining: 20 },
       analysesMonthly: { cap: 200, used: 0, remaining: 200 },
       documentsDaily: { cap: 20, used: 0, remaining: 20 },
+      alerts: [],
     }),
   ),
 ];

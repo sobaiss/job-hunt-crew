@@ -37,6 +37,7 @@ model User {
   quotaOverrides QuotaOverride[]
   quotaAuditEventsActed    QuotaAuditEvent[] @relation("QuotaAuditEventActor")
   quotaAuditEventsTargeted QuotaAuditEvent[] @relation("QuotaAuditEventTarget")
+  quotaAlerts    QuotaAlert[]
 }
 
 enum QuotaKind {
@@ -91,6 +92,31 @@ model QuotaAuditEvent {
 
   actor  User  @relation("QuotaAuditEventActor", fields: [actorUserId], references: [id], onDelete: Cascade)
   target User? @relation("QuotaAuditEventTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+}
+
+enum QuotaAlertThreshold {
+  APPROACHING
+  EXCEEDED
+}
+
+// One row per threshold crossing (issue #142): inserted the moment a User's
+// usage for a QuotaKind newly crosses 80% (APPROACHING) or 100%+ (EXCEEDED)
+// of their Effective quota — not re-inserted on every subsequent request
+// while still over (the call site that would insert one compares the
+// threshold implied by usage just before vs. just after its own write, and
+// only inserts when that comparison actually changed). `readAt` null means
+// still unread; GET /v1/quotas surfaces every unread row for the caller.
+model QuotaAlert {
+  id        String              @id @default(cuid())
+  userId    String
+  quotaKind QuotaKind
+  threshold QuotaAlertThreshold
+  createdAt DateTime            @default(now())
+  readAt    DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model Account {

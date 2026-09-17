@@ -20,6 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import (
     PlanQuotaDefault,
+    QuotaAlert,
+    Quotaalertthreshold,
     QuotaAuditEvent,
     Quotakind,
     QuotaOverride,
@@ -27,6 +29,10 @@ from .models import (
     Scoutstatus,
     User,
 )
+
+# Fraction of an Effective quota at which a QuotaAlert.APPROACHING fires
+# (issue #142). 100%+ always fires QuotaAlert.EXCEEDED regardless of this.
+_APPROACHING_RATIO = 0.8
 
 
 async def effective_quota(session: AsyncSession, user_id: str, kind: Quotakind) -> int | None:
@@ -105,3 +111,56 @@ def record_quota_audit_event(
     )
     session.add(event)
     return event
+
+
+def _threshold_for(cap: int | None, used: int) -> Quotaalertthreshold | None:
+    """Which threshold `used` sits at/over for `cap`, or `None` when under
+    80% or `cap` is unlimited. `used` may be <= 0 (the "before this action"
+    probe in `maybe_record_quota_alert`), which always resolves to `None`.
+    """
+    if cap is None or cap <= 0 or used <= 0:
+        return None
+    if used >= cap:
+        return Quotaalertthreshold.EXCEEDED
+    if used >= cap * _APPROACHING_RATIO:
+        return Quotaalertthreshold.APPROACHING
+    return None
+
+
+async def maybe_record_quota_alert(
+    session: AsyncSession,
+    user_id: str,
+    kind: Quotakind,
+    *,
+    cap: int | None,
+    used_after: int,
+) -> QuotaAlert | None:
+    """Stages one QuotaAlert row iff `used_after` (the counter's value right
+    after the quota-consuming write that just happened) newly crosses the
+    80% (APPROACHING) or 100%+ (EXCEEDED) threshold for `cap` — issue #142.
+
+    Every quota-consuming action here increments its counter by exactly one
+    unit per call, so `used_after - 1` is the counter's value immediately
+    before this action. Comparing the threshold implied by each side is
+    enough to detect the crossing: if both resolve to the same threshold (or
+    both `None`), usage was already there (or still under 80%) and nothing is
+    inserted — this is what keeps a Candidate who stays over their limit from
+    getting a fresh alert on every subsequent request.
+
+    Does not commit, matching `record_quota_audit_event` — the caller commits
+    once alongside its own write.
+    """
+    new_threshold = _threshold_for(cap, used_after)
+    if new_threshold is None:
+        return None
+    if _threshold_for(cap, used_after - 1) == new_threshold:
+        return None
+
+    alert = QuotaAlert(
+        id=str(uuid.uuid4()),
+        userId=user_id,
+        quotaKind=kind,
+        threshold=new_threshold,
+    )
+    session.add(alert)
+    return alert

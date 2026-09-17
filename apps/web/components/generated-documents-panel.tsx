@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GeneratedDocumentPreview } from "@/components/generated-document-preview";
+import { InlineQuotaBanner } from "@/components/inline-quota-banner";
 import { BffError } from "@/lib/bff-client";
 
 // "Generate documents" on a completed Analysis (issue #58, Scout slice 6):
@@ -206,6 +207,8 @@ export function GeneratedDocumentsPanel({ analysisId }: { analysisId: string }) 
   return (
     <section className="flex flex-col gap-3">
       <h2 className="text-sm font-semibold text-muted">{t("heading")}</h2>
+
+      {!documents && <InlineQuotaBanner kinds={["documentsDaily"]} />}
 
       {!documents && (
         <Button

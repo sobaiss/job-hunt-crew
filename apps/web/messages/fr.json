@@ -222,7 +222,16 @@
       "analysesDaily": "Analyses aujourd'hui",
       "analysesMonthly": "Analyses ce mois-ci",
       "documentsDaily": "Documents aujourd'hui"
-    }
+    },
+    "blocked": "Vous avez atteint votre limite de {kind}. Réessayez après la réinitialisation, ou consultez la page Quotas."
+  },
+  "quotaAlerts": {
+    "label": "Notifications",
+    "unread": "{count, plural, one {# non lue} other {# non lues}}",
+    "empty": "Tout est à jour — aucune alerte non lue.",
+    "dismiss": "Ignorer",
+    "approaching": "Vous approchez de votre limite de {kind}.",
+    "exceeded": "Vous avez atteint votre limite de {kind}."
   },
   "theme": {
     "label": "Changer de thème",

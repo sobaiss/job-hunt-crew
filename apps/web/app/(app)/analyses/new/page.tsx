@@ -23,6 +23,7 @@ import { BffError } from "@/lib/bff-client";
 import { Check } from "lucide-react";
 
 import { CvVersionPicker } from "@/components/cv-version-picker";
+import { InlineQuotaBanner } from "@/components/inline-quota-banner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -264,6 +265,8 @@ export default function AnalyseOneOfferPage() {
         <h1 className="font-serif text-2xl font-semibold">{t("heading")}</h1>
         <p className="text-sm text-muted">{t("subtitle")}</p>
       </div>
+
+      <InlineQuotaBanner kinds={["analysesDaily", "analysesMonthly"]} />
 
       {ingestionJobId ? (
         <WaitingState
