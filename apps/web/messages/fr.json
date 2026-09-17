@@ -408,6 +408,8 @@
       "neverRun": "Jamais exécuté",
       "showArchived": "Afficher les Scouts archivés",
       "sites": "{count, plural, one {# site} other {# sites}}",
+      "columnsLabel": "Colonnes",
+      "columnsReset": "Réinitialiser",
       "columns": {
         "label": "Libellé",
         "status": "Statut",

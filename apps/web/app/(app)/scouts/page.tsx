@@ -8,13 +8,16 @@ import { RefreshCw } from "lucide-react";
 
 import { useScouts, type ScoutStatus } from "@/hooks/use-scouts";
 import { useCvVersions } from "@/hooks/use-cv-versions";
+import { useColumnVisibility } from "@/hooks/use-column-visibility";
 import {
   DEFAULT_SCOUTS_SORT,
   sortScouts,
   type ScoutsSortColumn,
   type ScoutsSortState,
 } from "@/lib/scouts-sort";
+import type { ColumnConfig } from "@/lib/column-visibility";
 import { SortableHead } from "@/components/sortable-head";
+import { ColumnVisibilityMenu } from "@/components/column-visibility-menu";
 import { ScoutPanel } from "@/components/scout-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,14 +30,25 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-const COLUMNS: { key: ScoutsSortColumn; labelKey: string; className?: string }[] = [
-  { key: "label", labelKey: "list.columns.label" },
-  { key: "status", labelKey: "list.columns.status" },
-  { key: "baseCv", labelKey: "list.columns.baseCv" },
-  { key: "sites", labelKey: "list.columns.sites" },
-  { key: "lastRun", labelKey: "list.columns.lastRun" },
-  { key: "relevantFinds", labelKey: "list.columns.relevantFinds", className: "text-right" },
+// Label is the always-visible primary column (#131), reusing
+// lib/column-visibility.ts, hooks/use-column-visibility.ts, and
+// components/column-visibility-menu.tsx unmodified, same as CV versions
+// (#130) and Analyses (#129).
+const COLUMNS: ColumnConfig<ScoutsSortColumn>[] = [
+  { key: "label", labelKey: "list.columns.label", hideable: false },
+  { key: "status", labelKey: "list.columns.status", hideable: true },
+  { key: "baseCv", labelKey: "list.columns.baseCv", hideable: true },
+  { key: "sites", labelKey: "list.columns.sites", hideable: true },
+  { key: "lastRun", labelKey: "list.columns.lastRun", hideable: true },
+  {
+    key: "relevantFinds",
+    labelKey: "list.columns.relevantFinds",
+    hideable: true,
+    className: "text-right",
+  },
 ];
+
+const COLUMN_VISIBILITY_STORAGE_KEY = "column-visibility:scouts";
 
 function statusVariant(
   status: ScoutStatus,
@@ -69,6 +83,10 @@ function ScoutsPageContent() {
     searchParams.get("open"),
   );
   const panelTriggerRef = useRef<HTMLElement | null>(null);
+  const columnVisibility = useColumnVisibility(
+    COLUMN_VISIBILITY_STORAGE_KEY,
+    COLUMNS,
+  );
 
   // Strips a consumed `?open=` from the URL so it doesn't reopen the panel
   // again on a later visit (e.g. navigating back). Only a router call, no
@@ -104,6 +122,10 @@ function ScoutsPageContent() {
 
   const panelScout = scouts?.find((scout) => scout.id === panelId) ?? null;
 
+  const visibleColumns = COLUMNS.filter((column) =>
+    columnVisibility.isVisible(column.key),
+  );
+
   const openPanel = (row: HTMLTableRowElement, id: string) => {
     panelTriggerRef.current = row;
     setPanelId(id);
@@ -117,6 +139,15 @@ function ScoutsPageContent() {
           <p className="text-sm text-muted">{t("list.subtitle")}</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <ColumnVisibilityMenu
+            columns={COLUMNS}
+            isVisible={columnVisibility.isVisible}
+            onToggle={columnVisibility.toggle}
+            onReset={columnVisibility.reset}
+            label={t("list.columnsLabel")}
+            columnLabel={(labelKey) => t(labelKey)}
+            resetLabel={t("list.columnsReset")}
+          />
           <Button
             type="button"
             variant="outline"
@@ -169,7 +200,7 @@ function ScoutsPageContent() {
         <Table>
           <TableHeader>
             <TableRow>
-              {COLUMNS.map((column) => (
+              {visibleColumns.map((column) => (
                 <SortableHead
                   key={column.key}
                   column={column.key}
@@ -196,23 +227,33 @@ function ScoutsPageContent() {
                 className="cursor-pointer"
               >
                 <TableCell className="font-medium">{scout.label}</TableCell>
-                <TableCell>
-                  <Badge variant={statusVariant(scout.status)}>
-                    {t(`status.${scout.status}`)}
-                  </Badge>
-                </TableCell>
-                <TableCell>{cvLabel(scout.cvVersionId)}</TableCell>
-                <TableCell>
-                  {t("list.sites", { count: scout.targetSiteKeys.length })}
-                </TableCell>
-                <TableCell>
-                  {scout.lastRunAt
-                    ? new Date(scout.lastRunAt).toLocaleDateString()
-                    : t("list.neverRun")}
-                </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {scout.relevantFindsCount}
-                </TableCell>
+                {columnVisibility.isVisible("status") && (
+                  <TableCell>
+                    <Badge variant={statusVariant(scout.status)}>
+                      {t(`status.${scout.status}`)}
+                    </Badge>
+                  </TableCell>
+                )}
+                {columnVisibility.isVisible("baseCv") && (
+                  <TableCell>{cvLabel(scout.cvVersionId)}</TableCell>
+                )}
+                {columnVisibility.isVisible("sites") && (
+                  <TableCell>
+                    {t("list.sites", { count: scout.targetSiteKeys.length })}
+                  </TableCell>
+                )}
+                {columnVisibility.isVisible("lastRun") && (
+                  <TableCell>
+                    {scout.lastRunAt
+                      ? new Date(scout.lastRunAt).toLocaleDateString()
+                      : t("list.neverRun")}
+                  </TableCell>
+                )}
+                {columnVisibility.isVisible("relevantFinds") && (
+                  <TableCell className="text-right tabular-nums">
+                    {scout.relevantFindsCount}
+                  </TableCell>
+                )}
               </TableRow>
             ))}
           </TableBody>

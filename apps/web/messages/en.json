@@ -408,6 +408,8 @@
       "neverRun": "Never run",
       "showArchived": "Show archived Scouts",
       "sites": "{count, plural, one {# site} other {# sites}}",
+      "columnsLabel": "Columns",
+      "columnsReset": "Reset",
       "columns": {
         "label": "Label",
         "status": "Status",

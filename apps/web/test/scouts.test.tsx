@@ -168,6 +168,126 @@ describe("ScoutsPage — list", () => {
     expect(rowLabel()[0]).toContain("Zebra Scout");
   });
 
+  it("shows every column visible by default, with Label absent from the Columns menu (issue #131)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/scouts", () => HttpResponse.json({ scouts: [scout()] })),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+    );
+
+    renderWithProviders(<ScoutsPage />);
+    await screen.findByText("Senior Backend — Remote EU");
+
+    for (const name of [
+      "Label",
+      "Status",
+      "Base CV",
+      "Sites",
+      "Last run",
+      "Relevant finds",
+    ]) {
+      expect(screen.getByRole("columnheader", { name })).toBeInTheDocument();
+    }
+
+    await user.click(screen.getByRole("button", { name: "Columns" }));
+    for (const name of [
+      "Status",
+      "Base CV",
+      "Sites",
+      "Last run",
+      "Relevant finds",
+    ]) {
+      expect(
+        screen.getByRole("menuitemcheckbox", { name }),
+      ).toBeInTheDocument();
+    }
+    expect(
+      screen.queryByRole("menuitemcheckbox", { name: "Label" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("toggles a column's visibility independently and persists the choice across a remount, restored by Reset (issue #131)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/scouts", () => HttpResponse.json({ scouts: [scout()] })),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+    );
+
+    const { unmount } = renderWithProviders(<ScoutsPage />);
+    await screen.findByText("Senior Backend — Remote EU");
+
+    await user.click(screen.getByRole("button", { name: "Columns" }));
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "Status" }));
+    await user.keyboard("{Escape}");
+
+    expect(
+      screen.queryByRole("columnheader", { name: "Status" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("columnheader", { name: "Base CV" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Active")).not.toBeInTheDocument();
+
+    unmount();
+    renderWithProviders(<ScoutsPage />);
+    await screen.findByText("Senior Backend — Remote EU");
+    expect(
+      screen.queryByRole("columnheader", { name: "Status" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Columns" }));
+    await user.click(screen.getByRole("menuitem", { name: "Reset" }));
+    expect(
+      screen.getByRole("columnheader", { name: "Status" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps sorting on a column after it's hidden (issue #131)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/scouts", () =>
+        HttpResponse.json({
+          scouts: [
+            scout({
+              id: "scout-z",
+              label: "Zebra Scout",
+              lastRunAt: "2026-09-10T00:00:00.000Z",
+            }),
+            scout({
+              id: "scout-a",
+              label: "Alpha Scout",
+              lastRunAt: "2026-09-10T00:00:00.000Z",
+            }),
+          ],
+        }),
+      ),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+    );
+
+    renderWithProviders(<ScoutsPage />);
+    await screen.findByText("Zebra Scout");
+
+    await user.click(screen.getByRole("button", { name: "Label" }));
+    const rowLabel = () =>
+      screen.getAllByRole("row").slice(1, 3).map((row) => row.textContent);
+    expect(rowLabel()[0]).toContain("Alpha Scout");
+
+    await user.click(screen.getByRole("button", { name: "Columns" }));
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "Status" }));
+    await user.keyboard("{Escape}");
+
+    expect(
+      screen.queryByRole("columnheader", { name: "Status" }),
+    ).not.toBeInTheDocument();
+    expect(rowLabel()[0]).toContain("Alpha Scout");
+  });
+
   it("hides an Archived Scout from the default view", async () => {
     server.use(
       http.get("/api/scouts", () =>
