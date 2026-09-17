@@ -42,5 +42,6 @@ export const config = {
     "/cv-versions/:path*",
     "/ingestion-jobs/:path*",
     "/admin/:path*",
+    "/quotas/:path*",
   ],
 };

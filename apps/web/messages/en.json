@@ -89,6 +89,7 @@
     "agents": "Agents",
     "applications": "Applications",
     "cvVersions": "CV versions",
+    "quotas": "Quotas",
     "settings": "Settings",
     "newAnalysis": "New analysis",
     "openMenu": "Open menu"
@@ -164,6 +165,21 @@
     "loading": "Loading…",
     "signedInAs": "Signed in as {userId} ({plan})",
     "error": "Couldn't confirm admin access."
+  },
+  "quotas": {
+    "title": "Quotas",
+    "description": "Your usage against your Effective quota for each limit.",
+    "loading": "Loading your quotas…",
+    "error": "We couldn't load your quotas. Please try again.",
+    "unlimited": "Unlimited",
+    "usage": "{used} of {cap}",
+    "usageUnlimited": "{used} used — unlimited",
+    "kinds": {
+      "activeScouts": "Active Scouts",
+      "analysesDaily": "Analyses today",
+      "analysesMonthly": "Analyses this month",
+      "documentsDaily": "Documents today"
+    }
   },
   "theme": {
     "label": "Change theme",
@@ -380,7 +396,8 @@
     },
     "maxOffersLabel": "How many offers to analyse",
     "maxOffersHint": "Between 1 and {max}.",
-    "quotaEstimate": "{count, plural, one {Up to # analysis will run} other {Up to # analyses will run}} — {remaining} left today.",
+    "quotaEstimate": "{count, plural, one {Up to # analysis will run} other {Up to # analyses will run}} — {remaining} left today, {monthlyRemaining} left this month.",
+    "quotaUnlimited": "unlimited",
     "submit": "Analyse these offers",
     "submitting": "Starting…",
     "error": "We couldn't start that analysis. Please try again.",

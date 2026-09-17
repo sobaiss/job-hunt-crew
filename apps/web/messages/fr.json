@@ -89,6 +89,7 @@
     "agents": "Agents",
     "applications": "Candidatures",
     "cvVersions": "Versions de CV",
+    "quotas": "Quotas",
     "settings": "Paramètres",
     "newAnalysis": "Nouvelle analyse",
     "openMenu": "Ouvrir le menu"
@@ -164,6 +165,21 @@
     "loading": "Chargement…",
     "signedInAs": "Connecté en tant que {userId} ({plan})",
     "error": "Impossible de confirmer l'accès administrateur."
+  },
+  "quotas": {
+    "title": "Quotas",
+    "description": "Votre utilisation par rapport à votre quota effectif pour chaque limite.",
+    "loading": "Chargement de vos quotas…",
+    "error": "Impossible de charger vos quotas. Veuillez réessayer.",
+    "unlimited": "Illimité",
+    "usage": "{used} sur {cap}",
+    "usageUnlimited": "{used} utilisé(s) — illimité",
+    "kinds": {
+      "activeScouts": "Scouts actifs",
+      "analysesDaily": "Analyses aujourd'hui",
+      "analysesMonthly": "Analyses ce mois-ci",
+      "documentsDaily": "Documents aujourd'hui"
+    }
   },
   "theme": {
     "label": "Changer de thème",
@@ -380,7 +396,8 @@
     },
     "maxOffersLabel": "Combien d'offres analyser",
     "maxOffersHint": "Entre 1 et {max}.",
-    "quotaEstimate": "{count, plural, one {Jusqu'à # analyse sera lancée} other {Jusqu'à # analyses seront lancées}} — il en reste {remaining} aujourd'hui.",
+    "quotaEstimate": "{count, plural, one {Jusqu'à # analyse sera lancée} other {Jusqu'à # analyses seront lancées}} — il en reste {remaining} aujourd'hui, {monthlyRemaining} ce mois-ci.",
+    "quotaUnlimited": "illimité",
     "submit": "Analyser ces offres",
     "submitting": "Démarrage…",
     "error": "Impossible de lancer cette analyse. Veuillez réessayer.",

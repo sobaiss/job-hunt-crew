@@ -9,16 +9,15 @@ import { ExternalLink, RefreshCw } from "lucide-react";
 import {
   TERMINAL_ANALYSIS_STATUSES,
   useAnalyses,
-  useAnalysisQuota,
   useBulkCreateAnalyses,
   type AnalysisSummary,
 } from "@/hooks/use-analyses";
 import { useBulkSetApplicationStatus } from "@/hooks/use-applications";
 import {
   useBulkCreateGeneratedDocuments,
-  useGeneratedDocumentsQuota,
   useGeneratedDocumentsStatuses,
 } from "@/hooks/use-generated-documents";
+import { useQuotas } from "@/hooks/use-quotas";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useColumnVisibility } from "@/hooks/use-column-visibility";
 import { SortableHead } from "@/components/sortable-head";
@@ -107,9 +106,8 @@ function AnalysesTable() {
   const queryClient = useQueryClient();
   const bulkSetApplicationStatus = useBulkSetApplicationStatus();
   const bulkCreateGeneratedDocuments = useBulkCreateGeneratedDocuments();
-  const { data: generatedDocumentsQuota } = useGeneratedDocumentsQuota();
   const bulkCreateAnalyses = useBulkCreateAnalyses();
-  const { data: analysisQuota } = useAnalysisQuota();
+  const { data: quotas } = useQuotas();
 
   // Multi-select (#67): ids selected across however many pages the user has
   // extended the selection to via the "select all matching filters" banner —
@@ -257,9 +255,9 @@ function AnalysesTable() {
   };
 
   const requiredGenerationDocs = selectedIds.size * 2;
-  const remainingGenerationQuota = generatedDocumentsQuota?.remaining;
+  const remainingGenerationQuota = quotas?.documentsDaily.remaining;
   const insufficientGenerationQuota =
-    remainingGenerationQuota !== undefined && requiredGenerationDocs > remainingGenerationQuota;
+    remainingGenerationQuota != null && requiredGenerationDocs > remainingGenerationQuota;
 
   const bulkGenerationSummary = useMemo(() => {
     if (bulkGenerationDocumentIds.length === 0) return null;
@@ -297,9 +295,9 @@ function AnalysesTable() {
   );
   const eligibleRelaunchCount = eligibleForRelaunch.length;
   const skippedRelaunchCount = selectedIds.size - eligibleRelaunchCount;
-  const remainingAnalysisQuota = analysisQuota?.remaining;
+  const remainingAnalysisQuota = quotas?.analysesDaily.remaining;
   const insufficientRelaunchQuota =
-    remainingAnalysisQuota !== undefined && eligibleRelaunchCount > remainingAnalysisQuota;
+    remainingAnalysisQuota != null && eligibleRelaunchCount > remainingAnalysisQuota;
 
   const handleConfirmBulkRelaunch = () => {
     setBulkError(null);

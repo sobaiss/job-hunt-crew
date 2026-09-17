@@ -11,7 +11,7 @@ import {
   useCreateIngestionJob,
   INGESTION_MAX_OFFERS,
 } from "@/hooks/use-ingestion-jobs";
-import { useAnalysisQuota } from "@/hooks/use-analyses";
+import { useQuotas } from "@/hooks/use-quotas";
 import { useSiteConfigs, siteReliability } from "@/hooks/use-site-configs";
 import { BatchResultView } from "@/components/batch-result-view";
 import { CvVersionPicker } from "@/components/cv-version-picker";
@@ -44,7 +44,7 @@ export default function AnalyseSeveralOffersPage() {
   const reliabilityLabel = useTranslations("analyseSeveral.reliability");
 
   const sites = useSiteConfigs();
-  const quota = useAnalysisQuota();
+  const quotas = useQuotas();
   const create = useCreateIngestionJob();
   const [cvVersionId, setCvVersionId] = useState("");
   const [ingestionJobId, setIngestionJobId] = useState<string | null>(null);
@@ -181,11 +181,14 @@ export default function AnalyseSeveralOffersPage() {
                     <p className="text-xs text-muted">
                       {t("maxOffersHint", { max: INGESTION_MAX_OFFERS })}
                     </p>
-                    {quota.data && (
+                    {quotas.data && (
                       <p role="status" className="text-xs text-muted">
                         {t("quotaEstimate", {
                           count: plannedOffers,
-                          remaining: quota.data.remaining,
+                          remaining:
+                            quotas.data.analysesDaily.remaining ?? t("quotaUnlimited"),
+                          monthlyRemaining:
+                            quotas.data.analysesMonthly.remaining ?? t("quotaUnlimited"),
                         })}
                       </p>
                     )}

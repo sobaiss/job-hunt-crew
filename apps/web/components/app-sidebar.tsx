@@ -10,6 +10,7 @@ import {
   ChevronsUpDown,
   ClipboardList,
   FileText,
+  Gauge,
   LayoutDashboard,
   ListChecks,
   Plus,
@@ -38,6 +39,7 @@ export const NAV_ITEMS = [
   { href: "/scouts", key: "agents", Icon: Bot },
   { href: "/applications", key: "applications", Icon: ClipboardList },
   { href: "/cv-versions", key: "cvVersions", Icon: FileText },
+  { href: "/quotas", key: "quotas", Icon: Gauge },
   { href: "/settings", key: "settings", Icon: Settings },
 ] as const;
 

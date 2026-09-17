@@ -92,23 +92,6 @@ export function useGeneratedDocument(id: string | null) {
   });
 }
 
-export type GeneratedDocumentsQuota = { cap: number; used: number; remaining: number };
-
-/**
- * The caller's per-user daily document-generation budget (`GET
- * /api/generated-documents/quota`): `cap`, how many they've `used` since
- * 00:00 UTC, and how many `remaining`. Backs the bulk "Générer les
- * documents" pre-confirm estimate (#68) — "Générer pour X offres — Y
- * restantes aujourd'hui". Read on mount; not polled.
- */
-export function useGeneratedDocumentsQuota() {
-  return useQuery({
-    queryKey: ["generated-documents-quota"],
-    queryFn: () => bff.get<{ quota: GeneratedDocumentsQuota }>("/generated-documents/quota"),
-    select: (data) => data.quota,
-  });
-}
-
 /** Kicks off generation (issue #68's bulk action) for every Analysis in
  * `analysisIds`, one `POST /api/analyses/{id}/generated-documents` call per
  * id via `Promise.allSettled` — mirrors `useBulkSetApplicationStatus`'s

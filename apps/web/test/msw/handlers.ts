@@ -47,19 +47,19 @@ export const handlers = [
   http.get("/api/analyses/:id/generated-documents", () =>
     HttpResponse.json({ generatedDocuments: [] }),
   ),
-  // The Analyses table's bulk "Générer les documents" action (issue #68)
-  // reads the remaining daily quota unconditionally on load; default to a
-  // generous budget so suites exercising other parts of the page don't have
-  // to stub it. Quota-threshold tests override with `server.use`.
-  http.get("/api/generated-documents/quota", () =>
-    HttpResponse.json({ quota: { cap: 20, used: 0, remaining: 20 } }),
-  ),
-  // The Analyses table's bulk "Relancer l'analyse" action (issue #126) reads
-  // the remaining daily analysis quota unconditionally on load; default to a
-  // generous budget so suites exercising other parts of the page don't have
-  // to stub it. Quota-threshold tests override with `server.use`.
-  http.get("/api/analyses/quota", () =>
-    HttpResponse.json({ quota: { cap: 20, used: 0, remaining: 20 } }),
+  // The Effective quota + usage for all four QuotaKinds (issue #141) — read
+  // unconditionally by the Analyses table's bulk "Générer les documents" and
+  // "Relancer l'analyse" actions, and by the Quotas page and the "Analyse
+  // several offers" pre-submit estimate; default to a generous budget on
+  // every kind so suites exercising unrelated parts of those pages don't
+  // have to stub it. Quota-threshold tests override with `server.use`.
+  http.get("/api/quotas", () =>
+    HttpResponse.json({
+      activeScouts: { cap: 20, used: 0, remaining: 20 },
+      analysesDaily: { cap: 20, used: 0, remaining: 20 },
+      analysesMonthly: { cap: 200, used: 0, remaining: 200 },
+      documentsDaily: { cap: 20, used: 0, remaining: 20 },
+    }),
   ),
 ];
 

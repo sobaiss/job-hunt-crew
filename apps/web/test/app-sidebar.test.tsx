@@ -53,6 +53,10 @@ describe("AppSidebar", () => {
       "href",
       "/cv-versions",
     );
+    expect(screen.getByRole("link", { name: "Quotas" })).toHaveAttribute(
+      "href",
+      "/quotas",
+    );
     expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute(
       "href",
       "/settings",

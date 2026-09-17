@@ -64,7 +64,8 @@ type StubOptions = {
     };
   }[];
   analyses?: ReturnType<typeof analysisRow>[];
-  quota?: { cap: number; used: number; remaining: number };
+  analysesDailyQuota?: { cap: number; used: number; remaining: number };
+  analysesMonthlyQuota?: { cap: number; used: number; remaining: number };
 };
 
 function stubApi(options: StubOptions = {}) {
@@ -77,13 +78,21 @@ function stubApi(options: StubOptions = {}) {
     quotaSkippedCount = 0,
     jobOffers = [],
     analyses = [],
-    quota = { cap: 50, used: 0, remaining: 50 },
+    analysesDailyQuota = { cap: 50, used: 0, remaining: 50 },
+    analysesMonthlyQuota = { cap: 500, used: 0, remaining: 500 },
   } = options;
 
   server.use(
     http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions })),
     http.get("/api/site-configs", () => HttpResponse.json({ siteConfigs })),
-    http.get("/api/analyses/quota", () => HttpResponse.json({ quota })),
+    http.get("/api/quotas", () =>
+      HttpResponse.json({
+        activeScouts: { cap: 20, used: 0, remaining: 20 },
+        analysesDaily: analysesDailyQuota,
+        analysesMonthly: analysesMonthlyQuota,
+        documentsDaily: { cap: 20, used: 0, remaining: 20 },
+      }),
+    ),
     http.post("/api/ingestion-jobs", async ({ request }) => {
       onCreate?.((await request.json()) as Record<string, unknown>);
       return HttpResponse.json(
@@ -166,26 +175,29 @@ describe("AnalyseSeveralOffersPage", () => {
     expect(field).toHaveAttribute("max", "25");
   });
 
-  it("shows the pre-submit daily-quota estimate from the current offer count", async () => {
-    stubApi({ quota: { cap: 50, used: 45, remaining: 5 } });
+  it("shows the pre-submit daily- and monthly-quota estimate from the current offer count", async () => {
+    stubApi({
+      analysesDailyQuota: { cap: 50, used: 45, remaining: 5 },
+      analysesMonthlyQuota: { cap: 500, used: 470, remaining: 30 },
+    });
     const user = userEvent.setup();
     renderWithProviders(<AnalyseSeveralOffersPage />);
 
     const field = await screen.findByLabelText("How many offers to analyse");
     expect(
-      await screen.findByText("Up to 10 analyses will run — 5 left today."),
+      await screen.findByText("Up to 10 analyses will run — 5 left today, 30 left this month."),
     ).toBeInTheDocument();
 
     await user.clear(field);
     await user.type(field, "8");
     expect(
-      await screen.findByText("Up to 8 analyses will run — 5 left today."),
+      await screen.findByText("Up to 8 analyses will run — 5 left today, 30 left this month."),
     ).toBeInTheDocument();
 
     await user.clear(field);
     await user.type(field, "1");
     expect(
-      await screen.findByText("Up to 1 analysis will run — 5 left today."),
+      await screen.findByText("Up to 1 analysis will run — 5 left today, 30 left this month."),
     ).toBeInTheDocument();
   });
 

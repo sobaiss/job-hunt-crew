@@ -8,7 +8,7 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  return proxyToApi("/v1/generated-documents/quota", {
+  return proxyToApi("/v1/quotas", {
     headers: { "X-User-Id": session.user.id },
   });
 }

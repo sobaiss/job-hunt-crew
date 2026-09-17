@@ -1042,8 +1042,13 @@ describe("AnalysesDashboardPage", () => {
           ],
         }),
       ),
-      http.get("/api/generated-documents/quota", () =>
-        HttpResponse.json({ quota: { cap: 20, used: 17, remaining: 3 } }),
+      http.get("/api/quotas", () =>
+        HttpResponse.json({
+          activeScouts: { cap: 20, used: 0, remaining: 20 },
+          analysesDaily: { cap: 20, used: 0, remaining: 20 },
+          analysesMonthly: { cap: 200, used: 0, remaining: 200 },
+          documentsDaily: { cap: 20, used: 17, remaining: 3 },
+        }),
       ),
     );
 
@@ -1080,9 +1085,6 @@ describe("AnalysesDashboardPage", () => {
             summary({ id: "s2", jobOffer: { ...summary().jobOffer, id: "j2", title: "Offer Two" } }),
           ],
         }),
-      ),
-      http.get("/api/generated-documents/quota", () =>
-        HttpResponse.json({ quota: { cap: 20, used: 0, remaining: 20 } }),
       ),
       http.post("/api/analyses/s1/generated-documents", () =>
         HttpResponse.json({
@@ -1158,8 +1160,13 @@ describe("AnalysesDashboardPage", () => {
           ],
         }),
       ),
-      http.get("/api/analyses/quota", () =>
-        HttpResponse.json({ quota: { cap: 20, used: 19, remaining: 1 } }),
+      http.get("/api/quotas", () =>
+        HttpResponse.json({
+          activeScouts: { cap: 20, used: 0, remaining: 20 },
+          analysesDaily: { cap: 20, used: 19, remaining: 1 },
+          analysesMonthly: { cap: 200, used: 0, remaining: 200 },
+          documentsDaily: { cap: 20, used: 0, remaining: 20 },
+        }),
       ),
     );
 

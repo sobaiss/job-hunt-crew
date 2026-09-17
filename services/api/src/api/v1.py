@@ -994,46 +994,53 @@ async def list_analyses(
     return AnalysisListResponse(analyses=[_analysis_response(row) for row in rows])
 
 
-class AnalysisQuota(BaseModel):
+class QuotaUsage(BaseModel):
     cap: int | None
     used: int
     remaining: int | None
 
 
-class AnalysisQuotaResponse(BaseModel):
-    # `quota` is the daily window, kept under its original field name for the
-    # existing frontend consumer (`useAnalysisQuota`) — #141 retires this
-    # whole endpoint in favour of `GET /v1/quotas` and drops the alias then.
-    quota: AnalysisQuota
-    monthly: AnalysisQuota
+class QuotasResponse(BaseModel):
+    activeScouts: QuotaUsage
+    analysesDaily: QuotaUsage
+    analysesMonthly: QuotaUsage
+    documentsDaily: QuotaUsage
 
 
-def _quota(cap: int | None, used: int) -> AnalysisQuota:
-    return AnalysisQuota(cap=cap, used=used, remaining=None if cap is None else max(cap - used, 0))
+def _quota_usage(cap: int | None, used: int) -> QuotaUsage:
+    return QuotaUsage(cap=cap, used=used, remaining=None if cap is None else max(cap - used, 0))
 
 
-# Declared before `/analyses/{analysis_id}` so "quota" is matched here rather
-# than captured as an analysis id.
-@router.get("/analyses/quota", response_model=AnalysisQuotaResponse)
-async def get_analyses_quota(
+@router.get("/quotas", response_model=QuotasResponse)
+async def get_quotas(
     user_id: str = Depends(require_user_id),
     session: AsyncSession = Depends(get_session),
-) -> AnalysisQuotaResponse:
-    """The caller's per-user Analysis budget for both windows the Plan/
-    QuotaKind system enforces (issue #136): `quota` is the daily window,
-    `monthly` the calendar-month one. Each reports `cap` (the User's
-    effective quota for that `QuotaKind`, `None` when unlimited), how many
-    `Analysis` rows they have `used` since the window opened, and how many
-    `remaining` (floored at 0, `None` when unlimited). Backs the "Analyse
-    several offers" pre-submit estimate — "up to N analyses will run — M left
-    today" (issue #33). Same `effective_quota` rule `POST /v1/analyses`
-    enforces for its 429s.
+) -> QuotasResponse:
+    """The caller's Effective quota and current usage for all four QuotaKinds
+    (issue #141) — backs the candidate-facing Quotas page and replaces the
+    now-retired `GET /v1/analyses/quota` and `GET /v1/generated-documents/quota`,
+    which each only covered one or two of the four kinds. Each entry reports
+    `cap` (the User's effective quota for that QuotaKind, `None` when
+    unlimited), how many they've `used` since the relevant window opened, and
+    how many `remaining` (floored at 0, `None` when unlimited) — the same
+    `effective_quota` rule Scout create/reactivate, `POST /v1/analyses`, and
+    document generation enforce for their own 400/429s.
     """
-    daily_cap = await effective_quota(session, user_id, Quotakind.ANALYSES_DAILY)
-    monthly_cap = await effective_quota(session, user_id, Quotakind.ANALYSES_MONTHLY)
-    return AnalysisQuotaResponse(
-        quota=_quota(daily_cap, await analyses_requested_today(session, user_id)),
-        monthly=_quota(monthly_cap, await analyses_requested_this_month(session, user_id)),
+    active_scouts_cap = await effective_quota(session, user_id, Quotakind.ACTIVE_SCOUTS)
+    analyses_daily_cap = await effective_quota(session, user_id, Quotakind.ANALYSES_DAILY)
+    analyses_monthly_cap = await effective_quota(session, user_id, Quotakind.ANALYSES_MONTHLY)
+    documents_daily_cap = await effective_quota(session, user_id, Quotakind.DOCUMENTS_DAILY)
+    return QuotasResponse(
+        activeScouts=_quota_usage(active_scouts_cap, await active_scout_count(session, user_id)),
+        analysesDaily=_quota_usage(
+            analyses_daily_cap, await analyses_requested_today(session, user_id)
+        ),
+        analysesMonthly=_quota_usage(
+            analyses_monthly_cap, await analyses_requested_this_month(session, user_id)
+        ),
+        documentsDaily=_quota_usage(
+            documents_daily_cap, await generated_documents_created_today(session, user_id)
+        ),
     )
 
 
@@ -1932,39 +1939,6 @@ async def list_generated_documents(
     ).all()
     return ListGeneratedDocumentsResponse(
         generatedDocuments=[_generated_document_response(row) for row in rows]
-    )
-
-
-class GeneratedDocumentsQuota(BaseModel):
-    cap: int | None
-    used: int
-    remaining: int | None
-
-
-class GeneratedDocumentsQuotaResponse(BaseModel):
-    quota: GeneratedDocumentsQuota
-
-
-# Declared before `/generated-documents/{document_id}` so "quota" is matched
-# here rather than captured as a document id — same trick as `/analyses/quota`.
-@router.get("/generated-documents/quota", response_model=GeneratedDocumentsQuotaResponse)
-async def get_generated_documents_quota(
-    user_id: str = Depends(require_user_id),
-    session: AsyncSession = Depends(get_session),
-) -> GeneratedDocumentsQuotaResponse:
-    """The caller's per-user daily document-generation budget: `cap` (the
-    caller's effective `QuotaKind.DOCUMENTS_DAILY` quota, `None` when
-    unlimited), how many `GeneratedDocument` rows they've `used` since 00:00
-    UTC, and how many `remaining` (floored at 0, `None` when unlimited).
-    Backs the bulk "Générer les documents" pre-confirm estimate (issue #68) —
-    the same `effective_quota` rule `POST .../generated-documents` and
-    `.../regenerate` enforce.
-    """
-    cap = await effective_quota(session, user_id, Quotakind.DOCUMENTS_DAILY)
-    used = await generated_documents_created_today(session, user_id)
-    remaining = None if cap is None else max(cap - used, 0)
-    return GeneratedDocumentsQuotaResponse(
-        quota=GeneratedDocumentsQuota(cap=cap, used=used, remaining=remaining)
     )
 
 
