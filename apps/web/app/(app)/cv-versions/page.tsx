@@ -21,10 +21,12 @@ import {
 } from "@/lib/cv-versions-sort";
 import { conversionBadgeVariant, formatFileSize } from "@/lib/cv-versions-display";
 import type { ColumnConfig } from "@/lib/column-visibility";
+import { TITLE_MAX_LENGTH } from "@/lib/text-truncation";
 import { useEnumLabel } from "@/lib/enum-labels";
 import { CvVersionPanel } from "@/components/cv-version-panel";
 import { ColumnVisibilityMenu } from "@/components/column-visibility-menu";
 import { SortableHead } from "@/components/sortable-head";
+import { TruncatedCell } from "@/components/truncated-cell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -273,10 +275,12 @@ export default function CvVersionsPage() {
                       }}
                       className="cursor-pointer"
                     >
-                      <TableCell className="font-medium">{cv.label}</TableCell>
+                      <TableCell className="font-medium">
+                        <TruncatedCell text={cv.label} maxLength={TITLE_MAX_LENGTH} />
+                      </TableCell>
                       {columnVisibility.isVisible("file") && (
                         <TableCell>
-                          {cv.fileName} · {cv.fileType}
+                          <TruncatedCell text={cv.fileName} maxLength={TITLE_MAX_LENGTH} /> · {cv.fileType}
                         </TableCell>
                       )}
                       {columnVisibility.isVisible("size") && (

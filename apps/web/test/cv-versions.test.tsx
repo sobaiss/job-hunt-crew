@@ -398,6 +398,52 @@ describe("CvVersionsPage — list", () => {
     expect(rowLabel()[0]).toContain("Alpha CV");
   });
 
+  it("truncates a long Label or file name with an ellipsis and reveals the full text in a tooltip on hover or focus (issue #132)", async () => {
+    const user = userEvent.setup();
+    const longLabel = "Senior Staff Backend Engineer CV for the Platform Team";
+    const longFileName = "senior-staff-backend-engineer-cv-platform-team-2026.pdf";
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: [cvVersion({ label: longLabel, fileName: longFileName })],
+        }),
+      ),
+    );
+
+    renderWithProviders(<CvVersionsPage />);
+
+    const truncatedLabel = await screen.findByText(
+      `${longLabel.slice(0, 50)}…`,
+    );
+    const truncatedFileName = screen.getByText(
+      `${longFileName.slice(0, 50)}…`,
+    );
+    expect(truncatedLabel).toBeInTheDocument();
+    expect(truncatedFileName).toBeInTheDocument();
+
+    truncatedLabel.focus();
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(longLabel);
+
+    await user.hover(truncatedFileName);
+    expect(
+      await screen.findByRole("tooltip", {}, { timeout: 2000 }),
+    ).toHaveTextContent(longFileName);
+  });
+
+  it("renders a Label or file name at or under its limit unchanged, with no tooltip (issue #132)", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cvVersion()] }),
+      ),
+    );
+
+    renderWithProviders(<CvVersionsPage />);
+    await screen.findByText("Grad CV");
+
+    expect(screen.getByText("grad-cv.pdf · PDF")).toBeInTheDocument();
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
+
   it("shows an error state when the list fails to load", async () => {
     server.use(
       http.get("/api/cv-versions", () =>
