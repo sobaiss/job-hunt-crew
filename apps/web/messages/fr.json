@@ -584,6 +584,8 @@
       "showSuperseded": "Afficher les versions de CV remplacées",
       "importCv": "Importer un CV",
       "refresh": "Actualiser",
+      "columnsLabel": "Colonnes",
+      "columnsReset": "Réinitialiser",
       "columns": {
         "label": "Libellé",
         "file": "Fichier",

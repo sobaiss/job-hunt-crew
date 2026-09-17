@@ -314,6 +314,90 @@ describe("CvVersionsPage — list", () => {
     expect(rowLabel()[0]).toContain("Zebra CV");
   });
 
+  it("shows every column visible by default, with Label absent from the Columns menu (issue #130)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cvVersion()] }),
+      ),
+    );
+
+    renderWithProviders(<CvVersionsPage />);
+    await screen.findByText("Grad CV");
+
+    for (const name of ["Label", "File", "Size", "Uploaded", "Status", "Default"]) {
+      expect(screen.getByRole("columnheader", { name })).toBeInTheDocument();
+    }
+
+    await user.click(screen.getByRole("button", { name: "Columns" }));
+    for (const name of ["File", "Size", "Uploaded", "Status", "Default"]) {
+      expect(
+        screen.getByRole("menuitemcheckbox", { name }),
+      ).toBeInTheDocument();
+    }
+    expect(
+      screen.queryByRole("menuitemcheckbox", { name: "Label" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("toggles a column's visibility independently and persists the choice across a remount, restored by Reset (issue #130)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cvVersion()] }),
+      ),
+    );
+
+    const { unmount } = renderWithProviders(<CvVersionsPage />);
+    await screen.findByText("Grad CV");
+
+    await user.click(screen.getByRole("button", { name: "Columns" }));
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "File" }));
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("columnheader", { name: "File" })).not.toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Size" })).toBeInTheDocument();
+    expect(screen.queryByText("grad-cv.pdf · PDF")).not.toBeInTheDocument();
+
+    unmount();
+    renderWithProviders(<CvVersionsPage />);
+    await screen.findByText("Grad CV");
+    expect(screen.queryByRole("columnheader", { name: "File" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Columns" }));
+    await user.click(screen.getByRole("menuitem", { name: "Reset" }));
+    expect(screen.getByRole("columnheader", { name: "File" })).toBeInTheDocument();
+  });
+
+  it("keeps sorting on a column after it's hidden (issue #130)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: [
+            cvVersion({ id: "cv1", label: "Zebra CV", fileName: "zebra.pdf" }),
+            cvVersion({ id: "cv2", label: "Alpha CV", fileName: "alpha.pdf" }),
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<CvVersionsPage />);
+    await screen.findByText("Zebra CV");
+
+    await user.click(screen.getByRole("button", { name: "File" }));
+    const rowLabel = () =>
+      screen.getAllByRole("row").slice(1, 3).map((row) => row.textContent);
+    expect(rowLabel()[0]).toContain("Alpha CV");
+
+    await user.click(screen.getByRole("button", { name: "Columns" }));
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "File" }));
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("columnheader", { name: "File" })).not.toBeInTheDocument();
+    expect(rowLabel()[0]).toContain("Alpha CV");
+  });
+
   it("shows an error state when the list fails to load", async () => {
     server.use(
       http.get("/api/cv-versions", () =>

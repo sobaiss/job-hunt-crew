@@ -584,6 +584,8 @@
       "showSuperseded": "Show superseded CV versions",
       "importCv": "Import a CV",
       "refresh": "Refresh",
+      "columnsLabel": "Columns",
+      "columnsReset": "Reset",
       "columns": {
         "label": "Label",
         "file": "File",

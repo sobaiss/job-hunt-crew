@@ -12,6 +12,7 @@ import {
   useReplaceCvVersion,
 } from "@/hooks/use-cv-versions";
 import { useScouts } from "@/hooks/use-scouts";
+import { useColumnVisibility } from "@/hooks/use-column-visibility";
 import {
   DEFAULT_CV_VERSIONS_SORT,
   sortCvVersions,
@@ -19,8 +20,10 @@ import {
   type CvVersionsSortState,
 } from "@/lib/cv-versions-sort";
 import { conversionBadgeVariant, formatFileSize } from "@/lib/cv-versions-display";
+import type { ColumnConfig } from "@/lib/column-visibility";
 import { useEnumLabel } from "@/lib/enum-labels";
 import { CvVersionPanel } from "@/components/cv-version-panel";
+import { ColumnVisibilityMenu } from "@/components/column-visibility-menu";
 import { SortableHead } from "@/components/sortable-head";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,18 +37,25 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-const COLUMNS: { key: CvVersionsSortColumn; labelKey: string; className?: string }[] = [
-  { key: "label", labelKey: "list.columns.label" },
-  { key: "file", labelKey: "list.columns.file" },
-  { key: "size", labelKey: "list.columns.size", className: "text-right" },
-  { key: "uploaded", labelKey: "list.columns.uploaded" },
-  { key: "status", labelKey: "list.columns.status" },
-  { key: "default", labelKey: "list.columns.default" },
+// Label is the always-visible primary column (#130); Actions is never part
+// of the toggle. The rest are hideable, mirroring Analyses' Columns menu
+// (#129), reusing lib/column-visibility.ts and components/
+// column-visibility-menu.tsx unmodified.
+const COLUMNS: ColumnConfig<CvVersionsSortColumn>[] = [
+  { key: "label", labelKey: "list.columns.label", hideable: false },
+  { key: "file", labelKey: "list.columns.file", hideable: true },
+  {
+    key: "size",
+    labelKey: "list.columns.size",
+    hideable: true,
+    className: "text-right",
+  },
+  { key: "uploaded", labelKey: "list.columns.uploaded", hideable: true },
+  { key: "status", labelKey: "list.columns.status", hideable: true },
+  { key: "default", labelKey: "list.columns.default", hideable: true },
 ];
 
-// +1 for the non-sortable Actions column, used as the expanded detail row's
-// colSpan (conversion error text; Replace lives in the panel since #82).
-const TABLE_COLUMN_COUNT = COLUMNS.length + 1;
+const COLUMN_VISIBILITY_STORAGE_KEY = "column-visibility:cv-versions";
 
 export default function CvVersionsPage() {
   const t = useTranslations("cvVersions");
@@ -66,6 +76,10 @@ export default function CvVersionsPage() {
   // up against the live fetched list each render, not a snapshot.
   const [panelId, setPanelId] = useState<string | null>(null);
   const panelTriggerRef = useRef<HTMLElement | null>(null);
+  const columnVisibility = useColumnVisibility(
+    COLUMN_VISIBILITY_STORAGE_KEY,
+    COLUMNS,
+  );
 
   const toggleSort = (column: CvVersionsSortColumn) => {
     setSort((current) =>
@@ -105,11 +119,29 @@ export default function CvVersionsPage() {
     ? (labelById.get(panelCv.supersededById) ?? null)
     : null;
 
+  const visibleColumns = COLUMNS.filter((column) =>
+    columnVisibility.isVisible(column.key),
+  );
+  // +1 for the non-sortable Actions column, used as the expanded detail row's
+  // colSpan (conversion error text; Replace lives in the panel since #82).
+  // Recomputed from the currently visible columns (#130) rather than a fixed
+  // constant, so a hidden column doesn't leave the spanned cell too wide.
+  const tableColumnCount = visibleColumns.length + 1;
+
   return (
     <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-10 p-8">
       <div className="flex items-center justify-between gap-4">
         <h1 className="font-serif text-2xl font-semibold">{t("title")}</h1>
         <div className="flex shrink-0 items-center gap-2">
+          <ColumnVisibilityMenu
+            columns={COLUMNS}
+            isVisible={columnVisibility.isVisible}
+            onToggle={columnVisibility.toggle}
+            onReset={columnVisibility.reset}
+            label={t("list.columnsLabel")}
+            columnLabel={(labelKey) => t(labelKey)}
+            resetLabel={t("list.columnsReset")}
+          />
           <Button
             type="button"
             variant="outline"
@@ -204,7 +236,7 @@ export default function CvVersionsPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                {COLUMNS.map((column) => (
+                {visibleColumns.map((column) => (
                   <SortableHead
                     key={column.key}
                     column={column.key}
@@ -242,35 +274,45 @@ export default function CvVersionsPage() {
                       className="cursor-pointer"
                     >
                       <TableCell className="font-medium">{cv.label}</TableCell>
-                      <TableCell>
-                        {cv.fileName} · {cv.fileType}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {formatFileSize(cv.fileSizeBytes)}
-                      </TableCell>
-                      <TableCell>
-                        {new Date(cv.createdAt).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={conversionBadgeVariant(cv.conversionStatus)}
-                        >
-                          {conversionStatusLabel(cv.conversionStatus)}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        {cv.isDefault ? (
-                          <Badge variant="outline">{t("list.default")}</Badge>
-                        ) : cv.supersededById ? (
-                          <span className="text-xs text-muted">
-                            {t("list.replacedBy", {
-                              label: labelById.get(cv.supersededById) ?? "",
-                            })}
-                          </span>
-                        ) : (
-                          "—"
-                        )}
-                      </TableCell>
+                      {columnVisibility.isVisible("file") && (
+                        <TableCell>
+                          {cv.fileName} · {cv.fileType}
+                        </TableCell>
+                      )}
+                      {columnVisibility.isVisible("size") && (
+                        <TableCell className="text-right tabular-nums">
+                          {formatFileSize(cv.fileSizeBytes)}
+                        </TableCell>
+                      )}
+                      {columnVisibility.isVisible("uploaded") && (
+                        <TableCell>
+                          {new Date(cv.createdAt).toLocaleDateString()}
+                        </TableCell>
+                      )}
+                      {columnVisibility.isVisible("status") && (
+                        <TableCell>
+                          <Badge
+                            variant={conversionBadgeVariant(cv.conversionStatus)}
+                          >
+                            {conversionStatusLabel(cv.conversionStatus)}
+                          </Badge>
+                        </TableCell>
+                      )}
+                      {columnVisibility.isVisible("default") && (
+                        <TableCell>
+                          {cv.isDefault ? (
+                            <Badge variant="outline">{t("list.default")}</Badge>
+                          ) : cv.supersededById ? (
+                            <span className="text-xs text-muted">
+                              {t("list.replacedBy", {
+                                label: labelById.get(cv.supersededById) ?? "",
+                              })}
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </TableCell>
+                      )}
                       <TableCell onClick={(event) => event.stopPropagation()}>
                         <div className="flex flex-wrap items-center gap-2">
                           <Button
@@ -308,7 +350,7 @@ export default function CvVersionsPage() {
                     </TableRow>
                     {showDetailRow && (
                       <TableRow>
-                        <TableCell colSpan={TABLE_COLUMN_COUNT}>
+                        <TableCell colSpan={tableColumnCount}>
                           <p role="alert" className="text-sm text-destructive">
                             {t("list.conversionFailed")}
                             {cv.conversionError ? ` ${cv.conversionError}` : ""}
