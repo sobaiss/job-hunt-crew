@@ -16,8 +16,10 @@ import {
   type ScoutsSortState,
 } from "@/lib/scouts-sort";
 import type { ColumnConfig } from "@/lib/column-visibility";
+import { TITLE_MAX_LENGTH } from "@/lib/text-truncation";
 import { SortableHead } from "@/components/sortable-head";
 import { ColumnVisibilityMenu } from "@/components/column-visibility-menu";
+import { TruncatedCell } from "@/components/truncated-cell";
 import { ScoutPanel } from "@/components/scout-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -226,7 +228,9 @@ function ScoutsPageContent() {
                 }}
                 className="cursor-pointer"
               >
-                <TableCell className="font-medium">{scout.label}</TableCell>
+                <TableCell className="font-medium">
+                  <TruncatedCell text={scout.label} maxLength={TITLE_MAX_LENGTH} />
+                </TableCell>
                 {columnVisibility.isVisible("status") && (
                   <TableCell>
                     <Badge variant={statusVariant(scout.status)}>

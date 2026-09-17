@@ -288,6 +288,49 @@ describe("ScoutsPage — list", () => {
     expect(rowLabel()[0]).toContain("Alpha Scout");
   });
 
+  it("truncates a long Label with an ellipsis and reveals the full text in a tooltip on hover or focus (issue #133)", async () => {
+    const user = userEvent.setup();
+    const longLabel =
+      "Senior Staff Backend Engineer — Remote EU, Python and Kubernetes focus";
+    server.use(
+      http.get("/api/scouts", () =>
+        HttpResponse.json({ scouts: [scout({ label: longLabel })] }),
+      ),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+    );
+
+    renderWithProviders(<ScoutsPage />);
+
+    const truncatedLabel = await screen.findByText(
+      `${longLabel.slice(0, 50)}…`,
+    );
+    expect(truncatedLabel).toBeInTheDocument();
+
+    truncatedLabel.focus();
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(longLabel);
+
+    await user.hover(truncatedLabel);
+    expect(
+      await screen.findByRole("tooltip", {}, { timeout: 2000 }),
+    ).toHaveTextContent(longLabel);
+  });
+
+  it("renders a Label at or under its limit unchanged, with no tooltip (issue #133)", async () => {
+    server.use(
+      http.get("/api/scouts", () => HttpResponse.json({ scouts: [scout()] })),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+    );
+
+    renderWithProviders(<ScoutsPage />);
+    await screen.findByText("Senior Backend — Remote EU");
+
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
+
   it("hides an Archived Scout from the default view", async () => {
     server.use(
       http.get("/api/scouts", () =>
