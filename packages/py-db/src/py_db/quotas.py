@@ -69,6 +69,15 @@ async def active_scout_count(
     return int((await session.scalar(stmt)) or 0)
 
 
+async def total_active_scout_count(session: AsyncSession) -> int:
+    """How many `Scout` rows, across every User, are currently `ACTIVE` — the
+    platform-wide counterpart of `active_scout_count`, for the admin stats
+    endpoint (issue #140).
+    """
+    stmt = select(func.count()).select_from(Scout).where(Scout.status == Scoutstatus.ACTIVE)
+    return int((await session.scalar(stmt)) or 0)
+
+
 def record_quota_audit_event(
     session: AsyncSession,
     *,

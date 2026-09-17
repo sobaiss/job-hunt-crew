@@ -73,3 +73,61 @@ export function useSetUserPlan(userId: string) {
     },
   });
 }
+
+// Backs the admin reporting screen (issue #140): the plan-defaults editor,
+// the per-user usage table with its at/over-limit filter, and the global
+// stats panel.
+export type AdminPlanDefault = { plan: string; quotaKind: string; limit: number | null };
+
+export function useAdminPlanDefaults() {
+  return useQuery({
+    queryKey: ["admin-plan-defaults"],
+    queryFn: () => bff.get<{ defaults: AdminPlanDefault[] }>("/admin/plan-defaults"),
+  });
+}
+
+export function useSetPlanDefault() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ plan, kind, limit }: { plan: string; kind: string; limit: number | null }) =>
+      bff.put<AdminPlanDefault>(`/admin/plan-defaults/${plan}/${kind}`, { limit }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin-plan-defaults"] });
+      void queryClient.invalidateQueries({ queryKey: ["admin-users"] });
+    },
+  });
+}
+
+export type AdminUserSummary = {
+  userId: string;
+  email: string | null;
+  plan: string;
+  quotas: Record<string, AdminQuotaUsage>;
+  atOrOverLimit: boolean;
+};
+
+export function useAdminUsers(atOrOverLimit: boolean) {
+  return useQuery({
+    queryKey: ["admin-users", atOrOverLimit],
+    queryFn: () =>
+      bff.get<{ users: AdminUserSummary[] }>(
+        `/admin/users${atOrOverLimit ? "?atOrOverLimit=true" : ""}`,
+      ),
+  });
+}
+
+export type AdminStats = {
+  totalUsers: number;
+  usersOverLimitCount: number;
+  analysesRequestedToday: number;
+  analysesRequestedThisMonth: number;
+  documentsCreatedToday: number;
+  activeScoutsTotal: number;
+};
+
+export function useAdminStats() {
+  return useQuery({
+    queryKey: ["admin-stats"],
+    queryFn: () => bff.get<AdminStats>("/admin/stats"),
+  });
+}

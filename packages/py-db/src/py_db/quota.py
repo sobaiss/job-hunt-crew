@@ -68,3 +68,34 @@ async def generated_documents_created_today(session: AsyncSession, user_id: str)
         .where(Analysis.userId == user_id, GeneratedDocument.createdAt >= _start_of_today())
     )
     return count or 0
+
+
+async def total_analyses_requested_today(session: AsyncSession) -> int:
+    """How many `Analysis` rows, across every User, have been requested
+    since 00:00 UTC today — the platform-wide counterpart of
+    `analyses_requested_today`, for the admin stats endpoint (issue #140).
+    """
+    count = await session.scalar(
+        select(func.count()).select_from(Analysis).where(Analysis.requestedAt >= _start_of_today())
+    )
+    return count or 0
+
+
+async def total_analyses_requested_this_month(session: AsyncSession) -> int:
+    """Platform-wide counterpart of `analyses_requested_this_month` (issue #140)."""
+    count = await session.scalar(
+        select(func.count()).select_from(Analysis).where(Analysis.requestedAt >= _start_of_month())
+    )
+    return count or 0
+
+
+async def total_generated_documents_created_today(session: AsyncSession) -> int:
+    """Platform-wide counterpart of `generated_documents_created_today`
+    (issue #140). No join needed here since every User's documents count.
+    """
+    count = await session.scalar(
+        select(func.count())
+        .select_from(GeneratedDocument)
+        .where(GeneratedDocument.createdAt >= _start_of_today())
+    )
+    return count or 0

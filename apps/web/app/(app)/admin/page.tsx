@@ -1,14 +1,15 @@
 "use client";
 
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 
 import { useAdminMe } from "@/hooks/use-admin";
 
 /**
- * The bare Admin area landing page (issue #138) — only its own gate
- * (app/(app)/admin/layout.tsx) and this page exist so far. #139/#140 add the
- * per-user and reporting screens behind the same require_admin dependency
- * this page's GET /api/admin/me call already exercises end to end.
+ * The bare Admin area landing page (issue #138), now linking into the
+ * reporting screen (issue #140) — the per-user detail screen (#139) is
+ * reached from there rather than linked here directly, since it needs a
+ * known user id.
  */
 export default function AdminPage() {
   const t = useTranslations("admin");
@@ -25,6 +26,9 @@ export default function AdminPage() {
           {t("signedInAs", { userId: data.userId, plan: data.plan })}
         </p>
       )}
+      <Link href="/admin/users" className="text-sm font-medium underline">
+        {t("users.title")}
+      </Link>
     </main>
   );
 }

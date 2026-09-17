@@ -177,6 +177,36 @@
       "unlimitedPlaceholder": "unlimited",
       "setOverride": "Set override",
       "clearOverride": "Clear override"
+    },
+    "users": {
+      "title": "Reporting",
+      "description": "Every User's Plan and usage, global aggregate stats, and Plan-defaults editing.",
+      "stats": {
+        "title": "Global stats",
+        "loading": "Loading…",
+        "loadError": "Couldn't load global stats.",
+        "totalUsers": "Total users",
+        "usersOverLimitCount": "Users at/over a limit",
+        "analysesRequestedToday": "Analyses today",
+        "analysesRequestedThisMonth": "Analyses this month",
+        "documentsCreatedToday": "Documents today",
+        "activeScoutsTotal": "Active Scouts"
+      },
+      "planDefaults": {
+        "title": "Plan defaults",
+        "loading": "Loading…",
+        "loadError": "Couldn't load Plan defaults.",
+        "unlimitedPlaceholder": "unlimited",
+        "save": "Save {label}"
+      },
+      "table": {
+        "title": "Users",
+        "loading": "Loading…",
+        "loadError": "Couldn't load the user list.",
+        "filterLabel": "At/over any limit",
+        "atOrOverLimit": "at/over limit",
+        "noEmail": "no email"
+      }
     }
   },
   "quotas": {

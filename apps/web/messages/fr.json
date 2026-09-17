@@ -177,6 +177,36 @@
       "unlimitedPlaceholder": "illimité",
       "setOverride": "Appliquer la dérogation",
       "clearOverride": "Supprimer la dérogation"
+    },
+    "users": {
+      "title": "Rapports",
+      "description": "Le forfait et l'usage de chaque utilisateur, les statistiques globales, et l'édition des valeurs par défaut des forfaits.",
+      "stats": {
+        "title": "Statistiques globales",
+        "loading": "Chargement…",
+        "loadError": "Impossible de charger les statistiques globales.",
+        "totalUsers": "Total utilisateurs",
+        "usersOverLimitCount": "Utilisateurs à/au-dessus d'une limite",
+        "analysesRequestedToday": "Analyses aujourd'hui",
+        "analysesRequestedThisMonth": "Analyses ce mois-ci",
+        "documentsCreatedToday": "Documents aujourd'hui",
+        "activeScoutsTotal": "Agents actifs"
+      },
+      "planDefaults": {
+        "title": "Valeurs par défaut des forfaits",
+        "loading": "Chargement…",
+        "loadError": "Impossible de charger les valeurs par défaut des forfaits.",
+        "unlimitedPlaceholder": "illimité",
+        "save": "Enregistrer {label}"
+      },
+      "table": {
+        "title": "Utilisateurs",
+        "loading": "Chargement…",
+        "loadError": "Impossible de charger la liste des utilisateurs.",
+        "filterLabel": "À/au-dessus d'une limite",
+        "atOrOverLimit": "à/au-dessus d'une limite",
+        "noEmail": "aucun e-mail"
+      }
     }
   },
   "quotas": {

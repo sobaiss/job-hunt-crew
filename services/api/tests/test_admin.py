@@ -142,6 +142,59 @@ async def _audit_events(target_user_id: str) -> list[QuotaAuditEvent]:
         await engine.dispose()
 
 
+async def _plan_default(plan: Plan, kind: Quotakind) -> int | None:
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            return await session.scalar(
+                select(PlanQuotaDefault.limit).where(
+                    PlanQuotaDefault.plan == plan, PlanQuotaDefault.quotaKind == kind
+                )
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _set_plan_default(plan: Plan, kind: Quotakind, limit: int | None) -> None:
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            await session.execute(
+                update(PlanQuotaDefault)
+                .where(PlanQuotaDefault.plan == plan, PlanQuotaDefault.quotaKind == kind)
+                .values(limit=limit)
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+
+@pytest.fixture
+def standard_documents_daily_cap():
+    original = asyncio.run(_plan_default(Plan.STANDARD, Quotakind.DOCUMENTS_DAILY))
+
+    def _apply(limit: int | None) -> None:
+        asyncio.run(_set_plan_default(Plan.STANDARD, Quotakind.DOCUMENTS_DAILY, limit))
+
+    yield _apply
+    asyncio.run(_set_plan_default(Plan.STANDARD, Quotakind.DOCUMENTS_DAILY, original))
+
+
+async def _audit_events_for_field(field: str) -> list[QuotaAuditEvent]:
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            rows = await session.scalars(
+                select(QuotaAuditEvent).where(QuotaAuditEvent.field == field)
+            )
+            return list(rows.all())
+    finally:
+        await engine.dispose()
+
+
 async def _user_plan(user_id: str) -> Plan:
     engine = make_engine()
     try:
@@ -413,3 +466,178 @@ def test_set_plan_is_a_noop_when_unchanged_and_writes_no_audit_event(admin_id, t
         )
     assert response.status_code == 200
     assert asyncio.run(_audit_events(target_id)) == []
+
+
+# --- GET/PUT /v1/admin/plan-defaults[/{plan}/{kind}] (issue #140) ---
+
+
+def test_get_plan_defaults_requires_admin(target_id):
+    with TestClient(app) as client:
+        response = client.get(
+            "/v1/admin/plan-defaults",
+            headers={**HEADERS, "X-User-Id": target_id, "X-User-Plan": "FREE"},
+        )
+    assert response.status_code == 403
+
+
+def test_get_plan_defaults_returns_all_seeded_rows(admin_id):
+    with TestClient(app) as client:
+        response = client.get("/v1/admin/plan-defaults", headers=_admin_headers(admin_id))
+    assert response.status_code == 200
+    defaults = response.json()["defaults"]
+    # 4 Plans x 4 QuotaKinds, seeded by the #134 migration.
+    assert len(defaults) == 16
+    admin_scout_default = next(
+        d for d in defaults if d["plan"] == "ADMINISTRATEUR" and d["quotaKind"] == "ACTIVE_SCOUTS"
+    )
+    assert admin_scout_default["limit"] is None
+
+
+def test_set_plan_default_requires_admin(target_id):
+    with TestClient(app) as client:
+        response = client.put(
+            "/v1/admin/plan-defaults/STANDARD/DOCUMENTS_DAILY",
+            headers={**HEADERS, "X-User-Id": target_id, "X-User-Plan": "FREE"},
+            json={"limit": 99},
+        )
+    assert response.status_code == 403
+
+
+def test_set_plan_default_updates_limit_and_records_audit_event(
+    admin_id, standard_documents_daily_cap
+):
+    standard_documents_daily_cap(20)
+    with TestClient(app) as client:
+        response = client.put(
+            "/v1/admin/plan-defaults/STANDARD/DOCUMENTS_DAILY",
+            headers=_admin_headers(admin_id),
+            json={"limit": 99},
+        )
+    assert response.status_code == 200
+    assert response.json() == {"plan": "STANDARD", "quotaKind": "DOCUMENTS_DAILY", "limit": 99}
+    assert asyncio.run(_plan_default(Plan.STANDARD, Quotakind.DOCUMENTS_DAILY)) == 99
+
+    events = asyncio.run(_audit_events_for_field("planQuotaDefault:STANDARD:DOCUMENTS_DAILY"))
+    assert len(events) == 1
+    assert events[0].actorUserId == admin_id
+    assert events[0].targetUserId is None
+    assert events[0].oldValue == "20"
+    assert events[0].newValue == "99"
+
+
+def test_set_plan_default_to_null_means_unlimited(admin_id, standard_documents_daily_cap):
+    standard_documents_daily_cap(20)
+    with TestClient(app) as client:
+        response = client.put(
+            "/v1/admin/plan-defaults/STANDARD/DOCUMENTS_DAILY",
+            headers=_admin_headers(admin_id),
+            json={"limit": None},
+        )
+    assert response.status_code == 200
+    assert response.json()["limit"] is None
+    assert asyncio.run(_plan_default(Plan.STANDARD, Quotakind.DOCUMENTS_DAILY)) is None
+
+
+def test_set_plan_default_is_a_noop_when_unchanged_and_writes_no_audit_event(
+    admin_id, standard_documents_daily_cap
+):
+    standard_documents_daily_cap(20)
+    with TestClient(app) as client:
+        response = client.put(
+            "/v1/admin/plan-defaults/STANDARD/DOCUMENTS_DAILY",
+            headers=_admin_headers(admin_id),
+            json={"limit": 20},
+        )
+    assert response.status_code == 200
+    assert asyncio.run(_audit_events_for_field("planQuotaDefault:STANDARD:DOCUMENTS_DAILY")) == []
+
+
+def test_set_plan_default_propagates_live_to_non_overridden_user(
+    admin_id, target_id, standard_documents_daily_cap
+):
+    standard_documents_daily_cap(20)
+    with TestClient(app) as client:
+        client.put(
+            f"/v1/admin/users/{target_id}/plan",
+            headers=_admin_headers(admin_id),
+            json={"plan": "STANDARD"},
+        )
+        client.put(
+            "/v1/admin/plan-defaults/STANDARD/DOCUMENTS_DAILY",
+            headers=_admin_headers(admin_id),
+            json={"limit": 77},
+        )
+        response = client.get(
+            f"/v1/admin/users/{target_id}/quotas",
+            headers=_admin_headers(admin_id),
+        )
+    assert response.status_code == 200
+    assert response.json()["quotas"]["DOCUMENTS_DAILY"]["cap"] == 77
+
+
+# --- GET /v1/admin/users (issue #140) ---
+
+
+def test_list_users_requires_admin(target_id):
+    with TestClient(app) as client:
+        response = client.get(
+            "/v1/admin/users",
+            headers={**HEADERS, "X-User-Id": target_id, "X-User-Plan": "FREE"},
+        )
+    assert response.status_code == 403
+
+
+def test_list_users_returns_every_user_with_quota_summary(admin_id, target_id):
+    with TestClient(app) as client:
+        response = client.get("/v1/admin/users", headers=_admin_headers(admin_id))
+    assert response.status_code == 200
+    users = {u["userId"]: u for u in response.json()["users"]}
+    assert target_id in users
+    assert users[target_id]["plan"] == "FREE"
+    assert users[target_id]["atOrOverLimit"] is False
+    assert "ANALYSES_DAILY" in users[target_id]["quotas"]
+    assert users[target_id]["quotas"]["ANALYSES_DAILY"]["hasOverride"] is False
+
+
+def test_list_users_filters_users_at_or_over_limit(admin_id, target_id, analyses_daily_cap):
+    analyses_daily_cap(0)
+    with TestClient(app) as client:
+        response = client.get(
+            "/v1/admin/users",
+            headers=_admin_headers(admin_id),
+            params={"atOrOverLimit": "true"},
+        )
+    assert response.status_code == 200
+    body = response.json()["users"]
+    user_ids = {u["userId"] for u in body}
+    assert target_id in user_ids
+    assert all(u["atOrOverLimit"] is True for u in body)
+
+
+# --- GET /v1/admin/stats (issue #140) ---
+
+
+def test_get_stats_requires_admin(target_id):
+    with TestClient(app) as client:
+        response = client.get(
+            "/v1/admin/stats",
+            headers={**HEADERS, "X-User-Id": target_id, "X-User-Plan": "FREE"},
+        )
+    assert response.status_code == 403
+
+
+def test_get_stats_returns_aggregate_counts(admin_id, target_id, analyses_daily_cap):
+    analyses_daily_cap(0)
+    with TestClient(app) as client:
+        response = client.get("/v1/admin/stats", headers=_admin_headers(admin_id))
+    assert response.status_code == 200
+    body = response.json()
+    assert body["totalUsers"] >= 2
+    assert body["usersOverLimitCount"] >= 1
+    for key in (
+        "analysesRequestedToday",
+        "analysesRequestedThisMonth",
+        "documentsCreatedToday",
+        "activeScoutsTotal",
+    ):
+        assert isinstance(body[key], int)
