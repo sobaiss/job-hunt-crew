@@ -20,7 +20,10 @@ import {
   useGeneratedDocumentsStatuses,
 } from "@/hooks/use-generated-documents";
 import { useMediaQuery } from "@/hooks/use-media-query";
+import { useColumnVisibility } from "@/hooks/use-column-visibility";
 import { SortableHead } from "@/components/sortable-head";
+import { ColumnVisibilityMenu } from "@/components/column-visibility-menu";
+import type { ColumnConfig } from "@/lib/column-visibility";
 import {
   ANALYSES_PAGE_SIZES,
   JOB_OFFER_SOURCE_SITES,
@@ -64,40 +67,26 @@ import {
 const SELECT_CLASS =
   "flex h-9 w-full rounded-md border border-border bg-background px-3 py-1 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50";
 
-type ColumnDef = {
-  key: AnalysesSortColumn;
-  labelKey: string;
-  className?: string;
-};
-
-// Responsive column collapse (#69): as width shrinks, columns drop in this
-// exact order (CV first, Entreprise/Localisation last) so Poste/Score/Statut/
-// Lien and the selection checkbox — not listed here — always stay visible.
-// Each entry is "hidden below breakpoint X", so a column requiring a bigger
-// breakpoint drops out earlier while shrinking than one requiring a smaller
-// one. Location (#116) shares Company's breakpoint — both are offer metadata
-// of equal priority, so they collapse together.
-const COLUMN_VISIBILITY: Partial<Record<AnalysesSortColumn, string>> = {
-  cvLabel: "hidden xl:table-cell",
-  sourceSite: "hidden lg:table-cell",
-  postedAt: "hidden md:table-cell",
-  company: "hidden sm:table-cell",
-  location: "hidden sm:table-cell",
-};
+const COLUMN_VISIBILITY_STORAGE_KEY = "column-visibility:analyses";
 
 // The flat table's sortable columns, left to right (#63). "Lien" is sortable
 // by `sourceUrl` too, but rendered separately since its cell is an icon, not
-// text.
-const COLUMNS: ColumnDef[] = [
-  { key: "title", labelKey: "columns.title" },
-  { key: "company", labelKey: "columns.company", className: COLUMN_VISIBILITY.company },
-  { key: "location", labelKey: "columns.location", className: COLUMN_VISIBILITY.location },
-  { key: "sourceSite", labelKey: "columns.platform", className: COLUMN_VISIBILITY.sourceSite },
-  { key: "postedAt", labelKey: "columns.postedAt", className: COLUMN_VISIBILITY.postedAt },
-  { key: "cvLabel", labelKey: "columns.cv", className: COLUMN_VISIBILITY.cvLabel },
+// text. Poste (`title`) is the only non-`hideable` one — it, the selection
+// checkbox and "Lien" always stay visible and are never in the Columns menu
+// (#129). This also replaces the old breakpoint-based auto-hide (docs/adr/
+// 0012): visibility is now decided solely by the candidate's Columns choice,
+// at every viewport.
+const COLUMNS: ColumnConfig<AnalysesSortColumn>[] = [
+  { key: "title", labelKey: "columns.title", hideable: false },
+  { key: "company", labelKey: "columns.company", hideable: true },
+  { key: "location", labelKey: "columns.location", hideable: true },
+  { key: "sourceSite", labelKey: "columns.platform", hideable: true },
+  { key: "postedAt", labelKey: "columns.postedAt", hideable: true },
+  { key: "cvLabel", labelKey: "columns.cv", hideable: true },
   {
     key: "matchScore",
     labelKey: "columns.score",
+    hideable: true,
     className: "text-right",
   },
 ];
@@ -155,6 +144,11 @@ function AnalysesTable() {
   const state = useMemo(
     () => parseAnalysesTableState(searchParams),
     [searchParams],
+  );
+
+  const columnVisibility = useColumnVisibility(
+    COLUMN_VISIBILITY_STORAGE_KEY,
+    COLUMNS,
   );
 
   const cvLabels = useMemo(
@@ -357,16 +351,27 @@ function AnalysesTable() {
     <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 p-8">
       <div className="flex items-center justify-between gap-3">
         <h1 className="font-serif text-2xl font-semibold">{t("title")}</h1>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={isFetching}
-          onClick={() => refetch()}
-        >
-          <RefreshCw className={isFetching ? "size-4 animate-spin" : "size-4"} />
-          {t("refresh")}
-        </Button>
+        <div className="flex items-center gap-2">
+          <ColumnVisibilityMenu
+            columns={COLUMNS}
+            isVisible={columnVisibility.isVisible}
+            onToggle={columnVisibility.toggle}
+            onReset={columnVisibility.reset}
+            label={t("controls.columnsLabel")}
+            columnLabel={(labelKey) => t(labelKey)}
+            resetLabel={t("controls.columnsReset")}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={isFetching}
+            onClick={() => refetch()}
+          >
+            <RefreshCw className={isFetching ? "size-4 animate-spin" : "size-4"} />
+            {t("refresh")}
+          </Button>
+        </div>
       </div>
 
       {isPending && (
@@ -674,7 +679,9 @@ function AnalysesTable() {
                       onChange={togglePageSelection}
                     />
                   </TableHead>
-                  {COLUMNS.map((column) => (
+                  {COLUMNS.filter((column) =>
+                    columnVisibility.isVisible(column.key),
+                  ).map((column) => (
                     <SortableHead
                       key={column.key}
                       column={column.key}
@@ -699,6 +706,7 @@ function AnalysesTable() {
                   <AnalysisTableRow
                     key={analysis.id}
                     analysis={analysis}
+                    isColumnVisible={columnVisibility.isVisible}
                     sourceSiteLabel={sourceSiteLabel}
                     pipelineStatusLabel={pipelineStatusLabel}
                     trackingStatusLabel={trackingStatusLabel}
@@ -792,6 +800,7 @@ function AnalysesTable() {
 
 function AnalysisTableRow({
   analysis,
+  isColumnVisible,
   sourceSiteLabel,
   pipelineStatusLabel,
   trackingStatusLabel,
@@ -803,6 +812,7 @@ function AnalysisTableRow({
   onOpenQuickView,
 }: {
   analysis: AnalysisSummary;
+  isColumnVisible: (column: AnalysesSortColumn) => boolean;
   sourceSiteLabel: (value: string) => string;
   pipelineStatusLabel: (value: string) => string;
   trackingStatusLabel: (value: string) => string;
@@ -836,26 +846,30 @@ function AnalysisTableRow({
       <TableCell className="font-medium">
         {analysis.jobOffer.title ?? jobOfferFallback}
       </TableCell>
-      <TableCell className={COLUMN_VISIBILITY.company}>
-        {analysis.jobOffer.company ?? "—"}
-      </TableCell>
-      <TableCell className={COLUMN_VISIBILITY.location}>
-        {analysis.jobOffer.location ?? "—"}
-      </TableCell>
-      <TableCell className={COLUMN_VISIBILITY.sourceSite}>
-        {sourceSiteLabel(analysis.jobOffer.sourceSite)}
-      </TableCell>
-      <TableCell className={COLUMN_VISIBILITY.postedAt}>
-        {analysis.jobOffer.postedAt
-          ? new Date(analysis.jobOffer.postedAt).toLocaleDateString()
-          : "—"}
-      </TableCell>
-      <TableCell className={COLUMN_VISIBILITY.cvLabel}>
-        {analysis.cvVersion.label}
-      </TableCell>
-      <TableCell className="text-right tabular-nums">
-        {analysis.matchScore ?? "—"}
-      </TableCell>
+      {isColumnVisible("company") && (
+        <TableCell>{analysis.jobOffer.company ?? "—"}</TableCell>
+      )}
+      {isColumnVisible("location") && (
+        <TableCell>{analysis.jobOffer.location ?? "—"}</TableCell>
+      )}
+      {isColumnVisible("sourceSite") && (
+        <TableCell>{sourceSiteLabel(analysis.jobOffer.sourceSite)}</TableCell>
+      )}
+      {isColumnVisible("postedAt") && (
+        <TableCell>
+          {analysis.jobOffer.postedAt
+            ? new Date(analysis.jobOffer.postedAt).toLocaleDateString()
+            : "—"}
+        </TableCell>
+      )}
+      {isColumnVisible("cvLabel") && (
+        <TableCell>{analysis.cvVersion.label}</TableCell>
+      )}
+      {isColumnVisible("matchScore") && (
+        <TableCell className="text-right tabular-nums">
+          {analysis.matchScore ?? "—"}
+        </TableCell>
+      )}
       <TableCell>
         <TrackingBadge
           analysis={analysis}

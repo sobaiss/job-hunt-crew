@@ -217,7 +217,9 @@
       "platformLabel": "Platform",
       "platformAll": "All platforms",
       "locationLabel": "Location",
-      "locationPlaceholder": "City or region"
+      "locationPlaceholder": "City or region",
+      "columnsLabel": "Columns",
+      "columnsReset": "Reset"
     },
     "columns": {
       "title": "Position",

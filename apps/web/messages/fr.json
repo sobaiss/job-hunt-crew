@@ -217,7 +217,9 @@
       "platformLabel": "Plateforme",
       "platformAll": "Toutes les plateformes",
       "locationLabel": "Localisation",
-      "locationPlaceholder": "Ville ou région"
+      "locationPlaceholder": "Ville ou région",
+      "columnsLabel": "Colonnes",
+      "columnsReset": "Réinitialiser"
     },
     "columns": {
       "title": "Poste",

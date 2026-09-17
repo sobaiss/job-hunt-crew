@@ -120,7 +120,8 @@ describe("AnalysesDashboardPage", () => {
     expect(screen.queryByText("None")).not.toBeInTheDocument();
   });
 
-  it("collapses columns in the order CV, Platform, Posted, Company as space runs out, keeping Position/Score/Status/Link always visible (issue #69)", async () => {
+  it("shows every column visible by default, with Position/Status/Link absent from the Columns menu (issue #129)", async () => {
+    const user = userEvent.setup();
     server.use(
       http.get("/api/analyses", () => HttpResponse.json({ analyses: [summary()] })),
     );
@@ -128,30 +129,91 @@ describe("AnalysesDashboardPage", () => {
     renderWithProviders(<AnalysesDashboardPage />);
     await screen.findByText("Backend Engineer");
 
-    const cvHeader = screen.getByRole("columnheader", { name: "CV" });
-    const platformHeader = screen.getByRole("columnheader", { name: "Platform" });
-    const postedHeader = screen.getByRole("columnheader", { name: "Posted" });
-    const companyHeader = screen.getByRole("columnheader", { name: "Company" });
+    for (const name of [
+      "Position",
+      "Company",
+      "Location",
+      "Platform",
+      "Posted",
+      "CV",
+      "Score",
+      "Status",
+      "Link",
+    ]) {
+      expect(screen.getByRole("columnheader", { name })).toBeInTheDocument();
+    }
 
-    // Drops first (needs the widest viewport) -> drops last, in the order the
-    // issue specifies: CV, then Platform, then Posted, then Company.
-    expect(cvHeader.className).toContain("hidden xl:table-cell");
-    expect(platformHeader.className).toContain("hidden lg:table-cell");
-    expect(postedHeader.className).toContain("hidden md:table-cell");
-    expect(companyHeader.className).toContain("hidden sm:table-cell");
-    // The row's cells collapse in step with their header.
-    expect(screen.getByRole("cell", { name: "Acme Inc" }).className).toContain(
-      "hidden sm:table-cell",
+    await user.click(screen.getByRole("button", { name: "Columns" }));
+    for (const name of ["Company", "Location", "Platform", "Posted", "CV", "Score"]) {
+      expect(
+        screen.getByRole("menuitemcheckbox", { name }),
+      ).toBeInTheDocument();
+    }
+    for (const name of ["Position", "Status", "Link"]) {
+      expect(
+        screen.queryByRole("menuitemcheckbox", { name }),
+      ).not.toBeInTheDocument();
+    }
+  });
+
+  it("toggles a column's visibility independently and persists the choice across a remount, restored by Réinitialiser (issue #129)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () => HttpResponse.json({ analyses: [summary()] })),
     );
 
-    for (const header of [
-      screen.getByRole("columnheader", { name: "Position" }),
-      screen.getByRole("columnheader", { name: "Score" }),
-      screen.getByRole("columnheader", { name: "Status" }),
-      screen.getByRole("columnheader", { name: "Link" }),
-    ]) {
-      expect(header.className).not.toMatch(/(^|\s)hidden(\s|$)/);
-    }
+    const { unmount } = renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Backend Engineer");
+
+    await user.click(screen.getByRole("button", { name: "Columns" }));
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "Company" }));
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("columnheader", { name: "Company" })).not.toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Location" })).toBeInTheDocument();
+    expect(screen.queryByText("Acme Inc")).not.toBeInTheDocument();
+
+    unmount();
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Backend Engineer");
+    expect(screen.queryByRole("columnheader", { name: "Company" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Columns" }));
+    await user.click(screen.getByRole("menuitem", { name: "Reset" }));
+    expect(screen.getByRole("columnheader", { name: "Company" })).toBeInTheDocument();
+  });
+
+  it("keeps sorting on a column after it's hidden (issue #129)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            summary({
+              id: "a1",
+              jobOffer: { ...summary().jobOffer, title: "Zeta Offer", company: "Zeta Co" },
+            }),
+            summary({
+              id: "a2",
+              jobOffer: { ...summary().jobOffer, title: "Alpha Offer", company: "Alpha Co" },
+            }),
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Zeta Offer");
+
+    await user.click(screen.getByRole("columnheader", { name: "Company" }).querySelector("button")!);
+    expect(__getUrl()).toContain("sort=company");
+
+    await user.click(screen.getByRole("button", { name: "Columns" }));
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "Company" }));
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("columnheader", { name: "Company" })).not.toBeInTheDocument();
+    expect(__getUrl()).toContain("sort=company");
   });
 
   it("replaces the table with a stacked card per Analysis below ~640px, keeping the same click/select/link behavior (issue #69)", async () => {
