@@ -4,13 +4,14 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
-from py_db.models import User
+from py_db.models import Plan, PlanQuotaDefault, Quotakind, QuotaAuditEvent, QuotaOverride, User
 from py_db.session import make_engine, make_session_factory
-from sqlalchemy import delete
+from sqlalchemy import delete, select, update
 
 from api.main import app
 
 HEADERS = {"X-Internal-Api-Secret": "test-secret"}
+ADMIN_HEADERS = {**HEADERS, "X-User-Plan": "ADMINISTRATEUR"}
 
 
 @pytest.fixture(autouse=True)
@@ -18,7 +19,7 @@ def _secret(monkeypatch):
     monkeypatch.setenv("INTERNAL_API_SECRET", "test-secret")
 
 
-async def _create_user() -> str:
+async def _create_user(plan: Plan = Plan.FREE) -> str:
     user_id = str(uuid.uuid4())
     engine = make_engine()
     try:
@@ -28,6 +29,7 @@ async def _create_user() -> str:
                 User(
                     id=user_id,
                     email=f"{user_id}@example.com",
+                    plan=plan,
                     updatedAt=datetime.now(UTC).replace(tzinfo=None),
                 )
             )
@@ -53,6 +55,101 @@ def user_id():
     uid = asyncio.run(_create_user())
     yield uid
     asyncio.run(_delete_user(uid))
+
+
+@pytest.fixture
+def admin_id():
+    uid = asyncio.run(_create_user(plan=Plan.ADMINISTRATEUR))
+    yield uid
+    asyncio.run(_delete_user(uid))
+
+
+@pytest.fixture
+def target_id():
+    uid = asyncio.run(_create_user())
+    yield uid
+    asyncio.run(_delete_user(uid))
+
+
+def _admin_headers(admin_id: str) -> dict[str, str]:
+    return {**ADMIN_HEADERS, "X-User-Id": admin_id}
+
+
+async def _free_plan_default(kind: Quotakind) -> int | None:
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            return await session.scalar(
+                select(PlanQuotaDefault.limit).where(
+                    PlanQuotaDefault.plan == Plan.FREE, PlanQuotaDefault.quotaKind == kind
+                )
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _set_free_plan_default(kind: Quotakind, limit: int | None) -> None:
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            await session.execute(
+                update(PlanQuotaDefault)
+                .where(PlanQuotaDefault.plan == Plan.FREE, PlanQuotaDefault.quotaKind == kind)
+                .values(limit=limit)
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+
+@pytest.fixture
+def analyses_daily_cap():
+    original = asyncio.run(_free_plan_default(Quotakind.ANALYSES_DAILY))
+
+    def _apply(limit: int | None) -> None:
+        asyncio.run(_set_free_plan_default(Quotakind.ANALYSES_DAILY, limit))
+
+    yield _apply
+    asyncio.run(_set_free_plan_default(Quotakind.ANALYSES_DAILY, original))
+
+
+async def _quota_override(user_id: str, kind: Quotakind) -> QuotaOverride | None:
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            return await session.scalar(
+                select(QuotaOverride).where(
+                    QuotaOverride.userId == user_id, QuotaOverride.quotaKind == kind
+                )
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _audit_events(target_user_id: str) -> list[QuotaAuditEvent]:
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            rows = await session.scalars(
+                select(QuotaAuditEvent).where(QuotaAuditEvent.targetUserId == target_user_id)
+            )
+            return list(rows.all())
+    finally:
+        await engine.dispose()
+
+
+async def _user_plan(user_id: str) -> Plan:
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            return await session.scalar(select(User.plan).where(User.id == user_id))
+    finally:
+        await engine.dispose()
 
 
 def test_admin_route_rejects_caller_with_no_plan_header(user_id):
@@ -90,3 +187,229 @@ def test_admin_route_allows_administrator_plan(user_id):
         )
     assert response.status_code == 200
     assert response.json() == {"userId": user_id, "plan": "ADMINISTRATEUR"}
+
+
+# --- GET /v1/admin/users/{id}/quotas (issue #139) ---
+
+
+def test_get_user_quotas_requires_admin(admin_id, target_id):
+    with TestClient(app) as client:
+        response = client.get(
+            f"/v1/admin/users/{target_id}/quotas",
+            headers={**HEADERS, "X-User-Id": target_id, "X-User-Plan": "FREE"},
+        )
+    assert response.status_code == 403
+
+
+def test_get_user_quotas_404_for_unknown_user(admin_id):
+    with TestClient(app) as client:
+        response = client.get(
+            f"/v1/admin/users/{uuid.uuid4()}/quotas",
+            headers=_admin_headers(admin_id),
+        )
+    assert response.status_code == 404
+
+
+def test_get_user_quotas_reports_plan_defaults_with_no_override(
+    admin_id, target_id, analyses_daily_cap
+):
+    analyses_daily_cap(3)
+    with TestClient(app) as client:
+        response = client.get(
+            f"/v1/admin/users/{target_id}/quotas",
+            headers=_admin_headers(admin_id),
+        )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["userId"] == target_id
+    assert body["plan"] == "FREE"
+    assert body["quotas"]["ANALYSES_DAILY"] == {
+        "cap": 3,
+        "used": 0,
+        "remaining": 3,
+        "hasOverride": False,
+    }
+
+
+def test_get_user_quotas_flags_active_overrides(admin_id, target_id, analyses_daily_cap):
+    analyses_daily_cap(3)
+    with TestClient(app) as client:
+        put_response = client.put(
+            f"/v1/admin/users/{target_id}/quota-overrides/ANALYSES_DAILY",
+            headers=_admin_headers(admin_id),
+            json={"limit": 10},
+        )
+        assert put_response.status_code == 200
+
+        response = client.get(
+            f"/v1/admin/users/{target_id}/quotas",
+            headers=_admin_headers(admin_id),
+        )
+    body = response.json()
+    assert body["quotas"]["ANALYSES_DAILY"] == {
+        "cap": 10,
+        "used": 0,
+        "remaining": 10,
+        "hasOverride": True,
+    }
+
+
+# --- PUT/DELETE /v1/admin/users/{id}/quota-overrides/{kind} (issue #139) ---
+
+
+def test_set_quota_override_requires_admin(admin_id, target_id):
+    with TestClient(app) as client:
+        response = client.put(
+            f"/v1/admin/users/{target_id}/quota-overrides/ANALYSES_DAILY",
+            headers={**HEADERS, "X-User-Id": target_id, "X-User-Plan": "FREE"},
+            json={"limit": 10},
+        )
+    assert response.status_code == 403
+
+
+def test_set_quota_override_creates_row_and_audit_event(admin_id, target_id):
+    with TestClient(app) as client:
+        response = client.put(
+            f"/v1/admin/users/{target_id}/quota-overrides/ANALYSES_DAILY",
+            headers=_admin_headers(admin_id),
+            json={"limit": 25},
+        )
+    assert response.status_code == 200
+    assert response.json() == {"quotaKind": "ANALYSES_DAILY", "limit": 25}
+
+    override = asyncio.run(_quota_override(target_id, Quotakind.ANALYSES_DAILY))
+    assert override is not None
+    assert override.limit == 25
+
+    events = asyncio.run(_audit_events(target_id))
+    assert len(events) == 1
+    assert events[0].actorUserId == admin_id
+    assert events[0].field == "quotaOverride:ANALYSES_DAILY"
+    assert events[0].oldValue is None
+    assert events[0].newValue == "25"
+
+
+def test_set_quota_override_to_null_means_unlimited(admin_id, target_id):
+    with TestClient(app) as client:
+        response = client.put(
+            f"/v1/admin/users/{target_id}/quota-overrides/ANALYSES_DAILY",
+            headers=_admin_headers(admin_id),
+            json={"limit": None},
+        )
+    assert response.status_code == 200
+    assert response.json() == {"quotaKind": "ANALYSES_DAILY", "limit": None}
+
+    override = asyncio.run(_quota_override(target_id, Quotakind.ANALYSES_DAILY))
+    assert override is not None
+    assert override.limit is None
+
+    events = asyncio.run(_audit_events(target_id))
+    assert events[-1].newValue == "null"
+
+
+def test_set_quota_override_updates_existing_row_and_records_old_value(admin_id, target_id):
+    with TestClient(app) as client:
+        client.put(
+            f"/v1/admin/users/{target_id}/quota-overrides/ANALYSES_DAILY",
+            headers=_admin_headers(admin_id),
+            json={"limit": 10},
+        )
+        response = client.put(
+            f"/v1/admin/users/{target_id}/quota-overrides/ANALYSES_DAILY",
+            headers=_admin_headers(admin_id),
+            json={"limit": 20},
+        )
+    assert response.status_code == 200
+
+    override = asyncio.run(_quota_override(target_id, Quotakind.ANALYSES_DAILY))
+    assert override.limit == 20
+
+    events = asyncio.run(_audit_events(target_id))
+    assert len(events) == 2
+    assert events[1].oldValue == "10"
+    assert events[1].newValue == "20"
+
+
+def test_delete_quota_override_clears_row_and_records_audit_event(admin_id, target_id):
+    with TestClient(app) as client:
+        client.put(
+            f"/v1/admin/users/{target_id}/quota-overrides/ANALYSES_DAILY",
+            headers=_admin_headers(admin_id),
+            json={"limit": 10},
+        )
+        response = client.delete(
+            f"/v1/admin/users/{target_id}/quota-overrides/ANALYSES_DAILY",
+            headers=_admin_headers(admin_id),
+        )
+    assert response.status_code == 204
+
+    override = asyncio.run(_quota_override(target_id, Quotakind.ANALYSES_DAILY))
+    assert override is None
+
+    events = asyncio.run(_audit_events(target_id))
+    assert len(events) == 2
+    assert events[1].oldValue == "10"
+    assert events[1].newValue is None
+
+
+def test_delete_quota_override_is_idempotent_when_none_exists(admin_id, target_id):
+    with TestClient(app) as client:
+        response = client.delete(
+            f"/v1/admin/users/{target_id}/quota-overrides/ANALYSES_DAILY",
+            headers=_admin_headers(admin_id),
+        )
+    assert response.status_code == 204
+    assert asyncio.run(_audit_events(target_id)) == []
+
+
+# --- PUT /v1/admin/users/{id}/plan (issue #139) ---
+
+
+def test_set_plan_requires_admin(admin_id, target_id):
+    with TestClient(app) as client:
+        response = client.put(
+            f"/v1/admin/users/{target_id}/plan",
+            headers={**HEADERS, "X-User-Id": target_id, "X-User-Plan": "FREE"},
+            json={"plan": "PREMIUM"},
+        )
+    assert response.status_code == 403
+
+
+def test_set_plan_404_for_unknown_user(admin_id):
+    with TestClient(app) as client:
+        response = client.put(
+            f"/v1/admin/users/{uuid.uuid4()}/plan",
+            headers=_admin_headers(admin_id),
+            json={"plan": "PREMIUM"},
+        )
+    assert response.status_code == 404
+
+
+def test_set_plan_reassigns_plan_and_records_audit_event(admin_id, target_id):
+    with TestClient(app) as client:
+        response = client.put(
+            f"/v1/admin/users/{target_id}/plan",
+            headers=_admin_headers(admin_id),
+            json={"plan": "PREMIUM"},
+        )
+    assert response.status_code == 200
+    assert response.json() == {"userId": target_id, "plan": "PREMIUM"}
+    assert asyncio.run(_user_plan(target_id)) == Plan.PREMIUM
+
+    events = asyncio.run(_audit_events(target_id))
+    assert len(events) == 1
+    assert events[0].actorUserId == admin_id
+    assert events[0].field == "plan"
+    assert events[0].oldValue == "FREE"
+    assert events[0].newValue == "PREMIUM"
+
+
+def test_set_plan_is_a_noop_when_unchanged_and_writes_no_audit_event(admin_id, target_id):
+    with TestClient(app) as client:
+        response = client.put(
+            f"/v1/admin/users/{target_id}/plan",
+            headers=_admin_headers(admin_id),
+            json={"plan": "FREE"},
+        )
+    assert response.status_code == 200
+    assert asyncio.run(_audit_events(target_id)) == []

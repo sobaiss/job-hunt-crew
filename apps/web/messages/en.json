@@ -164,7 +164,20 @@
     "description": "Reachable only by an Administrator.",
     "loading": "Loading…",
     "signedInAs": "Signed in as {userId} ({plan})",
-    "error": "Couldn't confirm admin access."
+    "error": "Couldn't confirm admin access.",
+    "userDetail": {
+      "title": "User {userId}",
+      "loading": "Loading…",
+      "loadError": "Couldn't load this User's quotas.",
+      "planLabel": "Plan",
+      "usage": "{used} of {cap} ({remaining} remaining)",
+      "usageUnlimited": "{used} used — unlimited",
+      "overrideActive": "override active",
+      "overrideInputLabel": "Override for {kind}",
+      "unlimitedPlaceholder": "unlimited",
+      "setOverride": "Set override",
+      "clearOverride": "Clear override"
+    }
   },
   "quotas": {
     "title": "Quotas",

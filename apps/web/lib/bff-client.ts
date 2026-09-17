@@ -86,4 +86,18 @@ export const bff = {
       method: "PATCH",
       body: body === undefined ? undefined : JSON.stringify(body),
     }),
+
+  put: <T>(
+    path: string,
+    body?: unknown,
+    init?: Omit<RequestInit, "method" | "body">,
+  ) =>
+    request<T>(path, {
+      ...init,
+      method: "PUT",
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }),
+
+  delete: <T>(path: string, init?: Omit<RequestInit, "method" | "body">) =>
+    request<T>(path, { ...init, method: "DELETE" }),
 };
