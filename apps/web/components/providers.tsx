@@ -7,6 +7,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { NextIntlClientProvider, type AbstractIntlMessages } from "next-intl";
 
 import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { defaultLocale } from "@/i18n/locale";
 import enMessages from "@/messages/en.json";
 
@@ -61,8 +62,10 @@ export function Providers({
           disableTransitionOnChange
         >
           <QueryClientProvider client={queryClient}>
-            {children}
-            <Toaster />
+            <TooltipProvider>
+              {children}
+              <Toaster />
+            </TooltipProvider>
           </QueryClientProvider>
         </ThemeProvider>
       </NextIntlClientProvider>

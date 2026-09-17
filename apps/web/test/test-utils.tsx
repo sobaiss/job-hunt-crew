@@ -13,6 +13,7 @@ import type { Session } from "next-auth";
 import type { Locale } from "@/i18n/locale";
 import enMessages from "@/messages/en.json";
 import frMessages from "@/messages/fr.json";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 const MESSAGES: Record<Locale, typeof enMessages> = {
   en: enMessages,
@@ -57,7 +58,7 @@ export function renderWithProviders(
         >
           <ThemeProvider attribute="class" defaultTheme={theme} enableSystem>
             <QueryClientProvider client={queryClient}>
-              {children}
+              <TooltipProvider>{children}</TooltipProvider>
             </QueryClientProvider>
           </ThemeProvider>
         </NextIntlClientProvider>

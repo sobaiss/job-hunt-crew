@@ -46,8 +46,10 @@ import {
   trackingStatusOf,
 } from "@/lib/tracking-status";
 import { useEnumLabel } from "@/lib/enum-labels";
+import { SHORT_FIELD_MAX_LENGTH, TITLE_MAX_LENGTH } from "@/lib/text-truncation";
 import { analysisBadgeVariant } from "@/components/analysis-row";
 import { AnalysisQuickView } from "@/components/analysis-quick-view";
+import { TruncatedCell } from "@/components/truncated-cell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -844,13 +846,34 @@ function AnalysisTableRow({
         />
       </TableCell>
       <TableCell className="font-medium">
-        {analysis.jobOffer.title ?? jobOfferFallback}
+        <TruncatedCell
+          text={analysis.jobOffer.title ?? jobOfferFallback}
+          maxLength={TITLE_MAX_LENGTH}
+        />
       </TableCell>
       {isColumnVisible("company") && (
-        <TableCell>{analysis.jobOffer.company ?? "—"}</TableCell>
+        <TableCell>
+          {analysis.jobOffer.company ? (
+            <TruncatedCell
+              text={analysis.jobOffer.company}
+              maxLength={SHORT_FIELD_MAX_LENGTH}
+            />
+          ) : (
+            "—"
+          )}
+        </TableCell>
       )}
       {isColumnVisible("location") && (
-        <TableCell>{analysis.jobOffer.location ?? "—"}</TableCell>
+        <TableCell>
+          {analysis.jobOffer.location ? (
+            <TruncatedCell
+              text={analysis.jobOffer.location}
+              maxLength={SHORT_FIELD_MAX_LENGTH}
+            />
+          ) : (
+            "—"
+          )}
+        </TableCell>
       )}
       {isColumnVisible("sourceSite") && (
         <TableCell>{sourceSiteLabel(analysis.jobOffer.sourceSite)}</TableCell>

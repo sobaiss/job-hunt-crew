@@ -120,6 +120,64 @@ describe("AnalysesDashboardPage", () => {
     expect(screen.queryByText("None")).not.toBeInTheDocument();
   });
 
+  it("truncates a long Poste/Entreprise/Localisation value with an ellipsis and reveals the full text in a tooltip on hover or focus (issue #128)", async () => {
+    const user = userEvent.setup();
+    const longTitle =
+      "Senior Staff Backend Engineer for the Platform Reliability Team";
+    const longCompany = "A Very Long International Holding Company";
+    const longLocation = "San Francisco Bay Area, California";
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            summary({
+              jobOffer: {
+                ...summary().jobOffer,
+                title: longTitle,
+                company: longCompany,
+                location: longLocation,
+              },
+            }),
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+
+    const truncatedTitle = await screen.findByText(
+      `${longTitle.slice(0, 50)}…`,
+    );
+    const truncatedCompany = screen.getByText(`${longCompany.slice(0, 15)}…`);
+    const truncatedLocation = screen.getByText(
+      `${longLocation.slice(0, 15)}…`,
+    );
+    expect(truncatedTitle).toBeInTheDocument();
+    expect(truncatedCompany).toBeInTheDocument();
+    expect(truncatedLocation).toBeInTheDocument();
+
+    truncatedCompany.focus();
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(longCompany);
+
+    await user.hover(truncatedLocation);
+    expect(
+      await screen.findByRole("tooltip", {}, { timeout: 2000 }),
+    ).toHaveTextContent(longLocation);
+  });
+
+  it("renders a Poste/Entreprise/Localisation value at or under its limit unchanged, with no tooltip (issue #128)", async () => {
+    server.use(
+      http.get("/api/analyses", () => HttpResponse.json({ analyses: [summary()] })),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Backend Engineer");
+
+    expect(screen.getByText("Acme Inc")).toBeInTheDocument();
+    expect(screen.getByText("Paris")).toBeInTheDocument();
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
+
   it("shows every column visible by default, with Position/Status/Link absent from the Columns menu (issue #129)", async () => {
     const user = userEvent.setup();
     server.use(
