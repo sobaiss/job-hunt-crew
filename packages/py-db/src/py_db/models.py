@@ -230,6 +230,7 @@ class User(Base):
     email: Mapped[Optional[str]] = mapped_column(Text)
     emailVerified: Mapped[Optional[datetime.datetime]] = mapped_column(TIMESTAMP(precision=3))
     image: Mapped[Optional[str]] = mapped_column(Text)
+    passwordHash: Mapped[Optional[str]] = mapped_column(Text)
 
     Account: Mapped[list['Account']] = relationship('Account', back_populates='User_')
     CVVersion: Mapped[list['CVVersion']] = relationship('CVVersion', back_populates='User_')

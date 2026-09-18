@@ -18,14 +18,17 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 
 /**
- * Sign-in options: Google, LinkedIn, and an email Magic link. All three go
- * through next-auth `signIn`. `callbackUrl` (set by `middleware.ts` when it
- * bounces an unauthenticated request) is carried through so the user returns
- * to the page they originally asked for; it defaults to the Dashboard.
+ * Sign-in options: Google, LinkedIn, an email+password Credentials sign-in,
+ * and an email Magic link — all four go through next-auth `signIn`.
+ * `callbackUrl` (set by `middleware.ts` when it bounces an unauthenticated
+ * request) is carried through so the user returns to the page they
+ * originally asked for; it defaults to the Dashboard.
  *
- * After a Magic link request the form swaps to a "check your inbox" state
- * rather than redirecting. An `?error=` left on the URL by the auth callback,
- * or a failed Magic link request, surfaces a message.
+ * The email field is shared by the password and Magic-link flows below it —
+ * only the password field belongs to the Credentials form. After a Magic
+ * link request the form swaps to a "check your inbox" state rather than
+ * redirecting. An `?error=` left on the URL by the auth callback, a failed
+ * Magic link request, or invalid credentials each surface their own message.
  */
 export function SignInForm() {
   const t = useTranslations("signIn");
@@ -34,12 +37,33 @@ export function SignInForm() {
   const hasCallbackError = searchParams.get("error") != null;
 
   const [email, setEmail] = React.useState("");
+  const [password, setPassword] = React.useState("");
   const [status, setStatus] = React.useState<"idle" | "sending" | "sent">(
     "idle",
   );
   const [submitFailed, setSubmitFailed] = React.useState(false);
+  const [credentialsSubmitting, setCredentialsSubmitting] = React.useState(false);
+  const [credentialsFailed, setCredentialsFailed] = React.useState(false);
 
   const showError = hasCallbackError || submitFailed;
+
+  async function onCredentialsSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    setCredentialsSubmitting(true);
+    setCredentialsFailed(false);
+    const result = await signIn("credentials", {
+      email,
+      password,
+      redirect: false,
+      callbackUrl,
+    });
+    setCredentialsSubmitting(false);
+    if (result?.error) {
+      setCredentialsFailed(true);
+    } else if (result?.url) {
+      window.location.href = result.url;
+    }
+  }
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -103,20 +127,47 @@ export function SignInForm() {
           <Separator className="flex-1" />
         </div>
 
-        <form onSubmit={onSubmit} className="flex flex-col gap-3">
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="email">{t("emailLabel")}</Label>
+          <Input
+            id="email"
+            type="email"
+            required
+            autoComplete="email"
+            placeholder={t("emailPlaceholder")}
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+          />
+        </div>
+
+        <form onSubmit={onCredentialsSubmit} className="flex flex-col gap-3">
           <div className="flex flex-col gap-2">
-            <Label htmlFor="email">{t("emailLabel")}</Label>
+            <Label htmlFor="password">{t("passwordLabel")}</Label>
             <Input
-              id="email"
-              type="email"
-              required
-              autoComplete="email"
-              placeholder={t("emailPlaceholder")}
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
+              id="password"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
             />
           </div>
-          <Button type="submit" disabled={status === "sending"}>
+          {credentialsFailed && (
+            <p role="alert" className="text-sm text-destructive">
+              {t("invalidCredentials")}
+            </p>
+          )}
+          <Button type="submit" disabled={credentialsSubmitting || !password}>
+            {credentialsSubmitting ? t("sending") : t("signInWithPassword")}
+          </Button>
+        </form>
+
+        <form onSubmit={onSubmit}>
+          <Button
+            type="submit"
+            variant="outline"
+            className="w-full"
+            disabled={status === "sending"}
+          >
             {status === "sending" ? t("sending") : t("magicLink")}
           </Button>
         </form>

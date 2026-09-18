@@ -188,7 +188,7 @@ function SidebarAccountMenu() {
           <LocaleSwitch />
         </div>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => void signOut()}>
+        <DropdownMenuItem onSelect={() => void signOut({ callbackUrl: "/" })}>
           {tMenu("signOut")}
         </DropdownMenuItem>
       </DropdownMenuContent>

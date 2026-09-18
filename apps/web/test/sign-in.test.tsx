@@ -64,4 +64,53 @@ describe("SignInForm", () => {
       "Something went wrong while signing in. Please try again.",
     );
   });
+
+  it("signs in with email and password via the credentials provider", async () => {
+    signIn.mockResolvedValue({ ok: true, error: null, url: "/analyses" });
+    searchParams = new URLSearchParams("callbackUrl=%2Fcv-versions");
+    const user = userEvent.setup();
+    renderWithProviders(<SignInForm />);
+
+    await user.type(
+      screen.getByLabelText("Email address"),
+      "candidate@example.com",
+    );
+    await user.type(screen.getByLabelText("Password"), "a real password");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    expect(signIn).toHaveBeenCalledWith("credentials", {
+      email: "candidate@example.com",
+      password: "a real password",
+      redirect: false,
+      callbackUrl: "/cv-versions",
+    });
+  });
+
+  it("shows an error when the password sign-in is rejected", async () => {
+    signIn.mockResolvedValue({ ok: false, error: "CredentialsSignin" });
+    const user = userEvent.setup();
+    renderWithProviders(<SignInForm />);
+
+    await user.type(
+      screen.getByLabelText("Email address"),
+      "candidate@example.com",
+    );
+    await user.type(screen.getByLabelText("Password"), "wrong password");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    expect(
+      await screen.findByText("Invalid email or password."),
+    ).toBeInTheDocument();
+  });
+
+  it("disables the password sign-in button until a password is entered", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<SignInForm />);
+
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeDisabled();
+
+    await user.type(screen.getByLabelText("Password"), "a real password");
+
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeEnabled();
+  });
 });

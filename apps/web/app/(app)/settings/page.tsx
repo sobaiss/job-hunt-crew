@@ -86,7 +86,7 @@ export default function SettingsPage() {
       <section className="flex flex-col gap-4">
         <h2 className="text-sm font-medium text-muted">{t("session.heading")}</h2>
         <div>
-          <Button variant="outline" onClick={() => void signOut()}>
+          <Button variant="outline" onClick={() => void signOut({ callbackUrl: "/" })}>
             {t("session.signOut")}
           </Button>
         </div>

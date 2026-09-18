@@ -1,10 +1,11 @@
 import NextAuth from "next-auth";
 import type { Adapter } from "next-auth/adapters";
+import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 import LinkedIn from "next-auth/providers/linkedin";
 import Nodemailer from "next-auth/providers/nodemailer";
 import { createTransport } from "nodemailer";
-import { internalApiFetch, upsertUser } from "@/lib/internal-api";
+import { internalApiFetch, upsertUser, verifyCredentials } from "@/lib/internal-api";
 
 // Falls back to nodemailer's `jsonTransport` (no real SMTP connection) when
 // EMAIL_SERVER isn't configured, so the magic-link flow is exercisable in
@@ -90,6 +91,27 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
     Google,
     LinkedIn,
+    Credentials({
+      // Email is the login, per the sign-in page's password option. The one
+      // /internal/auth/verify-credentials call covers "unknown email", "no
+      // password set" (an OAuth/magic-link-only User), and "wrong password"
+      // identically, so `authorize` never needs to (and can't) tell them
+      // apart itself. On success it returns just `{ id, email }` — the `jwt`
+      // callback below re-derives userId/plan the same way every other
+      // provider does, via `upsertUser`, rather than special-casing this one.
+      credentials: {
+        email: { label: "Email", type: "email" },
+        password: { label: "Password", type: "password" },
+      },
+      async authorize(credentials) {
+        const email = typeof credentials?.email === "string" ? credentials.email : null;
+        const password = typeof credentials?.password === "string" ? credentials.password : null;
+        if (!email || !password) return null;
+        const verified = await verifyCredentials({ email, password });
+        if (!verified) return null;
+        return { id: verified.userId, email };
+      },
+    }),
     Nodemailer({
       server: emailServer,
       from: process.env.EMAIL_FROM || "Job Hunt Crew <no-reply@job-hunt-crew.local>",

@@ -67,3 +67,20 @@ export async function upsertUser(params: {
   const data = (await res.json()) as { userId: string; plan: Plan };
   return data;
 }
+
+// Backs the Credentials provider's `authorize`. Returns `null` (never
+// throws) on a 401 — invalid email, unknown email, and "no password set" are
+// all the same outcome from here, matching the endpoint's generic response.
+export async function verifyCredentials(params: {
+  email: string;
+  password: string;
+}): Promise<{ userId: string; plan: Plan } | null> {
+  const res = await internalApiFetch("/internal/auth/verify-credentials", {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    return null;
+  }
+  return (await res.json()) as { userId: string; plan: Plan };
+}

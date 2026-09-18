@@ -64,6 +64,6 @@ describe("SettingsPage", () => {
 
     await user.click(screen.getByRole("button", { name: "Sign out" }));
 
-    expect(signOut).toHaveBeenCalled();
+    expect(signOut).toHaveBeenCalledWith({ callbackUrl: "/" });
   });
 });

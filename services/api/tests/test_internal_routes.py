@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fastapi.testclient import TestClient
 from py_db.models import User, t_VerificationToken
+from py_db.passwords import hash_password
 from py_db.session import make_engine, make_session_factory
 from sqlalchemy import delete
 
@@ -24,6 +25,24 @@ async def _delete_user_by_email(email: str) -> None:
         session_factory = make_session_factory(engine)
         async with session_factory() as session:
             await session.execute(delete(User).where(User.email == email))
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+
+async def _create_user(email: str, *, password: str | None = None) -> None:
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            session.add(
+                User(
+                    id=str(uuid.uuid4()),
+                    email=email,
+                    passwordHash=hash_password(password) if password else None,
+                    updatedAt=datetime.now(UTC).replace(tzinfo=None),
+                )
+            )
             await session.commit()
     finally:
         await engine.dispose()
@@ -140,3 +159,64 @@ def test_consume_unknown_verification_token_returns_404():
             headers=HEADERS,
         )
     assert response.status_code == 404
+
+
+def test_verify_credentials_with_correct_password_returns_user():
+    email = f"creds-ok-{uuid.uuid4()}@example.com"
+    try:
+        asyncio.run(_create_user(email, password="correct horse battery staple"))
+        with TestClient(app) as client:
+            response = client.post(
+                "/internal/auth/verify-credentials",
+                json={"email": email, "password": "correct horse battery staple"},
+                headers=HEADERS,
+            )
+        assert response.status_code == 200
+        assert response.json()["userId"]
+        assert response.json()["plan"] == "FREE"
+    finally:
+        asyncio.run(_delete_user_by_email(email))
+
+
+def test_verify_credentials_with_wrong_password_returns_401():
+    email = f"creds-wrong-{uuid.uuid4()}@example.com"
+    try:
+        asyncio.run(_create_user(email, password="correct horse battery staple"))
+        with TestClient(app) as client:
+            response = client.post(
+                "/internal/auth/verify-credentials",
+                json={"email": email, "password": "not the right password"},
+                headers=HEADERS,
+            )
+        assert response.status_code == 401
+    finally:
+        asyncio.run(_delete_user_by_email(email))
+
+
+def test_verify_credentials_unknown_email_returns_401():
+    with TestClient(app) as client:
+        response = client.post(
+            "/internal/auth/verify-credentials",
+            json={"email": f"no-such-user-{uuid.uuid4()}@example.com", "password": "anything"},
+            headers=HEADERS,
+        )
+    assert response.status_code == 401
+
+
+def test_verify_credentials_user_with_no_password_set_returns_401():
+    # An OAuth/magic-link-only User (issue #135's foundation predates this
+    # column existing at all for pre-existing rows) has no passwordHash — the
+    # Credentials provider must reject it exactly like a wrong password, not
+    # error out.
+    email = f"no-password-{uuid.uuid4()}@example.com"
+    try:
+        asyncio.run(_create_user(email, password=None))
+        with TestClient(app) as client:
+            response = client.post(
+                "/internal/auth/verify-credentials",
+                json={"email": email, "password": "anything"},
+                headers=HEADERS,
+            )
+        assert response.status_code == 401
+    finally:
+        asyncio.run(_delete_user_by_email(email))

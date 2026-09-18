@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from py_db.models import User, t_VerificationToken
+from py_db.passwords import verify_password_or_dummy
 from pydantic import BaseModel
 from sqlalchemy import delete, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -60,6 +61,35 @@ async def upsert_user(
         user.updatedAt = _now()
     await session.commit()
     return UpsertUserResponse(userId=user.id, plan=user.plan.value)
+
+
+class VerifyCredentialsRequest(BaseModel):
+    email: str
+    password: str
+
+
+class VerifyCredentialsResponse(BaseModel):
+    userId: str
+    plan: str
+
+
+@router.post("/auth/verify-credentials", response_model=VerifyCredentialsResponse)
+async def verify_credentials(
+    req: VerifyCredentialsRequest, session: AsyncSession = Depends(get_session)
+) -> VerifyCredentialsResponse:
+    """Backs NextAuth's Credentials provider. One generic 401 covers "no such
+    email", "email exists but has no password set" (an OAuth/magic-link-only
+    User), and "wrong password" alike — never distinguishing them in either
+    the response or the response time (`verify_password_or_dummy` always does
+    real bcrypt work), so a failed attempt can't be used to enumerate which
+    emails have an account.
+    """
+    user = await session.scalar(select(User).where(User.email == req.email))
+    password_hash = user.passwordHash if user is not None else None
+    if not verify_password_or_dummy(req.password, password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    assert user is not None  # verify_password_or_dummy only returns True for a real hash
+    return VerifyCredentialsResponse(userId=user.id, plan=user.plan.value)
 
 
 class VerificationTokenRequest(BaseModel):
