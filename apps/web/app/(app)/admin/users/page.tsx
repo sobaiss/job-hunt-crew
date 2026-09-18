@@ -2,6 +2,7 @@
 
 import { Suspense, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { useTranslations } from "next-intl";
 
 import {
@@ -12,6 +13,7 @@ import {
   useClearQuotaOverride,
   useSetPlanDefault,
   useSetQuotaOverride,
+  useSetUserBlocked,
   useSetUserPlan,
   type AdminUserRow,
 } from "@/hooks/use-admin";
@@ -31,7 +33,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SortableHead } from "@/components/sortable-head";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 const SELECT_CLASS =
   "flex h-9 w-auto rounded-md border border-border bg-background px-3 py-1 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50";
@@ -190,13 +192,97 @@ function OverrideEditor({
 }
 
 /**
+ * Block/unblock action (issue #148), shared between the table row's quick
+ * action and the User panel — both ask for inline confirmation before
+ * applying, and both disable the action for the caller's own row/panel so an
+ * Administrator can never block themselves (also enforced server-side).
+ */
+function BlockUnblockAction({
+  userId,
+  blocked,
+  isSelf,
+  onStopPropagation,
+}: {
+  userId: string;
+  blocked: boolean;
+  isSelf: boolean;
+  onStopPropagation?: boolean;
+}) {
+  const t = useTranslations("admin.userPanel");
+  const [confirming, setConfirming] = useState(false);
+  const setBlocked = useSetUserBlocked(userId);
+
+  const stop = (event: { stopPropagation: () => void }) => {
+    if (onStopPropagation) event.stopPropagation();
+  };
+
+  if (confirming) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="text-sm text-muted">
+          {blocked ? t("unblockConfirm") : t("blockConfirm")}
+        </span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={setBlocked.isPending}
+          onClick={(event) => {
+            stop(event);
+            setBlocked.mutate(!blocked, { onSuccess: () => setConfirming(false) });
+          }}
+        >
+          {t("confirmAction")}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={setBlocked.isPending}
+          onClick={(event) => {
+            stop(event);
+            setConfirming(false);
+          }}
+        >
+          {t("cancelAction")}
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      disabled={isSelf}
+      title={isSelf ? t("selfActionDisabled") : undefined}
+      onClick={(event) => {
+        stop(event);
+        setConfirming(true);
+      }}
+    >
+      {blocked ? t("unblockAction") : t("blockAction")}
+    </Button>
+  );
+}
+
+/**
  * The User panel (issue #147): a slide-over replacing the deleted dedicated
  * per-user page (issue #139), reachable via the `?user=<id>` URL param so it
  * stays shareable. Shows the User's read-only info, lets an Administrator
  * reassign their Plan, and carries forward the per-QuotaKind usage +
  * override controls unchanged from the old page.
  */
-function UserPanel({ userId, onClose }: { userId: string | null; onClose: () => void }) {
+function UserPanel({
+  userId,
+  selfId,
+  onClose,
+}: {
+  userId: string | null;
+  selfId: string | undefined;
+  onClose: () => void;
+}) {
   const t = useTranslations("admin.userPanel");
   const { data, isPending, isError } = useAdminUserQuotas(userId ?? "");
   const setPlan = useSetUserPlan(userId ?? "");
@@ -233,6 +319,14 @@ function UserPanel({ userId, onClose }: { userId: string | null; onClose: () => 
                     <dt className="text-muted">{t("blockedLabel")}</dt>
                     <dd>{data.blocked ? t("yes") : t("no")}</dd>
                   </dl>
+                </section>
+
+                <section className="flex items-center gap-2">
+                  <BlockUnblockAction
+                    userId={userId}
+                    blocked={data.blocked}
+                    isSelf={userId === selfId}
+                  />
                 </section>
 
                 <section className="flex items-center gap-2">
@@ -295,6 +389,8 @@ function UsersTable() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const { data: session } = useSession();
+  const selfId = session?.user?.id;
 
   const state = useMemo(() => parseAdminUsersTableState(searchParams), [searchParams]);
   const openUserId = searchParams.get("user");
@@ -433,6 +529,7 @@ function UsersTable() {
                   sort={state.sort}
                   onSort={toggleSort}
                 />
+                <TableHead>{t("columns.actions")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -455,6 +552,14 @@ function UsersTable() {
                   <TableCell>{user.isAdmin ? t("adminYesOption") : "—"}</TableCell>
                   <TableCell>{user.blocked ? t("blockedYesOption") : "—"}</TableCell>
                   <TableCell>{new Date(user.createdAt).toLocaleDateString()}</TableCell>
+                  <TableCell>
+                    <BlockUnblockAction
+                      userId={user.id}
+                      blocked={user.blocked}
+                      isSelf={user.id === selfId}
+                      onStopPropagation
+                    />
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -508,7 +613,7 @@ function UsersTable() {
         </>
       )}
 
-      <UserPanel userId={openUserId} onClose={closeUser} />
+      <UserPanel userId={openUserId} selfId={selfId} onClose={closeUser} />
     </div>
   );
 }

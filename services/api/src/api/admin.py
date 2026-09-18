@@ -293,6 +293,53 @@ async def set_user_plan(
     return SetPlanResponse(userId=target.id, plan=target.plan.value)
 
 
+class SetUserBlockedRequest(BaseModel):
+    blocked: bool
+
+
+class SetUserBlockedResponse(BaseModel):
+    userId: str
+    blocked: bool
+
+
+@router.put("/users/{user_id}/blocked", response_model=SetUserBlockedResponse)
+async def set_user_blocked(
+    user_id: str,
+    req: SetUserBlockedRequest,
+    admin_id: str = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> SetUserBlockedResponse:
+    """Blocks or unblocks `user_id` (issue #148) — enforced live on every
+    subsequent `/v1/*` request by `require_user_id` (#144/docs/adr/0016), not
+    just gated here. An Administrator can never block themselves, since that
+    would deny their own access with no way back in. A no-op request (the
+    User already in the requested state) writes no `AdminAuditEvent`, matching
+    `set_user_plan`'s idempotency.
+    """
+    if user_id == admin_id:
+        raise HTTPException(status_code=400, detail="Administrators cannot block themselves")
+
+    target = await _get_target_user(session, user_id)
+    currently_blocked = target.blockedAt is not None
+
+    if req.blocked != currently_blocked:
+        old_value = target.blockedAt.isoformat() if target.blockedAt else "null"
+        target.blockedAt = _now() if req.blocked else None
+        target.updatedAt = _now()
+        new_value = target.blockedAt.isoformat() if target.blockedAt else "null"
+        record_admin_audit_event(
+            session,
+            actor_user_id=admin_id,
+            target_user_id=user_id,
+            field="blockedAt",
+            old_value=old_value,
+            new_value=new_value,
+        )
+        await session.commit()
+
+    return SetUserBlockedResponse(userId=target.id, blocked=target.blockedAt is not None)
+
+
 class PlanQuotaDefaultItem(BaseModel):
     plan: str
     quotaKind: str

@@ -195,7 +195,14 @@
       "overrideInputLabel": "Override for {kind}",
       "unlimitedPlaceholder": "unlimited",
       "setOverride": "Set override",
-      "clearOverride": "Clear override"
+      "clearOverride": "Clear override",
+      "blockAction": "Block",
+      "unblockAction": "Unblock",
+      "blockConfirm": "Block this User?",
+      "unblockConfirm": "Unblock this User?",
+      "confirmAction": "Confirm",
+      "cancelAction": "Cancel",
+      "selfActionDisabled": "You cannot block yourself"
     },
     "users": {
       "title": "Reporting",
@@ -245,7 +252,8 @@
           "plan": "Plan",
           "isAdmin": "Admin",
           "blocked": "Blocked",
-          "createdAt": "Created"
+          "createdAt": "Created",
+          "actions": "Actions"
         },
         "pagination": {
           "pageSizeLabel": "Rows per page",

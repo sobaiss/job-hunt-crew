@@ -81,6 +81,22 @@ export function useSetUserPlan(userId: string) {
   });
 }
 
+// Backs the block/unblock action on the Admin users table row and the User
+// panel (issue #148).
+export function useSetUserBlocked(userId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (blocked: boolean) =>
+      bff.put<{ userId: string; blocked: boolean }>(`/admin/users/${userId}/blocked`, {
+        blocked,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin-user-quotas", userId] });
+      void queryClient.invalidateQueries({ queryKey: ["admin-users"] });
+    },
+  });
+}
+
 // Backs the admin reporting screen (issue #140): the plan-defaults editor,
 // the per-user usage table with its at/over-limit filter, and the global
 // stats panel.

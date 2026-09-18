@@ -214,6 +214,17 @@ async def _user_plan(user_id: str) -> Plan:
         await engine.dispose()
 
 
+async def _user_blocked(user_id: str) -> bool:
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            blocked_at = await session.scalar(select(User.blockedAt).where(User.id == user_id))
+            return blocked_at is not None
+    finally:
+        await engine.dispose()
+
+
 def test_admin_route_rejects_caller_with_no_is_admin_header(user_id):
     with TestClient(app) as client:
         response = client.get(
@@ -491,6 +502,94 @@ def test_set_plan_is_a_noop_when_unchanged_and_writes_no_audit_event(admin_id, t
             f"/v1/admin/users/{target_id}/plan",
             headers=_admin_headers(admin_id),
             json={"plan": "FREE"},
+        )
+    assert response.status_code == 200
+    assert asyncio.run(_audit_events(target_id)) == []
+
+
+# --- PUT /v1/admin/users/{id}/blocked (issue #148) ---
+
+
+def test_set_blocked_requires_admin(admin_id, target_id):
+    with TestClient(app) as client:
+        response = client.put(
+            f"/v1/admin/users/{target_id}/blocked",
+            headers={**HEADERS, "X-User-Id": target_id, "X-User-Is-Admin": "false"},
+            json={"blocked": True},
+        )
+    assert response.status_code == 403
+
+
+def test_set_blocked_404_for_unknown_user(admin_id):
+    with TestClient(app) as client:
+        response = client.put(
+            f"/v1/admin/users/{uuid.uuid4()}/blocked",
+            headers=_admin_headers(admin_id),
+            json={"blocked": True},
+        )
+    assert response.status_code == 404
+
+
+def test_set_blocked_rejects_self_block(admin_id):
+    with TestClient(app) as client:
+        response = client.put(
+            f"/v1/admin/users/{admin_id}/blocked",
+            headers=_admin_headers(admin_id),
+            json={"blocked": True},
+        )
+    assert response.status_code == 400
+    assert asyncio.run(_user_blocked(admin_id)) is False
+
+
+def test_set_blocked_blocks_and_records_audit_event(admin_id, target_id):
+    with TestClient(app) as client:
+        response = client.put(
+            f"/v1/admin/users/{target_id}/blocked",
+            headers=_admin_headers(admin_id),
+            json={"blocked": True},
+        )
+    assert response.status_code == 200
+    assert response.json() == {"userId": target_id, "blocked": True}
+    assert asyncio.run(_user_blocked(target_id)) is True
+
+    events = asyncio.run(_audit_events(target_id))
+    assert len(events) == 1
+    assert events[0].actorUserId == admin_id
+    assert events[0].field == "blockedAt"
+    assert events[0].oldValue == "null"
+    assert events[0].newValue is not None and events[0].newValue != "null"
+
+
+def test_set_blocked_unblocks_and_records_audit_event(admin_id, target_id):
+    with TestClient(app) as client:
+        first = client.put(
+            f"/v1/admin/users/{target_id}/blocked",
+            headers=_admin_headers(admin_id),
+            json={"blocked": True},
+        )
+        assert first.status_code == 200
+
+        response = client.put(
+            f"/v1/admin/users/{target_id}/blocked",
+            headers=_admin_headers(admin_id),
+            json={"blocked": False},
+        )
+    assert response.status_code == 200
+    assert response.json() == {"userId": target_id, "blocked": False}
+    assert asyncio.run(_user_blocked(target_id)) is False
+
+    events = asyncio.run(_audit_events(target_id))
+    assert len(events) == 2
+    assert events[1].oldValue is not None and events[1].oldValue != "null"
+    assert events[1].newValue == "null"
+
+
+def test_set_blocked_is_a_noop_when_unchanged_and_writes_no_audit_event(admin_id, target_id):
+    with TestClient(app) as client:
+        response = client.put(
+            f"/v1/admin/users/{target_id}/blocked",
+            headers=_admin_headers(admin_id),
+            json={"blocked": False},
         )
     assert response.status_code == 200
     assert asyncio.run(_audit_events(target_id)) == []

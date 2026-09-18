@@ -195,7 +195,14 @@
       "overrideInputLabel": "Dérogation pour {kind}",
       "unlimitedPlaceholder": "illimité",
       "setOverride": "Appliquer la dérogation",
-      "clearOverride": "Supprimer la dérogation"
+      "clearOverride": "Supprimer la dérogation",
+      "blockAction": "Bloquer",
+      "unblockAction": "Débloquer",
+      "blockConfirm": "Bloquer cet utilisateur ?",
+      "unblockConfirm": "Débloquer cet utilisateur ?",
+      "confirmAction": "Confirmer",
+      "cancelAction": "Annuler",
+      "selfActionDisabled": "Vous ne pouvez pas vous bloquer vous-même"
     },
     "users": {
       "title": "Rapports",
@@ -245,7 +252,8 @@
           "plan": "Forfait",
           "isAdmin": "Administrateur",
           "blocked": "Bloqué",
-          "createdAt": "Créé le"
+          "createdAt": "Créé le",
+          "actions": "Actions"
         },
         "pagination": {
           "pageSizeLabel": "Lignes par page",

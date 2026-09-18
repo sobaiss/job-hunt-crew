@@ -1,11 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
+import type { Session } from "next-auth";
 
 import { renderWithProviders, screen, within } from "./test-utils";
 import { server } from "./msw/server";
 import { __setUrl } from "./next-navigation-mock";
 import AdminUsersPage from "@/app/(app)/admin/users/page";
+
+const ADMIN_SESSION: Session = {
+  expires: "2999-01-01T00:00:00.000Z",
+  user: { id: "admin-1", name: "Admin", email: "admin@example.com", isAdmin: true },
+};
 
 vi.mock("next/navigation", async () => {
   const mock = await vi.importActual<typeof import("./next-navigation-mock")>(
@@ -211,6 +217,62 @@ describe("AdminUsersPage", () => {
     renderWithProviders(<AdminUsersPage />);
 
     expect(await screen.findByText("No Users yet.")).toBeInTheDocument();
+  });
+
+  it("blocks a User from the table row after inline confirmation", async () => {
+    mockCommon();
+    let capturedBody: unknown;
+    server.use(
+      http.get("/api/admin/users", () => HttpResponse.json(usersListResponse())),
+      http.put("/api/admin/users/user-1/blocked", async ({ request }) => {
+        capturedBody = await request.json();
+        return HttpResponse.json({ userId: "user-1", blocked: true });
+      }),
+    );
+
+    renderWithProviders(<AdminUsersPage />, { session: ADMIN_SESSION });
+    await screen.findByText("Ada Lovelace");
+
+    await userEvent.click(screen.getByRole("button", { name: "Block" }));
+    await userEvent.click(screen.getByRole("button", { name: "Confirm" }));
+
+    expect(capturedBody).toEqual({ blocked: true });
+  });
+
+  it("disables the block action for the Administrator's own row", async () => {
+    mockCommon();
+    server.use(
+      http.get("/api/admin/users", () =>
+        HttpResponse.json(usersListResponse({ users: [{ ...usersListResponse().users[0], id: "admin-1" }] })),
+      ),
+    );
+
+    renderWithProviders(<AdminUsersPage />, { session: ADMIN_SESSION });
+    await screen.findByText("Ada Lovelace");
+
+    expect(screen.getByRole("button", { name: "Block" })).toBeDisabled();
+  });
+
+  it("blocks a User from the User panel after inline confirmation", async () => {
+    mockCommon();
+    let capturedBody: unknown;
+    server.use(
+      http.get("/api/admin/users", () => HttpResponse.json(usersListResponse())),
+      http.get("/api/admin/users/user-1/quotas", () => HttpResponse.json(quotasResponse())),
+      http.put("/api/admin/users/user-1/blocked", async ({ request }) => {
+        capturedBody = await request.json();
+        return HttpResponse.json({ userId: "user-1", blocked: true });
+      }),
+    );
+
+    renderWithProviders(<AdminUsersPage />, { session: ADMIN_SESSION });
+    await userEvent.click(await screen.findByText("Ada Lovelace"));
+
+    const panel = (await screen.findByText("User user-1")).closest('[role="dialog"]') as HTMLElement;
+    await userEvent.click(within(panel).getByRole("button", { name: "Block" }));
+    await userEvent.click(within(panel).getByRole("button", { name: "Confirm" }));
+
+    expect(capturedBody).toEqual({ blocked: true });
   });
 
   it("saves an edited plan-default limit", async () => {
