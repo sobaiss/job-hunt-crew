@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { bff } from "@/lib/bff-client";
+import { adminUsersTableStateToQuery, type AdminUsersTableState } from "@/lib/admin-users-filters";
 
 // Backs the bare Admin area landing page (issue #138) — confirms the
 // session's Plan actually cleared services/api's `require_admin` end to end.
@@ -27,7 +28,12 @@ export type AdminQuotaUsage = {
 
 export type AdminUserQuotas = {
   userId: string;
+  name: string | null;
+  email: string | null;
   plan: string;
+  isAdmin: boolean;
+  blocked: boolean;
+  createdAt: string;
   quotas: Record<string, AdminQuotaUsage>;
 };
 
@@ -70,6 +76,7 @@ export function useSetUserPlan(userId: string) {
       bff.put<{ userId: string; plan: string }>(`/admin/users/${userId}/plan`, { plan }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["admin-user-quotas", userId] });
+      void queryClient.invalidateQueries({ queryKey: ["admin-users"] });
     },
   });
 }
@@ -98,21 +105,32 @@ export function useSetPlanDefault() {
   });
 }
 
-export type AdminUserSummary = {
-  userId: string;
+// Backs the Admin users table (issue #147): a lightweight row per User —
+// Plan reassignment, quotas and overrides now live only on the User panel
+// (useAdminUserQuotas above), reached via the row's id.
+export type AdminUserRow = {
+  id: string;
+  name: string | null;
   email: string | null;
   plan: string;
-  quotas: Record<string, AdminQuotaUsage>;
+  isAdmin: boolean;
+  blocked: boolean;
   atOrOverLimit: boolean;
+  createdAt: string;
 };
 
-export function useAdminUsers(atOrOverLimit: boolean) {
+export type AdminUsersListResponse = {
+  users: AdminUserRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
+export function useAdminUsers(state: AdminUsersTableState) {
+  const qs = adminUsersTableStateToQuery(state).toString();
   return useQuery({
-    queryKey: ["admin-users", atOrOverLimit],
-    queryFn: () =>
-      bff.get<{ users: AdminUserSummary[] }>(
-        `/admin/users${atOrOverLimit ? "?atOrOverLimit=true" : ""}`,
-      ),
+    queryKey: ["admin-users", qs],
+    queryFn: () => bff.get<AdminUsersListResponse>(`/admin/users?${qs}`),
   });
 }
 

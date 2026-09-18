@@ -1,18 +1,40 @@
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
+import { Suspense, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 
 import {
   useAdminPlanDefaults,
   useAdminStats,
+  useAdminUserQuotas,
   useAdminUsers,
+  useClearQuotaOverride,
   useSetPlanDefault,
+  useSetQuotaOverride,
+  useSetUserPlan,
+  type AdminUserRow,
 } from "@/hooks/use-admin";
+import {
+  ADMIN_USER_PLANS,
+  ADMIN_USERS_PAGE_SIZES,
+  adminUsersTableStateToParams,
+  parseAdminUsersTableState,
+  type AdminBooleanFilter,
+  type AdminUsersPageSize,
+  type AdminUsersSortColumn,
+  type AdminUsersTableState,
+} from "@/lib/admin-users-filters";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { SortableHead } from "@/components/sortable-head";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
+
+const SELECT_CLASS =
+  "flex h-9 w-auto rounded-md border border-border bg-background px-3 py-1 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50";
 
 const KIND_ORDER = [
   "ACTIVE_SCOUTS",
@@ -20,6 +42,8 @@ const KIND_ORDER = [
   "ANALYSES_MONTHLY",
   "DOCUMENTS_DAILY",
 ] as const;
+
+const PLAN_VALUES = ["FREE", "STANDARD", "PREMIUM", "ADMINISTRATEUR"] as const;
 
 function StatsPanel() {
   const t = useTranslations("admin.users.stats");
@@ -116,94 +140,411 @@ function PlanDefaultsEditor() {
   );
 }
 
-function UsersTable({ atOrOverLimit }: { atOrOverLimit: boolean }) {
-  const t = useTranslations("admin.users.table");
-  const { data, isPending, isError } = useAdminUsers(atOrOverLimit);
-
-  if (isPending) return <p className="text-sm text-muted">{t("loading")}</p>;
-  if (isError || !data) {
-    return (
-      <p role="alert" className="text-sm text-destructive">
-        {t("loadError")}
-      </p>
-    );
-  }
+function OverrideEditor({
+  userId,
+  kind,
+  cap,
+  hasOverride,
+}: {
+  userId: string;
+  kind: string;
+  cap: number | null;
+  hasOverride: boolean;
+}) {
+  const t = useTranslations("admin.userPanel");
+  const [draft, setDraft] = useState(cap == null ? "" : String(cap));
+  const setOverride = useSetQuotaOverride(userId);
+  const clearOverride = useClearQuotaOverride(userId);
 
   return (
-    <div className="flex flex-col gap-2">
-      {data.users.map((user) => (
-        <Link
-          key={user.userId}
-          href={`/admin/users/${user.userId}`}
-          className="flex flex-col gap-2 rounded-md border border-border p-3 hover:bg-accent/5 sm:flex-row sm:items-center sm:justify-between"
+    <div className="flex items-center gap-2">
+      <Input
+        aria-label={t("overrideInputLabel", { kind })}
+        className="h-8 w-24"
+        placeholder={t("unlimitedPlaceholder")}
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+      />
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={setOverride.isPending}
+        onClick={() =>
+          setOverride.mutate({ kind, limit: draft.trim() === "" ? null : Number(draft) })
+        }
+      >
+        {t("setOverride")}
+      </Button>
+      {hasOverride && (
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={clearOverride.isPending}
+          onClick={() => clearOverride.mutate(kind)}
         >
-          <div className="flex flex-col gap-0.5">
-            <span className="text-sm font-medium">{user.userId}</span>
-            <span className="text-xs text-muted">
-              {user.email ?? t("noEmail")} · {user.plan}
-            </span>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            {KIND_ORDER.map((kind) => {
-              const usage = user.quotas[kind];
-              return (
-                <span key={kind} className="text-xs text-muted">
-                  {kind}: {usage.used}
-                  {usage.cap == null ? "" : `/${usage.cap}`}
-                </span>
-              );
-            })}
-            {user.atOrOverLimit && (
-              <span className="text-xs font-medium text-destructive">{t("atOrOverLimit")}</span>
-            )}
-          </div>
-        </Link>
-      ))}
+          {t("clearOverride")}
+        </Button>
+      )}
     </div>
   );
 }
 
 /**
- * The admin reporting screen (issue #140): global aggregate usage stats, a
- * per-user table (with an at/over-any-limit filter) linking into #139's
- * per-user detail screen, and the Plan-defaults editor. Editing a default
- * here takes effect for every non-overridden User on that Plan on their very
- * next `effective_quota` read — no backfill, no re-fetch needed on this page.
+ * The User panel (issue #147): a slide-over replacing the deleted dedicated
+ * per-user page (issue #139), reachable via the `?user=<id>` URL param so it
+ * stays shareable. Shows the User's read-only info, lets an Administrator
+ * reassign their Plan, and carries forward the per-QuotaKind usage +
+ * override controls unchanged from the old page.
+ */
+function UserPanel({ userId, onClose }: { userId: string | null; onClose: () => void }) {
+  const t = useTranslations("admin.userPanel");
+  const { data, isPending, isError } = useAdminUserQuotas(userId ?? "");
+  const setPlan = useSetUserPlan(userId ?? "");
+
+  return (
+    <Sheet open={userId !== null} onOpenChange={(open) => !open && onClose()}>
+      <SheetContent className="w-full overflow-y-auto sm:max-w-md">
+        {userId && (
+          <>
+            <SheetHeader>
+              <SheetTitle>{t("title", { userId })}</SheetTitle>
+            </SheetHeader>
+
+            {isPending && <p className="text-sm text-muted">{t("loading")}</p>}
+            {(isError || (!isPending && !data)) && (
+              <p role="alert" className="text-sm text-destructive">
+                {t("loadError")}
+              </p>
+            )}
+
+            {data && (
+              <div className="flex flex-col gap-6">
+                <section className="flex flex-col gap-2">
+                  <h2 className="text-sm font-semibold">{t("infoTitle")}</h2>
+                  <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+                    <dt className="text-muted">{t("nameLabel")}</dt>
+                    <dd>{data.name ?? t("noName")}</dd>
+                    <dt className="text-muted">{t("emailLabel")}</dt>
+                    <dd>{data.email ?? t("noName")}</dd>
+                    <dt className="text-muted">{t("createdAtLabel")}</dt>
+                    <dd>{new Date(data.createdAt).toLocaleDateString()}</dd>
+                    <dt className="text-muted">{t("isAdminLabel")}</dt>
+                    <dd>{data.isAdmin ? t("yes") : t("no")}</dd>
+                    <dt className="text-muted">{t("blockedLabel")}</dt>
+                    <dd>{data.blocked ? t("yes") : t("no")}</dd>
+                  </dl>
+                </section>
+
+                <section className="flex items-center gap-2">
+                  <span className="text-sm text-muted">{t("planLabel")}</span>
+                  <select
+                    className={SELECT_CLASS}
+                    aria-label={t("planLabel")}
+                    value={data.plan}
+                    disabled={setPlan.isPending}
+                    onChange={(event) => setPlan.mutate(event.target.value)}
+                  >
+                    {PLAN_VALUES.map((plan) => (
+                      <option key={plan} value={plan}>
+                        {plan}
+                      </option>
+                    ))}
+                  </select>
+                </section>
+
+                <section className="flex flex-col gap-2">
+                  <h2 className="text-sm font-semibold">{t("quotasTitle")}</h2>
+                  <div className="flex flex-col gap-5">
+                    {KIND_ORDER.map((kind) => {
+                      const usage = data.quotas[kind];
+                      return (
+                        <div key={kind} className="flex flex-col gap-1.5">
+                          <p className="text-sm font-medium">{kind}</p>
+                          <p className="text-xs text-muted">
+                            {usage.cap == null
+                              ? t("usageUnlimited", { used: usage.used })
+                              : t("usage", {
+                                  used: usage.used,
+                                  cap: usage.cap,
+                                  remaining: usage.remaining ?? 0,
+                                })}
+                            {usage.hasOverride ? ` · ${t("overrideActive")}` : ""}
+                          </p>
+                          <OverrideEditor
+                            userId={userId}
+                            kind={kind}
+                            cap={usage.cap}
+                            hasOverride={usage.hasOverride}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              </div>
+            )}
+          </>
+        )}
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+function UsersTable() {
+  const t = useTranslations("admin.users.table");
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  const state = useMemo(() => parseAdminUsersTableState(searchParams), [searchParams]);
+  const openUserId = searchParams.get("user");
+
+  const { data, isPending, isError } = useAdminUsers(state);
+
+  const updateState = (patch: Partial<AdminUsersTableState>) => {
+    const next: AdminUsersTableState = { ...state, ...patch, page: patch.page ?? 1 };
+    const params = adminUsersTableStateToParams(next);
+    if (openUserId) params.set("user", openUserId);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  };
+
+  const openUser = (id: string) => {
+    const params = adminUsersTableStateToParams(state);
+    params.set("user", id);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  };
+
+  const closeUser = () => {
+    const params = adminUsersTableStateToParams(state);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  };
+
+  const toggleSort = (column: AdminUsersSortColumn) => {
+    updateState({
+      sort:
+        state.sort.column === column
+          ? { column, direction: state.sort.direction === "asc" ? "desc" : "asc" }
+          : { column, direction: "asc" },
+    });
+  };
+
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / state.pageSize));
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="admin-users-search">{t("searchLabel")}</Label>
+          <Input
+            id="admin-users-search"
+            type="search"
+            placeholder={t("searchPlaceholder")}
+            value={state.search}
+            onChange={(event) => updateState({ search: event.target.value })}
+          />
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="admin-users-plan">{t("planLabel")}</Label>
+          <select
+            id="admin-users-plan"
+            className={SELECT_CLASS + " w-full"}
+            value={state.plan}
+            onChange={(event) =>
+              updateState({ plan: event.target.value as AdminUsersTableState["plan"] })
+            }
+          >
+            <option value="all">{t("planAllOption")}</option>
+            {ADMIN_USER_PLANS.map((plan) => (
+              <option key={plan} value={plan}>
+                {plan}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="admin-users-is-admin">{t("adminFilterLabel")}</Label>
+          <select
+            id="admin-users-is-admin"
+            className={SELECT_CLASS + " w-full"}
+            value={state.isAdmin}
+            onChange={(event) =>
+              updateState({ isAdmin: event.target.value as AdminBooleanFilter })
+            }
+          >
+            <option value="all">{t("adminAllOption")}</option>
+            <option value="true">{t("adminYesOption")}</option>
+            <option value="false">{t("adminNoOption")}</option>
+          </select>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="admin-users-blocked">{t("blockedFilterLabel")}</Label>
+          <select
+            id="admin-users-blocked"
+            className={SELECT_CLASS + " w-full"}
+            value={state.blocked}
+            onChange={(event) =>
+              updateState({ blocked: event.target.value as AdminBooleanFilter })
+            }
+          >
+            <option value="all">{t("blockedAllOption")}</option>
+            <option value="true">{t("blockedYesOption")}</option>
+            <option value="false">{t("blockedNoOption")}</option>
+          </select>
+        </div>
+      </div>
+
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={state.atOrOverLimit}
+          onChange={(event) => updateState({ atOrOverLimit: event.target.checked })}
+          aria-label={t("atOrOverLimitLabel")}
+        />
+        {t("atOrOverLimitLabel")}
+      </label>
+
+      {isPending && <p className="text-sm text-muted">{t("loading")}</p>}
+      {isError && (
+        <p role="alert" className="text-sm text-destructive">
+          {t("loadError")}
+        </p>
+      )}
+      {data && data.users.length === 0 && (
+        <p className="text-sm text-muted">{total === 0 ? t("empty") : t("noMatches")}</p>
+      )}
+
+      {data && data.users.length > 0 && (
+        <>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <SortableHead column="name" label={t("columns.name")} sort={state.sort} onSort={toggleSort} />
+                <SortableHead column="email" label={t("columns.email")} sort={state.sort} onSort={toggleSort} />
+                <SortableHead column="plan" label={t("columns.plan")} sort={state.sort} onSort={toggleSort} />
+                <SortableHead column="isAdmin" label={t("columns.isAdmin")} sort={state.sort} onSort={toggleSort} />
+                <SortableHead column="blocked" label={t("columns.blocked")} sort={state.sort} onSort={toggleSort} />
+                <SortableHead
+                  column="createdAt"
+                  label={t("columns.createdAt")}
+                  sort={state.sort}
+                  onSort={toggleSort}
+                />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data.users.map((user: AdminUserRow) => (
+                <TableRow
+                  key={user.id}
+                  tabIndex={0}
+                  className="cursor-pointer"
+                  onClick={() => openUser(user.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      openUser(user.id);
+                    }
+                  }}
+                >
+                  <TableCell className="font-medium">{user.name ?? t("noName")}</TableCell>
+                  <TableCell>{user.email ?? t("noEmail")}</TableCell>
+                  <TableCell>{user.plan}</TableCell>
+                  <TableCell>{user.isAdmin ? t("adminYesOption") : "—"}</TableCell>
+                  <TableCell>{user.blocked ? t("blockedYesOption") : "—"}</TableCell>
+                  <TableCell>{new Date(user.createdAt).toLocaleDateString()}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Label htmlFor="admin-users-page-size" className="text-sm text-muted">
+                {t("pagination.pageSizeLabel")}
+              </Label>
+              <select
+                id="admin-users-page-size"
+                className={SELECT_CLASS + " w-auto"}
+                value={state.pageSize}
+                onChange={(event) =>
+                  updateState({ pageSize: Number(event.target.value) as AdminUsersPageSize })
+                }
+              >
+                {ADMIN_USERS_PAGE_SIZES.map((size) => (
+                  <option key={size} value={size}>
+                    {size}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-muted">
+                {t("pagination.pageInfo", { page: state.page, totalPages, total })}
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={state.page <= 1}
+                onClick={() => updateState({ page: state.page - 1 })}
+              >
+                {t("pagination.previous")}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={state.page >= totalPages}
+                onClick={() => updateState({ page: state.page + 1 })}
+              >
+                {t("pagination.next")}
+              </Button>
+            </div>
+          </div>
+        </>
+      )}
+
+      <UserPanel userId={openUserId} onClose={closeUser} />
+    </div>
+  );
+}
+
+/**
+ * The admin reporting screen (issue #140), whose Users table was rewritten
+ * for scale in issue #147: search/filter/sort/pagination all applied
+ * server-side, and clicking a row opens the User panel in place via a
+ * shareable `?user=<id>` URL param instead of navigating to a dedicated page.
  */
 export default function AdminUsersPage() {
   const t = useTranslations("admin.users");
-  const [atOrOverLimit, setAtOrOverLimit] = useState(false);
 
   return (
-    <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-8">
-      <div className="flex flex-col gap-1">
-        <h1 className="font-serif text-2xl font-semibold">{t("title")}</h1>
-        <p className="text-sm text-muted">{t("description")}</p>
-      </div>
+    <Suspense fallback={null}>
+      <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-8">
+        <div className="flex flex-col gap-1">
+          <h1 className="font-serif text-2xl font-semibold">{t("title")}</h1>
+          <p className="text-sm text-muted">{t("description")}</p>
+        </div>
 
-      <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-semibold">{t("stats.title")}</h2>
-        <StatsPanel />
-      </section>
+        <section className="flex flex-col gap-2">
+          <h2 className="text-sm font-semibold">{t("stats.title")}</h2>
+          <StatsPanel />
+        </section>
 
-      <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-semibold">{t("planDefaults.title")}</h2>
-        <PlanDefaultsEditor />
-      </section>
+        <section className="flex flex-col gap-2">
+          <h2 className="text-sm font-semibold">{t("planDefaults.title")}</h2>
+          <PlanDefaultsEditor />
+        </section>
 
-      <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-semibold">{t("table.title")}</h2>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={atOrOverLimit}
-            onChange={(event) => setAtOrOverLimit(event.target.checked)}
-            aria-label={t("table.filterLabel")}
-          />
-          {t("table.filterLabel")}
-        </label>
-        <UsersTable atOrOverLimit={atOrOverLimit} />
-      </section>
-    </main>
+        <section className="flex flex-col gap-2">
+          <h2 className="text-sm font-semibold">{t("table.title")}</h2>
+          <UsersTable />
+        </section>
+      </main>
+    </Suspense>
   );
 }

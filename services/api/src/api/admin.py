@@ -18,7 +18,7 @@ from py_db.quotas import (
     total_active_scout_count,
 )
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .db import get_session
@@ -92,7 +92,12 @@ class QuotaUsage(BaseModel):
 
 class UserQuotasResponse(BaseModel):
     userId: str
+    name: str | None
+    email: str | None
     plan: str
+    isAdmin: bool
+    blocked: bool
+    createdAt: datetime
     quotas: dict[str, QuotaUsage]
 
 
@@ -135,13 +140,22 @@ async def get_user_quotas(
     _admin_id: str = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> UserQuotasResponse:
-    """A target User's Plan, Effective quota, current usage, and which
-    QuotaKinds carry an explicit `QuotaOverride`, for the admin per-user
-    detail screen (issue #139).
+    """A target User's info, Plan, Effective quota, current usage, and which
+    QuotaKinds carry an explicit `QuotaOverride`, for the User panel (issue
+    #147, relocated from the now-deleted per-user page of issue #139).
     """
     target = await _get_target_user(session, user_id)
     quotas, _ = await _user_quota_summary(session, user_id)
-    return UserQuotasResponse(userId=target.id, plan=target.plan.value, quotas=quotas)
+    return UserQuotasResponse(
+        userId=target.id,
+        name=target.name,
+        email=target.email,
+        plan=target.plan.value,
+        isAdmin=target.isAdmin,
+        blocked=target.blockedAt is not None,
+        createdAt=target.createdAt,
+        quotas=quotas,
+    )
 
 
 class SetQuotaOverrideRequest(BaseModel):
@@ -350,46 +364,109 @@ async def set_plan_default(
     return PlanQuotaDefaultItem(plan=plan.value, quotaKind=kind.value, limit=row.limit)
 
 
-class AdminUserSummary(BaseModel):
-    userId: str
+class AdminUserRow(BaseModel):
+    id: str
+    name: str | None
     email: str | None
     plan: str
-    quotas: dict[str, QuotaUsage]
+    isAdmin: bool
+    blocked: bool
     atOrOverLimit: bool
+    createdAt: datetime
 
 
-class AdminUsersResponse(BaseModel):
-    users: list[AdminUserSummary]
+class AdminUsersListResponse(BaseModel):
+    users: list[AdminUserRow]
+    total: int
+    page: int
+    pageSize: int
 
 
-@router.get("/users", response_model=AdminUsersResponse)
+_SORTABLE_COLUMNS = {
+    "name": User.name,
+    "email": User.email,
+    "plan": User.plan,
+    "isAdmin": User.isAdmin,
+    "blocked": User.blockedAt,
+    "createdAt": User.createdAt,
+}
+
+
+def _row_of(user: User, at_or_over_limit: bool) -> AdminUserRow:
+    return AdminUserRow(
+        id=user.id,
+        name=user.name,
+        email=user.email,
+        plan=user.plan.value,
+        isAdmin=user.isAdmin,
+        blocked=user.blockedAt is not None,
+        atOrOverLimit=at_or_over_limit,
+        createdAt=user.createdAt,
+    )
+
+
+@router.get("/users", response_model=AdminUsersListResponse)
 async def list_users(
+    search: str | None = Query(None),
+    plan: Plan | None = Query(None),
+    is_admin: bool | None = Query(None, alias="isAdmin"),
+    blocked: bool | None = Query(None),
     at_or_over_limit: bool = Query(False, alias="atOrOverLimit"),
+    sort_by: str = Query("createdAt", alias="sortBy"),
+    sort_dir: str = Query("desc", alias="sortDir"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100, alias="pageSize"),
     _admin_id: str = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
-) -> AdminUsersResponse:
-    """Every User's Plan and usage summary per QuotaKind, filterable to those
-    currently at or over any limit, for the admin reporting screen (issue
-    #140).
+) -> AdminUsersListResponse:
+    """Rewritten for scale (issue #147): a lightweight row per User (Plan
+    reassignment, quotas and overrides now live on the User panel instead),
+    searchable by name/email, filterable by Plan/isAdmin/blocked/
+    atOrOverLimit, sortable, and paginated — search/filter/sort/pagination
+    all applied server-side since the table is no longer expected to fit
+    unpaginated in one response.
+
+    `atOrOverLimit` needs every candidate's Effective quota computed
+    (`_user_quota_summary`), which SQL can't do — so when that filter is
+    active, every other filter is applied in SQL first, then the
+    already-narrowed candidate set is paginated in Python after computing
+    quotas for it. When `atOrOverLimit` isn't requested, pagination stays in
+    SQL and quotas are only computed for the one page of rows returned.
     """
-    users = (await session.scalars(select(User))).all()
+    stmt = select(User)
+    if search:
+        pattern = f"%{search}%"
+        stmt = stmt.where(or_(User.name.ilike(pattern), User.email.ilike(pattern)))
+    if plan is not None:
+        stmt = stmt.where(User.plan == plan)
+    if is_admin is not None:
+        stmt = stmt.where(User.isAdmin == is_admin)
+    if blocked is not None:
+        stmt = stmt.where(User.blockedAt.isnot(None) if blocked else User.blockedAt.is_(None))
 
-    summaries: list[AdminUserSummary] = []
-    for user in users:
-        quotas, over = await _user_quota_summary(session, user.id)
-        if at_or_over_limit and not over:
-            continue
-        summaries.append(
-            AdminUserSummary(
-                userId=user.id,
-                email=user.email,
-                plan=user.plan.value,
-                quotas=quotas,
-                atOrOverLimit=over,
-            )
-        )
+    sort_column = _SORTABLE_COLUMNS.get(sort_by, User.createdAt)
+    stmt = stmt.order_by(sort_column.asc() if sort_dir == "asc" else sort_column.desc())
 
-    return AdminUsersResponse(users=summaries)
+    if at_or_over_limit:
+        candidates = (await session.scalars(stmt)).all()
+        matching: list[User] = []
+        for user in candidates:
+            _, over = await _user_quota_summary(session, user.id)
+            if over:
+                matching.append(user)
+        total = len(matching)
+        start = (page - 1) * page_size
+        rows = [_row_of(user, True) for user in matching[start : start + page_size]]
+    else:
+        total = await session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+        page_stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+        candidates = (await session.scalars(page_stmt)).all()
+        rows = []
+        for user in candidates:
+            _, over = await _user_quota_summary(session, user.id)
+            rows.append(_row_of(user, over))
+
+    return AdminUsersListResponse(users=rows, total=total, page=page, pageSize=page_size)
 
 
 class AdminStatsResponse(BaseModel):

@@ -19,7 +19,13 @@ def _secret(monkeypatch):
     monkeypatch.setenv("INTERNAL_API_SECRET", "test-secret")
 
 
-async def _create_user(plan: Plan = Plan.FREE, is_admin: bool = False) -> str:
+async def _create_user(
+    plan: Plan = Plan.FREE,
+    is_admin: bool = False,
+    name: str | None = None,
+    email: str | None = None,
+    blocked: bool = False,
+) -> str:
     user_id = str(uuid.uuid4())
     engine = make_engine()
     try:
@@ -28,9 +34,11 @@ async def _create_user(plan: Plan = Plan.FREE, is_admin: bool = False) -> str:
             session.add(
                 User(
                     id=user_id,
-                    email=f"{user_id}@example.com",
+                    name=name,
+                    email=email or f"{user_id}@example.com",
                     plan=plan,
                     isAdmin=is_admin,
+                    blockedAt=datetime.now(UTC).replace(tzinfo=None) if blocked else None,
                     updatedAt=datetime.now(UTC).replace(tzinfo=None),
                 )
             )
@@ -283,6 +291,25 @@ def test_get_user_quotas_reports_plan_defaults_with_no_override(
         "remaining": 3,
         "hasOverride": False,
     }
+
+
+def test_get_user_quotas_includes_target_users_info(admin_id):
+    named_id = asyncio.run(_create_user(name="Grace Hopper", email="grace@example.com"))
+    try:
+        with TestClient(app) as client:
+            response = client.get(
+                f"/v1/admin/users/{named_id}/quotas",
+                headers=_admin_headers(admin_id),
+            )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["name"] == "Grace Hopper"
+        assert body["email"] == "grace@example.com"
+        assert body["isAdmin"] is False
+        assert body["blocked"] is False
+        assert "createdAt" in body
+    finally:
+        asyncio.run(_delete_user(named_id))
 
 
 def test_get_user_quotas_flags_active_overrides(admin_id, target_id, analyses_daily_cap):
@@ -587,16 +614,22 @@ def test_list_users_requires_admin(target_id):
     assert response.status_code == 403
 
 
-def test_list_users_returns_every_user_with_quota_summary(admin_id, target_id):
+def test_list_users_returns_lightweight_row_per_user(admin_id, target_id):
     with TestClient(app) as client:
-        response = client.get("/v1/admin/users", headers=_admin_headers(admin_id))
+        response = client.get("/v1/admin/users", headers=_admin_headers(admin_id), params={"pageSize": 100})
     assert response.status_code == 200
-    users = {u["userId"]: u for u in response.json()["users"]}
+    body = response.json()
+    users = {u["id"]: u for u in body["users"]}
     assert target_id in users
     assert users[target_id]["plan"] == "FREE"
+    assert users[target_id]["isAdmin"] is False
+    assert users[target_id]["blocked"] is False
     assert users[target_id]["atOrOverLimit"] is False
-    assert "ANALYSES_DAILY" in users[target_id]["quotas"]
-    assert users[target_id]["quotas"]["ANALYSES_DAILY"]["hasOverride"] is False
+    assert "createdAt" in users[target_id]
+    assert "quotas" not in users[target_id]
+    assert body["total"] >= 2
+    assert body["page"] == 1
+    assert body["pageSize"] == 100
 
 
 def test_list_users_filters_users_at_or_over_limit(admin_id, target_id, analyses_daily_cap):
@@ -605,13 +638,96 @@ def test_list_users_filters_users_at_or_over_limit(admin_id, target_id, analyses
         response = client.get(
             "/v1/admin/users",
             headers=_admin_headers(admin_id),
-            params={"atOrOverLimit": "true"},
+            params={"atOrOverLimit": "true", "pageSize": 100},
         )
     assert response.status_code == 200
     body = response.json()["users"]
-    user_ids = {u["userId"] for u in body}
+    user_ids = {u["id"] for u in body}
     assert target_id in user_ids
     assert all(u["atOrOverLimit"] is True for u in body)
+
+
+def test_list_users_searches_by_name_or_email(admin_id):
+    searchable_id = asyncio.run(_create_user(name="Ada Lovelace", email="ada@example.com"))
+    try:
+        with TestClient(app) as client:
+            response = client.get(
+                "/v1/admin/users",
+                headers=_admin_headers(admin_id),
+                params={"search": "lovelace"},
+            )
+        assert response.status_code == 200
+        ids = {u["id"] for u in response.json()["users"]}
+        assert searchable_id in ids
+    finally:
+        asyncio.run(_delete_user(searchable_id))
+
+
+def test_list_users_filters_by_plan_is_admin_and_blocked(admin_id):
+    premium_id = asyncio.run(_create_user(plan=Plan.PREMIUM))
+    blocked_id = asyncio.run(_create_user(blocked=True))
+    try:
+        with TestClient(app) as client:
+            plan_response = client.get(
+                "/v1/admin/users",
+                headers=_admin_headers(admin_id),
+                params={"plan": "PREMIUM", "pageSize": 100},
+            )
+            blocked_response = client.get(
+                "/v1/admin/users",
+                headers=_admin_headers(admin_id),
+                params={"blocked": "true", "pageSize": 100},
+            )
+            admin_response = client.get(
+                "/v1/admin/users",
+                headers=_admin_headers(admin_id),
+                params={"isAdmin": "true", "pageSize": 100},
+            )
+        plan_ids = {u["id"] for u in plan_response.json()["users"]}
+        assert premium_id in plan_ids
+        blocked_ids = {u["id"] for u in blocked_response.json()["users"]}
+        assert blocked_id in blocked_ids
+        admin_ids = {u["id"] for u in admin_response.json()["users"]}
+        assert admin_id in admin_ids
+    finally:
+        asyncio.run(_delete_user(premium_id))
+        asyncio.run(_delete_user(blocked_id))
+
+
+def test_list_users_sorts_by_requested_column(admin_id):
+    a_id = asyncio.run(_create_user(name="AAA Sortable"))
+    z_id = asyncio.run(_create_user(name="ZZZ Sortable"))
+    try:
+        with TestClient(app) as client:
+            response = client.get(
+                "/v1/admin/users",
+                headers=_admin_headers(admin_id),
+                params={"search": "Sortable", "sortBy": "name", "sortDir": "asc"},
+            )
+        ids_in_order = [u["id"] for u in response.json()["users"]]
+        assert ids_in_order.index(a_id) < ids_in_order.index(z_id)
+    finally:
+        asyncio.run(_delete_user(a_id))
+        asyncio.run(_delete_user(z_id))
+
+
+def test_list_users_paginates(admin_id):
+    extra_ids = [asyncio.run(_create_user()) for _ in range(3)]
+    try:
+        with TestClient(app) as client:
+            response = client.get(
+                "/v1/admin/users",
+                headers=_admin_headers(admin_id),
+                params={"page": 1, "pageSize": 1},
+            )
+        body = response.json()
+        assert len(body["users"]) == 1
+        assert body["page"] == 1
+        assert body["pageSize"] == 1
+        assert body["total"] >= 4
+    finally:
+        for uid in extra_ids:
+            asyncio.run(_delete_user(uid))
 
 
 # --- GET /v1/admin/stats (issue #140) ---
