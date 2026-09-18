@@ -9,11 +9,23 @@ The account record for one candidate, identified by email, keyed by the canonica
 _Avoid_: Candidate, account — "candidate" names the persona in product conversations; `User` is the row every context actually references.
 
 **Plan**:
-A User's usage tier — `free` | `standard` | `premium` | `administrateur` — determining their quota defaults (see PlanQuotaDefault). `administrateur` is vestigial: it used to double as the admin-access flag, but that meaning moved to the separate `isAdmin` field (docs/adr/0015) and every User previously on it was migrated to `premium` — the value is never assigned again, just left in the enum rather than dropped. New Users default to `free`.
-_Avoid_: Profile — collides with StyleProfile, an unrelated per-CVVersion concept, despite "profile" being the word the product brief uses; Tier, Role — Role is now `isAdmin`, a separate concept from Plan (see Administrator).
+A usage tier — `free` | `standard` | `premium` — determining quota defaults (see PlanQuotaDefault) for whichever User holds it through their current Subscription. `free` is unlimited across every QuotaKind. Never read or written directly on User — see Subscription and Effective Plan. (`administrateur` was a fourth value that used to double as the admin-access flag; docs/adr/0015 split that into a separate field, and docs/adr/0017 later retired the value outright once Role took over admin access end to end.)
+_Avoid_: Profile — collides with StyleProfile, an unrelated per-CVVersion concept, despite "profile" being the word the product brief uses; Tier, Role — a separate axis from Plan (see Role, Administrator).
+
+**Subscription**:
+One User's claim to one Plan for a period — a `startDate`, an optional `endDate` (`null` means it never expires, always true for a `free` Subscription), and, for a `standard`/`premium` Subscription, a `duration` (`monthly` or `yearly`) the `endDate` was computed from. Append-only (docs/adr/0018): assigning a User a new Plan or renewing their current one always creates a new Subscription rather than editing the existing one. Every User gets a `free` Subscription automatically at signup; every other Subscription is created by an Administrator — there is no self-service plan change yet.
+_Avoid_: Plan (that's the tier a Subscription grants, not the period itself), Billing, Membership.
+
+**Effective Plan**:
+The Plan actually in force for one User right now: their most recent Subscription's Plan if its period covers now, else `free`. Computed live from Subscription on every read — never cached on User, never backfilled by a background job (docs/adr/0018). A lapsed paid Subscription past its `endDate` with no renewal isn't marked expired or replaced by anything until an Administrator acts, so a User's Subscription history can show a gap after their last Subscription (or between two of them) — that gap reads as `free`.
+_Avoid_: Current plan, `User.plan` (the retired field this replaces), Active plan.
+
+**Role**:
+A User's access tier — `external` | `internal` | `administrator` — orthogonal to Plan/Subscription (see Administrator). Every new User is `external`. `internal` carries no distinct behavior yet; it exists to be assignable ahead of whatever it ends up gating. Replaces the standalone `isAdmin` boolean (docs/adr/0017).
+_Avoid_: `isAdmin` (the retired field), Permission, Tier — Tier is Plan's word, not Role's.
 
 **Administrator**:
-A User whose `isAdmin` is true (docs/adr/0015) — independent of their Plan, so an Administrator keeps a real usage tier while managing the system. The only User who can reach the Web context's Admin area, edit any User's QuotaOverride, edit a Plan's PlanQuotaDefault values, change another User's Plan, block or unblock a User, or grant/revoke another User's `isAdmin`. Can't revoke their own `isAdmin` or block themselves — avoids a lockout with no Administrator left to undo it.
+A User whose Role is `administrator` (docs/adr/0015, docs/adr/0017) — independent of their Plan/Subscription, so an Administrator keeps a real usage tier while managing the system. The only User who can reach the Web context's Admin area, edit any User's QuotaOverride, edit a Plan's PlanQuotaDefault values, assign another User a new Subscription, block or unblock a User, or change another User's Role. Can't demote their own Role away from `administrator` or block themselves — avoids a lockout with no Administrator left to undo it.
 _Avoid_: Admin (fine in prose), Superuser
 
 **Blocked**:
@@ -141,19 +153,19 @@ One of the fixed set of things a Plan limits: active Scouts (concurrent count of
 _Avoid_: Agent, active agents — the Web nav label is "Agents," but the counted entity is Scout; this vocabulary never says "agent" for the same reason Scout's own entry doesn't. Resource, metric.
 
 **PlanQuotaDefault**:
-The numeric ceiling (or `null` for unlimited) a Plan sets for one QuotaKind, admin-editable without a deploy. `administrateur`'s PlanQuotaDefault is `null` across every QuotaKind.
+The numeric ceiling (or `null` for unlimited) a Plan sets for one QuotaKind, admin-editable without a deploy. `free`'s PlanQuotaDefault is `null` (unlimited) across every QuotaKind (docs/adr/0018).
 _Avoid_: Default quota, Plan limit
 
 **QuotaOverride**:
-A numeric ceiling (or `null`) an Administrator has set for one User on one QuotaKind, taking precedence over that User's Plan's PlanQuotaDefault. Only exists for a User an Administrator has explicitly customized — a User with no QuotaOverride for a given QuotaKind tracks their Plan's default as it changes over time, rather than a value copied at signup (docs/adr/0013).
+A numeric ceiling (or `null`) an Administrator has set for one User on one QuotaKind, taking precedence over that User's Effective Plan's PlanQuotaDefault. Only exists for a User an Administrator has explicitly customized — a User with no QuotaOverride for a given QuotaKind tracks their Effective Plan's default as it changes over time, rather than a value copied at signup (docs/adr/0013).
 _Avoid_: User quota, custom limit
 
 **Effective quota**:
-The ceiling actually enforced for one User on one QuotaKind: their QuotaOverride if one exists, else their Plan's PlanQuotaDefault. Hard-blocks the corresponding action once reached (create/reactivate for active Scouts, `POST /v1/analyses` for daily/monthly Analyses, document generation for daily GeneratedDocuments) — there is no soft/warn-only mode. Lowering an Effective quota below a User's current active-Scout count never force-pauses their existing Scouts; it only blocks further create/reactivate calls.
+The ceiling actually enforced for one User on one QuotaKind: their QuotaOverride if one exists, else their Effective Plan's PlanQuotaDefault. Hard-blocks the corresponding action once reached (create/reactivate for active Scouts, `POST /v1/analyses` for daily/monthly Analyses, document generation for daily GeneratedDocuments) — there is no soft/warn-only mode. Lowering an Effective quota below a User's current active-Scout count never force-pauses their existing Scouts; it only blocks further create/reactivate calls.
 _Avoid_: Quota limit, cap (fine in prose; "cap" is also the pre-existing env-var terminology this replaces)
 
 **AdminAuditEvent**:
-One append-only entry recording an Administrator's action on a User or on shared config — editing a QuotaOverride, a PlanQuotaDefault, or a User's Plan; blocking or unblocking a User; editing a User's name; or granting/revoking a User's `isAdmin` — actor, target User, field, old/new value, timestamp. Renamed from QuotaAuditEvent once its scope grew past quota-only actions (docs/adr/0015). A distinct trail from PipelineEvent (pipeline observability) and StatusEvent (an Application's own history): this one exists purely for admin-action provenance.
+One append-only entry recording an Administrator's action on a User or on shared config — editing a QuotaOverride, a PlanQuotaDefault, or assigning a User a new Subscription; blocking or unblocking a User; editing a User's name; or changing a User's Role — actor, target User, field, old/new value, timestamp. Renamed from QuotaAuditEvent once its scope grew past quota-only actions (docs/adr/0015). A distinct trail from PipelineEvent (pipeline observability) and StatusEvent (an Application's own history): this one exists purely for admin-action provenance.
 _Avoid_: QuotaAuditEvent (its old name, now inaccurate — the trail covers non-quota admin actions too), Audit log (ambiguous with PipelineEvent's own "_Avoid_: Audit log" note — this is the admin-provenance trail, not the pipeline one)
 
 **QuotaAlert**:
