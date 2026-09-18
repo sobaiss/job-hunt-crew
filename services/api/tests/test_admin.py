@@ -11,6 +11,7 @@ from py_db.models import (
     PlanQuotaDefault,
     Quotakind,
     QuotaOverride,
+    Role,
     Subscription,
     User,
 )
@@ -20,7 +21,7 @@ from sqlalchemy import delete, select, update
 from api.main import app
 
 HEADERS = {"X-Internal-Api-Secret": "test-secret"}
-ADMIN_HEADERS = {**HEADERS, "X-User-Is-Admin": "true"}
+ADMIN_HEADERS = {**HEADERS, "X-User-Role": "ADMINISTRATOR"}
 
 
 @pytest.fixture(autouse=True)
@@ -31,6 +32,7 @@ def _secret(monkeypatch):
 async def _create_user(
     plan: Plan = Plan.FREE,
     is_admin: bool = False,
+    role: Role = Role.EXTERNAL,
     name: str | None = None,
     email: str | None = None,
     blocked: bool = False,
@@ -47,6 +49,7 @@ async def _create_user(
                 email=email or f"{user_id}@example.com",
                 plan=plan,
                 isAdmin=is_admin,
+                role=role,
                 blockedAt=datetime.now(UTC).replace(tzinfo=None) if blocked else None,
                 updatedAt=datetime.now(UTC).replace(tzinfo=None),
             )
@@ -112,7 +115,7 @@ def user_id():
 
 @pytest.fixture
 def admin_id():
-    uid = asyncio.run(_create_user(is_admin=True))
+    uid = asyncio.run(_create_user(is_admin=True, role=Role.ADMINISTRATOR))
     yield uid
     asyncio.run(_delete_user(uid))
 
@@ -284,17 +287,19 @@ async def _user_email(user_id: str) -> str | None:
         await engine.dispose()
 
 
-async def _user_is_admin(user_id: str) -> bool:
+async def _user_role(user_id: str) -> Role:
     engine = make_engine()
     try:
         session_factory = make_session_factory(engine)
         async with session_factory() as session:
-            return bool(await session.scalar(select(User.isAdmin).where(User.id == user_id)))
+            role = await session.scalar(select(User.role).where(User.id == user_id))
+            assert role is not None
+            return role
     finally:
         await engine.dispose()
 
 
-def test_admin_route_rejects_caller_with_no_is_admin_header(user_id):
+def test_admin_route_rejects_caller_with_no_role_header(user_id):
     with TestClient(app) as client:
         response = client.get(
             "/v1/admin/me",
@@ -307,7 +312,7 @@ def test_admin_route_rejects_non_admin_caller(user_id):
     with TestClient(app) as client:
         response = client.get(
             "/v1/admin/me",
-            headers={**HEADERS, "X-User-Id": user_id, "X-User-Is-Admin": "false"},
+            headers={**HEADERS, "X-User-Id": user_id, "X-User-Role": "EXTERNAL"},
         )
     assert response.status_code == 403
 
@@ -316,7 +321,7 @@ def test_admin_route_rejects_missing_user_id():
     with TestClient(app) as client:
         response = client.get(
             "/v1/admin/me",
-            headers={**HEADERS, "X-User-Is-Admin": "true"},
+            headers={**HEADERS, "X-User-Role": "ADMINISTRATOR"},
         )
     assert response.status_code == 401
 
@@ -328,7 +333,7 @@ def test_admin_route_allows_admin_caller(admin_id):
             headers=_admin_headers(admin_id),
         )
     assert response.status_code == 200
-    assert response.json() == {"userId": admin_id, "plan": "FREE", "isAdmin": True}
+    assert response.json() == {"userId": admin_id, "plan": "FREE", "role": "ADMINISTRATOR"}
 
 
 # --- GET /v1/admin/users/{id}/quotas (issue #139) ---
@@ -338,7 +343,7 @@ def test_get_user_quotas_requires_admin(admin_id, target_id):
     with TestClient(app) as client:
         response = client.get(
             f"/v1/admin/users/{target_id}/quotas",
-            headers={**HEADERS, "X-User-Id": target_id, "X-User-Is-Admin": "false"},
+            headers={**HEADERS, "X-User-Id": target_id, "X-User-Role": "EXTERNAL"},
         )
     assert response.status_code == 403
 
@@ -385,7 +390,7 @@ def test_get_user_quotas_includes_target_users_info(admin_id):
         body = response.json()
         assert body["name"] == "Grace Hopper"
         assert body["email"] == "grace@example.com"
-        assert body["isAdmin"] is False
+        assert body["role"] == "EXTERNAL"
         assert body["blocked"] is False
         assert "createdAt" in body
     finally:
@@ -422,7 +427,7 @@ def test_set_quota_override_requires_admin(admin_id, target_id):
     with TestClient(app) as client:
         response = client.put(
             f"/v1/admin/users/{target_id}/quota-overrides/ANALYSES_DAILY",
-            headers={**HEADERS, "X-User-Id": target_id, "X-User-Is-Admin": "false"},
+            headers={**HEADERS, "X-User-Id": target_id, "X-User-Role": "EXTERNAL"},
             json={"limit": 10},
         )
     assert response.status_code == 403
@@ -531,7 +536,7 @@ def test_set_plan_requires_admin(admin_id, target_id):
     with TestClient(app) as client:
         response = client.put(
             f"/v1/admin/users/{target_id}/plan",
-            headers={**HEADERS, "X-User-Id": target_id, "X-User-Is-Admin": "false"},
+            headers={**HEADERS, "X-User-Id": target_id, "X-User-Role": "EXTERNAL"},
             json={"plan": "PREMIUM", "duration": "YEARLY"},
         )
     assert response.status_code == 403
@@ -688,7 +693,7 @@ def test_set_blocked_requires_admin(admin_id, target_id):
     with TestClient(app) as client:
         response = client.put(
             f"/v1/admin/users/{target_id}/blocked",
-            headers={**HEADERS, "X-User-Id": target_id, "X-User-Is-Admin": "false"},
+            headers={**HEADERS, "X-User-Id": target_id, "X-User-Role": "EXTERNAL"},
             json={"blocked": True},
         )
     assert response.status_code == 403
@@ -776,7 +781,7 @@ def test_set_info_requires_admin(admin_id, target_id):
     with TestClient(app) as client:
         response = client.put(
             f"/v1/admin/users/{target_id}/info",
-            headers={**HEADERS, "X-User-Id": target_id, "X-User-Is-Admin": "false"},
+            headers={**HEADERS, "X-User-Id": target_id, "X-User-Role": "EXTERNAL"},
             json={"name": "New Name"},
         )
     assert response.status_code == 403
@@ -840,99 +845,101 @@ def test_set_info_is_a_noop_when_unchanged_and_writes_no_audit_event(admin_id, t
     assert len(asyncio.run(_audit_events(target_id))) == 1
 
 
-# --- PUT /v1/admin/users/{id}/admin-role (issue #149) ---
+# --- PUT /v1/admin/users/{id}/role (issue #156) ---
 
 
-def test_set_admin_role_requires_admin(admin_id, target_id):
+def test_set_role_requires_admin(admin_id, target_id):
     with TestClient(app) as client:
         response = client.put(
-            f"/v1/admin/users/{target_id}/admin-role",
-            headers={**HEADERS, "X-User-Id": target_id, "X-User-Is-Admin": "false"},
-            json={"isAdmin": True},
+            f"/v1/admin/users/{target_id}/role",
+            headers={**HEADERS, "X-User-Id": target_id, "X-User-Role": "EXTERNAL"},
+            json={"role": "ADMINISTRATOR"},
         )
     assert response.status_code == 403
 
 
-def test_set_admin_role_404_for_unknown_user(admin_id):
+def test_set_role_404_for_unknown_user(admin_id):
     with TestClient(app) as client:
         response = client.put(
-            f"/v1/admin/users/{uuid.uuid4()}/admin-role",
+            f"/v1/admin/users/{uuid.uuid4()}/role",
             headers=_admin_headers(admin_id),
-            json={"isAdmin": True},
+            json={"role": "ADMINISTRATOR"},
         )
     assert response.status_code == 404
 
 
-def test_set_admin_role_rejects_self_revoke(admin_id):
+def test_set_role_rejects_self_demotion(admin_id):
     with TestClient(app) as client:
         response = client.put(
-            f"/v1/admin/users/{admin_id}/admin-role",
+            f"/v1/admin/users/{admin_id}/role",
             headers=_admin_headers(admin_id),
-            json={"isAdmin": False},
+            json={"role": "EXTERNAL"},
         )
     assert response.status_code == 400
-    assert asyncio.run(_user_is_admin(admin_id)) is True
+    assert asyncio.run(_user_role(admin_id)) == Role.ADMINISTRATOR
 
 
-def test_set_admin_role_allows_self_grant_as_noop(admin_id):
+def test_set_role_allows_self_grant_administrator_as_noop(admin_id):
     with TestClient(app) as client:
         response = client.put(
-            f"/v1/admin/users/{admin_id}/admin-role",
+            f"/v1/admin/users/{admin_id}/role",
             headers=_admin_headers(admin_id),
-            json={"isAdmin": True},
+            json={"role": "ADMINISTRATOR"},
         )
     assert response.status_code == 200
     assert asyncio.run(_audit_events(admin_id)) == []
 
 
-def test_set_admin_role_grants_and_records_audit_event(admin_id, target_id):
+def test_set_role_changes_role_and_records_audit_event(admin_id, target_id):
     with TestClient(app) as client:
         response = client.put(
-            f"/v1/admin/users/{target_id}/admin-role",
+            f"/v1/admin/users/{target_id}/role",
             headers=_admin_headers(admin_id),
-            json={"isAdmin": True},
+            json={"role": "INTERNAL"},
         )
     assert response.status_code == 200
-    assert response.json() == {"userId": target_id, "isAdmin": True}
-    assert asyncio.run(_user_is_admin(target_id)) is True
+    assert response.json() == {"userId": target_id, "role": "INTERNAL"}
+    assert asyncio.run(_user_role(target_id)) == Role.INTERNAL
 
     events = asyncio.run(_audit_events(target_id))
     assert len(events) == 1
-    assert events[0].field == "isAdmin"
-    assert events[0].oldValue == "false"
-    assert events[0].newValue == "true"
+    assert events[0].field == "role"
+    assert events[0].oldValue == "EXTERNAL"
+    assert events[0].newValue == "INTERNAL"
 
 
-def test_set_admin_role_revokes_and_records_audit_event(admin_id, target_id):
+def test_set_role_every_transition_records_its_own_audit_event(admin_id, target_id):
     with TestClient(app) as client:
-        first = client.put(
-            f"/v1/admin/users/{target_id}/admin-role",
+        to_administrator = client.put(
+            f"/v1/admin/users/{target_id}/role",
             headers=_admin_headers(admin_id),
-            json={"isAdmin": True},
+            json={"role": "ADMINISTRATOR"},
         )
-        assert first.status_code == 200
+        assert to_administrator.status_code == 200
 
         response = client.put(
-            f"/v1/admin/users/{target_id}/admin-role",
+            f"/v1/admin/users/{target_id}/role",
             headers=_admin_headers(admin_id),
-            json={"isAdmin": False},
+            json={"role": "EXTERNAL"},
         )
     assert response.status_code == 200
-    assert response.json() == {"userId": target_id, "isAdmin": False}
-    assert asyncio.run(_user_is_admin(target_id)) is False
+    assert response.json() == {"userId": target_id, "role": "EXTERNAL"}
+    assert asyncio.run(_user_role(target_id)) == Role.EXTERNAL
 
     events = asyncio.run(_audit_events(target_id))
     assert len(events) == 2
-    assert events[1].oldValue == "true"
-    assert events[1].newValue == "false"
+    assert events[0].oldValue == "EXTERNAL"
+    assert events[0].newValue == "ADMINISTRATOR"
+    assert events[1].oldValue == "ADMINISTRATOR"
+    assert events[1].newValue == "EXTERNAL"
 
 
-def test_set_admin_role_is_a_noop_when_unchanged_and_writes_no_audit_event(admin_id, target_id):
+def test_set_role_is_a_noop_when_unchanged_and_writes_no_audit_event(admin_id, target_id):
     with TestClient(app) as client:
         response = client.put(
-            f"/v1/admin/users/{target_id}/admin-role",
+            f"/v1/admin/users/{target_id}/role",
             headers=_admin_headers(admin_id),
-            json={"isAdmin": False},
+            json={"role": "EXTERNAL"},
         )
     assert response.status_code == 200
     assert asyncio.run(_audit_events(target_id)) == []
@@ -945,7 +952,7 @@ def test_get_plan_defaults_requires_admin(target_id):
     with TestClient(app) as client:
         response = client.get(
             "/v1/admin/plan-defaults",
-            headers={**HEADERS, "X-User-Id": target_id, "X-User-Is-Admin": "false"},
+            headers={**HEADERS, "X-User-Id": target_id, "X-User-Role": "EXTERNAL"},
         )
     assert response.status_code == 403
 
@@ -966,7 +973,7 @@ def test_set_plan_defaults_requires_admin(target_id):
     with TestClient(app) as client:
         response = client.put(
             "/v1/admin/plan-defaults/STANDARD",
-            headers={**HEADERS, "X-User-Id": target_id, "X-User-Is-Admin": "false"},
+            headers={**HEADERS, "X-User-Id": target_id, "X-User-Role": "EXTERNAL"},
             json={"limits": {"DOCUMENTS_DAILY": 99}},
         )
     assert response.status_code == 403
@@ -1072,7 +1079,7 @@ def test_list_users_requires_admin(target_id):
     with TestClient(app) as client:
         response = client.get(
             "/v1/admin/users",
-            headers={**HEADERS, "X-User-Id": target_id, "X-User-Is-Admin": "false"},
+            headers={**HEADERS, "X-User-Id": target_id, "X-User-Role": "EXTERNAL"},
         )
     assert response.status_code == 403
 
@@ -1085,7 +1092,7 @@ def test_list_users_returns_lightweight_row_per_user(admin_id, target_id):
     users = {u["id"]: u for u in body["users"]}
     assert target_id in users
     assert users[target_id]["plan"] == "FREE"
-    assert users[target_id]["isAdmin"] is False
+    assert users[target_id]["role"] == "EXTERNAL"
     assert users[target_id]["blocked"] is False
     assert users[target_id]["atOrOverLimit"] is False
     assert "createdAt" in users[target_id]
@@ -1126,7 +1133,7 @@ def test_list_users_searches_by_name_or_email(admin_id):
         asyncio.run(_delete_user(searchable_id))
 
 
-def test_list_users_filters_by_plan_is_admin_and_blocked(admin_id):
+def test_list_users_filters_by_plan_role_and_blocked(admin_id):
     # Plan filter now reads Effective Plan (Subscription-derived,
     # docs/adr/0018), not the legacy User.plan column -- so the fixture
     # user's PREMIUM standing comes from a seeded Subscription, not `plan=`.
@@ -1145,17 +1152,18 @@ def test_list_users_filters_by_plan_is_admin_and_blocked(admin_id):
                 headers=_admin_headers(admin_id),
                 params={"blocked": "true", "pageSize": 100},
             )
-            admin_response = client.get(
+            role_response = client.get(
                 "/v1/admin/users",
                 headers=_admin_headers(admin_id),
-                params={"isAdmin": "true", "pageSize": 100},
+                params={"role": "ADMINISTRATOR", "pageSize": 100},
             )
         plan_ids = {u["id"] for u in plan_response.json()["users"]}
         assert premium_id in plan_ids
         blocked_ids = {u["id"] for u in blocked_response.json()["users"]}
         assert blocked_id in blocked_ids
-        admin_ids = {u["id"] for u in admin_response.json()["users"]}
-        assert admin_id in admin_ids
+        role_ids = {u["id"] for u in role_response.json()["users"]}
+        assert admin_id in role_ids
+        assert premium_id not in role_ids
     finally:
         asyncio.run(_delete_user(premium_id))
         asyncio.run(_delete_user(blocked_id))
@@ -1204,7 +1212,7 @@ def test_get_stats_requires_admin(target_id):
     with TestClient(app) as client:
         response = client.get(
             "/v1/admin/stats",
-            headers={**HEADERS, "X-User-Id": target_id, "X-User-Is-Admin": "false"},
+            headers={**HEADERS, "X-User-Id": target_id, "X-User-Role": "EXTERNAL"},
         )
     assert response.status_code == 403
 
@@ -1284,7 +1292,7 @@ def test_get_audit_events_requires_admin(target_id):
     with TestClient(app) as client:
         response = client.get(
             f"/v1/admin/users/{target_id}/audit-events",
-            headers={**HEADERS, "X-User-Id": target_id, "X-User-Is-Admin": "false"},
+            headers={**HEADERS, "X-User-Id": target_id, "X-User-Role": "EXTERNAL"},
         )
     assert response.status_code == 403
 

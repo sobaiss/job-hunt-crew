@@ -12,7 +12,8 @@ type EnumNamespace =
   | "applicationStatus"
   | "trackingStatus"
   | "sourceSite"
-  | "quotaKind";
+  | "quotaKind"
+  | "role";
 
 /**
  * Returns a `label(value)` function for one server enum. An unmapped value

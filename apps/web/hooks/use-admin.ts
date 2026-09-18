@@ -32,7 +32,7 @@ export type AdminUserQuotas = {
   email: string | null;
   plan: string;
   planEndDate: string | null;
-  isAdmin: boolean;
+  role: string;
   blocked: boolean;
   createdAt: string;
   quotas: Record<string, AdminQuotaUsage>;
@@ -118,14 +118,13 @@ export function useSetUserInfo(userId: string) {
   });
 }
 
-// Backs the admin-role grant/revoke action in the User panel (issue #149).
-export function useSetUserAdminRole(userId: string) {
+// Backs the Role select in the User panel (issue #156, replacing the
+// isAdmin grant/revoke action from #149 per docs/adr/0017).
+export function useSetUserRole(userId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (isAdmin: boolean) =>
-      bff.put<{ userId: string; isAdmin: boolean }>(`/admin/users/${userId}/admin-role`, {
-        isAdmin,
-      }),
+    mutationFn: (role: string) =>
+      bff.put<{ userId: string; role: string }>(`/admin/users/${userId}/role`, { role }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["admin-user-quotas", userId] });
       void queryClient.invalidateQueries({ queryKey: ["admin-users"] });
@@ -169,7 +168,7 @@ export type AdminUserRow = {
   name: string | null;
   email: string | null;
   plan: string;
-  isAdmin: boolean;
+  role: string;
   blocked: boolean;
   atOrOverLimit: boolean;
   createdAt: string;

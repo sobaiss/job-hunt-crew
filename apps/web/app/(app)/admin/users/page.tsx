@@ -12,7 +12,7 @@ import {
   useAdminUsers,
   useClearQuotaOverride,
   useSetQuotaOverride,
-  useSetUserAdminRole,
+  useSetUserRole,
   useSetUserBlocked,
   useSetUserInfo,
   useSetUserPlan,
@@ -20,10 +20,12 @@ import {
 } from "@/hooks/use-admin";
 import {
   ADMIN_USER_PLANS,
+  ADMIN_USER_ROLES,
   ADMIN_USERS_PAGE_SIZES,
   adminUsersTableStateToParams,
   parseAdminUsersTableState,
   type AdminBooleanFilter,
+  type AdminUserRoleFilter,
   type AdminUsersPageSize,
   type AdminUsersSortColumn,
   type AdminUsersTableState,
@@ -235,38 +237,41 @@ function NameEditor({ userId, name }: { userId: string; name: string | null }) {
 }
 
 /**
- * Grant/revoke admin role action (issue #149) — mirrors BlockUnblockAction's
- * inline-confirm shape. Disabled for the caller's own row: revoking their own
- * role is rejected server-side (it would lock them out of the Admin area with
- * no way back in), so the whole toggle is disabled for a self-target rather
- * than only the revoke direction.
+ * Three-way Role select (issue #156, replacing the isAdmin grant/revoke
+ * toggle from #149 per docs/adr/0017) — picking a different Role asks for
+ * inline confirmation before submitting, mirroring BlockUnblockAction's
+ * confirm shape. Disabled for the caller's own row: changing their own Role
+ * away from Administrator is rejected server-side (it would lock them out of
+ * the Admin area with no way back in), so the whole select is disabled for a
+ * self-target rather than only that one direction.
  */
-function AdminRoleAction({
+function RoleEditor({
   userId,
-  isAdmin,
+  role,
   isSelf,
 }: {
   userId: string;
-  isAdmin: boolean;
+  role: string;
   isSelf: boolean;
 }) {
   const t = useTranslations("admin.userPanel");
-  const [confirming, setConfirming] = useState(false);
-  const setAdminRole = useSetUserAdminRole(userId);
+  const roleLabel = useEnumLabel("role");
+  const [pendingRole, setPendingRole] = useState<string | null>(null);
+  const setRole = useSetUserRole(userId);
 
-  if (confirming) {
+  if (pendingRole !== null) {
     return (
       <div className="flex items-center gap-2">
         <span className="text-sm text-muted">
-          {isAdmin ? t("revokeAdminConfirm") : t("grantAdminConfirm")}
+          {t("roleConfirm", { role: roleLabel(pendingRole) })}
         </span>
         <Button
           type="button"
           variant="outline"
           size="sm"
-          disabled={setAdminRole.isPending}
+          disabled={setRole.isPending}
           onClick={() =>
-            setAdminRole.mutate(!isAdmin, { onSuccess: () => setConfirming(false) })
+            setRole.mutate(pendingRole, { onSuccess: () => setPendingRole(null) })
           }
         >
           {t("confirmAction")}
@@ -275,8 +280,8 @@ function AdminRoleAction({
           type="button"
           variant="outline"
           size="sm"
-          disabled={setAdminRole.isPending}
-          onClick={() => setConfirming(false)}
+          disabled={setRole.isPending}
+          onClick={() => setPendingRole(null)}
         >
           {t("cancelAction")}
         </Button>
@@ -285,16 +290,20 @@ function AdminRoleAction({
   }
 
   return (
-    <Button
-      type="button"
-      variant="outline"
-      size="sm"
+    <select
+      className={SELECT_CLASS}
+      aria-label={t("roleLabel")}
+      value={role}
       disabled={isSelf}
       title={isSelf ? t("selfRoleActionDisabled") : undefined}
-      onClick={() => setConfirming(true)}
+      onChange={(event) => setPendingRole(event.target.value)}
     >
-      {isAdmin ? t("revokeAdminAction") : t("grantAdminAction")}
-    </Button>
+      {ADMIN_USER_ROLES.map((value) => (
+        <option key={value} value={value}>
+          {roleLabel(value)}
+        </option>
+      ))}
+    </select>
   );
 }
 
@@ -439,6 +448,7 @@ function UserPanel({
 }) {
   const t = useTranslations("admin.userPanel");
   const quotaKindLabel = useEnumLabel("quotaKind");
+  const roleLabel = useEnumLabel("role");
   const { data, isPending, isError } = useAdminUserQuotas(userId ?? "");
 
   return (
@@ -477,8 +487,8 @@ function UserPanel({
                         <dd>{data.email ?? t("noName")}</dd>
                         <dt className="text-muted">{t("createdAtLabel")}</dt>
                         <dd>{new Date(data.createdAt).toLocaleDateString()}</dd>
-                        <dt className="text-muted">{t("isAdminLabel")}</dt>
-                        <dd>{data.isAdmin ? t("yes") : t("no")}</dd>
+                        <dt className="text-muted">{t("roleLabel")}</dt>
+                        <dd>{roleLabel(data.role)}</dd>
                         <dt className="text-muted">{t("blockedLabel")}</dt>
                         <dd>{data.blocked ? t("yes") : t("no")}</dd>
                       </dl>
@@ -490,11 +500,7 @@ function UserPanel({
                         blocked={data.blocked}
                         isSelf={userId === selfId}
                       />
-                      <AdminRoleAction
-                        userId={userId}
-                        isAdmin={data.isAdmin}
-                        isSelf={userId === selfId}
-                      />
+                      <RoleEditor userId={userId} role={data.role} isSelf={userId === selfId} />
                     </section>
 
                     <section className="flex flex-col gap-2">
@@ -548,6 +554,7 @@ function UserPanel({
 
 function UsersTable() {
   const t = useTranslations("admin.users.table");
+  const roleLabel = useEnumLabel("role");
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -623,18 +630,21 @@ function UsersTable() {
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="admin-users-is-admin">{t("adminFilterLabel")}</Label>
+          <Label htmlFor="admin-users-role">{t("roleFilterLabel")}</Label>
           <select
-            id="admin-users-is-admin"
+            id="admin-users-role"
             className={SELECT_CLASS + " w-full"}
-            value={state.isAdmin}
+            value={state.role}
             onChange={(event) =>
-              updateState({ isAdmin: event.target.value as AdminBooleanFilter })
+              updateState({ role: event.target.value as AdminUserRoleFilter })
             }
           >
-            <option value="all">{t("adminAllOption")}</option>
-            <option value="true">{t("adminYesOption")}</option>
-            <option value="false">{t("adminNoOption")}</option>
+            <option value="all">{t("roleAllOption")}</option>
+            {ADMIN_USER_ROLES.map((value) => (
+              <option key={value} value={value}>
+                {roleLabel(value)}
+              </option>
+            ))}
           </select>
         </div>
 
@@ -683,7 +693,7 @@ function UsersTable() {
                 <SortableHead column="name" label={t("columns.name")} sort={state.sort} onSort={toggleSort} />
                 <SortableHead column="email" label={t("columns.email")} sort={state.sort} onSort={toggleSort} />
                 <TableHead>{t("columns.plan")}</TableHead>
-                <SortableHead column="isAdmin" label={t("columns.isAdmin")} sort={state.sort} onSort={toggleSort} />
+                <SortableHead column="role" label={t("columns.role")} sort={state.sort} onSort={toggleSort} />
                 <SortableHead column="blocked" label={t("columns.blocked")} sort={state.sort} onSort={toggleSort} />
                 <SortableHead
                   column="createdAt"
@@ -711,7 +721,7 @@ function UsersTable() {
                   <TableCell className="font-medium">{user.name ?? t("noName")}</TableCell>
                   <TableCell>{user.email ?? t("noEmail")}</TableCell>
                   <TableCell>{user.plan}</TableCell>
-                  <TableCell>{user.isAdmin ? t("adminYesOption") : "—"}</TableCell>
+                  <TableCell>{roleLabel(user.role)}</TableCell>
                   <TableCell>{user.blocked ? t("blockedYesOption") : "—"}</TableCell>
                   <TableCell>{new Date(user.createdAt).toLocaleDateString()}</TableCell>
                   <TableCell>

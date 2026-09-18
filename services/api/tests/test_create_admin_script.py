@@ -1,8 +1,8 @@
 """The admin-bootstrap script (`packages/py-db/scripts/create_admin.py`,
-issue #144): it must grant admin access via `isAdmin = true` on a real Plan,
-never by assigning the vestigial `administrateur` Plan (docs/adr/0015).
-Loaded by file path since it's a standalone script, not a py_db package
-module.
+issue #156, docs/adr/0017): it must grant admin access via
+`role = ADMINISTRATOR` on a real Plan, never by assigning the vestigial
+`administrateur` Plan. Loaded by file path since it's a standalone script,
+not a py_db package module.
 """
 
 import asyncio
@@ -11,7 +11,7 @@ import uuid
 from pathlib import Path
 
 import pytest
-from py_db.models import Plan, User
+from py_db.models import Plan, Role, User
 from py_db.session import make_engine, make_session_factory
 from sqlalchemy import delete, select
 
@@ -55,13 +55,13 @@ def email():
     asyncio.run(_delete_user_by_email(addr))
 
 
-def test_creates_a_new_admin_with_isadmin_true_and_a_real_plan(email):
+def test_creates_a_new_admin_with_administrator_role_and_a_real_plan(email):
     create_admin = _load_create_admin_module()
     asyncio.run(create_admin.create_or_promote_admin(email, "New Admin", "a real password"))
 
     user = asyncio.run(_get_user(email))
     assert user is not None
-    assert user.isAdmin is True
+    assert user.role == Role.ADMINISTRATOR
     assert user.plan != Plan.ADMINISTRATEUR
 
 
@@ -92,5 +92,5 @@ def test_promoting_an_existing_user_leaves_their_plan_untouched(email):
 
     user = asyncio.run(_get_user(email))
     assert user is not None
-    assert user.isAdmin is True
+    assert user.role == Role.ADMINISTRATOR
     assert user.plan == Plan.STANDARD

@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { adminSessionHeaders, proxyToApi } from "@/lib/internal-api";
 
 // Backs the Audit history tab in the User panel (issue #150) — same
-// X-User-Id/X-User-Is-Admin forwarding pattern as the other admin routes.
+// X-User-Id/X-User-Role forwarding pattern as the other admin routes.
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const headers = adminSessionHeaders(await auth());
   if (!headers) {

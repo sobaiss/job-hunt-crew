@@ -204,7 +204,8 @@
       "noName": "Aucun nom",
       "emailLabel": "E-mail",
       "createdAtLabel": "Créé le",
-      "isAdminLabel": "Administrateur",
+      "roleLabel": "Rôle",
+      "roleConfirm": "Changer le rôle de cet utilisateur pour {role} ?",
       "blockedLabel": "Bloqué",
       "yes": "Oui",
       "no": "Non",
@@ -234,11 +235,7 @@
       "selfActionDisabled": "Vous ne pouvez pas vous bloquer vous-même",
       "editNameAction": "Modifier",
       "saveNameAction": "Enregistrer",
-      "grantAdminAction": "Accorder l'accès admin",
-      "revokeAdminAction": "Révoquer l'accès admin",
-      "grantAdminConfirm": "Accorder l'accès administrateur à cet utilisateur ?",
-      "revokeAdminConfirm": "Révoquer l'accès administrateur de cet utilisateur ?",
-      "selfRoleActionDisabled": "Vous ne pouvez pas révoquer votre propre rôle administrateur",
+      "selfRoleActionDisabled": "Vous ne pouvez pas modifier votre propre rôle en dehors d'administrateur",
       "detailsTab": "Détails",
       "historyTab": "Historique",
       "auditLoading": "Chargement…",
@@ -276,10 +273,8 @@
         "searchPlaceholder": "Nom ou e-mail",
         "planLabel": "Forfait",
         "planAllOption": "Tous les forfaits",
-        "adminFilterLabel": "Administrateur",
-        "adminAllOption": "Tous",
-        "adminYesOption": "Administrateurs uniquement",
-        "adminNoOption": "Non-administrateurs uniquement",
+        "roleFilterLabel": "Rôle",
+        "roleAllOption": "Tous",
         "blockedFilterLabel": "Bloqué",
         "blockedAllOption": "Tous",
         "blockedYesOption": "Bloqués uniquement",
@@ -291,7 +286,7 @@
           "name": "Nom",
           "email": "E-mail",
           "plan": "Forfait",
-          "isAdmin": "Administrateur",
+          "role": "Rôle",
           "blocked": "Bloqué",
           "createdAt": "Créé le",
           "actions": "Actions"
@@ -900,6 +895,11 @@
       "ANALYSES_DAILY": "Analyses aujourd'hui",
       "ANALYSES_MONTHLY": "Analyses ce mois-ci",
       "DOCUMENTS_DAILY": "Documents aujourd'hui"
+    },
+    "role": {
+      "EXTERNAL": "Externe",
+      "INTERNAL": "Interne",
+      "ADMINISTRATOR": "Administrateur"
     }
   }
 }

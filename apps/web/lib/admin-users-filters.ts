@@ -8,18 +8,23 @@
 export const ADMIN_USER_PLANS = ["FREE", "STANDARD", "PREMIUM", "ADMINISTRATEUR"] as const;
 export type AdminUserPlanFilter = (typeof ADMIN_USER_PLANS)[number] | "all";
 
+// The three Role values a User can hold (issue #156, replacing the
+// `isAdmin` boolean per docs/adr/0017).
+export const ADMIN_USER_ROLES = ["EXTERNAL", "INTERNAL", "ADMINISTRATOR"] as const;
+export type AdminUserRoleFilter = (typeof ADMIN_USER_ROLES)[number] | "all";
+
 export type AdminBooleanFilter = "all" | "true" | "false";
 
 // "plan" is deliberately not a sortable column: since #155/docs/adr/0018 it's
 // Effective Plan, derived per-User from Subscription rather than a raw
 // column, so the backend can't sort on it in SQL.
-export type AdminUsersSortColumn = "name" | "email" | "isAdmin" | "blocked" | "createdAt";
+export type AdminUsersSortColumn = "name" | "email" | "role" | "blocked" | "createdAt";
 export type AdminUsersSortDirection = "asc" | "desc";
 
 const SORT_COLUMNS: readonly AdminUsersSortColumn[] = [
   "name",
   "email",
-  "isAdmin",
+  "role",
   "blocked",
   "createdAt",
 ];
@@ -27,7 +32,7 @@ const SORT_COLUMNS: readonly AdminUsersSortColumn[] = [
 export type AdminUsersTableState = {
   search: string;
   plan: AdminUserPlanFilter;
-  isAdmin: AdminBooleanFilter;
+  role: AdminUserRoleFilter;
   blocked: AdminBooleanFilter;
   atOrOverLimit: boolean;
   sort: { column: AdminUsersSortColumn; direction: AdminUsersSortDirection };
@@ -41,7 +46,7 @@ export type AdminUsersPageSize = (typeof ADMIN_USERS_PAGE_SIZES)[number];
 export const DEFAULT_ADMIN_USERS_TABLE_STATE: AdminUsersTableState = {
   search: "",
   plan: "all",
-  isAdmin: "all",
+  role: "all",
   blocked: "all",
   atOrOverLimit: false,
   sort: { column: "createdAt", direction: "desc" },
@@ -54,7 +59,7 @@ export const DEFAULT_ADMIN_USERS_TABLE_STATE: AdminUsersTableState = {
  *  crashes the page. */
 export function parseAdminUsersTableState(params: URLSearchParams): AdminUsersTableState {
   const plan = params.get("plan");
-  const isAdmin = params.get("isAdmin");
+  const role = params.get("role");
   const blocked = params.get("blocked");
   const column = params.get("sort");
   const direction = params.get("dir");
@@ -66,7 +71,9 @@ export function parseAdminUsersTableState(params: URLSearchParams): AdminUsersTa
     plan: (ADMIN_USER_PLANS as readonly string[]).includes(plan ?? "")
       ? (plan as AdminUserPlanFilter)
       : "all",
-    isAdmin: isAdmin === "true" || isAdmin === "false" ? isAdmin : "all",
+    role: (ADMIN_USER_ROLES as readonly string[]).includes(role ?? "")
+      ? (role as AdminUserRoleFilter)
+      : "all",
     blocked: blocked === "true" || blocked === "false" ? blocked : "all",
     atOrOverLimit: params.get("atOrOverLimit") === "true",
     sort: {
@@ -91,7 +98,7 @@ export function adminUsersTableStateToParams(state: AdminUsersTableState): URLSe
   const params = new URLSearchParams();
   if (state.search) params.set("q", state.search);
   if (state.plan !== "all") params.set("plan", state.plan);
-  if (state.isAdmin !== "all") params.set("isAdmin", state.isAdmin);
+  if (state.role !== "all") params.set("role", state.role);
   if (state.blocked !== "all") params.set("blocked", state.blocked);
   if (state.atOrOverLimit) params.set("atOrOverLimit", "true");
   params.set("sort", state.sort.column);
@@ -108,7 +115,7 @@ export function adminUsersTableStateToQuery(state: AdminUsersTableState): URLSea
   const params = new URLSearchParams();
   if (state.search) params.set("search", state.search);
   if (state.plan !== "all") params.set("plan", state.plan);
-  if (state.isAdmin !== "all") params.set("isAdmin", state.isAdmin);
+  if (state.role !== "all") params.set("role", state.role);
   if (state.blocked !== "all") params.set("blocked", state.blocked);
   if (state.atOrOverLimit) params.set("atOrOverLimit", "true");
   params.set("sortBy", state.sort.column);

@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """One-off bootstrap for the very first Administrator.
 
-Every other way to become an Administrator (`PUT /v1/admin/users/{id}/admin-role`,
-issue #149) requires the caller to already be one — this script is how the
+Every other way to become an Administrator (`PUT /v1/admin/users/{id}/role`,
+issue #156) requires the caller to already be one — this script is how the
 first account is created, since there's no other path in. Also works to
 create additional Administrators later, or to (re)set an existing User's
 password.
 
-Admin access is granted via `isAdmin = true` (issue #144, docs/adr/0015),
-never by assigning the vestigial `administrateur` Plan — a new User created
-here keeps a real Plan (`free` by default) alongside admin rights; promoting
-an existing User leaves their current Plan untouched.
+Admin access is granted via `role = ADMINISTRATOR` (issue #156, docs/adr/0017,
+replacing the retired `isAdmin` boolean from issue #144), never by assigning
+the vestigial `administrateur` Plan — a new User created here keeps a real
+Plan (`free` by default) alongside admin rights; promoting an existing User
+leaves their current Plan untouched.
 
 Usage:
     DATABASE_URL=postgresql://postgres:postgres@localhost:5432/job_hunt_crew \\
@@ -24,7 +25,7 @@ import os
 import uuid
 from datetime import UTC, datetime
 
-from py_db.models import User
+from py_db.models import Role, User
 from py_db.passwords import hash_password
 from py_db.session import make_engine, make_session_factory
 from sqlalchemy import select
@@ -47,7 +48,7 @@ async def create_or_promote_admin(email: str, name: str, password: str) -> None:
             else:
                 action = "Updated"
             user.name = name
-            user.isAdmin = True
+            user.role = Role.ADMINISTRATOR
             user.passwordHash = hash_password(password)
             user.updatedAt = _now()
             await session.commit()

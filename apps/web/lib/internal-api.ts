@@ -4,23 +4,25 @@
 // depending on Prisma/aws-sdk directly, per the M7 frontend/backend split.
 
 import type { Session } from "next-auth";
-import type { Plan } from "@/types/next-auth";
+import type { Plan, Role } from "@/types/next-auth";
 
 const API_BASE_URL = process.env.API_BASE_URL || "http://localhost:8000";
 const INTERNAL_API_SECRET = process.env.INTERNAL_API_SECRET || "";
 
-// The single place the X-User-Id/X-User-Is-Admin header pair is built from a
-// Session (issue #152) — every admin BFF route forwards through this instead
-// of constructing the pair inline, so the Role rollout (#156) only needs to
-// change this one function. Returns null when there's no authenticated user,
-// so callers can 401 uniformly.
+// The single place the X-User-Id/X-User-Role header pair is built from a
+// Session (issue #152, updated for Role by issue #156) — every admin BFF
+// route forwards through this instead of constructing the pair inline.
+// Returns null when there's no authenticated user, so callers can 401
+// uniformly. A session with no Role (shouldn't happen once `jwt` always
+// resolves one, but not provable at the type level) defaults to the lowest
+// privilege, EXTERNAL, same as the User model's own column default.
 export function adminSessionHeaders(session: Session | null): Record<string, string> | null {
   if (!session?.user?.id) {
     return null;
   }
   return {
     "X-User-Id": session.user.id,
-    "X-User-Is-Admin": session.user.isAdmin ? "true" : "false",
+    "X-User-Role": session.user.role ?? "EXTERNAL",
   };
 }
 
@@ -68,7 +70,7 @@ export async function upsertUser(params: {
   email: string;
   name?: string | null;
   image?: string | null;
-}): Promise<{ userId: string; plan: Plan; isAdmin: boolean }> {
+}): Promise<{ userId: string; plan: Plan; role: Role }> {
   const res = await internalApiFetch("/internal/users/upsert", {
     method: "POST",
     body: JSON.stringify({
@@ -80,7 +82,7 @@ export async function upsertUser(params: {
   if (!res.ok) {
     throw new Error(`Failed to upsert user (${res.status})`);
   }
-  const data = (await res.json()) as { userId: string; plan: Plan; isAdmin: boolean };
+  const data = (await res.json()) as { userId: string; plan: Plan; role: Role };
   return data;
 }
 
@@ -90,7 +92,7 @@ export async function upsertUser(params: {
 export async function verifyCredentials(params: {
   email: string;
   password: string;
-}): Promise<{ userId: string; plan: Plan; isAdmin: boolean } | null> {
+}): Promise<{ userId: string; plan: Plan; role: Role } | null> {
   const res = await internalApiFetch("/internal/auth/verify-credentials", {
     method: "POST",
     body: JSON.stringify(params),
@@ -98,5 +100,5 @@ export async function verifyCredentials(params: {
   if (!res.ok) {
     return null;
   }
-  return (await res.json()) as { userId: string; plan: Plan; isAdmin: boolean };
+  return (await res.json()) as { userId: string; plan: Plan; role: Role };
 }

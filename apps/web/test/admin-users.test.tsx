@@ -10,7 +10,7 @@ import AdminUsersPage from "@/app/(app)/admin/users/page";
 
 const ADMIN_SESSION: Session = {
   expires: "2999-01-01T00:00:00.000Z",
-  user: { id: "admin-1", name: "Admin", email: "admin@example.com", isAdmin: true },
+  user: { id: "admin-1", name: "Admin", email: "admin@example.com", role: "ADMINISTRATOR" },
 };
 
 vi.mock("next/navigation", async () => {
@@ -40,7 +40,7 @@ function usersListResponse(overrides: Record<string, unknown> = {}) {
         name: "Ada Lovelace",
         email: "user1@example.com",
         plan: "FREE",
-        isAdmin: false,
+        role: "EXTERNAL",
         blocked: false,
         atOrOverLimit: true,
         createdAt: "2026-01-01T00:00:00.000Z",
@@ -60,7 +60,7 @@ function quotasResponse(overrides: Record<string, unknown> = {}) {
     email: "user1@example.com",
     plan: "FREE",
     planEndDate: null,
-    isAdmin: false,
+    role: "EXTERNAL",
     blocked: false,
     createdAt: "2026-01-01T00:00:00.000Z",
     quotas: {
@@ -365,15 +365,15 @@ describe("AdminUsersPage", () => {
     expect(capturedBody).toEqual({ name: "Grace Hopper" });
   });
 
-  it("grants the admin role from the panel after inline confirmation", async () => {
+  it("changes a User's role from the panel after inline confirmation", async () => {
     mockCommon();
     let capturedBody: unknown;
     server.use(
       http.get("/api/admin/users", () => HttpResponse.json(usersListResponse())),
       http.get("/api/admin/users/user-1/quotas", () => HttpResponse.json(quotasResponse())),
-      http.put("/api/admin/users/user-1/admin-role", async ({ request }) => {
+      http.put("/api/admin/users/user-1/role", async ({ request }) => {
         capturedBody = await request.json();
-        return HttpResponse.json({ userId: "user-1", isAdmin: true });
+        return HttpResponse.json({ userId: "user-1", role: "ADMINISTRATOR" });
       }),
     );
 
@@ -381,20 +381,23 @@ describe("AdminUsersPage", () => {
     await userEvent.click(await screen.findByText("Ada Lovelace"));
 
     const panel = (await screen.findByText("User user-1")).closest('[role="dialog"]') as HTMLElement;
-    await userEvent.click(within(panel).getByRole("button", { name: "Grant admin" }));
+    await userEvent.selectOptions(
+      within(panel).getByRole("combobox", { name: "Role" }),
+      "ADMINISTRATOR",
+    );
     await userEvent.click(within(panel).getByRole("button", { name: "Confirm" }));
 
-    expect(capturedBody).toEqual({ isAdmin: true });
+    expect(capturedBody).toEqual({ role: "ADMINISTRATOR" });
   });
 
-  it("disables the admin-role action for the Administrator's own row in the panel", async () => {
+  it("disables the role select for the Administrator's own row in the panel", async () => {
     mockCommon();
     server.use(
       http.get("/api/admin/users", () =>
         HttpResponse.json(usersListResponse({ users: [{ ...usersListResponse().users[0], id: "admin-1" }] })),
       ),
       http.get("/api/admin/users/admin-1/quotas", () =>
-        HttpResponse.json(quotasResponse({ userId: "admin-1", isAdmin: true })),
+        HttpResponse.json(quotasResponse({ userId: "admin-1", role: "ADMINISTRATOR" })),
       ),
     );
 
@@ -402,6 +405,6 @@ describe("AdminUsersPage", () => {
     await userEvent.click(await screen.findByText("Ada Lovelace"));
 
     const panel = (await screen.findByText("User admin-1")).closest('[role="dialog"]') as HTMLElement;
-    expect(within(panel).getByRole("button", { name: "Revoke admin" })).toBeDisabled();
+    expect(within(panel).getByRole("combobox", { name: "Role" })).toBeDisabled();
   });
 });

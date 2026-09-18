@@ -204,7 +204,8 @@
       "noName": "No name",
       "emailLabel": "Email",
       "createdAtLabel": "Created",
-      "isAdminLabel": "Admin",
+      "roleLabel": "Role",
+      "roleConfirm": "Change this User's role to {role}?",
       "blockedLabel": "Blocked",
       "yes": "Yes",
       "no": "No",
@@ -234,11 +235,7 @@
       "selfActionDisabled": "You cannot block yourself",
       "editNameAction": "Edit",
       "saveNameAction": "Save",
-      "grantAdminAction": "Grant admin",
-      "revokeAdminAction": "Revoke admin",
-      "grantAdminConfirm": "Grant admin access to this User?",
-      "revokeAdminConfirm": "Revoke this User's admin access?",
-      "selfRoleActionDisabled": "You cannot revoke your own admin role",
+      "selfRoleActionDisabled": "You cannot change your own role away from administrator",
       "detailsTab": "Details",
       "historyTab": "Audit history",
       "auditLoading": "Loading…",
@@ -276,10 +273,8 @@
         "searchPlaceholder": "Name or email",
         "planLabel": "Plan",
         "planAllOption": "All plans",
-        "adminFilterLabel": "Admin",
-        "adminAllOption": "All",
-        "adminYesOption": "Admins only",
-        "adminNoOption": "Non-admins only",
+        "roleFilterLabel": "Role",
+        "roleAllOption": "All",
         "blockedFilterLabel": "Blocked",
         "blockedAllOption": "All",
         "blockedYesOption": "Blocked only",
@@ -291,7 +286,7 @@
           "name": "Name",
           "email": "Email",
           "plan": "Plan",
-          "isAdmin": "Admin",
+          "role": "Role",
           "blocked": "Blocked",
           "createdAt": "Created",
           "actions": "Actions"
@@ -900,6 +895,11 @@
       "ANALYSES_DAILY": "Analyses today",
       "ANALYSES_MONTHLY": "Analyses this month",
       "DOCUMENTS_DAILY": "Documents today"
+    },
+    "role": {
+      "EXTERNAL": "External",
+      "INTERNAL": "Internal",
+      "ADMINISTRATOR": "Administrator"
     }
   }
 }

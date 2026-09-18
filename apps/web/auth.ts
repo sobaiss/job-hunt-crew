@@ -75,7 +75,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const upserted = await upsertUser({ email: user.email, name: user.name, image: user.image });
         token.userId = upserted.userId;
         token.plan = upserted.plan;
-        token.isAdmin = upserted.isAdmin;
+        token.role = upserted.role;
       }
       return token;
     },
@@ -86,7 +86,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (token.plan) {
         session.user.plan = token.plan;
       }
-      session.user.isAdmin = token.isAdmin ?? false;
+      session.user.role = token.role ?? "EXTERNAL";
       return session;
     },
   },

@@ -8,11 +8,12 @@ export const handlers = [
   http.get("/api/example", () => HttpResponse.json({ ok: true })),
   http.get("/api/auth/session", () => HttpResponse.json({})),
   // The Admin area landing page (issue #138); default to an Administrator
-  // response since only isAdmin sessions ever reach the page's own layout
-  // gate (issue #144, docs/adr/0015 — admin access is decoupled from Plan).
+  // response since only Administrator-Role sessions ever reach the page's
+  // own layout gate (issue #144/#156, docs/adr/0015 & 0017 — admin access is
+  // decoupled from Plan and gated on Role, not the retired isAdmin boolean).
   // Suites exercising the 403/401 path override with `server.use`.
   http.get("/api/admin/me", () =>
-    HttpResponse.json({ userId: "admin-1", plan: "PREMIUM", isAdmin: true }),
+    HttpResponse.json({ userId: "admin-1", plan: "PREMIUM", role: "ADMINISTRATOR" }),
   ),
   // The Dashboard reads the site catalogue to name a grouped SITE_SEARCH batch
   // row (issue #34). Default to an empty catalogue so suites that don't care

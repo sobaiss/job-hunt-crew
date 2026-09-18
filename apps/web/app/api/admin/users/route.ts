@@ -4,7 +4,7 @@ import { adminSessionHeaders, proxyToApi } from "@/lib/internal-api";
 
 // Backs the Admin users table (issue #147) — forwards every search/filter/
 // sort/pagination query param straight through unmodified (services/api owns
-// their validation), plus the Session's isAdmin so `require_admin` can reject
+// their validation), plus the Session's Role so `require_admin` can reject
 // a non-Administrator caller.
 export async function GET(request: Request) {
   const headers = adminSessionHeaders(await auth());

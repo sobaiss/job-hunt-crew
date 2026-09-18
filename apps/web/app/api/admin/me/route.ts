@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { adminSessionHeaders, proxyToApi } from "@/lib/internal-api";
 
 // Backs the bare Admin area landing page (issue #138) — forwards the
-// Session's isAdmin flag (issue #144, docs/adr/0015) alongside userId so
+// Session's Role (issue #156, docs/adr/0017) alongside userId so
 // services/api's `require_admin` can reject a non-Administrator caller the
 // same way it trusts X-User-Id today.
 export async function GET() {

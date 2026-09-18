@@ -10,6 +10,7 @@ from py_db.models import (
     PlanQuotaDefault,
     Quotakind,
     QuotaOverride,
+    Role,
     Subscription,
     User,
 )
@@ -43,17 +44,17 @@ def _now() -> datetime:
 
 async def require_admin(
     x_user_id: str | None = Header(default=None, alias="X-User-Id"),
-    x_user_is_admin: str | None = Header(default=None, alias="X-User-Is-Admin"),
+    x_user_role: str | None = Header(default=None, alias="X-User-Role"),
 ) -> str:
-    """Rejects any caller whose forwarded `isAdmin` flag isn't set (issue
-    #138, decoupled from Plan in #144 per docs/adr/0015). Trusts the
-    BFF-forwarded X-User-Is-Admin header the same way `require_user_id`
-    trusts X-User-Id — no independent re-verification against Postgres, same
-    MVP boundary as the Internal API secret.
+    """Rejects any caller whose forwarded Role isn't Administrator (issue
+    #156, replacing the `isAdmin` boolean gate from #138/#144 per
+    docs/adr/0017). Trusts the BFF-forwarded X-User-Role header the same way
+    `require_user_id` trusts X-User-Id — no independent re-verification
+    against Postgres, same MVP boundary as the Internal API secret.
     """
     if not x_user_id:
         raise HTTPException(status_code=401, detail="Missing X-User-Id header")
-    if x_user_is_admin != "true":
+    if x_user_role != Role.ADMINISTRATOR.value:
         raise HTTPException(status_code=403, detail="Administrator access required")
     return x_user_id
 
@@ -61,7 +62,7 @@ async def require_admin(
 class AdminMeResponse(BaseModel):
     userId: str
     plan: str
-    isAdmin: bool
+    role: str
 
 
 @router.get("/me", response_model=AdminMeResponse)
@@ -71,10 +72,11 @@ async def admin_me(
 ) -> AdminMeResponse:
     """Backs the bare `/admin` landing page (issue #138) — confirms the
     caller actually cleared `require_admin`, and reports their real Plan
-    now that admin access no longer implies one (#144).
+    now that admin access no longer implies one (#144), plus their Role
+    (issue #156, replacing the `isAdmin` boolean per docs/adr/0017).
     """
     target = await _get_target_user(session, user_id)
-    return AdminMeResponse(userId=target.id, plan=target.plan.value, isAdmin=target.isAdmin)
+    return AdminMeResponse(userId=target.id, plan=target.plan.value, role=target.role.value)
 
 
 async def _get_target_user(session: AsyncSession, user_id: str) -> User:
@@ -107,7 +109,7 @@ class UserQuotasResponse(BaseModel):
     email: str | None
     plan: str
     planEndDate: datetime | None
-    isAdmin: bool
+    role: str
     blocked: bool
     createdAt: datetime
     quotas: dict[str, QuotaUsage]
@@ -184,7 +186,7 @@ async def get_user_quotas(
         email=target.email,
         plan=plan.value,
         planEndDate=current.endDate if current else None,
-        isAdmin=target.isAdmin,
+        role=target.role.value,
         blocked=target.blockedAt is not None,
         createdAt=target.createdAt,
         quotas=quotas,
@@ -460,54 +462,56 @@ async def set_user_info(
     return SetUserInfoResponse(userId=target.id, name=target.name)
 
 
-class SetUserAdminRoleRequest(BaseModel):
-    isAdmin: bool
+class SetUserRoleRequest(BaseModel):
+    role: Role
 
 
-class SetUserAdminRoleResponse(BaseModel):
+class SetUserRoleResponse(BaseModel):
     userId: str
-    isAdmin: bool
+    role: str
 
 
-@router.put("/users/{user_id}/admin-role", response_model=SetUserAdminRoleResponse)
-async def set_user_admin_role(
+@router.put("/users/{user_id}/role", response_model=SetUserRoleResponse)
+async def set_user_role(
     user_id: str,
-    req: SetUserAdminRoleRequest,
+    req: SetUserRoleRequest,
     admin_id: str = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
-) -> SetUserAdminRoleResponse:
-    """Grants or revokes `user_id`'s `isAdmin` role from the User panel
-    (issue #149). An Administrator can never revoke their own admin role,
+) -> SetUserRoleResponse:
+    """Sets `user_id`'s Role to External/Internal/Administrator (issue #156,
+    replacing the `isAdmin` grant/revoke from #149 per docs/adr/0017). An
+    Administrator can never change their own Role away from Administrator,
     since that would lock them out of the Admin area with no way back in —
-    only the revoke direction is rejected for a self-target, since granting
-    is already the caller's own state (every caller here already cleared
-    `require_admin`) and resolves as a harmless no-op. A no-op request (the
-    User already in the requested state) writes no `AdminAuditEvent`,
-    matching `set_user_plan`'s idempotency.
+    only that direction is rejected for a self-target, since setting
+    Administrator on themselves is already the caller's own state (every
+    caller here already cleared `require_admin`) and resolves as a harmless
+    no-op. A no-op request (the User already in the requested Role) writes
+    no `AdminAuditEvent`, matching `set_user_plan`'s idempotency.
     """
-    if user_id == admin_id and not req.isAdmin:
+    if user_id == admin_id and req.role != Role.ADMINISTRATOR:
         raise HTTPException(
-            status_code=400, detail="Administrators cannot revoke their own admin role"
+            status_code=400,
+            detail="Administrators cannot change their own role away from administrator",
         )
 
     target = await _get_target_user(session, user_id)
 
-    if req.isAdmin != target.isAdmin:
-        old_value = "true" if target.isAdmin else "false"
-        target.isAdmin = req.isAdmin
+    if req.role != target.role:
+        old_value = target.role.value
+        target.role = req.role
         target.updatedAt = _now()
-        new_value = "true" if target.isAdmin else "false"
+        new_value = target.role.value
         record_admin_audit_event(
             session,
             actor_user_id=admin_id,
             target_user_id=user_id,
-            field="isAdmin",
+            field="role",
             old_value=old_value,
             new_value=new_value,
         )
         await session.commit()
 
-    return SetUserAdminRoleResponse(userId=target.id, isAdmin=target.isAdmin)
+    return SetUserRoleResponse(userId=target.id, role=target.role.value)
 
 
 class AuditEventActor(BaseModel):
@@ -669,7 +673,7 @@ class AdminUserRow(BaseModel):
     name: str | None
     email: str | None
     plan: str
-    isAdmin: bool
+    role: str
     blocked: bool
     atOrOverLimit: bool
     createdAt: datetime
@@ -685,7 +689,7 @@ class AdminUsersListResponse(BaseModel):
 _SORTABLE_COLUMNS = {
     "name": User.name,
     "email": User.email,
-    "isAdmin": User.isAdmin,
+    "role": User.role,
     "blocked": User.blockedAt,
     "createdAt": User.createdAt,
 }
@@ -697,7 +701,7 @@ def _row_of(user: User, plan: Plan, at_or_over_limit: bool) -> AdminUserRow:
         name=user.name,
         email=user.email,
         plan=plan.value,
-        isAdmin=user.isAdmin,
+        role=user.role.value,
         blocked=user.blockedAt is not None,
         atOrOverLimit=at_or_over_limit,
         createdAt=user.createdAt,
@@ -708,7 +712,7 @@ def _row_of(user: User, plan: Plan, at_or_over_limit: bool) -> AdminUserRow:
 async def list_users(
     search: str | None = Query(None),
     plan: Plan | None = Query(None),
-    is_admin: bool | None = Query(None, alias="isAdmin"),
+    role: Role | None = Query(None),
     blocked: bool | None = Query(None),
     at_or_over_limit: bool = Query(False, alias="atOrOverLimit"),
     sort_by: str = Query("createdAt", alias="sortBy"),
@@ -720,7 +724,7 @@ async def list_users(
 ) -> AdminUsersListResponse:
     """Rewritten for scale (issue #147): a lightweight row per User (Plan
     reassignment, quotas and overrides now live on the User panel instead),
-    searchable by name/email, filterable by Plan/isAdmin/blocked/
+    searchable by name/email, filterable by Plan/Role/blocked/
     atOrOverLimit, sortable, and paginated — search/filter/sort/pagination
     all applied server-side since the table is no longer expected to fit
     unpaginated in one response.
@@ -738,8 +742,8 @@ async def list_users(
     if search:
         pattern = f"%{search}%"
         stmt = stmt.where(or_(User.name.ilike(pattern), User.email.ilike(pattern)))
-    if is_admin is not None:
-        stmt = stmt.where(User.isAdmin == is_admin)
+    if role is not None:
+        stmt = stmt.where(User.role == role)
     if blocked is not None:
         stmt = stmt.where(User.blockedAt.isnot(None) if blocked else User.blockedAt.is_(None))
 

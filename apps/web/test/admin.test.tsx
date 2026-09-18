@@ -19,12 +19,18 @@ vi.mock("@/auth", () => ({ auth }));
 
 const ADMIN_SESSION: Session = {
   expires: "2999-01-01T00:00:00.000Z",
-  user: { id: "admin-1", name: "Ada", email: "ada@example.com", plan: "PREMIUM", isAdmin: true },
+  user: {
+    id: "admin-1",
+    name: "Ada",
+    email: "ada@example.com",
+    plan: "PREMIUM",
+    role: "ADMINISTRATOR",
+  },
 };
 
 const STANDARD_SESSION: Session = {
   expires: "2999-01-01T00:00:00.000Z",
-  user: { id: "user-1", name: "Bob", email: "bob@example.com", plan: "STANDARD", isAdmin: false },
+  user: { id: "user-1", name: "Bob", email: "bob@example.com", plan: "STANDARD", role: "EXTERNAL" },
 };
 
 beforeEach(() => {
@@ -52,7 +58,7 @@ describe("Admin layout gate", () => {
     expect(redirect).not.toHaveBeenCalled();
   });
 
-  it("renders children for an isAdmin session", async () => {
+  it("renders children for an Administrator session", async () => {
     auth.mockResolvedValue(ADMIN_SESSION);
 
     const element = await AdminLayout({ children: <div data-testid="child" /> });
