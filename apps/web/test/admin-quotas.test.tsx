@@ -69,11 +69,12 @@ describe("AdminQuotasPage", () => {
     renderWithProviders(<AdminQuotasPage />);
     await screen.findByText("STANDARD");
 
-    const standardHeader = screen.getByText("STANDARD").closest("th") as HTMLElement;
-    await userEvent.click(within(standardHeader).getByRole("button", { name: "Modify" }));
+    // Columns are FREE, STANDARD, PREMIUM in that fixed order, so the
+    // Modify buttons in the trailing Actions row follow the same order.
+    await userEvent.click(screen.getAllByRole("button", { name: "Modify" })[1]);
 
     const sheet = (await screen.findByText("Edit STANDARD")).closest('[role="dialog"]') as HTMLElement;
-    const analysesDailyInput = within(sheet).getByLabelText("ANALYSES_DAILY");
+    const analysesDailyInput = within(sheet).getByLabelText("Analyses today");
     await userEvent.clear(analysesDailyInput);
     await userEvent.type(analysesDailyInput, "99");
     await userEvent.click(within(sheet).getByRole("button", { name: "Save" }));
@@ -100,11 +101,10 @@ describe("AdminQuotasPage", () => {
     renderWithProviders(<AdminQuotasPage />);
     await screen.findByText("FREE");
 
-    const freeHeader = screen.getByText("FREE").closest("th") as HTMLElement;
-    await userEvent.click(within(freeHeader).getByRole("button", { name: "Modify" }));
+    await userEvent.click(screen.getAllByRole("button", { name: "Modify" })[0]);
 
     const sheet = (await screen.findByText("Edit FREE")).closest('[role="dialog"]') as HTMLElement;
-    const documentsDailyInput = within(sheet).getByLabelText("DOCUMENTS_DAILY");
+    const documentsDailyInput = within(sheet).getByLabelText("Documents today");
     await userEvent.clear(documentsDailyInput);
     await userEvent.click(within(sheet).getByRole("button", { name: "Save" }));
 

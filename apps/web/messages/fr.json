@@ -886,6 +886,12 @@
       "GLASSDOOR": "Glassdoor",
       "OTHER": "Autre",
       "HELLOWORK": "HelloWork"
+    },
+    "quotaKind": {
+      "ACTIVE_SCOUTS": "Scouts actifs",
+      "ANALYSES_DAILY": "Analyses aujourd'hui",
+      "ANALYSES_MONTHLY": "Analyses ce mois-ci",
+      "DOCUMENTS_DAILY": "Documents aujourd'hui"
     }
   }
 }

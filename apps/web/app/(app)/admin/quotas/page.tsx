@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 
 import { useAdminPlanDefaults, useSetPlanDefaults, type AdminPlanDefault } from "@/hooks/use-admin";
+import { useEnumLabel } from "@/lib/enum-labels";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -29,6 +30,7 @@ function groupByPlan(defaults: AdminPlanDefault[]): Record<string, LimitsByKind>
 
 function PlanEditForm({ plan, limits, onClose }: { plan: string; limits: LimitsByKind; onClose: () => void }) {
   const t = useTranslations("admin.quotas");
+  const quotaKindLabel = useEnumLabel("quotaKind");
   const setDefaults = useSetPlanDefaults(plan);
   const [drafts, setDrafts] = useState<Record<string, string>>(() =>
     Object.fromEntries(KIND_ORDER.map((kind) => [kind, limits[kind] == null ? "" : String(limits[kind])])),
@@ -43,7 +45,7 @@ function PlanEditForm({ plan, limits, onClose }: { plan: string; limits: LimitsB
         {KIND_ORDER.map((kind) => (
           <div key={kind} className="flex flex-col gap-1.5">
             <label className="text-sm font-medium" htmlFor={`${plan}-${kind}`}>
-              {kind}
+              {quotaKindLabel(kind)}
             </label>
             <Input
               id={`${plan}-${kind}`}
@@ -95,13 +97,14 @@ function PlanEditForm({ plan, limits, onClose }: { plan: string; limits: LimitsB
 export default function AdminQuotasPage() {
   const t = useTranslations("admin.quotas");
   const nav = useTranslations("admin");
+  const quotaKindLabel = useEnumLabel("quotaKind");
   const { data, isPending, isError } = useAdminPlanDefaults();
   const [editingPlan, setEditingPlan] = useState<string | null>(null);
 
   const byPlan = data ? groupByPlan(data.defaults) : {};
 
   return (
-    <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-8">
+    <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 p-8">
       <div className="flex flex-col gap-1">
         <h1 className="font-serif text-2xl font-semibold">{t("title")}</h1>
         <p className="text-sm text-muted">{t("description")}</p>
@@ -128,21 +131,14 @@ export default function AdminQuotasPage() {
             <TableRow>
               <TableHead>{t("kindColumn")}</TableHead>
               {REAL_PLANS.map((plan) => (
-                <TableHead key={plan}>
-                  <div className="flex items-center justify-between gap-2">
-                    <span>{plan}</span>
-                    <Button size="sm" variant="outline" onClick={() => setEditingPlan(plan)}>
-                      {t("modifyAction")}
-                    </Button>
-                  </div>
-                </TableHead>
+                <TableHead key={plan}>{plan}</TableHead>
               ))}
             </TableRow>
           </TableHeader>
           <TableBody>
             {KIND_ORDER.map((kind) => (
               <TableRow key={kind}>
-                <TableCell className="font-medium">{kind}</TableCell>
+                <TableCell className="font-medium">{quotaKindLabel(kind)}</TableCell>
                 {REAL_PLANS.map((plan) => {
                   const limit = byPlan[plan]?.[kind] ?? null;
                   return (
@@ -151,6 +147,16 @@ export default function AdminQuotasPage() {
                 })}
               </TableRow>
             ))}
+            <TableRow>
+              <TableCell />
+              {REAL_PLANS.map((plan) => (
+                <TableCell key={plan}>
+                  <Button size="sm" variant="outline" onClick={() => setEditingPlan(plan)}>
+                    {t("modifyAction")}
+                  </Button>
+                </TableCell>
+              ))}
+            </TableRow>
           </TableBody>
         </Table>
       )}

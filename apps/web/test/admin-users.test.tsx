@@ -231,7 +231,7 @@ describe("AdminUsersPage", () => {
     renderWithProviders(<AdminUsersPage />);
     await userEvent.click(await screen.findByText("Ada Lovelace"));
 
-    const input = await screen.findByLabelText("Override for ANALYSES_DAILY");
+    const input = await screen.findByLabelText("Override for Analyses today");
     await userEvent.clear(input);
     await userEvent.type(input, "99");
     const row = input.closest("div") as HTMLElement;

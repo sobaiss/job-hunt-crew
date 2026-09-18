@@ -28,6 +28,7 @@ import {
   type AdminUsersSortColumn,
   type AdminUsersTableState,
 } from "@/lib/admin-users-filters";
+import { useEnumLabel } from "@/lib/enum-labels";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -60,6 +61,7 @@ function OverrideEditor({
   hasOverride: boolean;
 }) {
   const t = useTranslations("admin.userPanel");
+  const quotaKindLabel = useEnumLabel("quotaKind");
   const [draft, setDraft] = useState(cap == null ? "" : String(cap));
   const setOverride = useSetQuotaOverride(userId);
   const clearOverride = useClearQuotaOverride(userId);
@@ -67,7 +69,7 @@ function OverrideEditor({
   return (
     <div className="flex items-center gap-2">
       <Input
-        aria-label={t("overrideInputLabel", { kind })}
+        aria-label={t("overrideInputLabel", { kind: quotaKindLabel(kind) })}
         className="h-8 w-24"
         placeholder={t("unlimitedPlaceholder")}
         value={draft}
@@ -349,6 +351,7 @@ function UserPanel({
   onClose: () => void;
 }) {
   const t = useTranslations("admin.userPanel");
+  const quotaKindLabel = useEnumLabel("quotaKind");
   const { data, isPending, isError } = useAdminUserQuotas(userId ?? "");
   const setPlan = useSetUserPlan(userId ?? "");
 
@@ -432,7 +435,7 @@ function UserPanel({
                           const usage = data.quotas[kind];
                           return (
                             <div key={kind} className="flex flex-col gap-1.5">
-                              <p className="text-sm font-medium">{kind}</p>
+                              <p className="text-sm font-medium">{quotaKindLabel(kind)}</p>
                               <p className="text-xs text-muted">
                                 {usage.cap == null
                                   ? t("usageUnlimited", { used: usage.used })
@@ -714,7 +717,7 @@ export default function AdminUsersPage() {
 
   return (
     <Suspense fallback={null}>
-      <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-8">
+      <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 p-8">
         <div className="flex flex-col gap-1">
           <h1 className="font-serif text-2xl font-semibold">{t("title")}</h1>
           <p className="text-sm text-muted">{t("description")}</p>

@@ -11,7 +11,8 @@ type EnumNamespace =
   | "cvConversionStatus"
   | "applicationStatus"
   | "trackingStatus"
-  | "sourceSite";
+  | "sourceSite"
+  | "quotaKind";
 
 /**
  * Returns a `label(value)` function for one server enum. An unmapped value
