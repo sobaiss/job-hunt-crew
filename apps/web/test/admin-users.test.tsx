@@ -161,6 +161,54 @@ describe("AdminUsersPage", () => {
     expect(screen.getByText("3 of 15 (12 remaining)")).toBeInTheDocument();
   });
 
+  it("shows the audit history tab with resolved actor info", async () => {
+    mockCommon();
+    server.use(
+      http.get("/api/admin/users", () => HttpResponse.json(usersListResponse())),
+      http.get("/api/admin/users/user-1/quotas", () => HttpResponse.json(quotasResponse())),
+      http.get("/api/admin/users/user-1/audit-events", () =>
+        HttpResponse.json({
+          events: [
+            {
+              id: "event-1",
+              field: "blockedAt",
+              oldValue: "null",
+              newValue: "2026-01-02T00:00:00.000Z",
+              createdAt: "2026-01-02T00:00:00.000Z",
+              actor: { id: "admin-1", name: "Admin", email: "admin@example.com" },
+            },
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<AdminUsersPage />);
+    await userEvent.click(await screen.findByText("Ada Lovelace"));
+    await userEvent.click(await screen.findByRole("tab", { name: "Audit history" }));
+
+    expect(await screen.findByText("blockedAt")).toBeInTheDocument();
+    expect(screen.getByText(/^by Admin on/)).toBeInTheDocument();
+  });
+
+  it("shows an empty state in the audit history tab when no events exist", async () => {
+    mockCommon();
+    server.use(
+      http.get("/api/admin/users", () => HttpResponse.json(usersListResponse())),
+      http.get("/api/admin/users/user-1/quotas", () => HttpResponse.json(quotasResponse())),
+      http.get("/api/admin/users/user-1/audit-events", () =>
+        HttpResponse.json({ events: [] }),
+      ),
+    );
+
+    renderWithProviders(<AdminUsersPage />);
+    await userEvent.click(await screen.findByText("Ada Lovelace"));
+    await userEvent.click(await screen.findByRole("tab", { name: "Audit history" }));
+
+    expect(
+      await screen.findByText("No admin actions recorded for this User yet."),
+    ).toBeInTheDocument();
+  });
+
   it("reassigns the User's Plan from the panel", async () => {
     mockCommon();
     let capturedBody: unknown;

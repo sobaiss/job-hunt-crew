@@ -209,7 +209,15 @@
       "revokeAdminAction": "Revoke admin",
       "grantAdminConfirm": "Grant admin access to this User?",
       "revokeAdminConfirm": "Revoke this User's admin access?",
-      "selfRoleActionDisabled": "You cannot revoke your own admin role"
+      "selfRoleActionDisabled": "You cannot revoke your own admin role",
+      "detailsTab": "Details",
+      "historyTab": "Audit history",
+      "auditLoading": "Loading…",
+      "auditLoadError": "Couldn't load this User's audit history.",
+      "auditEmpty": "No admin actions recorded for this User yet.",
+      "auditOldToNew": "{oldValue} → {newValue}",
+      "auditNullValue": "none",
+      "auditByAt": "by {actor} on {date}"
     },
     "users": {
       "title": "Reporting",

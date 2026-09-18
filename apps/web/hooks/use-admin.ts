@@ -179,6 +179,28 @@ export function useAdminUsers(state: AdminUsersTableState) {
   });
 }
 
+// Backs the Audit history tab in the User panel (issue #150): every
+// AdminAuditEvent recorded against a target User, newest first, with the
+// acting Administrator's name/email already resolved server-side.
+export type AdminAuditEventActor = { id: string; name: string | null; email: string | null };
+
+export type AdminAuditEventItem = {
+  id: string;
+  field: string;
+  oldValue: string | null;
+  newValue: string | null;
+  createdAt: string;
+  actor: AdminAuditEventActor;
+};
+
+export function useAdminAuditEvents(userId: string) {
+  return useQuery({
+    queryKey: ["admin-user-audit-events", userId],
+    queryFn: () => bff.get<{ events: AdminAuditEventItem[] }>(`/admin/users/${userId}/audit-events`),
+    enabled: userId !== "",
+  });
+}
+
 export type AdminStats = {
   totalUsers: number;
   usersOverLimitCount: number;

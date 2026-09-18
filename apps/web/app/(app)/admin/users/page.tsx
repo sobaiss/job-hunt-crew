@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react";
 import { useTranslations } from "next-intl";
 
 import {
+  useAdminAuditEvents,
   useAdminPlanDefaults,
   useAdminStats,
   useAdminUserQuotas,
@@ -36,6 +37,7 @@ import { Label } from "@/components/ui/label";
 import { SortableHead } from "@/components/sortable-head";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const SELECT_CLASS =
   "flex h-9 w-auto rounded-md border border-border bg-background px-3 py-1 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50";
@@ -388,12 +390,52 @@ function AdminRoleAction({
   );
 }
 
+function AuditHistory({ userId }: { userId: string }) {
+  const t = useTranslations("admin.userPanel");
+  const { data, isPending, isError } = useAdminAuditEvents(userId);
+
+  if (isPending) return <p className="text-sm text-muted">{t("auditLoading")}</p>;
+  if (isError || !data) {
+    return (
+      <p role="alert" className="text-sm text-destructive">
+        {t("auditLoadError")}
+      </p>
+    );
+  }
+  if (data.events.length === 0) {
+    return <p className="text-sm text-muted">{t("auditEmpty")}</p>;
+  }
+
+  return (
+    <ul className="flex flex-col gap-3">
+      {data.events.map((event) => (
+        <li key={event.id} className="flex flex-col gap-0.5 rounded-md border border-border p-3 text-sm">
+          <p className="font-medium">{event.field}</p>
+          <p className="text-muted">
+            {t("auditOldToNew", {
+              oldValue: event.oldValue ?? t("auditNullValue"),
+              newValue: event.newValue ?? t("auditNullValue"),
+            })}
+          </p>
+          <p className="text-xs text-muted">
+            {t("auditByAt", {
+              actor: event.actor.name ?? event.actor.email ?? event.actor.id,
+              date: new Date(event.createdAt).toLocaleString(),
+            })}
+          </p>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /**
  * The User panel (issue #147): a slide-over replacing the deleted dedicated
  * per-user page (issue #139), reachable via the `?user=<id>` URL param so it
  * stays shareable. Shows the User's read-only info, lets an Administrator
  * reassign their Plan, and carries forward the per-QuotaKind usage +
- * override controls unchanged from the old page.
+ * override controls unchanged from the old page. Issue #150 adds an Audit
+ * history tab alongside the existing Details content.
  */
 function UserPanel({
   userId,
@@ -425,85 +467,98 @@ function UserPanel({
             )}
 
             {data && (
-              <div className="flex flex-col gap-6">
-                <section className="flex flex-col gap-2">
-                  <h2 className="text-sm font-semibold">{t("infoTitle")}</h2>
-                  <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
-                    <dt className="text-muted">{t("nameLabel")}</dt>
-                    <dd>
-                      <NameEditor userId={userId} name={data.name} />
-                    </dd>
-                    <dt className="text-muted">{t("emailLabel")}</dt>
-                    <dd>{data.email ?? t("noName")}</dd>
-                    <dt className="text-muted">{t("createdAtLabel")}</dt>
-                    <dd>{new Date(data.createdAt).toLocaleDateString()}</dd>
-                    <dt className="text-muted">{t("isAdminLabel")}</dt>
-                    <dd>{data.isAdmin ? t("yes") : t("no")}</dd>
-                    <dt className="text-muted">{t("blockedLabel")}</dt>
-                    <dd>{data.blocked ? t("yes") : t("no")}</dd>
-                  </dl>
-                </section>
+              <Tabs defaultValue="details">
+                <TabsList>
+                  <TabsTrigger value="details">{t("detailsTab")}</TabsTrigger>
+                  <TabsTrigger value="history">{t("historyTab")}</TabsTrigger>
+                </TabsList>
 
-                <section className="flex items-center gap-2">
-                  <BlockUnblockAction
-                    userId={userId}
-                    blocked={data.blocked}
-                    isSelf={userId === selfId}
-                  />
-                  <AdminRoleAction
-                    userId={userId}
-                    isAdmin={data.isAdmin}
-                    isSelf={userId === selfId}
-                  />
-                </section>
+                <TabsContent value="details">
+                  <div className="flex flex-col gap-6">
+                    <section className="flex flex-col gap-2">
+                      <h2 className="text-sm font-semibold">{t("infoTitle")}</h2>
+                      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+                        <dt className="text-muted">{t("nameLabel")}</dt>
+                        <dd>
+                          <NameEditor userId={userId} name={data.name} />
+                        </dd>
+                        <dt className="text-muted">{t("emailLabel")}</dt>
+                        <dd>{data.email ?? t("noName")}</dd>
+                        <dt className="text-muted">{t("createdAtLabel")}</dt>
+                        <dd>{new Date(data.createdAt).toLocaleDateString()}</dd>
+                        <dt className="text-muted">{t("isAdminLabel")}</dt>
+                        <dd>{data.isAdmin ? t("yes") : t("no")}</dd>
+                        <dt className="text-muted">{t("blockedLabel")}</dt>
+                        <dd>{data.blocked ? t("yes") : t("no")}</dd>
+                      </dl>
+                    </section>
 
-                <section className="flex items-center gap-2">
-                  <span className="text-sm text-muted">{t("planLabel")}</span>
-                  <select
-                    className={SELECT_CLASS}
-                    aria-label={t("planLabel")}
-                    value={data.plan}
-                    disabled={setPlan.isPending}
-                    onChange={(event) => setPlan.mutate(event.target.value)}
-                  >
-                    {PLAN_VALUES.map((plan) => (
-                      <option key={plan} value={plan}>
-                        {plan}
-                      </option>
-                    ))}
-                  </select>
-                </section>
+                    <section className="flex items-center gap-2">
+                      <BlockUnblockAction
+                        userId={userId}
+                        blocked={data.blocked}
+                        isSelf={userId === selfId}
+                      />
+                      <AdminRoleAction
+                        userId={userId}
+                        isAdmin={data.isAdmin}
+                        isSelf={userId === selfId}
+                      />
+                    </section>
 
-                <section className="flex flex-col gap-2">
-                  <h2 className="text-sm font-semibold">{t("quotasTitle")}</h2>
-                  <div className="flex flex-col gap-5">
-                    {KIND_ORDER.map((kind) => {
-                      const usage = data.quotas[kind];
-                      return (
-                        <div key={kind} className="flex flex-col gap-1.5">
-                          <p className="text-sm font-medium">{kind}</p>
-                          <p className="text-xs text-muted">
-                            {usage.cap == null
-                              ? t("usageUnlimited", { used: usage.used })
-                              : t("usage", {
-                                  used: usage.used,
-                                  cap: usage.cap,
-                                  remaining: usage.remaining ?? 0,
-                                })}
-                            {usage.hasOverride ? ` · ${t("overrideActive")}` : ""}
-                          </p>
-                          <OverrideEditor
-                            userId={userId}
-                            kind={kind}
-                            cap={usage.cap}
-                            hasOverride={usage.hasOverride}
-                          />
-                        </div>
-                      );
-                    })}
+                    <section className="flex items-center gap-2">
+                      <span className="text-sm text-muted">{t("planLabel")}</span>
+                      <select
+                        className={SELECT_CLASS}
+                        aria-label={t("planLabel")}
+                        value={data.plan}
+                        disabled={setPlan.isPending}
+                        onChange={(event) => setPlan.mutate(event.target.value)}
+                      >
+                        {PLAN_VALUES.map((plan) => (
+                          <option key={plan} value={plan}>
+                            {plan}
+                          </option>
+                        ))}
+                      </select>
+                    </section>
+
+                    <section className="flex flex-col gap-2">
+                      <h2 className="text-sm font-semibold">{t("quotasTitle")}</h2>
+                      <div className="flex flex-col gap-5">
+                        {KIND_ORDER.map((kind) => {
+                          const usage = data.quotas[kind];
+                          return (
+                            <div key={kind} className="flex flex-col gap-1.5">
+                              <p className="text-sm font-medium">{kind}</p>
+                              <p className="text-xs text-muted">
+                                {usage.cap == null
+                                  ? t("usageUnlimited", { used: usage.used })
+                                  : t("usage", {
+                                      used: usage.used,
+                                      cap: usage.cap,
+                                      remaining: usage.remaining ?? 0,
+                                    })}
+                                {usage.hasOverride ? ` · ${t("overrideActive")}` : ""}
+                              </p>
+                              <OverrideEditor
+                                userId={userId}
+                                kind={kind}
+                                cap={usage.cap}
+                                hasOverride={usage.hasOverride}
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </section>
                   </div>
-                </section>
-              </div>
+                </TabsContent>
+
+                <TabsContent value="history">
+                  <AuditHistory userId={userId} />
+                </TabsContent>
+              </Tabs>
             )}
           </>
         )}

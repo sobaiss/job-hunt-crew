@@ -209,7 +209,15 @@
       "revokeAdminAction": "Révoquer l'accès admin",
       "grantAdminConfirm": "Accorder l'accès administrateur à cet utilisateur ?",
       "revokeAdminConfirm": "Révoquer l'accès administrateur de cet utilisateur ?",
-      "selfRoleActionDisabled": "Vous ne pouvez pas révoquer votre propre rôle administrateur"
+      "selfRoleActionDisabled": "Vous ne pouvez pas révoquer votre propre rôle administrateur",
+      "detailsTab": "Détails",
+      "historyTab": "Historique",
+      "auditLoading": "Chargement…",
+      "auditLoadError": "Impossible de charger l'historique de cet utilisateur.",
+      "auditEmpty": "Aucune action administrateur enregistrée pour cet utilisateur.",
+      "auditOldToNew": "{oldValue} → {newValue}",
+      "auditNullValue": "aucune",
+      "auditByAt": "par {actor} le {date}"
     },
     "users": {
       "title": "Rapports",

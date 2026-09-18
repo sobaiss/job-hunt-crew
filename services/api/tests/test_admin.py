@@ -1045,3 +1045,87 @@ def test_get_stats_returns_aggregate_counts(admin_id, target_id, analyses_daily_
         "activeScoutsTotal",
     ):
         assert isinstance(body[key], int)
+
+
+# --- GET /v1/admin/users/{id}/audit-events (issue #150) ---
+
+
+def test_get_audit_events_requires_admin(target_id):
+    with TestClient(app) as client:
+        response = client.get(
+            f"/v1/admin/users/{target_id}/audit-events",
+            headers={**HEADERS, "X-User-Id": target_id, "X-User-Is-Admin": "false"},
+        )
+    assert response.status_code == 403
+
+
+def test_get_audit_events_404_for_unknown_user(admin_id):
+    with TestClient(app) as client:
+        response = client.get(
+            f"/v1/admin/users/{uuid.uuid4()}/audit-events",
+            headers=_admin_headers(admin_id),
+        )
+    assert response.status_code == 404
+
+
+def test_get_audit_events_empty_when_none_recorded(admin_id, target_id):
+    with TestClient(app) as client:
+        response = client.get(
+            f"/v1/admin/users/{target_id}/audit-events",
+            headers=_admin_headers(admin_id),
+        )
+    assert response.status_code == 200
+    assert response.json()["events"] == []
+
+
+def test_get_audit_events_resolves_actor_and_returns_newest_first(admin_id, target_id):
+    with TestClient(app) as client:
+        client.put(
+            f"/v1/admin/users/{target_id}/plan",
+            headers=_admin_headers(admin_id),
+            json={"plan": "STANDARD"},
+        )
+        client.put(
+            f"/v1/admin/users/{target_id}/blocked",
+            headers=_admin_headers(admin_id),
+            json={"blocked": True},
+        )
+        response = client.get(
+            f"/v1/admin/users/{target_id}/audit-events",
+            headers=_admin_headers(admin_id),
+        )
+    assert response.status_code == 200
+    events = response.json()["events"]
+    assert len(events) == 2
+    # newest first: the blockedAt change (recorded second) comes before plan
+    assert events[0]["field"] == "blockedAt"
+    assert events[1]["field"] == "plan"
+    for event in events:
+        assert event["actor"]["id"] == admin_id
+        assert event["actor"]["email"] is not None
+        assert event["oldValue"] is not None or event["oldValue"] is None
+        assert "createdAt" in event
+
+
+def test_get_audit_events_only_includes_events_for_target_user(admin_id, target_id):
+    other_id = asyncio.run(_create_user())
+    try:
+        with TestClient(app) as client:
+            client.put(
+                f"/v1/admin/users/{target_id}/plan",
+                headers=_admin_headers(admin_id),
+                json={"plan": "STANDARD"},
+            )
+            client.put(
+                f"/v1/admin/users/{other_id}/plan",
+                headers=_admin_headers(admin_id),
+                json={"plan": "STANDARD"},
+            )
+            response = client.get(
+                f"/v1/admin/users/{target_id}/audit-events",
+                headers=_admin_headers(admin_id),
+            )
+        events = response.json()["events"]
+        assert len(events) == 1
+    finally:
+        asyncio.run(_delete_user(other_id))

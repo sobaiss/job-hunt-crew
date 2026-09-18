@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from py_db.models import Plan, PlanQuotaDefault, Quotakind, QuotaOverride, User
+from py_db.models import AdminAuditEvent, Plan, PlanQuotaDefault, Quotakind, QuotaOverride, User
 from py_db.quota import (
     analyses_requested_this_month,
     analyses_requested_today,
@@ -429,6 +429,77 @@ async def set_user_admin_role(
         await session.commit()
 
     return SetUserAdminRoleResponse(userId=target.id, isAdmin=target.isAdmin)
+
+
+class AuditEventActor(BaseModel):
+    id: str
+    name: str | None
+    email: str | None
+
+
+class AuditEventItem(BaseModel):
+    id: str
+    field: str
+    oldValue: str | None
+    newValue: str | None
+    createdAt: datetime
+    actor: AuditEventActor
+
+
+class AuditEventsResponse(BaseModel):
+    events: list[AuditEventItem]
+
+
+@router.get("/users/{user_id}/audit-events", response_model=AuditEventsResponse)
+async def get_audit_events(
+    user_id: str,
+    _admin_id: str = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> AuditEventsResponse:
+    """Every `AdminAuditEvent` recorded against `user_id`, newest first, for
+    the User panel's Audit history tab (issue #150) — quota overrides, Plan
+    changes, blocks/unblocks, info edits, and role changes all land here
+    since they all write through `record_admin_audit_event`. The acting
+    Administrator's name/email is resolved here so the frontend never has to
+    do its own per-event lookup.
+    """
+    await _get_target_user(session, user_id)
+
+    rows = (
+        await session.scalars(
+            select(AdminAuditEvent)
+            .where(AdminAuditEvent.targetUserId == user_id)
+            .order_by(AdminAuditEvent.createdAt.desc())
+        )
+    ).all()
+
+    actor_ids = {row.actorUserId for row in rows}
+    actors: dict[str, User] = {}
+    if actor_ids:
+        actor_rows = (
+            await session.scalars(select(User).where(User.id.in_(actor_ids)))
+        ).all()
+        actors = {actor.id: actor for actor in actor_rows}
+
+    events = []
+    for row in rows:
+        actor = actors.get(row.actorUserId)
+        events.append(
+            AuditEventItem(
+                id=row.id,
+                field=row.field,
+                oldValue=row.oldValue,
+                newValue=row.newValue,
+                createdAt=row.createdAt,
+                actor=AuditEventActor(
+                    id=row.actorUserId,
+                    name=actor.name if actor else None,
+                    email=actor.email if actor else None,
+                ),
+            )
+        )
+
+    return AuditEventsResponse(events=events)
 
 
 class PlanQuotaDefaultItem(BaseModel):
