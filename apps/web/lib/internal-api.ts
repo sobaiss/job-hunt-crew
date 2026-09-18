@@ -3,10 +3,26 @@
 // app/api/* BFF proxy routes) that must reach Postgres/S3/SQS without ever
 // depending on Prisma/aws-sdk directly, per the M7 frontend/backend split.
 
+import type { Session } from "next-auth";
 import type { Plan } from "@/types/next-auth";
 
 const API_BASE_URL = process.env.API_BASE_URL || "http://localhost:8000";
 const INTERNAL_API_SECRET = process.env.INTERNAL_API_SECRET || "";
+
+// The single place the X-User-Id/X-User-Is-Admin header pair is built from a
+// Session (issue #152) — every admin BFF route forwards through this instead
+// of constructing the pair inline, so the Role rollout (#156) only needs to
+// change this one function. Returns null when there's no authenticated user,
+// so callers can 401 uniformly.
+export function adminSessionHeaders(session: Session | null): Record<string, string> | null {
+  if (!session?.user?.id) {
+    return null;
+  }
+  return {
+    "X-User-Id": session.user.id,
+    "X-User-Is-Admin": session.user.isAdmin ? "true" : "false",
+  };
+}
 
 export function internalApiFetch(path: string, init?: RequestInit): Promise<Response> {
   return fetch(`${API_BASE_URL}${path}`, {
