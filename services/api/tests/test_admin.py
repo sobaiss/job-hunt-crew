@@ -225,6 +225,26 @@ async def _user_blocked(user_id: str) -> bool:
         await engine.dispose()
 
 
+async def _user_email(user_id: str) -> str | None:
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            return await session.scalar(select(User.email).where(User.id == user_id))
+    finally:
+        await engine.dispose()
+
+
+async def _user_is_admin(user_id: str) -> bool:
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            return bool(await session.scalar(select(User.isAdmin).where(User.id == user_id)))
+    finally:
+        await engine.dispose()
+
+
 def test_admin_route_rejects_caller_with_no_is_admin_header(user_id):
     with TestClient(app) as client:
         response = client.get(
@@ -590,6 +610,175 @@ def test_set_blocked_is_a_noop_when_unchanged_and_writes_no_audit_event(admin_id
             f"/v1/admin/users/{target_id}/blocked",
             headers=_admin_headers(admin_id),
             json={"blocked": False},
+        )
+    assert response.status_code == 200
+    assert asyncio.run(_audit_events(target_id)) == []
+
+
+# --- PUT /v1/admin/users/{id}/info (issue #149) ---
+
+
+def test_set_info_requires_admin(admin_id, target_id):
+    with TestClient(app) as client:
+        response = client.put(
+            f"/v1/admin/users/{target_id}/info",
+            headers={**HEADERS, "X-User-Id": target_id, "X-User-Is-Admin": "false"},
+            json={"name": "New Name"},
+        )
+    assert response.status_code == 403
+
+
+def test_set_info_404_for_unknown_user(admin_id):
+    with TestClient(app) as client:
+        response = client.put(
+            f"/v1/admin/users/{uuid.uuid4()}/info",
+            headers=_admin_headers(admin_id),
+            json={"name": "New Name"},
+        )
+    assert response.status_code == 404
+
+
+def test_set_info_updates_name_and_records_audit_event(admin_id, target_id):
+    with TestClient(app) as client:
+        response = client.put(
+            f"/v1/admin/users/{target_id}/info",
+            headers=_admin_headers(admin_id),
+            json={"name": "Ada Lovelace"},
+        )
+    assert response.status_code == 200
+    assert response.json() == {"userId": target_id, "name": "Ada Lovelace"}
+
+    events = asyncio.run(_audit_events(target_id))
+    assert len(events) == 1
+    assert events[0].actorUserId == admin_id
+    assert events[0].field == "name"
+    assert events[0].oldValue == "null"
+    assert events[0].newValue == "Ada Lovelace"
+
+
+def test_set_info_never_updates_email(admin_id, target_id):
+    with TestClient(app) as client:
+        response = client.put(
+            f"/v1/admin/users/{target_id}/info",
+            headers=_admin_headers(admin_id),
+            json={"name": "Ada Lovelace", "email": "hacked@example.com"},
+        )
+    assert response.status_code == 200
+    assert "email" not in response.json()
+    assert asyncio.run(_user_email(target_id)) != "hacked@example.com"
+
+
+def test_set_info_is_a_noop_when_unchanged_and_writes_no_audit_event(admin_id, target_id):
+    with TestClient(app) as client:
+        first = client.put(
+            f"/v1/admin/users/{target_id}/info",
+            headers=_admin_headers(admin_id),
+            json={"name": "Ada Lovelace"},
+        )
+        assert first.status_code == 200
+
+        response = client.put(
+            f"/v1/admin/users/{target_id}/info",
+            headers=_admin_headers(admin_id),
+            json={"name": "Ada Lovelace"},
+        )
+    assert response.status_code == 200
+    assert len(asyncio.run(_audit_events(target_id))) == 1
+
+
+# --- PUT /v1/admin/users/{id}/admin-role (issue #149) ---
+
+
+def test_set_admin_role_requires_admin(admin_id, target_id):
+    with TestClient(app) as client:
+        response = client.put(
+            f"/v1/admin/users/{target_id}/admin-role",
+            headers={**HEADERS, "X-User-Id": target_id, "X-User-Is-Admin": "false"},
+            json={"isAdmin": True},
+        )
+    assert response.status_code == 403
+
+
+def test_set_admin_role_404_for_unknown_user(admin_id):
+    with TestClient(app) as client:
+        response = client.put(
+            f"/v1/admin/users/{uuid.uuid4()}/admin-role",
+            headers=_admin_headers(admin_id),
+            json={"isAdmin": True},
+        )
+    assert response.status_code == 404
+
+
+def test_set_admin_role_rejects_self_revoke(admin_id):
+    with TestClient(app) as client:
+        response = client.put(
+            f"/v1/admin/users/{admin_id}/admin-role",
+            headers=_admin_headers(admin_id),
+            json={"isAdmin": False},
+        )
+    assert response.status_code == 400
+    assert asyncio.run(_user_is_admin(admin_id)) is True
+
+
+def test_set_admin_role_allows_self_grant_as_noop(admin_id):
+    with TestClient(app) as client:
+        response = client.put(
+            f"/v1/admin/users/{admin_id}/admin-role",
+            headers=_admin_headers(admin_id),
+            json={"isAdmin": True},
+        )
+    assert response.status_code == 200
+    assert asyncio.run(_audit_events(admin_id)) == []
+
+
+def test_set_admin_role_grants_and_records_audit_event(admin_id, target_id):
+    with TestClient(app) as client:
+        response = client.put(
+            f"/v1/admin/users/{target_id}/admin-role",
+            headers=_admin_headers(admin_id),
+            json={"isAdmin": True},
+        )
+    assert response.status_code == 200
+    assert response.json() == {"userId": target_id, "isAdmin": True}
+    assert asyncio.run(_user_is_admin(target_id)) is True
+
+    events = asyncio.run(_audit_events(target_id))
+    assert len(events) == 1
+    assert events[0].field == "isAdmin"
+    assert events[0].oldValue == "false"
+    assert events[0].newValue == "true"
+
+
+def test_set_admin_role_revokes_and_records_audit_event(admin_id, target_id):
+    with TestClient(app) as client:
+        first = client.put(
+            f"/v1/admin/users/{target_id}/admin-role",
+            headers=_admin_headers(admin_id),
+            json={"isAdmin": True},
+        )
+        assert first.status_code == 200
+
+        response = client.put(
+            f"/v1/admin/users/{target_id}/admin-role",
+            headers=_admin_headers(admin_id),
+            json={"isAdmin": False},
+        )
+    assert response.status_code == 200
+    assert response.json() == {"userId": target_id, "isAdmin": False}
+    assert asyncio.run(_user_is_admin(target_id)) is False
+
+    events = asyncio.run(_audit_events(target_id))
+    assert len(events) == 2
+    assert events[1].oldValue == "true"
+    assert events[1].newValue == "false"
+
+
+def test_set_admin_role_is_a_noop_when_unchanged_and_writes_no_audit_event(admin_id, target_id):
+    with TestClient(app) as client:
+        response = client.put(
+            f"/v1/admin/users/{target_id}/admin-role",
+            headers=_admin_headers(admin_id),
+            json={"isAdmin": False},
         )
     assert response.status_code == 200
     assert asyncio.run(_audit_events(target_id)) == []

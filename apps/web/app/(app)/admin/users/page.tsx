@@ -13,7 +13,9 @@ import {
   useClearQuotaOverride,
   useSetPlanDefault,
   useSetQuotaOverride,
+  useSetUserAdminRole,
   useSetUserBlocked,
+  useSetUserInfo,
   useSetUserPlan,
   type AdminUserRow,
 } from "@/hooks/use-admin";
@@ -268,6 +270,125 @@ function BlockUnblockAction({
 }
 
 /**
+ * Inline name editor (issue #149) — email stays read-only next to it, and is
+ * never sent by this component's mutation.
+ */
+function NameEditor({ userId, name }: { userId: string; name: string | null }) {
+  const t = useTranslations("admin.userPanel");
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(name ?? "");
+  const setInfo = useSetUserInfo(userId);
+
+  if (!editing) {
+    return (
+      <div className="flex items-center gap-2">
+        <span>{name ?? t("noName")}</span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            setDraft(name ?? "");
+            setEditing(true);
+          }}
+        >
+          {t("editNameAction")}
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <Input
+        aria-label={t("nameLabel")}
+        className="h-8 w-48"
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+      />
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={setInfo.isPending || draft.trim() === ""}
+        onClick={() =>
+          setInfo.mutate(draft.trim(), { onSuccess: () => setEditing(false) })
+        }
+      >
+        {t("saveNameAction")}
+      </Button>
+      <Button type="button" variant="outline" size="sm" onClick={() => setEditing(false)}>
+        {t("cancelAction")}
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * Grant/revoke admin role action (issue #149) — mirrors BlockUnblockAction's
+ * inline-confirm shape. Disabled for the caller's own row: revoking their own
+ * role is rejected server-side (it would lock them out of the Admin area with
+ * no way back in), so the whole toggle is disabled for a self-target rather
+ * than only the revoke direction.
+ */
+function AdminRoleAction({
+  userId,
+  isAdmin,
+  isSelf,
+}: {
+  userId: string;
+  isAdmin: boolean;
+  isSelf: boolean;
+}) {
+  const t = useTranslations("admin.userPanel");
+  const [confirming, setConfirming] = useState(false);
+  const setAdminRole = useSetUserAdminRole(userId);
+
+  if (confirming) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="text-sm text-muted">
+          {isAdmin ? t("revokeAdminConfirm") : t("grantAdminConfirm")}
+        </span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={setAdminRole.isPending}
+          onClick={() =>
+            setAdminRole.mutate(!isAdmin, { onSuccess: () => setConfirming(false) })
+          }
+        >
+          {t("confirmAction")}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={setAdminRole.isPending}
+          onClick={() => setConfirming(false)}
+        >
+          {t("cancelAction")}
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      disabled={isSelf}
+      title={isSelf ? t("selfRoleActionDisabled") : undefined}
+      onClick={() => setConfirming(true)}
+    >
+      {isAdmin ? t("revokeAdminAction") : t("grantAdminAction")}
+    </Button>
+  );
+}
+
+/**
  * The User panel (issue #147): a slide-over replacing the deleted dedicated
  * per-user page (issue #139), reachable via the `?user=<id>` URL param so it
  * stays shareable. Shows the User's read-only info, lets an Administrator
@@ -309,7 +430,9 @@ function UserPanel({
                   <h2 className="text-sm font-semibold">{t("infoTitle")}</h2>
                   <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
                     <dt className="text-muted">{t("nameLabel")}</dt>
-                    <dd>{data.name ?? t("noName")}</dd>
+                    <dd>
+                      <NameEditor userId={userId} name={data.name} />
+                    </dd>
                     <dt className="text-muted">{t("emailLabel")}</dt>
                     <dd>{data.email ?? t("noName")}</dd>
                     <dt className="text-muted">{t("createdAtLabel")}</dt>
@@ -325,6 +448,11 @@ function UserPanel({
                   <BlockUnblockAction
                     userId={userId}
                     blocked={data.blocked}
+                    isSelf={userId === selfId}
+                  />
+                  <AdminRoleAction
+                    userId={userId}
+                    isAdmin={data.isAdmin}
                     isSelf={userId === selfId}
                   />
                 </section>

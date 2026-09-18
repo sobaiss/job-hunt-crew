@@ -202,7 +202,14 @@
       "unblockConfirm": "Unblock this User?",
       "confirmAction": "Confirm",
       "cancelAction": "Cancel",
-      "selfActionDisabled": "You cannot block yourself"
+      "selfActionDisabled": "You cannot block yourself",
+      "editNameAction": "Edit",
+      "saveNameAction": "Save",
+      "grantAdminAction": "Grant admin",
+      "revokeAdminAction": "Revoke admin",
+      "grantAdminConfirm": "Grant admin access to this User?",
+      "revokeAdminConfirm": "Revoke this User's admin access?",
+      "selfRoleActionDisabled": "You cannot revoke your own admin role"
     },
     "users": {
       "title": "Reporting",

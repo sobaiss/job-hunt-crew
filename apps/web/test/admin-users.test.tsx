@@ -275,6 +275,72 @@ describe("AdminUsersPage", () => {
     expect(capturedBody).toEqual({ blocked: true });
   });
 
+  it("edits a User's name from the panel", async () => {
+    mockCommon();
+    let capturedBody: unknown;
+    server.use(
+      http.get("/api/admin/users", () => HttpResponse.json(usersListResponse())),
+      http.get("/api/admin/users/user-1/quotas", () => HttpResponse.json(quotasResponse())),
+      http.put("/api/admin/users/user-1/info", async ({ request }) => {
+        capturedBody = await request.json();
+        return HttpResponse.json({ userId: "user-1", name: "Grace Hopper" });
+      }),
+    );
+
+    renderWithProviders(<AdminUsersPage />, { session: ADMIN_SESSION });
+    await userEvent.click(await screen.findByText("Ada Lovelace"));
+
+    const panel = (await screen.findByText("User user-1")).closest('[role="dialog"]') as HTMLElement;
+    await userEvent.click(within(panel).getByRole("button", { name: "Edit" }));
+
+    const input = within(panel).getByLabelText("Name");
+    await userEvent.clear(input);
+    await userEvent.type(input, "Grace Hopper");
+    await userEvent.click(within(panel).getByRole("button", { name: "Save" }));
+
+    expect(capturedBody).toEqual({ name: "Grace Hopper" });
+  });
+
+  it("grants the admin role from the panel after inline confirmation", async () => {
+    mockCommon();
+    let capturedBody: unknown;
+    server.use(
+      http.get("/api/admin/users", () => HttpResponse.json(usersListResponse())),
+      http.get("/api/admin/users/user-1/quotas", () => HttpResponse.json(quotasResponse())),
+      http.put("/api/admin/users/user-1/admin-role", async ({ request }) => {
+        capturedBody = await request.json();
+        return HttpResponse.json({ userId: "user-1", isAdmin: true });
+      }),
+    );
+
+    renderWithProviders(<AdminUsersPage />, { session: ADMIN_SESSION });
+    await userEvent.click(await screen.findByText("Ada Lovelace"));
+
+    const panel = (await screen.findByText("User user-1")).closest('[role="dialog"]') as HTMLElement;
+    await userEvent.click(within(panel).getByRole("button", { name: "Grant admin" }));
+    await userEvent.click(within(panel).getByRole("button", { name: "Confirm" }));
+
+    expect(capturedBody).toEqual({ isAdmin: true });
+  });
+
+  it("disables the admin-role action for the Administrator's own row in the panel", async () => {
+    mockCommon();
+    server.use(
+      http.get("/api/admin/users", () =>
+        HttpResponse.json(usersListResponse({ users: [{ ...usersListResponse().users[0], id: "admin-1" }] })),
+      ),
+      http.get("/api/admin/users/admin-1/quotas", () =>
+        HttpResponse.json(quotasResponse({ userId: "admin-1", isAdmin: true })),
+      ),
+    );
+
+    renderWithProviders(<AdminUsersPage />, { session: ADMIN_SESSION });
+    await userEvent.click(await screen.findByText("Ada Lovelace"));
+
+    const panel = (await screen.findByText("User admin-1")).closest('[role="dialog"]') as HTMLElement;
+    expect(within(panel).getByRole("button", { name: "Revoke admin" })).toBeDisabled();
+  });
+
   it("saves an edited plan-default limit", async () => {
     mockCommon();
     let capturedBody: unknown;

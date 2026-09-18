@@ -97,6 +97,35 @@ export function useSetUserBlocked(userId: string) {
   });
 }
 
+// Backs the name-edit action in the User panel (issue #149). Email is
+// never sent here — the underlying endpoint never accepts it.
+export function useSetUserInfo(userId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) =>
+      bff.put<{ userId: string; name: string | null }>(`/admin/users/${userId}/info`, { name }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin-user-quotas", userId] });
+      void queryClient.invalidateQueries({ queryKey: ["admin-users"] });
+    },
+  });
+}
+
+// Backs the admin-role grant/revoke action in the User panel (issue #149).
+export function useSetUserAdminRole(userId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (isAdmin: boolean) =>
+      bff.put<{ userId: string; isAdmin: boolean }>(`/admin/users/${userId}/admin-role`, {
+        isAdmin,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin-user-quotas", userId] });
+      void queryClient.invalidateQueries({ queryKey: ["admin-users"] });
+    },
+  });
+}
+
 // Backs the admin reporting screen (issue #140): the plan-defaults editor,
 // the per-user usage table with its at/over-limit filter, and the global
 // stats panel.

@@ -340,6 +340,97 @@ async def set_user_blocked(
     return SetUserBlockedResponse(userId=target.id, blocked=target.blockedAt is not None)
 
 
+class SetUserInfoRequest(BaseModel):
+    name: str
+
+
+class SetUserInfoResponse(BaseModel):
+    userId: str
+    name: str | None
+
+
+@router.put("/users/{user_id}/info", response_model=SetUserInfoResponse)
+async def set_user_info(
+    user_id: str,
+    req: SetUserInfoRequest,
+    admin_id: str = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> SetUserInfoResponse:
+    """Edits `user_id`'s display name from the User panel (issue #149) —
+    email stays read-only and is never accepted here (the request model has
+    no `email` field, so one sent by a caller is simply ignored). A no-op
+    request (the same name already set) writes no `AdminAuditEvent`, matching
+    `set_user_plan`'s idempotency.
+    """
+    target = await _get_target_user(session, user_id)
+
+    if req.name != target.name:
+        old_value = "null" if target.name is None else target.name
+        target.name = req.name
+        target.updatedAt = _now()
+        record_admin_audit_event(
+            session,
+            actor_user_id=admin_id,
+            target_user_id=user_id,
+            field="name",
+            old_value=old_value,
+            new_value=req.name,
+        )
+        await session.commit()
+
+    return SetUserInfoResponse(userId=target.id, name=target.name)
+
+
+class SetUserAdminRoleRequest(BaseModel):
+    isAdmin: bool
+
+
+class SetUserAdminRoleResponse(BaseModel):
+    userId: str
+    isAdmin: bool
+
+
+@router.put("/users/{user_id}/admin-role", response_model=SetUserAdminRoleResponse)
+async def set_user_admin_role(
+    user_id: str,
+    req: SetUserAdminRoleRequest,
+    admin_id: str = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> SetUserAdminRoleResponse:
+    """Grants or revokes `user_id`'s `isAdmin` role from the User panel
+    (issue #149). An Administrator can never revoke their own admin role,
+    since that would lock them out of the Admin area with no way back in —
+    only the revoke direction is rejected for a self-target, since granting
+    is already the caller's own state (every caller here already cleared
+    `require_admin`) and resolves as a harmless no-op. A no-op request (the
+    User already in the requested state) writes no `AdminAuditEvent`,
+    matching `set_user_plan`'s idempotency.
+    """
+    if user_id == admin_id and not req.isAdmin:
+        raise HTTPException(
+            status_code=400, detail="Administrators cannot revoke their own admin role"
+        )
+
+    target = await _get_target_user(session, user_id)
+
+    if req.isAdmin != target.isAdmin:
+        old_value = "true" if target.isAdmin else "false"
+        target.isAdmin = req.isAdmin
+        target.updatedAt = _now()
+        new_value = "true" if target.isAdmin else "false"
+        record_admin_audit_event(
+            session,
+            actor_user_id=admin_id,
+            target_user_id=user_id,
+            field="isAdmin",
+            old_value=old_value,
+            new_value=new_value,
+        )
+        await session.commit()
+
+    return SetUserAdminRoleResponse(userId=target.id, isAdmin=target.isAdmin)
+
+
 class PlanQuotaDefaultItem(BaseModel):
     plan: str
     quotaKind: str
