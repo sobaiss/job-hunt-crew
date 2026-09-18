@@ -89,24 +89,6 @@ def test_upsert_user_same_email_twice_returns_same_user_id():
         asyncio.run(_delete_user_by_email(email))
 
 
-def test_upsert_user_returns_new_users_plan():
-    # New Users default to FREE (issue #135); the response carries `plan` so
-    # apps/web's `jwt` callback can stash it without ever querying Postgres
-    # directly (issue #138).
-    email = f"plan-{uuid.uuid4()}@example.com"
-    try:
-        with TestClient(app) as client:
-            response = client.post(
-                "/internal/users/upsert",
-                json={"email": email},
-                headers=HEADERS,
-            )
-        assert response.status_code == 200
-        assert response.json()["plan"] == "FREE"
-    finally:
-        asyncio.run(_delete_user_by_email(email))
-
-
 async def _load_subscriptions(user_id: str) -> list[Subscription]:
     engine = make_engine()
     try:
@@ -255,7 +237,6 @@ def test_verify_credentials_with_correct_password_returns_user():
             )
         assert response.status_code == 200
         assert response.json()["userId"]
-        assert response.json()["plan"] == "FREE"
     finally:
         asyncio.run(_delete_user_by_email(email))
 

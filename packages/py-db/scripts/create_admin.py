@@ -8,10 +8,11 @@ create additional Administrators later, or to (re)set an existing User's
 password.
 
 Admin access is granted via `role = ADMINISTRATOR` (issue #156, docs/adr/0017,
-replacing the retired `isAdmin` boolean from issue #144), never by assigning
-the vestigial `administrateur` Plan — a new User created here keeps a real
-Plan (`free` by default) alongside admin rights; promoting an existing User
-leaves their current Plan untouched.
+replacing the retired `isAdmin` boolean from issue #144) — this script never
+touches Plan/Subscription. A new User created here has no Subscription at
+all, so their Effective Plan (py_db.quotas.effective_plan) falls back to
+`free` the same way a lapsed one would; promoting an existing User leaves
+their Subscription untouched.
 
 Usage:
     DATABASE_URL=postgresql://postgres:postgres@localhost:5432/job_hunt_crew \\

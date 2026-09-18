@@ -11,10 +11,8 @@ import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
-// The three real Plans this comparison always shows, side by side —
-// `ADMINISTRATEUR` never appears here (issue #146): it carries no
-// `PlanQuotaDefault` rows since #144's migration removed them, and this page
-// has no control to add or remove a Plan column.
+// The three Plans this comparison always shows, side by side — this page has
+// no control to add or remove a Plan column (issue #146).
 const REAL_PLANS = ["FREE", "STANDARD", "PREMIUM"] as const;
 const KIND_ORDER = ["ACTIVE_SCOUTS", "ANALYSES_DAILY", "ANALYSES_MONTHLY", "DOCUMENTS_DAILY"] as const;
 

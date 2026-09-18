@@ -105,7 +105,6 @@ class Plan(str, enum.Enum):
     FREE = 'FREE'
     STANDARD = 'STANDARD'
     PREMIUM = 'PREMIUM'
-    ADMINISTRATEUR = 'ADMINISTRATEUR'
 
 
 class Quotaalertthreshold(str, enum.Enum):
@@ -236,8 +235,6 @@ class User(Base):
     id: Mapped[str] = mapped_column(Text, primary_key=True)
     createdAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False, server_default=text('CURRENT_TIMESTAMP'))
     updatedAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False)
-    plan: Mapped[Plan] = mapped_column(Enum(Plan, values_callable=lambda cls: [member.value for member in cls], name='Plan'), nullable=False, server_default=text('\'FREE\'::"Plan"'))
-    isAdmin: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text('false'))
     role: Mapped[Role] = mapped_column(Enum(Role, values_callable=lambda cls: [member.value for member in cls], name='Role'), nullable=False, server_default=text('\'EXTERNAL\'::"Role"'))
     name: Mapped[Optional[str]] = mapped_column(Text)
     email: Mapped[Optional[str]] = mapped_column(Text)

@@ -8,7 +8,7 @@ import uuid
 from datetime import UTC, datetime
 
 import pytest
-from py_db.models import Plan, Quotaalertthreshold, Quotakind, QuotaAlert, User
+from py_db.models import Quotaalertthreshold, Quotakind, QuotaAlert, User
 from py_db.quotas import maybe_record_quota_alert
 from py_db.session import make_engine, make_session_factory
 from sqlalchemy import delete, select
@@ -26,7 +26,7 @@ async def test_crossing_80_percent_inserts_an_approaching_alert():
     try:
         async with session_factory() as session:
             session.add(
-                User(id=user_id, email=f"{user_id}@example.com", plan=Plan.STANDARD, updatedAt=_now())
+                User(id=user_id, email=f"{user_id}@example.com", updatedAt=_now())
             )
             await session.commit()
 
@@ -61,7 +61,7 @@ async def test_reaching_100_percent_inserts_an_exceeded_alert():
     try:
         async with session_factory() as session:
             session.add(
-                User(id=user_id, email=f"{user_id}@example.com", plan=Plan.STANDARD, updatedAt=_now())
+                User(id=user_id, email=f"{user_id}@example.com", updatedAt=_now())
             )
             await session.commit()
 
@@ -97,7 +97,7 @@ async def test_staying_over_the_limit_does_not_re_fire_on_every_call():
     try:
         async with session_factory() as session:
             session.add(
-                User(id=user_id, email=f"{user_id}@example.com", plan=Plan.STANDARD, updatedAt=_now())
+                User(id=user_id, email=f"{user_id}@example.com", updatedAt=_now())
             )
             await session.commit()
 
@@ -139,7 +139,6 @@ async def test_unlimited_cap_never_inserts_an_alert():
                 User(
                     id=user_id,
                     email=f"{user_id}@example.com",
-                    plan=Plan.ADMINISTRATEUR,
                     updatedAt=_now(),
                 )
             )

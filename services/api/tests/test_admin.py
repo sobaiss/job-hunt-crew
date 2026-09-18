@@ -30,8 +30,6 @@ def _secret(monkeypatch):
 
 
 async def _create_user(
-    plan: Plan = Plan.FREE,
-    is_admin: bool = False,
     role: Role = Role.EXTERNAL,
     name: str | None = None,
     email: str | None = None,
@@ -47,8 +45,6 @@ async def _create_user(
                 id=user_id,
                 name=name,
                 email=email or f"{user_id}@example.com",
-                plan=plan,
-                isAdmin=is_admin,
                 role=role,
                 blockedAt=datetime.now(UTC).replace(tzinfo=None) if blocked else None,
                 updatedAt=datetime.now(UTC).replace(tzinfo=None),
@@ -115,7 +111,7 @@ def user_id():
 
 @pytest.fixture
 def admin_id():
-    uid = asyncio.run(_create_user(is_admin=True, role=Role.ADMINISTRATOR))
+    uid = asyncio.run(_create_user(role=Role.ADMINISTRATOR))
     yield uid
     asyncio.run(_delete_user(uid))
 
@@ -962,11 +958,8 @@ def test_get_plan_defaults_returns_all_seeded_rows(admin_id):
         response = client.get("/v1/admin/plan-defaults", headers=_admin_headers(admin_id))
     assert response.status_code == 200
     defaults = response.json()["defaults"]
-    # 3 real Plans x 4 QuotaKinds, seeded by the #134 migration. ADMINISTRATEUR's
-    # 4 rows were removed by #144's migration since that Plan is never
-    # assigned again (docs/adr/0015).
+    # 3 Plans x 4 QuotaKinds, seeded by the #134 migration.
     assert len(defaults) == 12
-    assert not any(d["plan"] == "ADMINISTRATEUR" for d in defaults)
 
 
 def test_set_plan_defaults_requires_admin(target_id):
@@ -979,14 +972,14 @@ def test_set_plan_defaults_requires_admin(target_id):
     assert response.status_code == 403
 
 
-def test_set_plan_defaults_404_for_plan_with_no_rows(admin_id):
+def test_set_plan_defaults_422_for_unknown_plan(admin_id):
     with TestClient(app) as client:
         response = client.put(
-            "/v1/admin/plan-defaults/ADMINISTRATEUR",
+            "/v1/admin/plan-defaults/NOT_A_PLAN",
             headers=_admin_headers(admin_id),
             json={"limits": {"DOCUMENTS_DAILY": 99}},
         )
-    assert response.status_code == 404
+    assert response.status_code == 422
 
 
 def test_set_plan_defaults_updates_only_changed_kinds_and_records_audit_events(
@@ -1244,7 +1237,8 @@ def test_get_stats_rejects_invalid_period(admin_id):
 
 def test_get_stats_returns_signup_series_plan_distribution_and_blocked_count(admin_id):
     blocked_id = asyncio.run(_create_user(blocked=True))
-    premium_id = asyncio.run(_create_user(plan=Plan.PREMIUM))
+    premium_id = asyncio.run(_create_user())
+    asyncio.run(_give_active_subscription(premium_id, Plan.PREMIUM))
     try:
         with TestClient(app) as client:
             response = client.get(
@@ -1264,11 +1258,11 @@ def test_get_stats_returns_signup_series_plan_distribution_and_blocked_count(adm
 def test_get_stats_period_only_filters_new_signups(admin_id):
     old_id = asyncio.run(
         _create_user(
-            plan=Plan.PREMIUM,
             blocked=True,
             created_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(days=100),
         )
     )
+    asyncio.run(_give_active_subscription(old_id, Plan.PREMIUM))
     try:
         with TestClient(app) as client:
             response = client.get(

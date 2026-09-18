@@ -71,12 +71,13 @@ async def admin_me(
     session: AsyncSession = Depends(get_session),
 ) -> AdminMeResponse:
     """Backs the bare `/admin` landing page (issue #138) — confirms the
-    caller actually cleared `require_admin`, and reports their real Plan
-    now that admin access no longer implies one (#144), plus their Role
+    caller actually cleared `require_admin`, and reports their real Effective
+    Plan now that admin access no longer implies one (#144), plus their Role
     (issue #156, replacing the `isAdmin` boolean per docs/adr/0017).
     """
     target = await _get_target_user(session, user_id)
-    return AdminMeResponse(userId=target.id, plan=target.plan.value, role=target.role.value)
+    plan = await effective_plan(session, user_id)
+    return AdminMeResponse(userId=target.id, plan=plan.value, role=target.role.value)
 
 
 async def _get_target_user(session: AsyncSession, user_id: str) -> User:
@@ -630,8 +631,8 @@ async def set_plan_defaults(
     next `effective_quota` read — no backfill needed, since that resolution
     always reads this row live (docs/adr/0013). Only kinds whose limit
     actually changes write an `AdminAuditEvent`, matching `set_user_plan`'s
-    per-field idempotency; `plan` (e.g. `ADMINISTRATEUR`, which has no rows
-    since #144's migration removed them) 404s.
+    per-field idempotency; a `plan` with no `PlanQuotaDefault` rows 404s
+    (defensive only — every current `Plan` value is seeded with rows).
     """
     rows = (
         await session.scalars(select(PlanQuotaDefault).where(PlanQuotaDefault.plan == plan))
@@ -828,8 +829,9 @@ async def get_stats(
     dashboard (issue #145, enriching issue #140's original 6 figures): total
     Analyses/GeneratedDocuments/active Scouts platform-wide, how many Users
     are currently at or over any of their own QuotaKind limits, a
-    `period`-filtered new-signups series, and today-snapshots of the Plan
-    distribution and blocked-User count that always ignore `period`.
+    `period`-filtered new-signups series, and today-snapshots of the
+    Effective Plan distribution and blocked-User count that always ignore
+    `period`.
     """
     users = (await session.scalars(select(User))).all()
     users_over_limit = 0
@@ -839,7 +841,8 @@ async def get_stats(
         _, over = await _user_quota_summary(session, user.id)
         if over:
             users_over_limit += 1
-        users_by_plan[user.plan.value] = users_by_plan.get(user.plan.value, 0) + 1
+        user_plan = await effective_plan(session, user.id)
+        users_by_plan[user_plan.value] = users_by_plan.get(user_plan.value, 0) + 1
         if user.blockedAt is not None:
             blocked_users_count += 1
 

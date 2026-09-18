@@ -5,7 +5,7 @@
 // applies them server-side, since the table is no longer expected to fit
 // unpaginated in one response.
 
-export const ADMIN_USER_PLANS = ["FREE", "STANDARD", "PREMIUM", "ADMINISTRATEUR"] as const;
+export const ADMIN_USER_PLANS = ["FREE", "STANDARD", "PREMIUM"] as const;
 export type AdminUserPlanFilter = (typeof ADMIN_USER_PLANS)[number] | "all";
 
 // The three Role values a User can hold (issue #156, replacing the

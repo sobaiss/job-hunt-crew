@@ -31,8 +31,6 @@ class UpsertUserRequest(BaseModel):
 
 class UpsertUserResponse(BaseModel):
     userId: str
-    plan: str
-    isAdmin: bool
     role: str
 
 
@@ -74,9 +72,7 @@ async def upsert_user(
             user.image = req.image
         user.updatedAt = _now()
     await session.commit()
-    return UpsertUserResponse(
-        userId=user.id, plan=user.plan.value, isAdmin=user.isAdmin, role=user.role.value
-    )
+    return UpsertUserResponse(userId=user.id, role=user.role.value)
 
 
 class VerifyCredentialsRequest(BaseModel):
@@ -86,8 +82,6 @@ class VerifyCredentialsRequest(BaseModel):
 
 class VerifyCredentialsResponse(BaseModel):
     userId: str
-    plan: str
-    isAdmin: bool
     role: str
 
 
@@ -107,9 +101,7 @@ async def verify_credentials(
     if not verify_password_or_dummy(req.password, password_hash):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     assert user is not None  # verify_password_or_dummy only returns True for a real hash
-    return VerifyCredentialsResponse(
-        userId=user.id, plan=user.plan.value, isAdmin=user.isAdmin, role=user.role.value
-    )
+    return VerifyCredentialsResponse(userId=user.id, role=user.role.value)
 
 
 class VerificationTokenRequest(BaseModel):

@@ -49,9 +49,7 @@ const KIND_ORDER = [
   "DOCUMENTS_DAILY",
 ] as const;
 
-// The only three Plans a Subscription can be assigned (issue #155,
-// docs/adr/0018) — ADMINISTRATEUR is a vestigial `Plan` value nothing can
-// subscribe to.
+// The three Plans a Subscription can be assigned (issue #155, docs/adr/0018).
 const ASSIGNABLE_PLAN_VALUES = ["FREE", "STANDARD", "PREMIUM"] as const;
 const DURATION_VALUES = ["MONTHLY", "YEARLY"] as const;
 

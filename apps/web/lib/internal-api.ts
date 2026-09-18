@@ -4,7 +4,7 @@
 // depending on Prisma/aws-sdk directly, per the M7 frontend/backend split.
 
 import type { Session } from "next-auth";
-import type { Plan, Role } from "@/types/next-auth";
+import type { Role } from "@/types/next-auth";
 
 const API_BASE_URL = process.env.API_BASE_URL || "http://localhost:8000";
 const INTERNAL_API_SECRET = process.env.INTERNAL_API_SECRET || "";
@@ -70,7 +70,7 @@ export async function upsertUser(params: {
   email: string;
   name?: string | null;
   image?: string | null;
-}): Promise<{ userId: string; plan: Plan; role: Role }> {
+}): Promise<{ userId: string; role: Role }> {
   const res = await internalApiFetch("/internal/users/upsert", {
     method: "POST",
     body: JSON.stringify({
@@ -82,7 +82,7 @@ export async function upsertUser(params: {
   if (!res.ok) {
     throw new Error(`Failed to upsert user (${res.status})`);
   }
-  const data = (await res.json()) as { userId: string; plan: Plan; role: Role };
+  const data = (await res.json()) as { userId: string; role: Role };
   return data;
 }
 
@@ -92,7 +92,7 @@ export async function upsertUser(params: {
 export async function verifyCredentials(params: {
   email: string;
   password: string;
-}): Promise<{ userId: string; plan: Plan; role: Role } | null> {
+}): Promise<{ userId: string; role: Role } | null> {
   const res = await internalApiFetch("/internal/auth/verify-credentials", {
     method: "POST",
     body: JSON.stringify(params),
@@ -100,5 +100,5 @@ export async function verifyCredentials(params: {
   if (!res.ok) {
     return null;
   }
-  return (await res.json()) as { userId: string; plan: Plan; role: Role };
+  return (await res.json()) as { userId: string; role: Role };
 }

@@ -23,14 +23,13 @@ const ADMIN_SESSION: Session = {
     id: "admin-1",
     name: "Ada",
     email: "ada@example.com",
-    plan: "PREMIUM",
     role: "ADMINISTRATOR",
   },
 };
 
 const STANDARD_SESSION: Session = {
   expires: "2999-01-01T00:00:00.000Z",
-  user: { id: "user-1", name: "Bob", email: "bob@example.com", plan: "STANDARD", role: "EXTERNAL" },
+  user: { id: "user-1", name: "Bob", email: "bob@example.com", role: "EXTERNAL" },
 };
 
 beforeEach(() => {

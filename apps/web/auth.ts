@@ -74,7 +74,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (user?.email) {
         const upserted = await upsertUser({ email: user.email, name: user.name, image: user.image });
         token.userId = upserted.userId;
-        token.plan = upserted.plan;
         token.role = upserted.role;
       }
       return token;
@@ -82,9 +81,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     session({ session, token }) {
       if (typeof token.userId === "string") {
         session.user.id = token.userId;
-      }
-      if (token.plan) {
-        session.user.plan = token.plan;
       }
       session.user.role = token.role ?? "EXTERNAL";
       return session;
@@ -99,7 +95,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       // password set" (an OAuth/magic-link-only User), and "wrong password"
       // identically, so `authorize` never needs to (and can't) tell them
       // apart itself. On success it returns just `{ id, email }` — the `jwt`
-      // callback below re-derives userId/plan the same way every other
+      // callback below re-derives userId/role the same way every other
       // provider does, via `upsertUser`, rather than special-casing this one.
       credentials: {
         email: { label: "Email", type: "email" },
