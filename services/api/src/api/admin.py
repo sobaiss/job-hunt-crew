@@ -1,3 +1,4 @@
+import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Literal
@@ -5,6 +6,8 @@ from typing import Literal
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from py_db.models import (
     AdminAuditEvent,
+    CVVersion,
+    Cvconversionstatus,
     Duration,
     Plan,
     PlanQuotaDefault,
@@ -34,6 +37,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .db import get_session
+from .sqs_client import CV_CONVERSION_QUEUE_URL, make_sqs_client
 
 router = APIRouter(prefix="/v1/admin")
 
@@ -856,4 +860,148 @@ async def get_stats(
         newSignups=_signup_series(users, period),
         usersByPlan=users_by_plan,
         blockedUsersCount=blocked_users_count,
+    )
+
+
+class AdminCVVersionRow(BaseModel):
+    id: str
+    userId: str
+    userName: str | None
+    userEmail: str | None
+    label: str
+    fileName: str
+    fileType: str
+    isDefault: bool
+    conversionStatus: str
+    conversionError: str | None
+    supersededById: str | None
+    createdAt: datetime
+    updatedAt: datetime
+
+
+class AdminCVVersionsListResponse(BaseModel):
+    cvVersions: list[AdminCVVersionRow]
+    total: int
+    page: int
+    pageSize: int
+
+
+@router.get("/cv-versions", response_model=AdminCVVersionsListResponse)
+async def list_admin_cv_versions(
+    user_id: str | None = Query(None, alias="userId"),
+    created_at_from: datetime | None = Query(None, alias="createdAtFrom"),
+    created_at_to: datetime | None = Query(None, alias="createdAtTo"),
+    conversion_status: Cvconversionstatus | None = Query(None, alias="conversionStatus"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100, alias="pageSize"),
+    _admin_id: str = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> AdminCVVersionsListResponse:
+    """Every candidate's CVVersion in one cross-user, filterable, paginated
+    list (issue #163) -- filterable by `userId`, a `createdAt` range, and
+    `conversionStatus`; sorted newest first, matching the candidate-facing
+    `list_cv_versions` order. Superseded rows are included by default (no
+    extra flag needed) since an Administrator troubleshooting a stuck or
+    failed conversion needs full history, unlike the candidate-facing page.
+    The owner's name/email are resolved here (mirroring `get_audit_events`'s
+    actor resolution) so the frontend never has to do its own per-row lookup.
+    """
+    stmt = select(CVVersion)
+    if user_id is not None:
+        stmt = stmt.where(CVVersion.userId == user_id)
+    if created_at_from is not None:
+        stmt = stmt.where(CVVersion.createdAt >= created_at_from)
+    if created_at_to is not None:
+        stmt = stmt.where(CVVersion.createdAt <= created_at_to)
+    if conversion_status is not None:
+        stmt = stmt.where(CVVersion.conversionStatus == conversion_status)
+    stmt = stmt.order_by(CVVersion.createdAt.desc())
+
+    total = await session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    page_stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+    rows = (await session.scalars(page_stmt)).all()
+
+    owner_ids = {row.userId for row in rows}
+    owners: dict[str, User] = {}
+    if owner_ids:
+        owner_rows = (await session.scalars(select(User).where(User.id.in_(owner_ids)))).all()
+        owners = {owner.id: owner for owner in owner_rows}
+
+    return AdminCVVersionsListResponse(
+        cvVersions=[
+            AdminCVVersionRow(
+                id=row.id,
+                userId=row.userId,
+                userName=owners[row.userId].name if row.userId in owners else None,
+                userEmail=owners[row.userId].email if row.userId in owners else None,
+                label=row.label,
+                fileName=row.fileName,
+                fileType=row.fileType.value,
+                isDefault=row.isDefault,
+                conversionStatus=row.conversionStatus.value,
+                conversionError=row.conversionError,
+                supersededById=row.supersededById,
+                createdAt=row.createdAt,
+                updatedAt=row.updatedAt,
+            )
+            for row in rows
+        ],
+        total=total,
+        page=page,
+        pageSize=page_size,
+    )
+
+
+class AdminReconvertCVVersionResponse(BaseModel):
+    cvVersionId: str
+    conversionStatus: str
+
+
+@router.post(
+    "/cv-versions/{cv_version_id}/reconvert",
+    response_model=AdminReconvertCVVersionResponse,
+    status_code=202,
+)
+async def reconvert_cv_version(
+    cv_version_id: str,
+    admin_id: str = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> AdminReconvertCVVersionResponse:
+    """Admin-scoped reconvert trigger (issue #163) -- the only write action
+    this table offers (no Set default/Import/Replace anywhere in the Admin
+    area). Mirrors `v1.convert_cv_version`'s PENDING-reset-plus-enqueue
+    exactly, except ownership is derived from the target CVVersion itself
+    rather than a caller's own userId (docs/adr/0020: an admin action never
+    changes who owns the resource, and no target-user override is accepted),
+    and it records an AdminAuditEvent alongside the change instead of just
+    mutating silently.
+    """
+    existing = await session.get(CVVersion, cv_version_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="CVVersion not found")
+
+    if existing.conversionStatus == Cvconversionstatus.CONVERTING:
+        raise HTTPException(status_code=409, detail="A Conversion is already running for this CV")
+
+    existing.conversionStatus = Cvconversionstatus.PENDING
+    existing.conversionError = None
+    existing.updatedAt = _now()
+
+    record_admin_audit_event(
+        session,
+        actor_user_id=admin_id,
+        target_user_id=existing.userId,
+        resource_type="CVVersion",
+        resource_id=existing.id,
+    )
+    await session.commit()
+
+    sqs = make_sqs_client()
+    sqs.send_message(
+        QueueUrl=CV_CONVERSION_QUEUE_URL,
+        MessageBody=json.dumps({"cvVersionId": cv_version_id}),
+    )
+
+    return AdminReconvertCVVersionResponse(
+        cvVersionId=existing.id, conversionStatus=existing.conversionStatus.value
     )

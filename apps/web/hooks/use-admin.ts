@@ -4,6 +4,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { bff } from "@/lib/bff-client";
 import { adminUsersTableStateToQuery, type AdminUsersTableState } from "@/lib/admin-users-filters";
+import {
+  adminCvVersionsTableStateToQuery,
+  type AdminCvVersionsTableState,
+} from "@/lib/admin-cv-versions-filters";
 
 // Backs the bare Admin area landing page (issue #138) — confirms the
 // session's Plan actually cleared services/api's `require_admin` end to end.
@@ -234,5 +238,58 @@ export function useAdminStats(period: AdminStatsPeriod = "all") {
   return useQuery({
     queryKey: ["admin-stats", period],
     queryFn: () => bff.get<AdminStats>(`/admin/stats?period=${period}`),
+  });
+}
+
+// Backs the Admin CV versions table (issue #163): every candidate's
+// CVVersion in one cross-user, filterable, paginated list — superseded rows
+// included by default, unlike the candidate-facing table. The owner's
+// name/email are resolved server-side (mirroring the audit-events actor
+// resolution) so the table never does its own per-row lookup.
+export type AdminCvVersionRow = {
+  id: string;
+  userId: string;
+  userName: string | null;
+  userEmail: string | null;
+  label: string;
+  fileName: string;
+  fileType: string;
+  isDefault: boolean;
+  conversionStatus: string;
+  conversionError: string | null;
+  supersededById: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AdminCvVersionsListResponse = {
+  cvVersions: AdminCvVersionRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
+export function useAdminCvVersions(state: AdminCvVersionsTableState) {
+  const qs = adminCvVersionsTableStateToQuery(state).toString();
+  return useQuery({
+    queryKey: ["admin-cv-versions", qs],
+    queryFn: () => bff.get<AdminCvVersionsListResponse>(`/admin/cv-versions?${qs}`),
+  });
+}
+
+// Backs the Reconvert row action (issue #163) — the only write action this
+// table offers. Ownership never moves to the admin caller; the response is
+// only the new conversionStatus, so a full refetch of the list picks up the
+// row's new state.
+export function useReconvertCvVersion() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (cvVersionId: string) =>
+      bff.post<{ cvVersionId: string; conversionStatus: string }>(
+        `/admin/cv-versions/${cvVersionId}/reconvert`,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin-cv-versions"] });
+    },
   });
 }

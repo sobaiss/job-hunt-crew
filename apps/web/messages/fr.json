@@ -298,6 +298,40 @@
           "next": "Suivant"
         }
       }
+    },
+    "cvVersions": {
+      "title": "Versions de CV",
+      "description": "Les versions de CV de chaque candidat, y compris les versions remplacées.",
+      "table": {
+        "loading": "Chargement…",
+        "loadError": "Impossible de charger la liste des versions de CV.",
+        "empty": "Aucune version de CV pour le moment.",
+        "noMatches": "Aucune version de CV ne correspond à ces filtres.",
+        "candidateLabel": "Candidat",
+        "candidatePlaceholder": "Nom ou e-mail",
+        "createdAtFromLabel": "Créé à partir de",
+        "createdAtToLabel": "Créé jusqu'à",
+        "statusFilterLabel": "Statut de conversion",
+        "statusAllOption": "Tous les statuts",
+        "noName": "aucun nom",
+        "supersededYes": "Oui",
+        "reconvertAction": "Reconvertir",
+        "columns": {
+          "candidate": "Candidat",
+          "label": "Libellé",
+          "fileName": "Fichier",
+          "status": "Statut",
+          "superseded": "Remplacée",
+          "createdAt": "Créé le",
+          "actions": "Actions"
+        },
+        "pagination": {
+          "pageSizeLabel": "Lignes par page",
+          "pageInfo": "Page {page} sur {totalPages} ({total} au total)",
+          "previous": "Précédent",
+          "next": "Suivant"
+        }
+      }
     }
   },
   "quotas": {

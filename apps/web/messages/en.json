@@ -298,6 +298,40 @@
           "next": "Next"
         }
       }
+    },
+    "cvVersions": {
+      "title": "CV versions",
+      "description": "Every candidate's CV versions, including superseded ones.",
+      "table": {
+        "loading": "Loading…",
+        "loadError": "Couldn't load the CV versions list.",
+        "empty": "No CV versions yet.",
+        "noMatches": "No CV versions match these filters.",
+        "candidateLabel": "Candidate",
+        "candidatePlaceholder": "Name or email",
+        "createdAtFromLabel": "Created from",
+        "createdAtToLabel": "Created to",
+        "statusFilterLabel": "Conversion status",
+        "statusAllOption": "All statuses",
+        "noName": "no name",
+        "supersededYes": "Yes",
+        "reconvertAction": "Reconvert",
+        "columns": {
+          "candidate": "Candidate",
+          "label": "Label",
+          "fileName": "File",
+          "status": "Status",
+          "superseded": "Superseded",
+          "createdAt": "Created",
+          "actions": "Actions"
+        },
+        "pagination": {
+          "pageSizeLabel": "Rows per page",
+          "pageInfo": "Page {page} of {totalPages} ({total} total)",
+          "previous": "Previous",
+          "next": "Next"
+        }
+      }
     }
   },
   "quotas": {
