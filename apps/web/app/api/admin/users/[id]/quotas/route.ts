@@ -15,7 +15,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   return proxyToApi(`/v1/admin/users/${id}/quotas`, {
     headers: {
       "X-User-Id": session.user.id,
-      "X-User-Plan": session.user.plan ?? "",
+      "X-User-Is-Admin": session.user.isAdmin ? "true" : "false",
     },
   });
 }

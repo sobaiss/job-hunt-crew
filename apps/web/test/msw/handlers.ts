@@ -7,11 +7,12 @@ import { http, HttpResponse } from "msw";
 export const handlers = [
   http.get("/api/example", () => HttpResponse.json({ ok: true })),
   http.get("/api/auth/session", () => HttpResponse.json({})),
-  // The Admin area landing page (issue #138); default to an administrateur
-  // response since only that Plan ever reaches the page's own layout gate.
+  // The Admin area landing page (issue #138); default to an Administrator
+  // response since only isAdmin sessions ever reach the page's own layout
+  // gate (issue #144, docs/adr/0015 — admin access is decoupled from Plan).
   // Suites exercising the 403/401 path override with `server.use`.
   http.get("/api/admin/me", () =>
-    HttpResponse.json({ userId: "admin-1", plan: "ADMINISTRATEUR" }),
+    HttpResponse.json({ userId: "admin-1", plan: "PREMIUM", isAdmin: true }),
   ),
   // The Dashboard reads the site catalogue to name a grouped SITE_SEARCH batch
   // row (issue #34). Default to an empty catalogue so suites that don't care

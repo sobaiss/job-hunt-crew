@@ -52,7 +52,7 @@ export async function upsertUser(params: {
   email: string;
   name?: string | null;
   image?: string | null;
-}): Promise<{ userId: string; plan: Plan }> {
+}): Promise<{ userId: string; plan: Plan; isAdmin: boolean }> {
   const res = await internalApiFetch("/internal/users/upsert", {
     method: "POST",
     body: JSON.stringify({
@@ -64,7 +64,7 @@ export async function upsertUser(params: {
   if (!res.ok) {
     throw new Error(`Failed to upsert user (${res.status})`);
   }
-  const data = (await res.json()) as { userId: string; plan: Plan };
+  const data = (await res.json()) as { userId: string; plan: Plan; isAdmin: boolean };
   return data;
 }
 
@@ -74,7 +74,7 @@ export async function upsertUser(params: {
 export async function verifyCredentials(params: {
   email: string;
   password: string;
-}): Promise<{ userId: string; plan: Plan } | null> {
+}): Promise<{ userId: string; plan: Plan; isAdmin: boolean } | null> {
   const res = await internalApiFetch("/internal/auth/verify-credentials", {
     method: "POST",
     body: JSON.stringify(params),
@@ -82,5 +82,5 @@ export async function verifyCredentials(params: {
   if (!res.ok) {
     return null;
   }
-  return (await res.json()) as { userId: string; plan: Plan };
+  return (await res.json()) as { userId: string; plan: Plan; isAdmin: boolean };
 }

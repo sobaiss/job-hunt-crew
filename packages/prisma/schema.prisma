@@ -14,7 +14,7 @@ enum Plan {
   FREE
   STANDARD
   PREMIUM
-  ADMINISTRATEUR
+  ADMINISTRATEUR // vestigial since #144/docs/adr/0015 — never assigned again; admin access is `User.isAdmin`
 }
 
 model User {
@@ -25,6 +25,13 @@ model User {
   image         String?
   plan          Plan      @default(FREE)
   passwordHash  String?
+  // Admin access, decoupled from Plan (docs/adr/0015) — an Administrator
+  // keeps a real quota tier alongside admin rights.
+  isAdmin       Boolean   @default(false)
+  // Nullable timestamp doubles as a flag, same convention as emailVerified.
+  // Enforced live against Postgres on every request (docs/adr/0016), never
+  // trusted from a cached session claim.
+  blockedAt     DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -36,8 +43,8 @@ model User {
   scouts         Scout[]
   applications   Application[]
   quotaOverrides QuotaOverride[]
-  quotaAuditEventsActed    QuotaAuditEvent[] @relation("QuotaAuditEventActor")
-  quotaAuditEventsTargeted QuotaAuditEvent[] @relation("QuotaAuditEventTarget")
+  adminAuditEventsActed    AdminAuditEvent[] @relation("AdminAuditEventActor")
+  adminAuditEventsTargeted AdminAuditEvent[] @relation("AdminAuditEventTarget")
   quotaAlerts    QuotaAlert[]
 }
 
@@ -78,11 +85,12 @@ model QuotaOverride {
   @@unique([userId, quotaKind])
 }
 
-// Append-only provenance trail for an Administrator's edit to a
-// QuotaOverride, a PlanQuotaDefault, or a User's Plan (docs/adr/0013,
-// issue #138) — actor, target user (absent for a PlanQuotaDefault edit,
-// which isn't scoped to one User), field, old/new value, timestamp.
-model QuotaAuditEvent {
+// Append-only provenance trail for an Administrator's action against a User
+// or a global setting (docs/adr/0013, issue #138) — actor, target user
+// (absent for a PlanQuotaDefault edit, which isn't scoped to one User),
+// field, old/new value, timestamp. Renamed from QuotaAuditEvent in #144 as
+// its field vocabulary grew beyond quotas (isAdmin, blockedAt, name, ...).
+model AdminAuditEvent {
   id           String   @id @default(cuid())
   actorUserId  String
   targetUserId String?
@@ -91,8 +99,8 @@ model QuotaAuditEvent {
   newValue     String?
   createdAt    DateTime @default(now())
 
-  actor  User  @relation("QuotaAuditEventActor", fields: [actorUserId], references: [id], onDelete: Cascade)
-  target User? @relation("QuotaAuditEventTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+  actor  User  @relation("AdminAuditEventActor", fields: [actorUserId], references: [id], onDelete: Cascade)
+  target User? @relation("AdminAuditEventTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
 }
 
 enum QuotaAlertThreshold {

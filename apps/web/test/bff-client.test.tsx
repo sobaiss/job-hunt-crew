@@ -1,8 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import { http, HttpResponse } from "msw";
 
 import { server } from "./msw/server";
+
+const { signOut } = vi.hoisted(() => ({ signOut: vi.fn() }));
+vi.mock("next-auth/react", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next-auth/react")>()),
+  signOut,
+}));
+
 import { bff, BffError } from "@/lib/bff-client";
+
+beforeEach(() => {
+  signOut.mockReset();
+});
 
 describe("bff client", () => {
   it("returns the parsed JSON body on a 2xx response", async () => {
@@ -56,5 +67,32 @@ describe("bff client", () => {
     expect(err).toBeInstanceOf(BffError);
     expect(err.status).toBe(500);
     expect(err.message).toMatch(/failed with 500/);
+  });
+
+  // issue #144, docs/adr/0016: a blocked caller's next request anywhere
+  // signs them out and routes them to a dedicated "account blocked" page.
+  it("signs the caller out and redirects when the response is USER_BLOCKED", async () => {
+    server.use(
+      http.get("/api/scouts", () =>
+        HttpResponse.json(
+          { detail: { code: "USER_BLOCKED", message: "This account is blocked" } },
+          { status: 403 },
+        ),
+      ),
+    );
+
+    await expect(bff.get("/scouts")).rejects.toBeInstanceOf(BffError);
+    expect(signOut).toHaveBeenCalledWith({ callbackUrl: "/account-blocked" });
+  });
+
+  it("does not sign out on an ordinary 403 that isn't USER_BLOCKED", async () => {
+    server.use(
+      http.get("/api/scouts", () =>
+        HttpResponse.json({ error: "Forbidden" }, { status: 403 }),
+      ),
+    );
+
+    await expect(bff.get("/scouts")).rejects.toBeInstanceOf(BffError);
+    expect(signOut).not.toHaveBeenCalled();
   });
 });

@@ -4,14 +4,14 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
-from py_db.models import Plan, PlanQuotaDefault, Quotakind, QuotaAuditEvent, QuotaOverride, User
+from py_db.models import Plan, PlanQuotaDefault, Quotakind, AdminAuditEvent, QuotaOverride, User
 from py_db.session import make_engine, make_session_factory
 from sqlalchemy import delete, select, update
 
 from api.main import app
 
 HEADERS = {"X-Internal-Api-Secret": "test-secret"}
-ADMIN_HEADERS = {**HEADERS, "X-User-Plan": "ADMINISTRATEUR"}
+ADMIN_HEADERS = {**HEADERS, "X-User-Is-Admin": "true"}
 
 
 @pytest.fixture(autouse=True)
@@ -19,7 +19,7 @@ def _secret(monkeypatch):
     monkeypatch.setenv("INTERNAL_API_SECRET", "test-secret")
 
 
-async def _create_user(plan: Plan = Plan.FREE) -> str:
+async def _create_user(plan: Plan = Plan.FREE, is_admin: bool = False) -> str:
     user_id = str(uuid.uuid4())
     engine = make_engine()
     try:
@@ -30,6 +30,7 @@ async def _create_user(plan: Plan = Plan.FREE) -> str:
                     id=user_id,
                     email=f"{user_id}@example.com",
                     plan=plan,
+                    isAdmin=is_admin,
                     updatedAt=datetime.now(UTC).replace(tzinfo=None),
                 )
             )
@@ -59,7 +60,7 @@ def user_id():
 
 @pytest.fixture
 def admin_id():
-    uid = asyncio.run(_create_user(plan=Plan.ADMINISTRATEUR))
+    uid = asyncio.run(_create_user(is_admin=True))
     yield uid
     asyncio.run(_delete_user(uid))
 
@@ -129,13 +130,13 @@ async def _quota_override(user_id: str, kind: Quotakind) -> QuotaOverride | None
         await engine.dispose()
 
 
-async def _audit_events(target_user_id: str) -> list[QuotaAuditEvent]:
+async def _audit_events(target_user_id: str) -> list[AdminAuditEvent]:
     engine = make_engine()
     try:
         session_factory = make_session_factory(engine)
         async with session_factory() as session:
             rows = await session.scalars(
-                select(QuotaAuditEvent).where(QuotaAuditEvent.targetUserId == target_user_id)
+                select(AdminAuditEvent).where(AdminAuditEvent.targetUserId == target_user_id)
             )
             return list(rows.all())
     finally:
@@ -182,13 +183,13 @@ def standard_documents_daily_cap():
     asyncio.run(_set_plan_default(Plan.STANDARD, Quotakind.DOCUMENTS_DAILY, original))
 
 
-async def _audit_events_for_field(field: str) -> list[QuotaAuditEvent]:
+async def _audit_events_for_field(field: str) -> list[AdminAuditEvent]:
     engine = make_engine()
     try:
         session_factory = make_session_factory(engine)
         async with session_factory() as session:
             rows = await session.scalars(
-                select(QuotaAuditEvent).where(QuotaAuditEvent.field == field)
+                select(AdminAuditEvent).where(AdminAuditEvent.field == field)
             )
             return list(rows.all())
     finally:
@@ -205,7 +206,7 @@ async def _user_plan(user_id: str) -> Plan:
         await engine.dispose()
 
 
-def test_admin_route_rejects_caller_with_no_plan_header(user_id):
+def test_admin_route_rejects_caller_with_no_is_admin_header(user_id):
     with TestClient(app) as client:
         response = client.get(
             "/v1/admin/me",
@@ -214,11 +215,11 @@ def test_admin_route_rejects_caller_with_no_plan_header(user_id):
     assert response.status_code == 403
 
 
-def test_admin_route_rejects_non_administrator_plan(user_id):
+def test_admin_route_rejects_non_admin_caller(user_id):
     with TestClient(app) as client:
         response = client.get(
             "/v1/admin/me",
-            headers={**HEADERS, "X-User-Id": user_id, "X-User-Plan": "STANDARD"},
+            headers={**HEADERS, "X-User-Id": user_id, "X-User-Is-Admin": "false"},
         )
     assert response.status_code == 403
 
@@ -227,19 +228,19 @@ def test_admin_route_rejects_missing_user_id():
     with TestClient(app) as client:
         response = client.get(
             "/v1/admin/me",
-            headers={**HEADERS, "X-User-Plan": "ADMINISTRATEUR"},
+            headers={**HEADERS, "X-User-Is-Admin": "true"},
         )
     assert response.status_code == 401
 
 
-def test_admin_route_allows_administrator_plan(user_id):
+def test_admin_route_allows_admin_caller(admin_id):
     with TestClient(app) as client:
         response = client.get(
             "/v1/admin/me",
-            headers={**HEADERS, "X-User-Id": user_id, "X-User-Plan": "ADMINISTRATEUR"},
+            headers=_admin_headers(admin_id),
         )
     assert response.status_code == 200
-    assert response.json() == {"userId": user_id, "plan": "ADMINISTRATEUR"}
+    assert response.json() == {"userId": admin_id, "plan": "FREE", "isAdmin": True}
 
 
 # --- GET /v1/admin/users/{id}/quotas (issue #139) ---
@@ -249,7 +250,7 @@ def test_get_user_quotas_requires_admin(admin_id, target_id):
     with TestClient(app) as client:
         response = client.get(
             f"/v1/admin/users/{target_id}/quotas",
-            headers={**HEADERS, "X-User-Id": target_id, "X-User-Plan": "FREE"},
+            headers={**HEADERS, "X-User-Id": target_id, "X-User-Is-Admin": "false"},
         )
     assert response.status_code == 403
 
@@ -314,7 +315,7 @@ def test_set_quota_override_requires_admin(admin_id, target_id):
     with TestClient(app) as client:
         response = client.put(
             f"/v1/admin/users/{target_id}/quota-overrides/ANALYSES_DAILY",
-            headers={**HEADERS, "X-User-Id": target_id, "X-User-Plan": "FREE"},
+            headers={**HEADERS, "X-User-Id": target_id, "X-User-Is-Admin": "false"},
             json={"limit": 10},
         )
     assert response.status_code == 403
@@ -422,7 +423,7 @@ def test_set_plan_requires_admin(admin_id, target_id):
     with TestClient(app) as client:
         response = client.put(
             f"/v1/admin/users/{target_id}/plan",
-            headers={**HEADERS, "X-User-Id": target_id, "X-User-Plan": "FREE"},
+            headers={**HEADERS, "X-User-Id": target_id, "X-User-Is-Admin": "false"},
             json={"plan": "PREMIUM"},
         )
     assert response.status_code == 403
@@ -475,7 +476,7 @@ def test_get_plan_defaults_requires_admin(target_id):
     with TestClient(app) as client:
         response = client.get(
             "/v1/admin/plan-defaults",
-            headers={**HEADERS, "X-User-Id": target_id, "X-User-Plan": "FREE"},
+            headers={**HEADERS, "X-User-Id": target_id, "X-User-Is-Admin": "false"},
         )
     assert response.status_code == 403
 
@@ -485,19 +486,18 @@ def test_get_plan_defaults_returns_all_seeded_rows(admin_id):
         response = client.get("/v1/admin/plan-defaults", headers=_admin_headers(admin_id))
     assert response.status_code == 200
     defaults = response.json()["defaults"]
-    # 4 Plans x 4 QuotaKinds, seeded by the #134 migration.
-    assert len(defaults) == 16
-    admin_scout_default = next(
-        d for d in defaults if d["plan"] == "ADMINISTRATEUR" and d["quotaKind"] == "ACTIVE_SCOUTS"
-    )
-    assert admin_scout_default["limit"] is None
+    # 3 real Plans x 4 QuotaKinds, seeded by the #134 migration. ADMINISTRATEUR's
+    # 4 rows were removed by #144's migration since that Plan is never
+    # assigned again (docs/adr/0015).
+    assert len(defaults) == 12
+    assert not any(d["plan"] == "ADMINISTRATEUR" for d in defaults)
 
 
 def test_set_plan_default_requires_admin(target_id):
     with TestClient(app) as client:
         response = client.put(
             "/v1/admin/plan-defaults/STANDARD/DOCUMENTS_DAILY",
-            headers={**HEADERS, "X-User-Id": target_id, "X-User-Plan": "FREE"},
+            headers={**HEADERS, "X-User-Id": target_id, "X-User-Is-Admin": "false"},
             json={"limit": 99},
         )
     assert response.status_code == 403
@@ -582,7 +582,7 @@ def test_list_users_requires_admin(target_id):
     with TestClient(app) as client:
         response = client.get(
             "/v1/admin/users",
-            headers={**HEADERS, "X-User-Id": target_id, "X-User-Plan": "FREE"},
+            headers={**HEADERS, "X-User-Id": target_id, "X-User-Is-Admin": "false"},
         )
     assert response.status_code == 403
 
@@ -621,7 +621,7 @@ def test_get_stats_requires_admin(target_id):
     with TestClient(app) as client:
         response = client.get(
             "/v1/admin/stats",
-            headers={**HEADERS, "X-User-Id": target_id, "X-User-Plan": "FREE"},
+            headers={**HEADERS, "X-User-Id": target_id, "X-User-Is-Admin": "false"},
         )
     assert response.status_code == 403
 

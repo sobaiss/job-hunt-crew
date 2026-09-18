@@ -6,6 +6,8 @@
 // Server-side code (auth.ts, the BFF routes themselves) does NOT use this —
 // it talks to services/api directly via `lib/internal-api.ts`.
 
+import { signOut } from "next-auth/react";
+
 /** Thrown for any non-2xx BFF response. Carries the HTTP status and parsed body. */
 export class BffError extends Error {
   readonly status: number;
@@ -23,6 +25,16 @@ const BASE = "/api";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+// services/api's `require_user_id` rejects a blocked caller with this
+// distinguishable shape (issue #144, docs/adr/0016), forwarded through the
+// BFF proxy unchanged. Signs the Candidate out and routes them to a
+// dedicated "account blocked" page immediately, rather than surfacing this
+// as a generic per-request error — this takes effect even against an
+// already-active session, independent of the JWT's remaining lifetime.
+function isBlockedResponse(data: unknown): boolean {
+  return isRecord(data) && isRecord(data.detail) && data.detail.code === "USER_BLOCKED";
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -47,6 +59,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!response.ok) {
+    if (isBlockedResponse(data)) {
+      void signOut({ callbackUrl: "/account-blocked" });
+    }
     const message =
       isRecord(data) && typeof data.error === "string"
         ? data.error

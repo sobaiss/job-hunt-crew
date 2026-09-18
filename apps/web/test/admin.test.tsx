@@ -18,12 +18,12 @@ vi.mock("@/auth", () => ({ auth }));
 
 const ADMIN_SESSION: Session = {
   expires: "2999-01-01T00:00:00.000Z",
-  user: { id: "admin-1", name: "Ada", email: "ada@example.com", plan: "ADMINISTRATEUR" },
+  user: { id: "admin-1", name: "Ada", email: "ada@example.com", plan: "PREMIUM", isAdmin: true },
 };
 
 const STANDARD_SESSION: Session = {
   expires: "2999-01-01T00:00:00.000Z",
-  user: { id: "user-1", name: "Bob", email: "bob@example.com", plan: "STANDARD" },
+  user: { id: "user-1", name: "Bob", email: "bob@example.com", plan: "STANDARD", isAdmin: false },
 };
 
 beforeEach(() => {
@@ -42,7 +42,7 @@ describe("Admin layout gate", () => {
     expect(notFound).not.toHaveBeenCalled();
   });
 
-  it("404s a signed-in Candidate whose Plan isn't ADMINISTRATEUR", async () => {
+  it("404s a signed-in Candidate who isn't an Administrator", async () => {
     auth.mockResolvedValue(STANDARD_SESSION);
 
     await AdminLayout({ children: <div /> });
@@ -51,7 +51,7 @@ describe("Admin layout gate", () => {
     expect(redirect).not.toHaveBeenCalled();
   });
 
-  it("renders children for an ADMINISTRATEUR-plan session", async () => {
+  it("renders children for an isAdmin session", async () => {
     auth.mockResolvedValue(ADMIN_SESSION);
 
     const element = await AdminLayout({ children: <div data-testid="child" /> });
@@ -68,7 +68,7 @@ describe("AdminPage", () => {
     renderWithProviders(<AdminPage />, { session: ADMIN_SESSION });
 
     expect(
-      await screen.findByText("Signed in as admin-1 (ADMINISTRATEUR)"),
+      await screen.findByText("Signed in as admin-1 (PREMIUM)"),
     ).toBeInTheDocument();
   });
 

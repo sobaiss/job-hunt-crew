@@ -10,6 +10,8 @@ declare module "next-auth" {
     user: {
       id: string;
       plan?: Plan;
+      // Admin access, decoupled from Plan (issue #144, docs/adr/0015).
+      isAdmin?: boolean;
     } & DefaultSession["user"];
   }
 }
@@ -18,5 +20,6 @@ declare module "next-auth/jwt" {
   interface JWT {
     userId?: string;
     plan?: Plan;
+    isAdmin?: boolean;
   }
 }

@@ -19,10 +19,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import (
+    AdminAuditEvent,
     PlanQuotaDefault,
     QuotaAlert,
     Quotaalertthreshold,
-    QuotaAuditEvent,
     Quotakind,
     QuotaOverride,
     Scout,
@@ -84,7 +84,7 @@ async def total_active_scout_count(session: AsyncSession) -> int:
     return int((await session.scalar(stmt)) or 0)
 
 
-def record_quota_audit_event(
+def record_admin_audit_event(
     session: AsyncSession,
     *,
     actor_user_id: str,
@@ -92,16 +92,18 @@ def record_quota_audit_event(
     field: str,
     old_value: str | None,
     new_value: str | None,
-) -> QuotaAuditEvent:
-    """Stages one QuotaAuditEvent row for an Administrator's edit to a
-    QuotaOverride, a PlanQuotaDefault, or a User's Plan (issue #138).
+) -> AdminAuditEvent:
+    """Stages one AdminAuditEvent row for an Administrator's action against a
+    User or a global setting (issue #138; renamed from
+    record_quota_audit_event in #144 as the field vocabulary grew beyond
+    quotas — isAdmin, blockedAt, name, ...).
 
     Unlike `record_pipeline_event`, this does not commit: every admin
     mutation (#139/#140) must write its audit event in the same transaction
     as the change it records, so a caller adds this row alongside its own
     changes and commits once.
     """
-    event = QuotaAuditEvent(
+    event = AdminAuditEvent(
         id=str(uuid.uuid4()),
         actorUserId=actor_user_id,
         targetUserId=target_user_id,

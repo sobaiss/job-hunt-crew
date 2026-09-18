@@ -86,6 +86,11 @@
     "sentBody": "We sent a sign-in link to {email}. Follow it to finish signing in.",
     "error": "Something went wrong while signing in. Please try again."
   },
+  "accountBlocked": {
+    "title": "Your account is blocked",
+    "body": "An administrator has blocked access to this account. If you think this is a mistake, please contact support.",
+    "backToHome": "Back to home"
+  },
   "nav": {
     "dashboard": "Dashboard",
     "analyses": "Analyses",

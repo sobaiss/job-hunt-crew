@@ -31,6 +31,7 @@ from py_db.models import (
     Scoutstatus,
     SiteConfig,
     StatusEvent,
+    User,
 )
 from py_db.application_stats import compute_application_stats, stats_window_since
 from py_db.quota import (
@@ -69,12 +70,29 @@ def _now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-async def require_user_id(x_user_id: str | None = Header(default=None, alias="X-User-Id")) -> str:
+async def require_user_id(
+    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
+    session: AsyncSession = Depends(get_session),
+) -> str:
     """Per PRD Section 7/14: services/api trusts the caller's userId header
     (paired with the shared INTERNAL_API_SECRET) rather than independently
-    verifying a signed session — apps/web's BFF proxy is the only caller."""
+    verifying a signed session — apps/web's BFF proxy is the only caller.
+
+    Additionally rejects a blocked caller (issue #144, docs/adr/0016) on
+    every authenticated request, not only `/v1/admin/*` ones — checked live
+    against Postgres here rather than trusted from a cached session claim,
+    since the whole point of blocking is to take effect even against an
+    already-active session. `detail.code` lets the Web client distinguish
+    this from an ordinary 403.
+    """
     if not x_user_id:
         raise HTTPException(status_code=401, detail="Missing X-User-Id header")
+    blocked_at = await session.scalar(select(User.blockedAt).where(User.id == x_user_id))
+    if blocked_at is not None:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "USER_BLOCKED", "message": "This account is blocked"},
+        )
     return x_user_id
 
 

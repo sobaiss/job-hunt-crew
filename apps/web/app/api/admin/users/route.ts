@@ -17,7 +17,7 @@ export async function GET(request: Request) {
     {
       headers: {
         "X-User-Id": session.user.id,
-        "X-User-Plan": session.user.plan ?? "",
+        "X-User-Is-Admin": session.user.isAdmin ? "true" : "false",
       },
     },
   );

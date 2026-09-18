@@ -104,11 +104,27 @@ _Avoid_: Column settings, table preferences
 
 **Quotas page**:
 A dedicated page/tab showing a Candidate's own Effective quota and current usage (defined in [API](../../services/api/CONTEXT.md)'s context) for every QuotaKind as a progress bar — all four shown regardless of proximity to the limit, not just the ones near capacity. Where a QuotaAlert's persisted feed entries surface alongside the bars.
-_Avoid_: Usage page, Dashboard (that's the overview; this is quota-specific)
+_Avoid_: Usage page, Dashboard (that's the overview; this is quota-specific), Plan defaults page (that's the Admin-area screen editing every Plan's PlanQuotaDefault — a different audience and content from this Candidate-facing screen)
 
 **Admin area**:
-The area reachable only by an Administrator (defined in [API](../../services/api/CONTEXT.md)'s context) — a per-user screen (Plan, Effective quotas, current usage, QuotaOverride editing, Plan reassignment) and a reporting screen (a per-user table flagging who's at/over any QuotaKind, plus global aggregate usage stats). Gated by Plan, not a separate route-level password or secondary login.
-_Avoid_: Admin panel (fine in prose), Dashboard (that's the candidate overview)
+The area reachable only by an Administrator (defined in [API](../../services/api/CONTEXT.md)'s context), gated by `isAdmin` rather than Plan (docs/adr/0015). Split across three screens, each with its own glossary entry: the Admin dashboard, the Plan defaults page, and the Admin users table plus User panel.
+_Avoid_: Admin panel (fine in prose), Dashboard (that's either the candidate overview or, in this area, specifically the Admin dashboard below)
+
+**Admin dashboard**:
+The `/admin` landing page — global aggregate stats (total Users, Users at/over a quota limit, Analyses/GeneratedDocuments volume, active Scouts), plus new-signups and Plan-distribution figures, filterable by a 7/30/90-day/all-time preset. That filter only narrows the time-series figures (signups, cumulative usage); snapshot figures (current totals, current Plan distribution) always reflect today regardless of it. Links out to the Plan defaults page and the Admin users table.
+_Avoid_: Admin area (that's the whole gated section; this is just its landing screen), Dashboard (that's the candidate overview at `/`)
+
+**Plan defaults page**:
+The `/admin/quotas` page — PlanQuotaDefault values (defined in [API](../../services/api/CONTEXT.md)'s context) for `free`/`standard`/`premium` side by side, one column per Plan, one row per QuotaKind (`administrateur`'s row is never shown — docs/adr/0015). Each column's own Modifier button opens a slide-over form to edit that Plan's four values together; no Plan can be added or removed here.
+_Avoid_: Quotas page (that's the Candidate-facing `/quotas` screen showing one User's own usage, not Plan configuration), Admin area (that's the whole section)
+
+**Admin users table**:
+The `/admin/users` table listing every User (defined in [API](../../services/api/CONTEXT.md)'s context) for an Administrator to search and manage — server-paginated, with search by name/email and filters for Plan, `isAdmin`, Blocked status, and at/over quota limit. Row-level actions only, no multi-select: a quick Bloquer/Débloquer button per row (inline confirm, no modal), and clicking the row opens the User panel. Restyled after the Analyses table's conventions (Table/SortableHead primitives, URL-synced filter state).
+_Avoid_: Users list, Admin area (that's the whole section), Analyses (a different table — only its styling is the reference here)
+
+**User panel**:
+The right-hand slide-over opened by clicking an Admin users table row — replaces the former dedicated `/admin/users/[id]` page entirely. Shows the User's info (name, editable; email, not editable from here), their `isAdmin` role (toggle, inline confirm), their quotas (QuotaOverride editing and Plan reassignment, defined in [API](../../services/api/CONTEXT.md)'s context), and an Audit history tab listing their AdminAuditEvents. Reachable directly via a `?user=<id>` query param on `/admin/users`, the same pattern the Scout panel's `?open=<id>` uses.
+_Avoid_: Quick view, Scout panel, CV panel (different slide-overs, see their own entries), Historique (that's the Scout panel's own run-history tab; this one is Audit history)
 
 **Settings**:
 The `/settings` page — theme, Locale, and read-only account details (name and email from the Session), plus sign out. No account deletion (there is no API for it).

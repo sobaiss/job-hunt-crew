@@ -86,6 +86,11 @@
     "sentBody": "Nous avons envoyé un lien de connexion à {email}. Suivez-le pour terminer la connexion.",
     "error": "Une erreur est survenue lors de la connexion. Veuillez réessayer."
   },
+  "accountBlocked": {
+    "title": "Votre compte est bloqué",
+    "body": "Un administrateur a bloqué l'accès à ce compte. Si vous pensez qu'il s'agit d'une erreur, veuillez contacter le support.",
+    "backToHome": "Retour à l'accueil"
+  },
   "nav": {
     "dashboard": "Tableau de bord",
     "analyses": "Analyses",

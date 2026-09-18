@@ -14,7 +14,7 @@ from py_db.quota import (
 from py_db.quotas import (
     active_scout_count,
     effective_quota,
-    record_quota_audit_event,
+    record_admin_audit_event,
     total_active_scout_count,
 )
 from pydantic import BaseModel
@@ -32,16 +32,17 @@ def _now() -> datetime:
 
 async def require_admin(
     x_user_id: str | None = Header(default=None, alias="X-User-Id"),
-    x_user_plan: str | None = Header(default=None, alias="X-User-Plan"),
+    x_user_is_admin: str | None = Header(default=None, alias="X-User-Is-Admin"),
 ) -> str:
-    """Rejects any caller whose forwarded Plan isn't ADMINISTRATEUR (issue
-    #138). Trusts the BFF-forwarded X-User-Plan header the same way
-    `require_user_id` trusts X-User-Id — no independent re-verification
-    against Postgres, same MVP boundary as the Internal API secret.
+    """Rejects any caller whose forwarded `isAdmin` flag isn't set (issue
+    #138, decoupled from Plan in #144 per docs/adr/0015). Trusts the
+    BFF-forwarded X-User-Is-Admin header the same way `require_user_id`
+    trusts X-User-Id — no independent re-verification against Postgres, same
+    MVP boundary as the Internal API secret.
     """
     if not x_user_id:
         raise HTTPException(status_code=401, detail="Missing X-User-Id header")
-    if x_user_plan != Plan.ADMINISTRATEUR.value:
+    if x_user_is_admin != "true":
         raise HTTPException(status_code=403, detail="Administrator access required")
     return x_user_id
 
@@ -49,15 +50,20 @@ async def require_admin(
 class AdminMeResponse(BaseModel):
     userId: str
     plan: str
+    isAdmin: bool
 
 
 @router.get("/me", response_model=AdminMeResponse)
-async def admin_me(user_id: str = Depends(require_admin)) -> AdminMeResponse:
+async def admin_me(
+    user_id: str = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> AdminMeResponse:
     """Backs the bare `/admin` landing page (issue #138) — confirms the
-    caller actually cleared `require_admin`. #139/#140 add the real
-    per-user and reporting endpoints behind this same dependency.
+    caller actually cleared `require_admin`, and reports their real Plan
+    now that admin access no longer implies one (#144).
     """
-    return AdminMeResponse(userId=user_id, plan=Plan.ADMINISTRATEUR.value)
+    target = await _get_target_user(session, user_id)
+    return AdminMeResponse(userId=target.id, plan=target.plan.value, isAdmin=target.isAdmin)
 
 
 async def _get_target_user(session: AsyncSession, user_id: str) -> User:
@@ -160,7 +166,7 @@ async def set_quota_override(
     """Sets (creating or replacing) `user_id`'s `QuotaOverride` for `kind`,
     taking precedence over their Plan's default per `effective_quota`'s
     resolution order — `limit: null` makes that QuotaKind unlimited for this
-    User specifically (issue #139). Writes one `QuotaAuditEvent` in the same
+    User specifically (issue #139). Writes one `AdminAuditEvent` in the same
     transaction as the change.
     """
     await _get_target_user(session, user_id)
@@ -186,7 +192,7 @@ async def set_quota_override(
             )
         )
 
-    record_quota_audit_event(
+    record_admin_audit_event(
         session,
         actor_user_id=admin_id,
         target_user_id=user_id,
@@ -223,7 +229,7 @@ async def delete_quota_override(
 
     old_value = "null" if existing.limit is None else str(existing.limit)
     await session.delete(existing)
-    record_quota_audit_event(
+    record_admin_audit_event(
         session,
         actor_user_id=admin_id,
         target_user_id=user_id,
@@ -251,7 +257,7 @@ async def set_user_plan(
     session: AsyncSession = Depends(get_session),
 ) -> SetPlanResponse:
     """Reassigns `user_id`'s Plan (issue #139). A no-op request (the same
-    Plan the User already has) writes no `QuotaAuditEvent` — only an actual
+    Plan the User already has) writes no `AdminAuditEvent` — only an actual
     change is audited, matching `delete_quota_override`'s idempotency.
     """
     target = await _get_target_user(session, user_id)
@@ -260,7 +266,7 @@ async def set_user_plan(
         old_plan = target.plan.value
         target.plan = req.plan
         target.updatedAt = _now()
-        record_quota_audit_event(
+        record_admin_audit_event(
             session,
             actor_user_id=admin_id,
             target_user_id=user_id,
@@ -316,7 +322,7 @@ async def set_plan_default(
     User on `plan` with no `QuotaOverride` for `kind` on their very next
     `effective_quota` read — no backfill needed, since that resolution always
     reads this row live (docs/adr/0013). A no-op request (the same limit
-    already set) writes no `QuotaAuditEvent`, matching `set_user_plan`'s
+    already set) writes no `AdminAuditEvent`, matching `set_user_plan`'s
     idempotency.
     """
     row = await session.scalar(
@@ -331,7 +337,7 @@ async def set_plan_default(
         old_value = "null" if row.limit is None else str(row.limit)
         row.limit = req.limit
         row.updatedAt = _now()
-        record_quota_audit_event(
+        record_admin_audit_event(
             session,
             actor_user_id=admin_id,
             target_user_id=None,

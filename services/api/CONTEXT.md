@@ -9,12 +9,16 @@ The account record for one candidate, identified by email, keyed by the canonica
 _Avoid_: Candidate, account — "candidate" names the persona in product conversations; `User` is the row every context actually references.
 
 **Plan**:
-A User's usage tier — `free` | `standard` | `premium` | `administrateur` — determining their quota defaults (see PlanQuotaDefault). `administrateur` is a Plan value, not a separate flag: a User on it has no quota ceilings of its own (every QuotaKind resolves to unlimited) and is the only User who can reach the Web context's Admin area. This means administering the system and running one's own job search as a Candidate are mutually exclusive under this model — a deliberate simplification, since nothing in the product today needs one User to be both. New Users default to `free`.
-_Avoid_: Profile — collides with StyleProfile, an unrelated per-CVVersion concept, despite "profile" being the word the product brief uses; Tier, Role — Plan already carries both the usage-tier and (for one value) the access-role meaning, so a separate Role term would imply a distinction this model doesn't make.
+A User's usage tier — `free` | `standard` | `premium` | `administrateur` — determining their quota defaults (see PlanQuotaDefault). `administrateur` is vestigial: it used to double as the admin-access flag, but that meaning moved to the separate `isAdmin` field (docs/adr/0015) and every User previously on it was migrated to `premium` — the value is never assigned again, just left in the enum rather than dropped. New Users default to `free`.
+_Avoid_: Profile — collides with StyleProfile, an unrelated per-CVVersion concept, despite "profile" being the word the product brief uses; Tier, Role — Role is now `isAdmin`, a separate concept from Plan (see Administrator).
 
 **Administrator**:
-A User whose Plan is `administrateur`. The only User who can reach the Web context's Admin area, edit any User's QuotaOverride, edit a Plan's PlanQuotaDefault values, or change another User's Plan.
+A User whose `isAdmin` is true (docs/adr/0015) — independent of their Plan, so an Administrator keeps a real usage tier while managing the system. The only User who can reach the Web context's Admin area, edit any User's QuotaOverride, edit a Plan's PlanQuotaDefault values, change another User's Plan, block or unblock a User, or grant/revoke another User's `isAdmin`. Can't revoke their own `isAdmin` or block themselves — avoids a lockout with no Administrator left to undo it.
 _Avoid_: Admin (fine in prose), Superuser
+
+**Blocked**:
+A User whose `blockedAt` is set — every one of their calls into this context is rejected until an Administrator unblocks them (docs/adr/0016). Blocking is purely an access gate: it never suspends their Scouts, touches their data, or changes their Plan/quotas, and is always reversible. An Administrator can't block themselves.
+_Avoid_: Suspended (implies automatic or temporary), Disabled, Deactivated, Banned
 
 **CVVersion**:
 One labeled, versioned upload of a candidate's CV (PDF, DOCX, Markdown, or plain text). Exactly one per user may be the default; each carries a Markdown rendition and its `conversionStatus`, and — for a PDF/DOCX upload — a StyleProfile and its `styleStatus`. Replacing one never mutates or deletes it — it creates a new CVVersion and sets `supersededById` on the old one (docs/adr/0005), so every Analysis, Application, GeneratedDocument, and Scout that already reference it keep seeing exactly what they always saw.
@@ -148,9 +152,9 @@ _Avoid_: User quota, custom limit
 The ceiling actually enforced for one User on one QuotaKind: their QuotaOverride if one exists, else their Plan's PlanQuotaDefault. Hard-blocks the corresponding action once reached (create/reactivate for active Scouts, `POST /v1/analyses` for daily/monthly Analyses, document generation for daily GeneratedDocuments) — there is no soft/warn-only mode. Lowering an Effective quota below a User's current active-Scout count never force-pauses their existing Scouts; it only blocks further create/reactivate calls.
 _Avoid_: Quota limit, cap (fine in prose; "cap" is also the pre-existing env-var terminology this replaces)
 
-**QuotaAuditEvent**:
-One append-only entry recording an Administrator's edit to a QuotaOverride, a PlanQuotaDefault, or a User's Plan — actor, target User, field, old/new value, timestamp. A distinct trail from PipelineEvent (pipeline observability) and StatusEvent (an Application's own history): this one exists purely for admin-action provenance.
-_Avoid_: Audit log (ambiguous with PipelineEvent's own "_Avoid_: Audit log" note — this is the admin-provenance trail, not the pipeline one)
+**AdminAuditEvent**:
+One append-only entry recording an Administrator's action on a User or on shared config — editing a QuotaOverride, a PlanQuotaDefault, or a User's Plan; blocking or unblocking a User; editing a User's name; or granting/revoking a User's `isAdmin` — actor, target User, field, old/new value, timestamp. Renamed from QuotaAuditEvent once its scope grew past quota-only actions (docs/adr/0015). A distinct trail from PipelineEvent (pipeline observability) and StatusEvent (an Application's own history): this one exists purely for admin-action provenance.
+_Avoid_: QuotaAuditEvent (its old name, now inaccurate — the trail covers non-quota admin actions too), Audit log (ambiguous with PipelineEvent's own "_Avoid_: Audit log" note — this is the admin-provenance trail, not the pipeline one)
 
 **QuotaAlert**:
 A persisted notification for one User crossing 80% ("approaching") or 100%+ ("exceeded") of their Effective quota for one QuotaKind — one fixed threshold pair across every QuotaKind for now. Surfaced in the Web context both as a standing notification-feed entry and as an inline banner on the specific action screen at the moment it would be blocked.

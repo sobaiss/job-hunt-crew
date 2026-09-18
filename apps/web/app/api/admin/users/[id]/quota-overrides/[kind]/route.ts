@@ -12,7 +12,7 @@ async function _authedUserHeaders() {
   }
   return {
     "X-User-Id": session.user.id,
-    "X-User-Plan": session.user.plan ?? "",
+    "X-User-Is-Admin": session.user.isAdmin ? "true" : "false",
   };
 }
 

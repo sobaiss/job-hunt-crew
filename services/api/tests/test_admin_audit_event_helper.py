@@ -1,4 +1,4 @@
-"""The shared QuotaAuditEvent write helper (`py_db.quotas.record_quota_audit_event`,
+"""The shared AdminAuditEvent write helper (`py_db.quotas.record_admin_audit_event`,
 issue #138) — the provenance trail #139/#140's admin mutation endpoints
 (QuotaOverride edit, PlanQuotaDefault edit, Plan reassignment) all write
 through. Covers only the helper's own contract here (staging a row without
@@ -10,8 +10,8 @@ import uuid
 from datetime import UTC, datetime
 
 import pytest
-from py_db.models import QuotaAuditEvent, User
-from py_db.quotas import record_quota_audit_event
+from py_db.models import AdminAuditEvent, User
+from py_db.quotas import record_admin_audit_event
 from py_db.session import make_engine, make_session_factory
 from sqlalchemy import delete, select
 
@@ -21,7 +21,7 @@ def _now() -> datetime:
 
 
 @pytest.mark.asyncio
-async def test_record_quota_audit_event_stages_row_without_committing():
+async def test_record_admin_audit_event_stages_row_without_committing():
     engine = make_engine()
     session_factory = make_session_factory(engine)
     actor_id = str(uuid.uuid4())
@@ -33,7 +33,7 @@ async def test_record_quota_audit_event_stages_row_without_committing():
             await session.commit()
 
         async with session_factory() as session:
-            record_quota_audit_event(
+            record_admin_audit_event(
                 session,
                 actor_user_id=actor_id,
                 target_user_id=target_id,
@@ -48,8 +48,8 @@ async def test_record_quota_audit_event_stages_row_without_committing():
             async with session_factory() as other_session:
                 assert (
                     await other_session.scalar(
-                        select(QuotaAuditEvent).where(
-                            QuotaAuditEvent.actorUserId == actor_id
+                        select(AdminAuditEvent).where(
+                            AdminAuditEvent.actorUserId == actor_id
                         )
                     )
                 ) is None
@@ -57,7 +57,7 @@ async def test_record_quota_audit_event_stages_row_without_committing():
 
         async with session_factory() as session:
             event = await session.scalar(
-                select(QuotaAuditEvent).where(QuotaAuditEvent.actorUserId == actor_id)
+                select(AdminAuditEvent).where(AdminAuditEvent.actorUserId == actor_id)
             )
             assert event is not None
             assert event.targetUserId == target_id
@@ -66,7 +66,7 @@ async def test_record_quota_audit_event_stages_row_without_committing():
             assert event.newValue == "10"
     finally:
         async with session_factory() as session:
-            await session.execute(delete(QuotaAuditEvent).where(QuotaAuditEvent.actorUserId == actor_id))
+            await session.execute(delete(AdminAuditEvent).where(AdminAuditEvent.actorUserId == actor_id))
             await session.execute(delete(User).where(User.id.in_([actor_id, target_id])))
             await session.commit()
         await engine.dispose()
