@@ -4,10 +4,11 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
-from py_db.models import User, t_VerificationToken
+from py_db.models import Role, Subscription, User, t_VerificationToken
 from py_db.passwords import hash_password
+from py_db.quotas import effective_plan
 from py_db.session import make_engine, make_session_factory
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 
 from api.main import app
 
@@ -102,6 +103,87 @@ def test_upsert_user_returns_new_users_plan():
             )
         assert response.status_code == 200
         assert response.json()["plan"] == "FREE"
+    finally:
+        asyncio.run(_delete_user_by_email(email))
+
+
+async def _load_subscriptions(user_id: str) -> list[Subscription]:
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            return list(
+                (
+                    await session.scalars(
+                        select(Subscription).where(Subscription.userId == user_id)
+                    )
+                ).all()
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _load_user_role_and_effective_plan(user_id: str) -> tuple[Role, str]:
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            user = await session.get(User, user_id)
+            plan = await effective_plan(session, user_id)
+            return user.role, plan.value
+    finally:
+        await engine.dispose()
+
+
+def test_upsert_user_creates_unbounded_free_subscription_for_new_user():
+    # #154: signup creates exactly one unbounded (endDate=None) FREE
+    # Subscription alongside the new User, so a brand-new User's Effective
+    # Plan (docs/adr/0018) is free with unlimited quota and zero admin action.
+    email = f"new-subscription-{uuid.uuid4()}@example.com"
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/internal/users/upsert",
+                json={"email": email},
+                headers=HEADERS,
+            )
+        assert response.status_code == 200
+        user_id = response.json()["userId"]
+
+        subscriptions = asyncio.run(_load_subscriptions(user_id))
+        assert len(subscriptions) == 1
+        assert subscriptions[0].plan.value == "FREE"
+        assert subscriptions[0].endDate is None
+        assert subscriptions[0].duration is None
+
+        role, plan = asyncio.run(_load_user_role_and_effective_plan(user_id))
+        assert role == Role.EXTERNAL
+        assert plan == "FREE"
+    finally:
+        asyncio.run(_delete_user_by_email(email))
+
+
+def test_upsert_user_does_not_duplicate_subscription_for_existing_user():
+    # A repeat sign-in (same email upserted twice) must not create a second
+    # Subscription for an already-provisioned User.
+    email = f"repeat-subscription-{uuid.uuid4()}@example.com"
+    try:
+        with TestClient(app) as client:
+            first = client.post(
+                "/internal/users/upsert",
+                json={"email": email},
+                headers=HEADERS,
+            )
+            second = client.post(
+                "/internal/users/upsert",
+                json={"email": email, "name": "Updated Name"},
+                headers=HEADERS,
+            )
+        assert first.status_code == 200
+        assert second.status_code == 200
+        user_id = first.json()["userId"]
+
+        assert len(asyncio.run(_load_subscriptions(user_id))) == 1
     finally:
         asyncio.run(_delete_user_by_email(email))
 

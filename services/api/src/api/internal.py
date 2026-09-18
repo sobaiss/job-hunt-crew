@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from py_db.models import User, t_VerificationToken
+from py_db.models import Plan, Subscription, User, t_VerificationToken
 from py_db.passwords import verify_password_or_dummy
 from pydantic import BaseModel
 from sqlalchemy import delete, insert, select
@@ -54,6 +54,18 @@ async def upsert_user(
             updatedAt=_now(),
         )
         session.add(user)
+        # #154: every brand-new User starts on an unbounded (endDate=None)
+        # Free Subscription, created in the same transaction as the User
+        # row itself — zero admin action needed for their Effective Plan
+        # (docs/adr/0018) to be `free` with unlimited quota.
+        session.add(
+            Subscription(
+                id=str(uuid.uuid4()),
+                userId=user.id,
+                plan=Plan.FREE,
+                startDate=_now(),
+            )
+        )
     else:
         if req.name is not None:
             user.name = req.name
