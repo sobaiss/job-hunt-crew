@@ -181,11 +181,14 @@ export type AdminUsersListResponse = {
   pageSize: number;
 };
 
-export function useAdminUsers(state: AdminUsersTableState) {
+// `enabled` lets a caller (the CandidatePicker's type-ahead, issue #160) defer
+// the query until it actually needs suggestions, instead of always fetching.
+export function useAdminUsers(state: AdminUsersTableState, options?: { enabled?: boolean }) {
   const qs = adminUsersTableStateToQuery(state).toString();
   return useQuery({
     queryKey: ["admin-users", qs],
     queryFn: () => bff.get<AdminUsersListResponse>(`/admin/users?${qs}`),
+    enabled: options?.enabled ?? true,
   });
 }
 

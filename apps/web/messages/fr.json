@@ -479,6 +479,11 @@
       "noResult": "Pas encore de résultat."
     }
   },
+  "candidatePicker": {
+    "noMatches": "Aucun candidat correspondant.",
+    "noName": "sans nom",
+    "resultsLabel": "Candidats correspondants"
+  },
   "cvPicker": {
     "label": "Version de CV",
     "placeholder": "Sélectionnez une version de CV",

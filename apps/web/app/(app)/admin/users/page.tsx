@@ -31,6 +31,7 @@ import {
   type AdminUsersTableState,
 } from "@/lib/admin-users-filters";
 import { useEnumLabel } from "@/lib/enum-labels";
+import { CandidatePicker } from "@/components/candidate-picker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -597,16 +598,13 @@ function UsersTable() {
   return (
     <div className="flex flex-col gap-4">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="admin-users-search">{t("searchLabel")}</Label>
-          <Input
-            id="admin-users-search"
-            type="search"
-            placeholder={t("searchPlaceholder")}
-            value={state.search}
-            onChange={(event) => updateState({ search: event.target.value })}
-          />
-        </div>
+        <CandidatePicker
+          id="admin-users-search"
+          label={t("searchLabel")}
+          placeholder={t("searchPlaceholder")}
+          value={state.search}
+          onChange={(search) => updateState({ search })}
+        />
 
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="admin-users-plan">{t("planLabel")}</Label>

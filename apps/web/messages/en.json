@@ -479,6 +479,11 @@
       "noResult": "No result yet."
     }
   },
+  "candidatePicker": {
+    "noMatches": "No matching candidates.",
+    "noName": "no name",
+    "resultsLabel": "Matching candidates"
+  },
   "cvPicker": {
     "label": "CV version",
     "placeholder": "Select a CV version",
