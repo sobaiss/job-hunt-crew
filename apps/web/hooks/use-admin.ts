@@ -126,9 +126,10 @@ export function useSetUserAdminRole(userId: string) {
   });
 }
 
-// Backs the admin reporting screen (issue #140): the plan-defaults editor,
-// the per-user usage table with its at/over-limit filter, and the global
-// stats panel.
+// Backs the Plan defaults page (issue #146, replacing the #140 editor
+// embedded in the Admin users table): the free/standard/premium comparison
+// table, and the per-user usage table's at/over-limit filter and global
+// stats panel also read this same list.
 export type AdminPlanDefault = { plan: string; quotaKind: string; limit: number | null };
 
 export function useAdminPlanDefaults() {
@@ -138,11 +139,14 @@ export function useAdminPlanDefaults() {
   });
 }
 
-export function useSetPlanDefault() {
+// Saves every changed QuotaKind limit for `plan` in one action, matching the
+// slide-over form's "all four kinds together" save (issue #146) — the
+// backend only writes an AdminAuditEvent for kinds that actually changed.
+export function useSetPlanDefaults(plan: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ plan, kind, limit }: { plan: string; kind: string; limit: number | null }) =>
-      bff.put<AdminPlanDefault>(`/admin/plan-defaults/${plan}/${kind}`, { limit }),
+    mutationFn: (limits: Record<string, number | null>) =>
+      bff.put<{ defaults: AdminPlanDefault[] }>(`/admin/plan-defaults/${plan}`, { limits }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["admin-plan-defaults"] });
       void queryClient.invalidateQueries({ queryKey: ["admin-users"] });

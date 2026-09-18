@@ -53,15 +53,6 @@ function usersListResponse(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function planDefaultsResponse() {
-  return {
-    defaults: [
-      { plan: "FREE", quotaKind: "ANALYSES_DAILY", limit: 15 },
-      { plan: "STANDARD", quotaKind: "ANALYSES_DAILY", limit: 50 },
-    ],
-  };
-}
-
 function quotasResponse(overrides: Record<string, unknown> = {}) {
   return {
     userId: "user-1",
@@ -82,10 +73,7 @@ function quotasResponse(overrides: Record<string, unknown> = {}) {
 }
 
 function mockCommon() {
-  server.use(
-    http.get("/api/admin/stats", () => HttpResponse.json(statsResponse())),
-    http.get("/api/admin/plan-defaults", () => HttpResponse.json(planDefaultsResponse())),
-  );
+  server.use(http.get("/api/admin/stats", () => HttpResponse.json(statsResponse())));
 }
 
 describe("AdminUsersPage", () => {
@@ -97,7 +85,7 @@ describe("AdminUsersPage", () => {
     __setUrl("/admin/users");
   });
 
-  it("renders global stats, the plan-defaults editor, and the users table", async () => {
+  it("renders global stats and the users table", async () => {
     mockCommon();
     server.use(http.get("/api/admin/users", () => HttpResponse.json(usersListResponse())));
 
@@ -105,7 +93,6 @@ describe("AdminUsersPage", () => {
 
     expect(await screen.findByText("Ada Lovelace")).toBeInTheDocument();
     expect(screen.getByText("3")).toBeInTheDocument(); // totalUsers
-    expect(screen.getByLabelText("FREE / ANALYSES_DAILY")).toHaveValue("15");
   });
 
   it("sends the search term and filters as server-side query params", async () => {
@@ -387,26 +374,5 @@ describe("AdminUsersPage", () => {
 
     const panel = (await screen.findByText("User admin-1")).closest('[role="dialog"]') as HTMLElement;
     expect(within(panel).getByRole("button", { name: "Revoke admin" })).toBeDisabled();
-  });
-
-  it("saves an edited plan-default limit", async () => {
-    mockCommon();
-    let capturedBody: unknown;
-    server.use(
-      http.get("/api/admin/users", () => HttpResponse.json(usersListResponse())),
-      http.put("/api/admin/plan-defaults/FREE/ANALYSES_DAILY", async ({ request }) => {
-        capturedBody = await request.json();
-        return HttpResponse.json({ plan: "FREE", quotaKind: "ANALYSES_DAILY", limit: 25 });
-      }),
-    );
-
-    renderWithProviders(<AdminUsersPage />);
-
-    const input = await screen.findByLabelText("FREE / ANALYSES_DAILY");
-    await userEvent.clear(input);
-    await userEvent.type(input, "25");
-    await userEvent.click(screen.getByRole("button", { name: "Save FREE / ANALYSES_DAILY" }));
-
-    expect(capturedBody).toEqual({ limit: 25 });
   });
 });

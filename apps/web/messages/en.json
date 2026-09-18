@@ -219,9 +219,24 @@
       "auditNullValue": "none",
       "auditByAt": "by {actor} on {date}"
     },
+    "quotas": {
+      "title": "Plan defaults",
+      "description": "Compare and edit the free/standard/premium quota ceilings, side by side.",
+      "loading": "Loading…",
+      "loadError": "Couldn't load Plan defaults.",
+      "kindColumn": "Quota",
+      "modifyAction": "Modify",
+      "unlimitedLabel": "Unlimited",
+      "unlimitedPlaceholder": "unlimited",
+      "editTitle": "Edit {plan}",
+      "saveAction": "Save",
+      "cancelAction": "Cancel",
+      "saveError": "Couldn't save these limits."
+    },
     "users": {
       "title": "Reporting",
-      "description": "Every User's Plan and usage, global aggregate stats, and Plan-defaults editing.",
+      "description": "Every User's Plan and usage, and global aggregate stats.",
+      "planDefaultsLink": "Plan defaults",
       "stats": {
         "title": "Global stats",
         "loading": "Loading…",
@@ -232,13 +247,6 @@
         "analysesRequestedThisMonth": "Analyses this month",
         "documentsCreatedToday": "Documents today",
         "activeScoutsTotal": "Active Scouts"
-      },
-      "planDefaults": {
-        "title": "Plan defaults",
-        "loading": "Loading…",
-        "loadError": "Couldn't load Plan defaults.",
-        "unlimitedPlaceholder": "unlimited",
-        "save": "Save {label}"
       },
       "table": {
         "title": "Users",

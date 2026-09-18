@@ -529,48 +529,60 @@ async def get_plan_defaults(
     )
 
 
-class SetPlanQuotaDefaultRequest(BaseModel):
-    limit: int | None = None
+class SetPlanQuotaDefaultsRequest(BaseModel):
+    limits: dict[Quotakind, int | None]
 
 
-@router.put("/plan-defaults/{plan}/{kind}", response_model=PlanQuotaDefaultItem)
-async def set_plan_default(
+@router.put("/plan-defaults/{plan}", response_model=PlanQuotaDefaultsResponse)
+async def set_plan_defaults(
     plan: Plan,
-    kind: Quotakind,
-    req: SetPlanQuotaDefaultRequest,
+    req: SetPlanQuotaDefaultsRequest,
     admin_id: str = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
-) -> PlanQuotaDefaultItem:
-    """Edits `plan`'s default ceiling for `kind` (issue #140). Reaches every
-    User on `plan` with no `QuotaOverride` for `kind` on their very next
-    `effective_quota` read — no backfill needed, since that resolution always
-    reads this row live (docs/adr/0013). A no-op request (the same limit
-    already set) writes no `AdminAuditEvent`, matching `set_user_plan`'s
-    idempotency.
+) -> PlanQuotaDefaultsResponse:
+    """Edits every QuotaKind ceiling for `plan` together, in one action
+    (issue #146) — replaces the old per-kind endpoint so the Plan defaults
+    page's slide-over form can save all four limits at once. Reaches every
+    User on `plan` with no `QuotaOverride` for a changed kind on their very
+    next `effective_quota` read — no backfill needed, since that resolution
+    always reads this row live (docs/adr/0013). Only kinds whose limit
+    actually changes write an `AdminAuditEvent`, matching `set_user_plan`'s
+    per-field idempotency; `plan` (e.g. `ADMINISTRATEUR`, which has no rows
+    since #144's migration removed them) 404s.
     """
-    row = await session.scalar(
-        select(PlanQuotaDefault).where(
-            PlanQuotaDefault.plan == plan, PlanQuotaDefault.quotaKind == kind
-        )
-    )
-    if row is None:
+    rows = (
+        await session.scalars(select(PlanQuotaDefault).where(PlanQuotaDefault.plan == plan))
+    ).all()
+    if not rows:
         raise HTTPException(status_code=404, detail="PlanQuotaDefault not found")
 
-    if row.limit != req.limit:
-        old_value = "null" if row.limit is None else str(row.limit)
-        row.limit = req.limit
-        row.updatedAt = _now()
-        record_admin_audit_event(
-            session,
-            actor_user_id=admin_id,
-            target_user_id=None,
-            field=f"planQuotaDefault:{plan.value}:{kind.value}",
-            old_value=old_value,
-            new_value="null" if req.limit is None else str(req.limit),
-        )
+    changed = False
+    for row in rows:
+        if row.quotaKind not in req.limits:
+            continue
+        new_limit = req.limits[row.quotaKind]
+        if row.limit != new_limit:
+            old_value = "null" if row.limit is None else str(row.limit)
+            row.limit = new_limit
+            row.updatedAt = _now()
+            record_admin_audit_event(
+                session,
+                actor_user_id=admin_id,
+                target_user_id=None,
+                field=f"planQuotaDefault:{plan.value}:{row.quotaKind.value}",
+                old_value=old_value,
+                new_value="null" if new_limit is None else str(new_limit),
+            )
+            changed = True
+    if changed:
         await session.commit()
 
-    return PlanQuotaDefaultItem(plan=plan.value, quotaKind=kind.value, limit=row.limit)
+    return PlanQuotaDefaultsResponse(
+        defaults=[
+            PlanQuotaDefaultItem(plan=plan.value, quotaKind=row.quotaKind.value, limit=row.limit)
+            for row in rows
+        ]
+    )
 
 
 class AdminUserRow(BaseModel):

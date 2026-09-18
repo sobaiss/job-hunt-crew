@@ -1,18 +1,17 @@
 "use client";
 
 import { Suspense, useMemo, useState } from "react";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useTranslations } from "next-intl";
 
 import {
   useAdminAuditEvents,
-  useAdminPlanDefaults,
   useAdminStats,
   useAdminUserQuotas,
   useAdminUsers,
   useClearQuotaOverride,
-  useSetPlanDefault,
   useSetQuotaOverride,
   useSetUserAdminRole,
   useSetUserBlocked,
@@ -81,65 +80,6 @@ function StatsPanel() {
             <p className="text-xs text-muted">{label}</p>
             <p className="text-lg font-semibold">{value}</p>
           </div>
-        ))}
-      </CardContent>
-    </Card>
-  );
-}
-
-function PlanDefaultRow({ plan, kind, limit }: { plan: string; kind: string; limit: number | null }) {
-  const t = useTranslations("admin.users.planDefaults");
-  const [draft, setDraft] = useState(limit == null ? "" : String(limit));
-  const setDefault = useSetPlanDefault();
-  const label = `${plan} / ${kind}`;
-
-  return (
-    <div className="flex items-center gap-2">
-      <span className="w-56 text-sm">{label}</span>
-      <Input
-        aria-label={label}
-        className="h-8 w-24"
-        placeholder={t("unlimitedPlaceholder")}
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-      />
-      <Button
-        size="sm"
-        variant="outline"
-        disabled={setDefault.isPending}
-        onClick={() =>
-          setDefault.mutate({ plan, kind, limit: draft.trim() === "" ? null : Number(draft) })
-        }
-      >
-        {t("save", { label })}
-      </Button>
-    </div>
-  );
-}
-
-function PlanDefaultsEditor() {
-  const t = useTranslations("admin.users.planDefaults");
-  const { data, isPending, isError } = useAdminPlanDefaults();
-
-  if (isPending) return <p className="text-sm text-muted">{t("loading")}</p>;
-  if (isError || !data) {
-    return (
-      <p role="alert" className="text-sm text-destructive">
-        {t("loadError")}
-      </p>
-    );
-  }
-
-  return (
-    <Card>
-      <CardContent className="flex flex-col gap-3 py-6">
-        {data.defaults.map((row) => (
-          <PlanDefaultRow
-            key={`${row.plan}:${row.quotaKind}`}
-            plan={row.plan}
-            kind={row.quotaKind}
-            limit={row.limit}
-          />
         ))}
       </CardContent>
     </Card>
@@ -816,16 +756,14 @@ export default function AdminUsersPage() {
         <div className="flex flex-col gap-1">
           <h1 className="font-serif text-2xl font-semibold">{t("title")}</h1>
           <p className="text-sm text-muted">{t("description")}</p>
+          <Link href="/admin/quotas" className="text-sm font-medium underline">
+            {t("planDefaultsLink")}
+          </Link>
         </div>
 
         <section className="flex flex-col gap-2">
           <h2 className="text-sm font-semibold">{t("stats.title")}</h2>
           <StatsPanel />
-        </section>
-
-        <section className="flex flex-col gap-2">
-          <h2 className="text-sm font-semibold">{t("planDefaults.title")}</h2>
-          <PlanDefaultsEditor />
         </section>
 
         <section className="flex flex-col gap-2">

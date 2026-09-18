@@ -784,7 +784,7 @@ def test_set_admin_role_is_a_noop_when_unchanged_and_writes_no_audit_event(admin
     assert asyncio.run(_audit_events(target_id)) == []
 
 
-# --- GET/PUT /v1/admin/plan-defaults[/{plan}/{kind}] (issue #140) ---
+# --- GET/PUT /v1/admin/plan-defaults[/{plan}] (issue #140, bulk PUT #146) ---
 
 
 def test_get_plan_defaults_requires_admin(target_id):
@@ -808,29 +808,47 @@ def test_get_plan_defaults_returns_all_seeded_rows(admin_id):
     assert not any(d["plan"] == "ADMINISTRATEUR" for d in defaults)
 
 
-def test_set_plan_default_requires_admin(target_id):
+def test_set_plan_defaults_requires_admin(target_id):
     with TestClient(app) as client:
         response = client.put(
-            "/v1/admin/plan-defaults/STANDARD/DOCUMENTS_DAILY",
+            "/v1/admin/plan-defaults/STANDARD",
             headers={**HEADERS, "X-User-Id": target_id, "X-User-Is-Admin": "false"},
-            json={"limit": 99},
+            json={"limits": {"DOCUMENTS_DAILY": 99}},
         )
     assert response.status_code == 403
 
 
-def test_set_plan_default_updates_limit_and_records_audit_event(
+def test_set_plan_defaults_404_for_plan_with_no_rows(admin_id):
+    with TestClient(app) as client:
+        response = client.put(
+            "/v1/admin/plan-defaults/ADMINISTRATEUR",
+            headers=_admin_headers(admin_id),
+            json={"limits": {"DOCUMENTS_DAILY": 99}},
+        )
+    assert response.status_code == 404
+
+
+def test_set_plan_defaults_updates_only_changed_kinds_and_records_audit_events(
     admin_id, standard_documents_daily_cap
 ):
     standard_documents_daily_cap(20)
+    unchanged_analyses_daily = asyncio.run(_plan_default(Plan.STANDARD, Quotakind.ANALYSES_DAILY))
     with TestClient(app) as client:
         response = client.put(
-            "/v1/admin/plan-defaults/STANDARD/DOCUMENTS_DAILY",
+            "/v1/admin/plan-defaults/STANDARD",
             headers=_admin_headers(admin_id),
-            json={"limit": 99},
+            json={"limits": {"DOCUMENTS_DAILY": 99, "ANALYSES_DAILY": unchanged_analyses_daily}},
         )
     assert response.status_code == 200
-    assert response.json() == {"plan": "STANDARD", "quotaKind": "DOCUMENTS_DAILY", "limit": 99}
+    documents_default = next(
+        d for d in response.json()["defaults"] if d["quotaKind"] == "DOCUMENTS_DAILY"
+    )
+    assert documents_default == {"plan": "STANDARD", "quotaKind": "DOCUMENTS_DAILY", "limit": 99}
     assert asyncio.run(_plan_default(Plan.STANDARD, Quotakind.DOCUMENTS_DAILY)) == 99
+    assert (
+        asyncio.run(_plan_default(Plan.STANDARD, Quotakind.ANALYSES_DAILY))
+        == unchanged_analyses_daily
+    )
 
     events = asyncio.run(_audit_events_for_field("planQuotaDefault:STANDARD:DOCUMENTS_DAILY"))
     assert len(events) == 1
@@ -838,36 +856,40 @@ def test_set_plan_default_updates_limit_and_records_audit_event(
     assert events[0].targetUserId is None
     assert events[0].oldValue == "20"
     assert events[0].newValue == "99"
+    assert asyncio.run(_audit_events_for_field("planQuotaDefault:STANDARD:ANALYSES_DAILY")) == []
 
 
-def test_set_plan_default_to_null_means_unlimited(admin_id, standard_documents_daily_cap):
+def test_set_plan_defaults_to_null_means_unlimited(admin_id, standard_documents_daily_cap):
     standard_documents_daily_cap(20)
     with TestClient(app) as client:
         response = client.put(
-            "/v1/admin/plan-defaults/STANDARD/DOCUMENTS_DAILY",
+            "/v1/admin/plan-defaults/STANDARD",
             headers=_admin_headers(admin_id),
-            json={"limit": None},
+            json={"limits": {"DOCUMENTS_DAILY": None}},
         )
     assert response.status_code == 200
-    assert response.json()["limit"] is None
+    documents_default = next(
+        d for d in response.json()["defaults"] if d["quotaKind"] == "DOCUMENTS_DAILY"
+    )
+    assert documents_default["limit"] is None
     assert asyncio.run(_plan_default(Plan.STANDARD, Quotakind.DOCUMENTS_DAILY)) is None
 
 
-def test_set_plan_default_is_a_noop_when_unchanged_and_writes_no_audit_event(
+def test_set_plan_defaults_is_a_noop_when_unchanged_and_writes_no_audit_event(
     admin_id, standard_documents_daily_cap
 ):
     standard_documents_daily_cap(20)
     with TestClient(app) as client:
         response = client.put(
-            "/v1/admin/plan-defaults/STANDARD/DOCUMENTS_DAILY",
+            "/v1/admin/plan-defaults/STANDARD",
             headers=_admin_headers(admin_id),
-            json={"limit": 20},
+            json={"limits": {"DOCUMENTS_DAILY": 20}},
         )
     assert response.status_code == 200
     assert asyncio.run(_audit_events_for_field("planQuotaDefault:STANDARD:DOCUMENTS_DAILY")) == []
 
 
-def test_set_plan_default_propagates_live_to_non_overridden_user(
+def test_set_plan_defaults_propagates_live_to_non_overridden_user(
     admin_id, target_id, standard_documents_daily_cap
 ):
     standard_documents_daily_cap(20)
@@ -878,9 +900,9 @@ def test_set_plan_default_propagates_live_to_non_overridden_user(
             json={"plan": "STANDARD"},
         )
         client.put(
-            "/v1/admin/plan-defaults/STANDARD/DOCUMENTS_DAILY",
+            "/v1/admin/plan-defaults/STANDARD",
             headers=_admin_headers(admin_id),
-            json={"limit": 77},
+            json={"limits": {"DOCUMENTS_DAILY": 77}},
         )
         response = client.get(
             f"/v1/admin/users/{target_id}/quotas",

@@ -29,6 +29,9 @@ export default function AdminPage() {
       <Link href="/admin/users" className="text-sm font-medium underline">
         {t("users.title")}
       </Link>
+      <Link href="/admin/quotas" className="text-sm font-medium underline">
+        {t("quotas.title")}
+      </Link>
     </main>
   );
 }

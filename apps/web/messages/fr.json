@@ -219,9 +219,24 @@
       "auditNullValue": "aucune",
       "auditByAt": "par {actor} le {date}"
     },
+    "quotas": {
+      "title": "Valeurs par défaut des forfaits",
+      "description": "Comparez et modifiez les plafonds de quota de free/standard/premium, côte à côte.",
+      "loading": "Chargement…",
+      "loadError": "Impossible de charger les valeurs par défaut des forfaits.",
+      "kindColumn": "Quota",
+      "modifyAction": "Modifier",
+      "unlimitedLabel": "Illimité",
+      "unlimitedPlaceholder": "illimité",
+      "editTitle": "Modifier {plan}",
+      "saveAction": "Enregistrer",
+      "cancelAction": "Annuler",
+      "saveError": "Impossible d'enregistrer ces limites."
+    },
     "users": {
       "title": "Rapports",
-      "description": "Le forfait et l'usage de chaque utilisateur, les statistiques globales, et l'édition des valeurs par défaut des forfaits.",
+      "description": "Le forfait et l'usage de chaque utilisateur, et les statistiques globales.",
+      "planDefaultsLink": "Valeurs par défaut des forfaits",
       "stats": {
         "title": "Statistiques globales",
         "loading": "Chargement…",
@@ -232,13 +247,6 @@
         "analysesRequestedThisMonth": "Analyses ce mois-ci",
         "documentsCreatedToday": "Documents aujourd'hui",
         "activeScoutsTotal": "Agents actifs"
-      },
-      "planDefaults": {
-        "title": "Valeurs par défaut des forfaits",
-        "loading": "Chargement…",
-        "loadError": "Impossible de charger les valeurs par défaut des forfaits.",
-        "unlimitedPlaceholder": "illimité",
-        "save": "Enregistrer {label}"
       },
       "table": {
         "title": "Utilisateurs",
