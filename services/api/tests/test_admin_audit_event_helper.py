@@ -70,3 +70,50 @@ async def test_record_admin_audit_event_stages_row_without_committing():
             await session.execute(delete(User).where(User.id.in_([actor_id, target_id])))
             await session.commit()
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_record_admin_audit_event_stages_resource_scoped_row():
+    """Issue #159: an admin action on a candidate's own resource (an
+    Analysis, a Scout, a CVVersion) has no field/oldValue/newValue to
+    record -- only which resource was acted on -- so the helper must accept
+    an optional resourceType/resourceId pair and leave the field trio null.
+    """
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    actor_id = str(uuid.uuid4())
+    target_id = str(uuid.uuid4())
+    resource_id = str(uuid.uuid4())
+    try:
+        async with session_factory() as session:
+            session.add(User(id=actor_id, email=f"{actor_id}@example.com", updatedAt=_now()))
+            session.add(User(id=target_id, email=f"{target_id}@example.com", updatedAt=_now()))
+            await session.commit()
+
+        async with session_factory() as session:
+            record_admin_audit_event(
+                session,
+                actor_user_id=actor_id,
+                target_user_id=target_id,
+                resource_type="Scout",
+                resource_id=resource_id,
+            )
+            await session.commit()
+
+        async with session_factory() as session:
+            event = await session.scalar(
+                select(AdminAuditEvent).where(AdminAuditEvent.actorUserId == actor_id)
+            )
+            assert event is not None
+            assert event.targetUserId == target_id
+            assert event.resourceType == "Scout"
+            assert event.resourceId == resource_id
+            assert event.field is None
+            assert event.oldValue is None
+            assert event.newValue is None
+    finally:
+        async with session_factory() as session:
+            await session.execute(delete(AdminAuditEvent).where(AdminAuditEvent.actorUserId == actor_id))
+            await session.execute(delete(User).where(User.id.in_([actor_id, target_id])))
+            await session.commit()
+        await engine.dispose()

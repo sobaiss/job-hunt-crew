@@ -127,9 +127,11 @@ model AdminAuditEvent {
   id           String   @id @default(cuid())
   actorUserId  String
   targetUserId String?
-  field        String
+  field        String?
   oldValue     String?
   newValue     String?
+  resourceType String?
+  resourceId   String?
   createdAt    DateTime @default(now())
 
   actor  User  @relation("AdminAuditEventActor", fields: [actorUserId], references: [id], onDelete: Cascade)

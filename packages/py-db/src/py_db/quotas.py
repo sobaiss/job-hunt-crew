@@ -116,14 +116,19 @@ def record_admin_audit_event(
     *,
     actor_user_id: str,
     target_user_id: str | None,
-    field: str,
-    old_value: str | None,
-    new_value: str | None,
+    field: str | None = None,
+    old_value: str | None = None,
+    new_value: str | None = None,
+    resource_type: str | None = None,
+    resource_id: str | None = None,
 ) -> AdminAuditEvent:
     """Stages one AdminAuditEvent row for an Administrator's action against a
     User or a global setting (issue #138; renamed from
     record_quota_audit_event in #144 as the field vocabulary grew beyond
-    quotas — isAdmin, blockedAt, name, ...).
+    quotas — isAdmin, blockedAt, name, ...), or against a candidate's own
+    resource -- an Analysis, a Scout, a CVVersion (issue #159, docs/adr/0020).
+    Callers pass either `field`/`old_value`/`new_value` for a field edit, or
+    `resource_type`/`resource_id` for a resource action -- never both.
 
     Unlike `record_pipeline_event`, this does not commit: every admin
     mutation (#139/#140) must write its audit event in the same transaction
@@ -137,6 +142,8 @@ def record_admin_audit_event(
         field=field,
         oldValue=old_value,
         newValue=new_value,
+        resourceType=resource_type,
+        resourceId=resource_id,
     )
     session.add(event)
     return event

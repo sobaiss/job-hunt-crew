@@ -317,11 +317,13 @@ class AdminAuditEvent(Base):
 
     id: Mapped[str] = mapped_column(Text, primary_key=True)
     actorUserId: Mapped[str] = mapped_column(Text, nullable=False)
-    field: Mapped[str] = mapped_column(Text, nullable=False)
     createdAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False, server_default=text('CURRENT_TIMESTAMP'))
     targetUserId: Mapped[Optional[str]] = mapped_column(Text)
+    field: Mapped[Optional[str]] = mapped_column(Text)
     oldValue: Mapped[Optional[str]] = mapped_column(Text)
     newValue: Mapped[Optional[str]] = mapped_column(Text)
+    resourceType: Mapped[Optional[str]] = mapped_column(Text)
+    resourceId: Mapped[Optional[str]] = mapped_column(Text)
 
     User_: Mapped['User'] = relationship('User', foreign_keys=[actorUserId], back_populates='AdminAuditEvent_actorUserId')
     User1: Mapped[Optional['User']] = relationship('User', foreign_keys=[targetUserId], back_populates='AdminAuditEvent_targetUserId')
