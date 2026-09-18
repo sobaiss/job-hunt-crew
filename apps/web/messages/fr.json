@@ -209,6 +209,14 @@
       "yes": "Oui",
       "no": "Non",
       "planLabel": "Forfait",
+      "durationLabel": "Durée",
+      "durationPlaceholder": "Choisir une durée",
+      "duration": {
+        "MONTHLY": "Mensuelle",
+        "YEARLY": "Annuelle"
+      },
+      "assignPlanAction": "Attribuer",
+      "planEndDateLabel": "Se termine le {date}",
       "quotasTitle": "Quotas",
       "usage": "{used} sur {cap} ({remaining} restant)",
       "usageUnlimited": "{used} utilisé(s) — illimité",

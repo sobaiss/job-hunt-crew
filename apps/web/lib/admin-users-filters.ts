@@ -10,13 +10,15 @@ export type AdminUserPlanFilter = (typeof ADMIN_USER_PLANS)[number] | "all";
 
 export type AdminBooleanFilter = "all" | "true" | "false";
 
-export type AdminUsersSortColumn = "name" | "email" | "plan" | "isAdmin" | "blocked" | "createdAt";
+// "plan" is deliberately not a sortable column: since #155/docs/adr/0018 it's
+// Effective Plan, derived per-User from Subscription rather than a raw
+// column, so the backend can't sort on it in SQL.
+export type AdminUsersSortColumn = "name" | "email" | "isAdmin" | "blocked" | "createdAt";
 export type AdminUsersSortDirection = "asc" | "desc";
 
 const SORT_COLUMNS: readonly AdminUsersSortColumn[] = [
   "name",
   "email",
-  "plan",
   "isAdmin",
   "blocked",
   "createdAt",

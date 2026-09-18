@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 from py_db.models import (
     AdminAuditEvent,
+    Duration,
     Plan,
     PlanQuotaDefault,
     Quotakind,
@@ -69,10 +70,19 @@ async def _delete_user(user_id: str) -> None:
         await engine.dispose()
 
 
-async def _give_active_subscription(user_id: str, plan: Plan) -> None:
-    """Directly seeds an unbounded, active Subscription for `user_id` (issue
-    #153/docs/adr/0018) -- effective_quota now derives Effective Plan from
-    Subscription, not the legacy `PUT .../plan` endpoint's User.plan write.
+async def _give_active_subscription(
+    user_id: str,
+    plan: Plan,
+    *,
+    duration: Duration | None = None,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+) -> None:
+    """Directly seeds a Subscription for `user_id` (issue #153/docs/adr/0018)
+    -- effective_quota now derives Effective Plan from Subscription, not the
+    legacy `PUT .../plan` endpoint's User.plan write. Defaults to an
+    unbounded, currently-active row; `duration`/`end_date` let #155's tests
+    seed a dated one directly, without going through the endpoint under test.
     """
     engine = make_engine()
     try:
@@ -83,7 +93,9 @@ async def _give_active_subscription(user_id: str, plan: Plan) -> None:
                     id=str(uuid.uuid4()),
                     userId=user_id,
                     plan=plan,
-                    startDate=datetime.now(UTC).replace(tzinfo=None),
+                    startDate=start_date or datetime.now(UTC).replace(tzinfo=None),
+                    duration=duration,
+                    endDate=end_date,
                 )
             )
             await session.commit()
@@ -236,12 +248,17 @@ async def _audit_events_for_field(field: str) -> list[AdminAuditEvent]:
         await engine.dispose()
 
 
-async def _user_plan(user_id: str) -> Plan:
+async def _subscriptions_for(user_id: str) -> list[Subscription]:
     engine = make_engine()
     try:
         session_factory = make_session_factory(engine)
         async with session_factory() as session:
-            return await session.scalar(select(User.plan).where(User.id == user_id))
+            rows = await session.scalars(
+                select(Subscription)
+                .where(Subscription.userId == user_id)
+                .order_by(Subscription.startDate.asc())
+            )
+            return list(rows.all())
     finally:
         await engine.dispose()
 
@@ -506,7 +523,8 @@ def test_delete_quota_override_is_idempotent_when_none_exists(admin_id, target_i
     assert asyncio.run(_audit_events(target_id)) == []
 
 
-# --- PUT /v1/admin/users/{id}/plan (issue #139) ---
+# --- PUT /v1/admin/users/{id}/plan (issue #139, rewritten for Subscriptions
+# in #155/docs/adr/0018) ---
 
 
 def test_set_plan_requires_admin(admin_id, target_id):
@@ -514,7 +532,7 @@ def test_set_plan_requires_admin(admin_id, target_id):
         response = client.put(
             f"/v1/admin/users/{target_id}/plan",
             headers={**HEADERS, "X-User-Id": target_id, "X-User-Is-Admin": "false"},
-            json={"plan": "PREMIUM"},
+            json={"plan": "PREMIUM", "duration": "YEARLY"},
         )
     assert response.status_code == 403
 
@@ -524,31 +542,74 @@ def test_set_plan_404_for_unknown_user(admin_id):
         response = client.put(
             f"/v1/admin/users/{uuid.uuid4()}/plan",
             headers=_admin_headers(admin_id),
-            json={"plan": "PREMIUM"},
+            json={"plan": "PREMIUM", "duration": "YEARLY"},
         )
     assert response.status_code == 404
 
 
-def test_set_plan_reassigns_plan_and_records_audit_event(admin_id, target_id):
+def test_set_plan_requires_duration_for_standard_and_premium(admin_id, target_id):
     with TestClient(app) as client:
         response = client.put(
             f"/v1/admin/users/{target_id}/plan",
             headers=_admin_headers(admin_id),
-            json={"plan": "PREMIUM"},
+            json={"plan": "STANDARD"},
+        )
+    assert response.status_code == 400
+    assert asyncio.run(_subscriptions_for(target_id)) == []
+
+
+def test_set_plan_rejects_duration_for_free(admin_id, target_id):
+    with TestClient(app) as client:
+        response = client.put(
+            f"/v1/admin/users/{target_id}/plan",
+            headers=_admin_headers(admin_id),
+            json={"plan": "FREE", "duration": "MONTHLY"},
+        )
+    assert response.status_code == 400
+    assert asyncio.run(_subscriptions_for(target_id)) == []
+
+
+def test_set_plan_assigns_standard_with_duration_and_computed_end_date(admin_id, target_id):
+    with TestClient(app) as client:
+        response = client.put(
+            f"/v1/admin/users/{target_id}/plan",
+            headers=_admin_headers(admin_id),
+            json={"plan": "STANDARD", "duration": "MONTHLY"},
         )
     assert response.status_code == 200
-    assert response.json() == {"userId": target_id, "plan": "PREMIUM"}
-    assert asyncio.run(_user_plan(target_id)) == Plan.PREMIUM
+    body = response.json()
+    assert body["userId"] == target_id
+    assert body["plan"] == "STANDARD"
+    assert body["endDate"] is not None
+
+    subscriptions = asyncio.run(_subscriptions_for(target_id))
+    assert len(subscriptions) == 1
+    assert subscriptions[0].plan == Plan.STANDARD
+    assert subscriptions[0].duration == Duration.MONTHLY
+    assert subscriptions[0].endDate is not None
+    expected_end = subscriptions[0].startDate + timedelta(days=30)
+    assert abs((subscriptions[0].endDate - expected_end).total_seconds()) < 5
 
     events = asyncio.run(_audit_events(target_id))
     assert len(events) == 1
     assert events[0].actorUserId == admin_id
     assert events[0].field == "plan"
     assert events[0].oldValue == "FREE"
-    assert events[0].newValue == "PREMIUM"
+    assert events[0].newValue == "STANDARD:MONTHLY"
 
 
-def test_set_plan_is_a_noop_when_unchanged_and_writes_no_audit_event(admin_id, target_id):
+def test_set_plan_assigns_free_with_null_end_date_and_ends_current_subscription(
+    admin_id, target_id
+):
+    asyncio.run(
+        _give_active_subscription(
+            target_id,
+            Plan.PREMIUM,
+            duration=Duration.YEARLY,
+            end_date=datetime.now(UTC).replace(tzinfo=None) + timedelta(days=300),
+        )
+    )
+
     with TestClient(app) as client:
         response = client.put(
             f"/v1/admin/users/{target_id}/plan",
@@ -556,7 +617,68 @@ def test_set_plan_is_a_noop_when_unchanged_and_writes_no_audit_event(admin_id, t
             json={"plan": "FREE"},
         )
     assert response.status_code == 200
+    body = response.json()
+    assert body["plan"] == "FREE"
+    assert body["endDate"] is None
+
+    subscriptions = asyncio.run(_subscriptions_for(target_id))
+    assert len(subscriptions) == 2
+    old, new = subscriptions
+    assert old.plan == Plan.PREMIUM
+    assert old.endDate is not None and old.endDate <= datetime.now(UTC).replace(tzinfo=None)
+    assert new.plan == Plan.FREE
+    assert new.duration is None
+    assert new.endDate is None
+
+    events = asyncio.run(_audit_events(target_id))
+    assert len(events) == 1
+    assert events[0].oldValue == "PREMIUM:YEARLY"
+    assert events[0].newValue == "FREE"
+
+
+def test_set_plan_is_a_noop_when_plan_and_duration_unchanged_and_writes_no_audit_event(
+    admin_id, target_id
+):
+    asyncio.run(_give_active_subscription(target_id, Plan.STANDARD, duration=Duration.MONTHLY))
+
+    with TestClient(app) as client:
+        response = client.put(
+            f"/v1/admin/users/{target_id}/plan",
+            headers=_admin_headers(admin_id),
+            json={"plan": "STANDARD", "duration": "MONTHLY"},
+        )
+    assert response.status_code == 200
     assert asyncio.run(_audit_events(target_id)) == []
+    assert len(asyncio.run(_subscriptions_for(target_id))) == 1
+
+
+def test_set_plan_renews_by_creating_a_new_subscription_once_the_current_one_has_lapsed(
+    admin_id, target_id
+):
+    now = datetime.now(UTC).replace(tzinfo=None)
+    asyncio.run(
+        _give_active_subscription(
+            target_id,
+            Plan.STANDARD,
+            duration=Duration.MONTHLY,
+            start_date=now - timedelta(days=40),
+            end_date=now - timedelta(days=10),
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.put(
+            f"/v1/admin/users/{target_id}/plan",
+            headers=_admin_headers(admin_id),
+            json={"plan": "STANDARD", "duration": "MONTHLY"},
+        )
+    assert response.status_code == 200
+    assert len(asyncio.run(_subscriptions_for(target_id))) == 2
+
+    events = asyncio.run(_audit_events(target_id))
+    assert len(events) == 1
+    assert events[0].oldValue == "FREE"
+    assert events[0].newValue == "STANDARD:MONTHLY"
 
 
 # --- PUT /v1/admin/users/{id}/blocked (issue #148) ---
@@ -1005,7 +1127,11 @@ def test_list_users_searches_by_name_or_email(admin_id):
 
 
 def test_list_users_filters_by_plan_is_admin_and_blocked(admin_id):
-    premium_id = asyncio.run(_create_user(plan=Plan.PREMIUM))
+    # Plan filter now reads Effective Plan (Subscription-derived,
+    # docs/adr/0018), not the legacy User.plan column -- so the fixture
+    # user's PREMIUM standing comes from a seeded Subscription, not `plan=`.
+    premium_id = asyncio.run(_create_user())
+    asyncio.run(_give_active_subscription(premium_id, Plan.PREMIUM))
     blocked_id = asyncio.run(_create_user(blocked=True))
     try:
         with TestClient(app) as client:
@@ -1187,7 +1313,7 @@ def test_get_audit_events_resolves_actor_and_returns_newest_first(admin_id, targ
         client.put(
             f"/v1/admin/users/{target_id}/plan",
             headers=_admin_headers(admin_id),
-            json={"plan": "STANDARD"},
+            json={"plan": "STANDARD", "duration": "MONTHLY"},
         )
         client.put(
             f"/v1/admin/users/{target_id}/blocked",
@@ -1218,12 +1344,12 @@ def test_get_audit_events_only_includes_events_for_target_user(admin_id, target_
             client.put(
                 f"/v1/admin/users/{target_id}/plan",
                 headers=_admin_headers(admin_id),
-                json={"plan": "STANDARD"},
+                json={"plan": "STANDARD", "duration": "MONTHLY"},
             )
             client.put(
                 f"/v1/admin/users/{other_id}/plan",
                 headers=_admin_headers(admin_id),
-                json={"plan": "STANDARD"},
+                json={"plan": "STANDARD", "duration": "MONTHLY"},
             )
             response = client.get(
                 f"/v1/admin/users/{target_id}/audit-events",

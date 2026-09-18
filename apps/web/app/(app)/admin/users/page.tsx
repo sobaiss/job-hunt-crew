@@ -47,7 +47,11 @@ const KIND_ORDER = [
   "DOCUMENTS_DAILY",
 ] as const;
 
-const PLAN_VALUES = ["FREE", "STANDARD", "PREMIUM", "ADMINISTRATEUR"] as const;
+// The only three Plans a Subscription can be assigned (issue #155,
+// docs/adr/0018) — ADMINISTRATEUR is a vestigial `Plan` value nothing can
+// subscribe to.
+const ASSIGNABLE_PLAN_VALUES = ["FREE", "STANDARD", "PREMIUM"] as const;
+const DURATION_VALUES = ["MONTHLY", "YEARLY"] as const;
 
 function OverrideEditor({
   userId,
@@ -294,6 +298,89 @@ function AdminRoleAction({
   );
 }
 
+/**
+ * Assigns/renews a User's Subscription (issue #155, docs/adr/0018) — a
+ * duration is required once Standard/Premium is picked (hidden/disabled for
+ * Free, whose Subscription is always unbounded), and both are only sent to
+ * the server together via the explicit action button, not on every keystroke
+ * the way the old single-select Plan reassignment worked.
+ */
+function PlanEditor({
+  userId,
+  plan,
+  planEndDate,
+}: {
+  userId: string;
+  plan: string;
+  planEndDate: string | null;
+}) {
+  const t = useTranslations("admin.userPanel");
+  const [planDraft, setPlanDraft] = useState(plan);
+  const [durationDraft, setDurationDraft] = useState<string>("");
+  const setPlan = useSetUserPlan(userId);
+  const needsDuration = planDraft === "STANDARD" || planDraft === "PREMIUM";
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2">
+        <select
+          className={SELECT_CLASS}
+          aria-label={t("planLabel")}
+          value={planDraft}
+          disabled={setPlan.isPending}
+          onChange={(event) => {
+            setPlanDraft(event.target.value);
+            setDurationDraft("");
+          }}
+        >
+          {ASSIGNABLE_PLAN_VALUES.map((value) => (
+            <option key={value} value={value}>
+              {value}
+            </option>
+          ))}
+        </select>
+
+        {needsDuration && (
+          <select
+            className={SELECT_CLASS}
+            aria-label={t("durationLabel")}
+            value={durationDraft}
+            disabled={setPlan.isPending}
+            onChange={(event) => setDurationDraft(event.target.value)}
+          >
+            <option value="">{t("durationPlaceholder")}</option>
+            {DURATION_VALUES.map((value) => (
+              <option key={value} value={value}>
+                {t(`duration.${value}`)}
+              </option>
+            ))}
+          </select>
+        )}
+
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={setPlan.isPending || (needsDuration && durationDraft === "")}
+          onClick={() =>
+            setPlan.mutate({
+              plan: planDraft,
+              duration: needsDuration ? durationDraft : null,
+            })
+          }
+        >
+          {t("assignPlanAction")}
+        </Button>
+      </div>
+      {planEndDate && (
+        <p className="text-xs text-muted">
+          {t("planEndDateLabel", { date: new Date(planEndDate).toLocaleDateString() })}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function AuditHistory({ userId }: { userId: string }) {
   const t = useTranslations("admin.userPanel");
   const { data, isPending, isError } = useAdminAuditEvents(userId);
@@ -353,7 +440,6 @@ function UserPanel({
   const t = useTranslations("admin.userPanel");
   const quotaKindLabel = useEnumLabel("quotaKind");
   const { data, isPending, isError } = useAdminUserQuotas(userId ?? "");
-  const setPlan = useSetUserPlan(userId ?? "");
 
   return (
     <Sheet open={userId !== null} onOpenChange={(open) => !open && onClose()}>
@@ -411,21 +497,9 @@ function UserPanel({
                       />
                     </section>
 
-                    <section className="flex items-center gap-2">
+                    <section className="flex flex-col gap-2">
                       <span className="text-sm text-muted">{t("planLabel")}</span>
-                      <select
-                        className={SELECT_CLASS}
-                        aria-label={t("planLabel")}
-                        value={data.plan}
-                        disabled={setPlan.isPending}
-                        onChange={(event) => setPlan.mutate(event.target.value)}
-                      >
-                        {PLAN_VALUES.map((plan) => (
-                          <option key={plan} value={plan}>
-                            {plan}
-                          </option>
-                        ))}
-                      </select>
+                      <PlanEditor userId={userId} plan={data.plan} planEndDate={data.planEndDate} />
                     </section>
 
                     <section className="flex flex-col gap-2">
@@ -608,7 +682,7 @@ function UsersTable() {
               <TableRow>
                 <SortableHead column="name" label={t("columns.name")} sort={state.sort} onSort={toggleSort} />
                 <SortableHead column="email" label={t("columns.email")} sort={state.sort} onSort={toggleSort} />
-                <SortableHead column="plan" label={t("columns.plan")} sort={state.sort} onSort={toggleSort} />
+                <TableHead>{t("columns.plan")}</TableHead>
                 <SortableHead column="isAdmin" label={t("columns.isAdmin")} sort={state.sort} onSort={toggleSort} />
                 <SortableHead column="blocked" label={t("columns.blocked")} sort={state.sort} onSort={toggleSort} />
                 <SortableHead

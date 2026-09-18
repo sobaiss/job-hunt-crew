@@ -31,6 +31,7 @@ export type AdminUserQuotas = {
   name: string | null;
   email: string | null;
   plan: string;
+  planEndDate: string | null;
   isAdmin: boolean;
   blocked: boolean;
   createdAt: string;
@@ -69,11 +70,17 @@ export function useClearQuotaOverride(userId: string) {
   });
 }
 
+// Assigns or renews `userId`'s Subscription (issue #155, docs/adr/0018):
+// `duration` is required for standard/premium and omitted for free — the
+// server computes `endDate` from it, never accepted here.
 export function useSetUserPlan(userId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (plan: string) =>
-      bff.put<{ userId: string; plan: string }>(`/admin/users/${userId}/plan`, { plan }),
+    mutationFn: ({ plan, duration }: { plan: string; duration?: string | null }) =>
+      bff.put<{ userId: string; plan: string; endDate: string | null }>(
+        `/admin/users/${userId}/plan`,
+        { plan, duration: duration ?? null },
+      ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["admin-user-quotas", userId] });
       void queryClient.invalidateQueries({ queryKey: ["admin-users"] });

@@ -3,7 +3,16 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from py_db.models import AdminAuditEvent, Plan, PlanQuotaDefault, Quotakind, QuotaOverride, User
+from py_db.models import (
+    AdminAuditEvent,
+    Duration,
+    Plan,
+    PlanQuotaDefault,
+    Quotakind,
+    QuotaOverride,
+    Subscription,
+    User,
+)
 from py_db.quota import (
     analyses_requested_this_month,
     analyses_requested_today,
@@ -14,6 +23,7 @@ from py_db.quota import (
 )
 from py_db.quotas import (
     active_scout_count,
+    effective_plan,
     effective_quota,
     record_admin_audit_event,
     total_active_scout_count,
@@ -96,10 +106,29 @@ class UserQuotasResponse(BaseModel):
     name: str | None
     email: str | None
     plan: str
+    planEndDate: datetime | None
     isAdmin: bool
     blocked: bool
     createdAt: datetime
     quotas: dict[str, QuotaUsage]
+
+
+async def _current_subscription(session: AsyncSession, user_id: str) -> Subscription | None:
+    """The Subscription actively covering `user_id` right now, if any (issue
+    #155, docs/adr/0018) -- the same date-covering rule as `effective_plan`,
+    but returns the row itself so callers can end it or read its `endDate`.
+    """
+    now = _now()
+    return await session.scalar(
+        select(Subscription)
+        .where(
+            Subscription.userId == user_id,
+            Subscription.startDate <= now,
+            or_(Subscription.endDate.is_(None), Subscription.endDate > now),
+        )
+        .order_by(Subscription.startDate.desc(), Subscription.createdAt.desc())
+        .limit(1)
+    )
 
 
 async def _user_quota_summary(
@@ -147,11 +176,14 @@ async def get_user_quotas(
     """
     target = await _get_target_user(session, user_id)
     quotas, _ = await _user_quota_summary(session, user_id)
+    plan = await effective_plan(session, user_id)
+    current = await _current_subscription(session, user_id)
     return UserQuotasResponse(
         userId=target.id,
         name=target.name,
         email=target.email,
-        plan=target.plan.value,
+        plan=plan.value,
+        planEndDate=current.endDate if current else None,
         isAdmin=target.isAdmin,
         blocked=target.blockedAt is not None,
         createdAt=target.createdAt,
@@ -257,11 +289,21 @@ async def delete_quota_override(
 
 class SetPlanRequest(BaseModel):
     plan: Plan
+    duration: Duration | None = None
 
 
 class SetPlanResponse(BaseModel):
     userId: str
     plan: str
+    endDate: datetime | None = None
+
+
+def _duration_days(duration: Duration) -> int:
+    return 30 if duration == Duration.MONTHLY else 365
+
+
+def _subscription_label(plan: Plan, duration: Duration | None) -> str:
+    return plan.value if duration is None else f"{plan.value}:{duration.value}"
 
 
 @router.put("/users/{user_id}/plan", response_model=SetPlanResponse)
@@ -271,27 +313,63 @@ async def set_user_plan(
     admin_id: str = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> SetPlanResponse:
-    """Reassigns `user_id`'s Plan (issue #139). A no-op request (the same
-    Plan the User already has) writes no `AdminAuditEvent` — only an actual
-    change is audited, matching `delete_quota_override`'s idempotency.
+    """Assigns or renews `user_id`'s Subscription (issue #155, docs/adr/0018)
+    — creates a new Subscription for `req.plan`, ending whichever one they
+    currently hold so a User is never on two Plans at once. `duration` is
+    required for STANDARD/PREMIUM (the server computes `endDate` from it,
+    never accepted from the client) and rejected for FREE, whose
+    Subscription is always unbounded. There is no separate renew endpoint —
+    calling this again with the same or a different plan/duration is how a
+    Subscription gets renewed. Re-assigning the exact same still-active
+    plan/duration is a no-op that writes no `AdminAuditEvent`, matching
+    `delete_quota_override`'s idempotency.
     """
-    target = await _get_target_user(session, user_id)
+    await _get_target_user(session, user_id)
 
-    if req.plan != target.plan:
-        old_plan = target.plan.value
-        target.plan = req.plan
-        target.updatedAt = _now()
-        record_admin_audit_event(
-            session,
-            actor_user_id=admin_id,
-            target_user_id=user_id,
-            field="plan",
-            old_value=old_plan,
-            new_value=req.plan.value,
+    if req.plan in (Plan.STANDARD, Plan.PREMIUM):
+        if req.duration is None:
+            raise HTTPException(
+                status_code=400, detail="duration is required for the Standard/Premium plans"
+            )
+    elif req.duration is not None:
+        raise HTTPException(
+            status_code=400, detail="duration is only accepted for the Standard/Premium plans"
         )
-        await session.commit()
 
-    return SetPlanResponse(userId=target.id, plan=target.plan.value)
+    current = await _current_subscription(session, user_id)
+
+    if current is not None and current.plan == req.plan and current.duration == req.duration:
+        return SetPlanResponse(userId=user_id, plan=current.plan.value, endDate=current.endDate)
+
+    now = _now()
+    old_value = _subscription_label(current.plan, current.duration) if current else "FREE"
+
+    if current is not None:
+        current.endDate = now
+
+    new_subscription = Subscription(
+        id=str(uuid.uuid4()),
+        userId=user_id,
+        plan=req.plan,
+        startDate=now,
+        duration=req.duration,
+        endDate=now + timedelta(days=_duration_days(req.duration)) if req.duration else None,
+    )
+    session.add(new_subscription)
+
+    record_admin_audit_event(
+        session,
+        actor_user_id=admin_id,
+        target_user_id=user_id,
+        field="plan",
+        old_value=old_value,
+        new_value=_subscription_label(req.plan, req.duration),
+    )
+    await session.commit()
+
+    return SetPlanResponse(
+        userId=user_id, plan=new_subscription.plan.value, endDate=new_subscription.endDate
+    )
 
 
 class SetUserBlockedRequest(BaseModel):
@@ -607,19 +685,18 @@ class AdminUsersListResponse(BaseModel):
 _SORTABLE_COLUMNS = {
     "name": User.name,
     "email": User.email,
-    "plan": User.plan,
     "isAdmin": User.isAdmin,
     "blocked": User.blockedAt,
     "createdAt": User.createdAt,
 }
 
 
-def _row_of(user: User, at_or_over_limit: bool) -> AdminUserRow:
+def _row_of(user: User, plan: Plan, at_or_over_limit: bool) -> AdminUserRow:
     return AdminUserRow(
         id=user.id,
         name=user.name,
         email=user.email,
-        plan=user.plan.value,
+        plan=plan.value,
         isAdmin=user.isAdmin,
         blocked=user.blockedAt is not None,
         atOrOverLimit=at_or_over_limit,
@@ -648,19 +725,19 @@ async def list_users(
     all applied server-side since the table is no longer expected to fit
     unpaginated in one response.
 
+    `plan` now filters on Effective Plan (issue #155, docs/adr/0018,
+    Subscription-derived) rather than the legacy `User.plan` column, and
     `atOrOverLimit` needs every candidate's Effective quota computed
-    (`_user_quota_summary`), which SQL can't do — so when that filter is
-    active, every other filter is applied in SQL first, then the
-    already-narrowed candidate set is paginated in Python after computing
-    quotas for it. When `atOrOverLimit` isn't requested, pagination stays in
-    SQL and quotas are only computed for the one page of rows returned.
+    (`_user_quota_summary`) — neither is a SQL-filterable column, so when
+    either is active every other filter is applied in SQL first, then the
+    already-narrowed candidate set is filtered and paginated in Python.
+    When neither filter is requested, pagination stays in SQL and Effective
+    Plan/quotas are only computed for the one page of rows returned.
     """
     stmt = select(User)
     if search:
         pattern = f"%{search}%"
         stmt = stmt.where(or_(User.name.ilike(pattern), User.email.ilike(pattern)))
-    if plan is not None:
-        stmt = stmt.where(User.plan == plan)
     if is_admin is not None:
         stmt = stmt.where(User.isAdmin == is_admin)
     if blocked is not None:
@@ -669,24 +746,29 @@ async def list_users(
     sort_column = _SORTABLE_COLUMNS.get(sort_by, User.createdAt)
     stmt = stmt.order_by(sort_column.asc() if sort_dir == "asc" else sort_column.desc())
 
-    if at_or_over_limit:
+    if at_or_over_limit or plan is not None:
         candidates = (await session.scalars(stmt)).all()
-        matching: list[User] = []
+        matching: list[AdminUserRow] = []
         for user in candidates:
+            user_plan = await effective_plan(session, user.id)
+            if plan is not None and user_plan != plan:
+                continue
             _, over = await _user_quota_summary(session, user.id)
-            if over:
-                matching.append(user)
+            if at_or_over_limit and not over:
+                continue
+            matching.append(_row_of(user, user_plan, over))
         total = len(matching)
         start = (page - 1) * page_size
-        rows = [_row_of(user, True) for user in matching[start : start + page_size]]
+        rows = matching[start : start + page_size]
     else:
         total = await session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
         page_stmt = stmt.offset((page - 1) * page_size).limit(page_size)
         candidates = (await session.scalars(page_stmt)).all()
         rows = []
         for user in candidates:
+            user_plan = await effective_plan(session, user.id)
             _, over = await _user_quota_summary(session, user.id)
-            rows.append(_row_of(user, over))
+            rows.append(_row_of(user, user_plan, over))
 
     return AdminUsersListResponse(users=rows, total=total, page=page, pageSize=page_size)
 

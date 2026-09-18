@@ -59,6 +59,7 @@ function quotasResponse(overrides: Record<string, unknown> = {}) {
     name: "Ada Lovelace",
     email: "user1@example.com",
     plan: "FREE",
+    planEndDate: null,
     isAdmin: false,
     blocked: false,
     createdAt: "2026-01-01T00:00:00.000Z",
@@ -195,7 +196,7 @@ describe("AdminUsersPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("reassigns the User's Plan from the panel", async () => {
+  it("reassigns the User's Plan to Free from the panel with no duration", async () => {
     mockCommon();
     let capturedBody: unknown;
     server.use(
@@ -203,17 +204,46 @@ describe("AdminUsersPage", () => {
       http.get("/api/admin/users/user-1/quotas", () => HttpResponse.json(quotasResponse())),
       http.put("/api/admin/users/user-1/plan", async ({ request }) => {
         capturedBody = await request.json();
-        return HttpResponse.json({ userId: "user-1", plan: "PREMIUM" });
+        return HttpResponse.json({ userId: "user-1", plan: "FREE", endDate: null });
       }),
     );
 
     renderWithProviders(<AdminUsersPage />);
     await userEvent.click(await screen.findByText("Ada Lovelace"));
 
-    const select = await screen.findByRole("combobox", { name: "Plan" });
-    await userEvent.selectOptions(select, "PREMIUM");
+    await userEvent.click(await screen.findByRole("button", { name: "Assign" }));
 
-    expect(capturedBody).toEqual({ plan: "PREMIUM" });
+    expect(capturedBody).toEqual({ plan: "FREE", duration: null });
+  });
+
+  it("requires a duration before assigning Standard/Premium from the panel", async () => {
+    mockCommon();
+    let capturedBody: unknown;
+    server.use(
+      http.get("/api/admin/users", () => HttpResponse.json(usersListResponse())),
+      http.get("/api/admin/users/user-1/quotas", () => HttpResponse.json(quotasResponse())),
+      http.put("/api/admin/users/user-1/plan", async ({ request }) => {
+        capturedBody = await request.json();
+        return HttpResponse.json({ userId: "user-1", plan: "PREMIUM", endDate: "2026-02-01T00:00:00.000Z" });
+      }),
+    );
+
+    renderWithProviders(<AdminUsersPage />);
+    await userEvent.click(await screen.findByText("Ada Lovelace"));
+
+    const planSelect = await screen.findByRole("combobox", { name: "Plan" });
+    await userEvent.selectOptions(planSelect, "PREMIUM");
+
+    const assignButton = screen.getByRole("button", { name: "Assign" });
+    expect(assignButton).toBeDisabled();
+
+    const durationSelect = screen.getByRole("combobox", { name: "Duration" });
+    await userEvent.selectOptions(durationSelect, "YEARLY");
+    expect(assignButton).toBeEnabled();
+
+    await userEvent.click(assignButton);
+
+    expect(capturedBody).toEqual({ plan: "PREMIUM", duration: "YEARLY" });
   });
 
   it("sets a quota override from the panel", async () => {

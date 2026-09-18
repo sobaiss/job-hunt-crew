@@ -209,6 +209,14 @@
       "yes": "Yes",
       "no": "No",
       "planLabel": "Plan",
+      "durationLabel": "Duration",
+      "durationPlaceholder": "Select duration",
+      "duration": {
+        "MONTHLY": "Monthly",
+        "YEARLY": "Yearly"
+      },
+      "assignPlanAction": "Assign",
+      "planEndDateLabel": "Ends {date}",
       "quotasTitle": "Quotas",
       "usage": "{used} of {cap} ({remaining} remaining)",
       "usageUnlimited": "{used} used — unlimited",
