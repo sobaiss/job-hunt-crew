@@ -4,7 +4,15 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
-from py_db.models import Plan, PlanQuotaDefault, Quotakind, AdminAuditEvent, QuotaOverride, User
+from py_db.models import (
+    AdminAuditEvent,
+    Plan,
+    PlanQuotaDefault,
+    Quotakind,
+    QuotaOverride,
+    Subscription,
+    User,
+)
 from py_db.session import make_engine, make_session_factory
 from sqlalchemy import delete, select, update
 
@@ -56,6 +64,28 @@ async def _delete_user(user_id: str) -> None:
         session_factory = make_session_factory(engine)
         async with session_factory() as session:
             await session.execute(delete(User).where(User.id == user_id))
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+
+async def _give_active_subscription(user_id: str, plan: Plan) -> None:
+    """Directly seeds an unbounded, active Subscription for `user_id` (issue
+    #153/docs/adr/0018) -- effective_quota now derives Effective Plan from
+    Subscription, not the legacy `PUT .../plan` endpoint's User.plan write.
+    """
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            session.add(
+                Subscription(
+                    id=str(uuid.uuid4()),
+                    userId=user_id,
+                    plan=plan,
+                    startDate=datetime.now(UTC).replace(tzinfo=None),
+                )
+            )
             await session.commit()
     finally:
         await engine.dispose()
@@ -895,12 +925,11 @@ def test_set_plan_defaults_propagates_live_to_non_overridden_user(
     admin_id, target_id, standard_documents_daily_cap
 ):
     standard_documents_daily_cap(20)
+    # Effective Plan is now Subscription-derived (docs/adr/0018), so a
+    # Subscription -- not the legacy `PUT .../plan` endpoint's User.plan
+    # write -- is what puts target_id on STANDARD for this propagation check.
+    asyncio.run(_give_active_subscription(target_id, Plan.STANDARD))
     with TestClient(app) as client:
-        client.put(
-            f"/v1/admin/users/{target_id}/plan",
-            headers=_admin_headers(admin_id),
-            json={"plan": "STANDARD"},
-        )
         client.put(
             "/v1/admin/plan-defaults/STANDARD",
             headers=_admin_headers(admin_id),

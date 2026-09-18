@@ -51,6 +51,11 @@ class Cvstylestatus(str, enum.Enum):
     FAILED = 'FAILED'
 
 
+class Duration(str, enum.Enum):
+    MONTHLY = 'MONTHLY'
+    YEARLY = 'YEARLY'
+
+
 class Generateddocumentstatus(str, enum.Enum):
     PENDING = 'PENDING'
     GENERATING = 'GENERATING'
@@ -113,6 +118,12 @@ class Quotakind(str, enum.Enum):
     ANALYSES_DAILY = 'ANALYSES_DAILY'
     ANALYSES_MONTHLY = 'ANALYSES_MONTHLY'
     DOCUMENTS_DAILY = 'DOCUMENTS_DAILY'
+
+
+class Role(str, enum.Enum):
+    EXTERNAL = 'EXTERNAL'
+    INTERNAL = 'INTERNAL'
+    ADMINISTRATOR = 'ADMINISTRATOR'
 
 
 class Scoutrunstatus(str, enum.Enum):
@@ -227,6 +238,7 @@ class User(Base):
     updatedAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False)
     plan: Mapped[Plan] = mapped_column(Enum(Plan, values_callable=lambda cls: [member.value for member in cls], name='Plan'), nullable=False, server_default=text('\'FREE\'::"Plan"'))
     isAdmin: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text('false'))
+    role: Mapped[Role] = mapped_column(Enum(Role, values_callable=lambda cls: [member.value for member in cls], name='Role'), nullable=False, server_default=text('\'EXTERNAL\'::"Role"'))
     name: Mapped[Optional[str]] = mapped_column(Text)
     email: Mapped[Optional[str]] = mapped_column(Text)
     emailVerified: Mapped[Optional[datetime.datetime]] = mapped_column(TIMESTAMP(precision=3))
@@ -241,6 +253,7 @@ class User(Base):
     QuotaAlert: Mapped[list['QuotaAlert']] = relationship('QuotaAlert', back_populates='User_')
     QuotaOverride: Mapped[list['QuotaOverride']] = relationship('QuotaOverride', back_populates='User_')
     Session: Mapped[list['Session']] = relationship('Session', back_populates='User_')
+    Subscription: Mapped[list['Subscription']] = relationship('Subscription', back_populates='User_')
     Scout: Mapped[list['Scout']] = relationship('Scout', back_populates='User_')
     IngestionJob: Mapped[list['IngestionJob']] = relationship('IngestionJob', back_populates='User_')
     Analysis: Mapped[list['Analysis']] = relationship('Analysis', back_populates='User_')
@@ -401,6 +414,25 @@ class Session(Base):
     expires: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False)
 
     User_: Mapped['User'] = relationship('User', back_populates='Session')
+
+
+class Subscription(Base):
+    __tablename__ = 'Subscription'
+    __table_args__ = (
+        ForeignKeyConstraint(['userId'], ['User.id'], ondelete='CASCADE', onupdate='CASCADE', name='Subscription_userId_fkey'),
+        PrimaryKeyConstraint('id', name='Subscription_pkey'),
+        Index('Subscription_userId_idx', 'userId')
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    userId: Mapped[str] = mapped_column(Text, nullable=False)
+    plan: Mapped[Plan] = mapped_column(Enum(Plan, values_callable=lambda cls: [member.value for member in cls], name='Plan'), nullable=False)
+    startDate: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False)
+    createdAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False, server_default=text('CURRENT_TIMESTAMP'))
+    endDate: Mapped[Optional[datetime.datetime]] = mapped_column(TIMESTAMP(precision=3))
+    duration: Mapped[Optional[Duration]] = mapped_column(Enum(Duration, values_callable=lambda cls: [member.value for member in cls], name='Duration'))
+
+    User_: Mapped['User'] = relationship('User', back_populates='Subscription')
 
 
 class Scout(Base):

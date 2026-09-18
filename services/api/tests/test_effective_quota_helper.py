@@ -1,22 +1,42 @@
-"""The shared quota-resolution helper (`py_db.quotas.effective_quota`),
-introduced in issue #135 so every quota-consuming action reads its ceiling
+"""The shared quota-resolution helpers (`py_db.quotas.effective_plan`,
+introduced in issue #153/docs/adr/0018, and `py_db.quotas.effective_quota`,
+introduced in issue #135) so every quota-consuming action reads its ceiling
 from one place. Covers the override-vs-Plan-default precedence (docs/adr/0013)
+and the Subscription-vs-Effective-Plan derivation (docs/adr/0018)
 exhaustively here; each HTTP call site's own test only needs one thin case
 confirming it honors this function's answer.
 """
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
-from py_db.models import Plan, Quotakind, QuotaOverride, User
-from py_db.quotas import effective_quota
+from py_db.models import Duration, Plan, Quotakind, QuotaOverride, Subscription, User
+from py_db.quotas import effective_plan, effective_quota
 from py_db.session import make_engine, make_session_factory
 from sqlalchemy import delete
 
 
 def _now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
+
+
+def _subscription(
+    user_id: str,
+    plan: Plan,
+    *,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    duration: Duration | None = None,
+) -> Subscription:
+    return Subscription(
+        id=str(uuid.uuid4()),
+        userId=user_id,
+        plan=plan,
+        startDate=start_date if start_date is not None else _now(),
+        endDate=end_date,
+        duration=duration,
+    )
 
 
 @pytest.mark.asyncio
@@ -26,9 +46,8 @@ async def test_falls_back_to_plan_default_when_no_override():
     user_id = str(uuid.uuid4())
     try:
         async with session_factory() as session:
-            session.add(
-                User(id=user_id, email=f"{user_id}@example.com", plan=Plan.STANDARD, updatedAt=_now())
-            )
+            session.add(User(id=user_id, email=f"{user_id}@example.com", updatedAt=_now()))
+            session.add(_subscription(user_id, Plan.STANDARD))
             await session.commit()
 
         async with session_factory() as session:
@@ -48,9 +67,8 @@ async def test_override_takes_precedence_over_plan_default():
     user_id = str(uuid.uuid4())
     try:
         async with session_factory() as session:
-            session.add(
-                User(id=user_id, email=f"{user_id}@example.com", plan=Plan.STANDARD, updatedAt=_now())
-            )
+            session.add(User(id=user_id, email=f"{user_id}@example.com", updatedAt=_now()))
+            session.add(_subscription(user_id, Plan.STANDARD))
             session.add(
                 QuotaOverride(
                     id=str(uuid.uuid4()),
@@ -79,9 +97,8 @@ async def test_null_override_means_unlimited_even_with_a_numeric_plan_default():
     user_id = str(uuid.uuid4())
     try:
         async with session_factory() as session:
-            session.add(
-                User(id=user_id, email=f"{user_id}@example.com", plan=Plan.FREE, updatedAt=_now())
-            )
+            session.add(User(id=user_id, email=f"{user_id}@example.com", updatedAt=_now()))
+            session.add(_subscription(user_id, Plan.STANDARD))
             session.add(
                 QuotaOverride(
                     id=str(uuid.uuid4()),
@@ -94,7 +111,7 @@ async def test_null_override_means_unlimited_even_with_a_numeric_plan_default():
             await session.commit()
 
         async with session_factory() as session:
-            # FREE's seeded ACTIVE_SCOUTS default is 2, but the explicit
+            # STANDARD's seeded ACTIVE_SCOUTS default is 5, but the explicit
             # override row (limit=None) makes this User unlimited.
             assert await effective_quota(session, user_id, Quotakind.ACTIVE_SCOUTS) is None
     finally:
@@ -105,25 +122,160 @@ async def test_null_override_means_unlimited_even_with_a_numeric_plan_default():
 
 
 @pytest.mark.asyncio
-async def test_administrateur_plan_default_is_unlimited_on_every_kind():
+async def test_free_plan_default_is_unlimited_on_every_kind():
+    """docs/adr/0018: `free`'s PlanQuotaDefault became unlimited across every
+    QuotaKind in the same migration that introduced Subscription — replaces
+    the retired test that made this same assertion about the vestigial
+    `administrateur` Plan value.
+    """
     engine = make_engine()
     session_factory = make_session_factory(engine)
     user_id = str(uuid.uuid4())
     try:
         async with session_factory() as session:
-            session.add(
-                User(
-                    id=user_id,
-                    email=f"{user_id}@example.com",
-                    plan=Plan.ADMINISTRATEUR,
-                    updatedAt=_now(),
-                )
-            )
+            session.add(User(id=user_id, email=f"{user_id}@example.com", updatedAt=_now()))
+            session.add(_subscription(user_id, Plan.FREE))
             await session.commit()
 
         async with session_factory() as session:
             for kind in Quotakind:
                 assert await effective_quota(session, user_id, kind) is None
+    finally:
+        async with session_factory() as session:
+            await session.execute(delete(User).where(User.id == user_id))
+            await session.commit()
+        await engine.dispose()
+
+
+# --- effective_plan (issue #153/docs/adr/0018) ---
+
+
+@pytest.mark.asyncio
+async def test_effective_plan_is_free_with_no_subscription():
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id = str(uuid.uuid4())
+    try:
+        async with session_factory() as session:
+            session.add(User(id=user_id, email=f"{user_id}@example.com", updatedAt=_now()))
+            await session.commit()
+
+        async with session_factory() as session:
+            assert await effective_plan(session, user_id) == Plan.FREE
+    finally:
+        async with session_factory() as session:
+            await session.execute(delete(User).where(User.id == user_id))
+            await session.commit()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_effective_plan_honors_an_active_unbounded_free_subscription():
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id = str(uuid.uuid4())
+    try:
+        async with session_factory() as session:
+            session.add(User(id=user_id, email=f"{user_id}@example.com", updatedAt=_now()))
+            session.add(_subscription(user_id, Plan.FREE, start_date=_now() - timedelta(days=1)))
+            await session.commit()
+
+        async with session_factory() as session:
+            assert await effective_plan(session, user_id) == Plan.FREE
+    finally:
+        async with session_factory() as session:
+            await session.execute(delete(User).where(User.id == user_id))
+            await session.commit()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_effective_plan_honors_an_active_dated_premium_subscription():
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id = str(uuid.uuid4())
+    try:
+        async with session_factory() as session:
+            session.add(User(id=user_id, email=f"{user_id}@example.com", updatedAt=_now()))
+            session.add(
+                _subscription(
+                    user_id,
+                    Plan.PREMIUM,
+                    start_date=_now() - timedelta(days=1),
+                    end_date=_now() + timedelta(days=30),
+                    duration=Duration.MONTHLY,
+                )
+            )
+            await session.commit()
+
+        async with session_factory() as session:
+            assert await effective_plan(session, user_id) == Plan.PREMIUM
+    finally:
+        async with session_factory() as session:
+            await session.execute(delete(User).where(User.id == user_id))
+            await session.commit()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_effective_plan_falls_back_to_free_when_lapsed_with_nothing_after():
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id = str(uuid.uuid4())
+    try:
+        async with session_factory() as session:
+            session.add(User(id=user_id, email=f"{user_id}@example.com", updatedAt=_now()))
+            session.add(
+                _subscription(
+                    user_id,
+                    Plan.PREMIUM,
+                    start_date=_now() - timedelta(days=400),
+                    end_date=_now() - timedelta(days=35),
+                    duration=Duration.YEARLY,
+                )
+            )
+            await session.commit()
+
+        async with session_factory() as session:
+            assert await effective_plan(session, user_id) == Plan.FREE
+    finally:
+        async with session_factory() as session:
+            await session.execute(delete(User).where(User.id == user_id))
+            await session.commit()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_effective_plan_picks_the_later_subscription_after_a_lapse():
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id = str(uuid.uuid4())
+    try:
+        async with session_factory() as session:
+            session.add(User(id=user_id, email=f"{user_id}@example.com", updatedAt=_now()))
+            # A lapsed Standard subscription, then a later, still-active Premium one.
+            session.add(
+                _subscription(
+                    user_id,
+                    Plan.STANDARD,
+                    start_date=_now() - timedelta(days=400),
+                    end_date=_now() - timedelta(days=35),
+                    duration=Duration.YEARLY,
+                )
+            )
+            session.add(
+                _subscription(
+                    user_id,
+                    Plan.PREMIUM,
+                    start_date=_now() - timedelta(days=1),
+                    end_date=_now() + timedelta(days=30),
+                    duration=Duration.MONTHLY,
+                )
+            )
+            await session.commit()
+
+        async with session_factory() as session:
+            assert await effective_plan(session, user_id) == Plan.PREMIUM
     finally:
         async with session_factory() as session:
             await session.execute(delete(User).where(User.id == user_id))

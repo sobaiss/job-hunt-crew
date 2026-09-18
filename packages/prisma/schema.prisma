@@ -17,6 +17,22 @@ enum Plan {
   ADMINISTRATEUR // vestigial since #144/docs/adr/0015 — never assigned again; admin access is `User.isAdmin`
 }
 
+// A User's access tier (docs/adr/0017), orthogonal to Plan/Subscription.
+// Replaces `isAdmin`; every existing User is backfilled ADMINISTRATOR where
+// isAdmin was true, else EXTERNAL — nobody is backfilled INTERNAL.
+enum Role {
+  EXTERNAL
+  INTERNAL
+  ADMINISTRATOR
+}
+
+// How long a Subscription's period lasts, for `standard`/`premium` only —
+// always null for a `free` Subscription (docs/adr/0018).
+enum Duration {
+  MONTHLY
+  YEARLY
+}
+
 model User {
   id            String    @id @default(cuid())
   name          String?
@@ -28,6 +44,9 @@ model User {
   // Admin access, decoupled from Plan (docs/adr/0015) — an Administrator
   // keeps a real quota tier alongside admin rights.
   isAdmin       Boolean   @default(false)
+  // Replaces isAdmin as the source of truth for admin access (docs/adr/0017).
+  // Both fields coexist untouched until #156/#157 cut over every reader.
+  role          Role      @default(EXTERNAL)
   // Nullable timestamp doubles as a flag, same convention as emailVerified.
   // Enforced live against Postgres on every request (docs/adr/0016), never
   // trusted from a cached session claim.
@@ -46,6 +65,27 @@ model User {
   adminAuditEventsActed    AdminAuditEvent[] @relation("AdminAuditEventActor")
   adminAuditEventsTargeted AdminAuditEvent[] @relation("AdminAuditEventTarget")
   quotaAlerts    QuotaAlert[]
+  subscriptions  Subscription[]
+}
+
+// One User's claim to one Plan for a period (docs/adr/0018). Append-only:
+// assigning or renewing a Plan always inserts a new Subscription rather than
+// editing one in place, so full history survives. `endDate` null means the
+// Subscription never expires (always true for `free`). Effective Plan
+// (py_db.quotas.effective_plan) derives a User's current Plan live from
+// this table — never cached on User, never backfilled by a background job.
+model Subscription {
+  id        String    @id @default(cuid())
+  userId    String
+  plan      Plan
+  startDate DateTime
+  endDate   DateTime?
+  duration  Duration?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 enum QuotaKind {

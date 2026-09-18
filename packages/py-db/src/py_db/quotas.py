@@ -14,12 +14,14 @@ Hand-written (not sqlacodegen output), like `quota.py`.
 """
 
 import uuid
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import (
     AdminAuditEvent,
+    Plan,
     PlanQuotaDefault,
     QuotaAlert,
     Quotaalertthreshold,
@@ -27,7 +29,7 @@ from .models import (
     QuotaOverride,
     Scout,
     Scoutstatus,
-    User,
+    Subscription,
 )
 
 # Fraction of an Effective quota at which a QuotaAlert.APPROACHING fires
@@ -35,12 +37,37 @@ from .models import (
 _APPROACHING_RATIO = 0.8
 
 
+async def effective_plan(session: AsyncSession, user_id: str) -> Plan:
+    """The Plan actually in force for `user_id` right now (docs/adr/0018):
+    their most recent Subscription's `plan` if its period covers now
+    (`startDate <= now` and `endDate` is `None` or in the future), else
+    `free`. Computed live on every call — never cached on User, never
+    backfilled by a background job. A User with no Subscription at all
+    (shouldn't happen once #154 lands, but not assumed here) also gets `free`.
+    """
+    subscription = await session.scalar(
+        select(Subscription)
+        .where(Subscription.userId == user_id)
+        .order_by(Subscription.startDate.desc(), Subscription.createdAt.desc())
+        .limit(1)
+    )
+    if subscription is None:
+        return Plan.FREE
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    if subscription.startDate > now:
+        return Plan.FREE
+    if subscription.endDate is not None and subscription.endDate <= now:
+        return Plan.FREE
+    return subscription.plan
+
+
 async def effective_quota(session: AsyncSession, user_id: str, kind: Quotakind) -> int | None:
     """The ceiling actually enforced for `user_id` on `kind`: their
     `QuotaOverride.limit` if a `QuotaOverride` row exists for (user_id, kind)
     — including when that row's `limit` is itself `None` (explicitly
-    unlimited) — else the `user_id`'s Plan's `PlanQuotaDefault.limit`. `None`
-    at either level means unlimited.
+    unlimited) — else the `user_id`'s Effective Plan's
+    `PlanQuotaDefault.limit`. `None` at either level means unlimited.
     """
     override = await session.scalar(
         select(QuotaOverride).where(
@@ -50,7 +77,7 @@ async def effective_quota(session: AsyncSession, user_id: str, kind: Quotakind) 
     if override is not None:
         return override.limit
 
-    plan = await session.scalar(select(User.plan).where(User.id == user_id))
+    plan = await effective_plan(session, user_id)
     default = await session.scalar(
         select(PlanQuotaDefault).where(
             PlanQuotaDefault.plan == plan, PlanQuotaDefault.quotaKind == kind
