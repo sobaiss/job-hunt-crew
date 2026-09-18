@@ -85,14 +85,13 @@ describe("AdminUsersPage", () => {
     __setUrl("/admin/users");
   });
 
-  it("renders global stats and the users table", async () => {
+  it("renders the users table", async () => {
     mockCommon();
     server.use(http.get("/api/admin/users", () => HttpResponse.json(usersListResponse())));
 
     renderWithProviders(<AdminUsersPage />);
 
     expect(await screen.findByText("Ada Lovelace")).toBeInTheDocument();
-    expect(screen.getByText("3")).toBeInTheDocument(); // totalUsers
   });
 
   it("sends the search term and filters as server-side query params", async () => {

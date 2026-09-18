@@ -173,6 +173,27 @@
     "loading": "Chargement…",
     "signedInAs": "Connecté en tant que {userId} ({plan})",
     "error": "Impossible de confirmer l'accès administrateur.",
+    "dashboard": {
+      "loading": "Chargement…",
+      "loadError": "Impossible de charger les statistiques globales.",
+      "periodLabel": "Période",
+      "period": {
+        "7d": "7 derniers jours",
+        "30d": "30 derniers jours",
+        "90d": "90 derniers jours",
+        "all": "Depuis toujours"
+      },
+      "totalUsers": "Total utilisateurs",
+      "usersOverLimitCount": "Utilisateurs à/au-dessus d'une limite",
+      "analysesRequestedToday": "Analyses aujourd'hui",
+      "analysesRequestedThisMonth": "Analyses ce mois-ci",
+      "documentsCreatedToday": "Documents aujourd'hui",
+      "activeScoutsTotal": "Agents actifs",
+      "blockedUsersCount": "Utilisateurs bloqués",
+      "newSignupsTitle": "Nouvelles inscriptions",
+      "newSignupsEmpty": "Aucune inscription sur cette période.",
+      "usersByPlanTitle": "Utilisateurs par forfait"
+    },
     "userPanel": {
       "title": "Utilisateur {userId}",
       "loading": "Chargement…",
@@ -237,17 +258,6 @@
       "title": "Rapports",
       "description": "Le forfait et l'usage de chaque utilisateur, et les statistiques globales.",
       "planDefaultsLink": "Valeurs par défaut des forfaits",
-      "stats": {
-        "title": "Statistiques globales",
-        "loading": "Chargement…",
-        "loadError": "Impossible de charger les statistiques globales.",
-        "totalUsers": "Total utilisateurs",
-        "usersOverLimitCount": "Utilisateurs à/au-dessus d'une limite",
-        "analysesRequestedToday": "Analyses aujourd'hui",
-        "analysesRequestedThisMonth": "Analyses ce mois-ci",
-        "documentsCreatedToday": "Documents aujourd'hui",
-        "activeScoutsTotal": "Agents actifs"
-      },
       "table": {
         "title": "Utilisateurs",
         "loading": "Chargement…",

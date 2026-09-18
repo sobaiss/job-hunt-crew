@@ -173,6 +173,27 @@
     "loading": "Loading…",
     "signedInAs": "Signed in as {userId} ({plan})",
     "error": "Couldn't confirm admin access.",
+    "dashboard": {
+      "loading": "Loading…",
+      "loadError": "Couldn't load global stats.",
+      "periodLabel": "Period",
+      "period": {
+        "7d": "Last 7 days",
+        "30d": "Last 30 days",
+        "90d": "Last 90 days",
+        "all": "All time"
+      },
+      "totalUsers": "Total users",
+      "usersOverLimitCount": "Users at/over a limit",
+      "analysesRequestedToday": "Analyses today",
+      "analysesRequestedThisMonth": "Analyses this month",
+      "documentsCreatedToday": "Documents today",
+      "activeScoutsTotal": "Active Scouts",
+      "blockedUsersCount": "Blocked users",
+      "newSignupsTitle": "New signups",
+      "newSignupsEmpty": "No signups in this period.",
+      "usersByPlanTitle": "Users by Plan"
+    },
     "userPanel": {
       "title": "User {userId}",
       "loading": "Loading…",
@@ -237,17 +258,6 @@
       "title": "Reporting",
       "description": "Every User's Plan and usage, and global aggregate stats.",
       "planDefaultsLink": "Plan defaults",
-      "stats": {
-        "title": "Global stats",
-        "loading": "Loading…",
-        "loadError": "Couldn't load global stats.",
-        "totalUsers": "Total users",
-        "usersOverLimitCount": "Users at/over a limit",
-        "analysesRequestedToday": "Analyses today",
-        "analysesRequestedThisMonth": "Analyses this month",
-        "documentsCreatedToday": "Documents today",
-        "activeScoutsTotal": "Active Scouts"
-      },
       "table": {
         "title": "Users",
         "loading": "Loading…",

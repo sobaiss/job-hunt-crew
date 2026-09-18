@@ -205,6 +205,10 @@ export function useAdminAuditEvents(userId: string) {
   });
 }
 
+// Backs the Admin dashboard (issue #145). `period` filters only
+// `newSignups` — every other field is a today-snapshot regardless of it.
+export type AdminStatsPeriod = "7d" | "30d" | "90d" | "all";
+
 export type AdminStats = {
   totalUsers: number;
   usersOverLimitCount: number;
@@ -212,11 +216,14 @@ export type AdminStats = {
   analysesRequestedThisMonth: number;
   documentsCreatedToday: number;
   activeScoutsTotal: number;
+  newSignups: Array<{ date: string; count: number }>;
+  usersByPlan: Record<string, number>;
+  blockedUsersCount: number;
 };
 
-export function useAdminStats() {
+export function useAdminStats(period: AdminStatsPeriod = "all") {
   return useQuery({
-    queryKey: ["admin-stats"],
-    queryFn: () => bff.get<AdminStats>("/admin/stats"),
+    queryKey: ["admin-stats", period],
+    queryFn: () => bff.get<AdminStats>(`/admin/stats?period=${period}`),
   });
 }

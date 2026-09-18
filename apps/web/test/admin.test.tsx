@@ -1,8 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { HttpResponse, http } from "msw";
+import userEvent from "@testing-library/user-event";
 import type { Session } from "next-auth";
 
-import { renderWithProviders, screen } from "./test-utils";
+import { renderWithProviders, screen, waitFor } from "./test-utils";
 import { server } from "./msw/server";
 import AdminLayout from "@/app/(app)/admin/layout";
 import AdminPage from "@/app/(app)/admin/page";
@@ -63,7 +64,29 @@ describe("Admin layout gate", () => {
   });
 });
 
+function statsResponse(overrides: Record<string, unknown> = {}) {
+  return {
+    totalUsers: 3,
+    usersOverLimitCount: 1,
+    analysesRequestedToday: 5,
+    analysesRequestedThisMonth: 40,
+    documentsCreatedToday: 2,
+    activeScoutsTotal: 4,
+    newSignups: [
+      { date: "2026-09-16", count: 1 },
+      { date: "2026-09-17", count: 2 },
+    ],
+    usersByPlan: { FREE: 2, STANDARD: 1 },
+    blockedUsersCount: 1,
+    ...overrides,
+  };
+}
+
 describe("AdminPage", () => {
+  beforeEach(() => {
+    server.use(http.get("/api/admin/stats", () => HttpResponse.json(statsResponse())));
+  });
+
   it("confirms admin access via GET /api/admin/me", async () => {
     renderWithProviders(<AdminPage />, { session: ADMIN_SESSION });
 
@@ -80,5 +103,59 @@ describe("AdminPage", () => {
     renderWithProviders(<AdminPage />, { session: ADMIN_SESSION });
 
     expect(await screen.findByText("Couldn't confirm admin access.")).toBeInTheDocument();
+  });
+
+  it("renders every dashboard figure, the new-signups series, and the Plan breakdown", async () => {
+    renderWithProviders(<AdminPage />, { session: ADMIN_SESSION });
+
+    expect(await screen.findByText("3")).toBeInTheDocument(); // totalUsers
+    expect(screen.getByText("Blocked users")).toBeInTheDocument();
+    expect(screen.getByText("New signups")).toBeInTheDocument();
+    expect(screen.getByText("Users by Plan")).toBeInTheDocument();
+    expect(screen.getByText("FREE")).toBeInTheDocument();
+    expect(screen.getByText("STANDARD")).toBeInTheDocument();
+  });
+
+  it("links to the Admin users table and the Plan defaults page", async () => {
+    renderWithProviders(<AdminPage />, { session: ADMIN_SESSION });
+
+    await screen.findByText("3");
+    expect(screen.getByRole("link", { name: "Reporting" })).toHaveAttribute("href", "/admin/users");
+    expect(screen.getByRole("link", { name: "Plan defaults" })).toHaveAttribute(
+      "href",
+      "/admin/quotas",
+    );
+  });
+
+  it("re-fetches stats with the selected period, filtering only the new-signups series server-side", async () => {
+    const requestedUrls: string[] = [];
+    server.use(
+      http.get("/api/admin/stats", ({ request }) => {
+        requestedUrls.push(request.url);
+        return HttpResponse.json(statsResponse());
+      }),
+    );
+
+    renderWithProviders(<AdminPage />, { session: ADMIN_SESSION });
+    await screen.findByText("3");
+
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByLabelText("Period"), "7d");
+
+    await waitFor(() => {
+      expect(requestedUrls.some((url) => url.includes("period=7d"))).toBe(true);
+    });
+  });
+
+  it("shows a placeholder when there are no signups in the selected period", async () => {
+    server.use(
+      http.get("/api/admin/stats", () =>
+        HttpResponse.json(statsResponse({ newSignups: [] })),
+      ),
+    );
+
+    renderWithProviders(<AdminPage />, { session: ADMIN_SESSION });
+
+    expect(await screen.findByText("No signups in this period.")).toBeInTheDocument();
   });
 });

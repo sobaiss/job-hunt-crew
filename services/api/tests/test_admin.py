@@ -1,6 +1,6 @@
 import asyncio
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -25,23 +25,25 @@ async def _create_user(
     name: str | None = None,
     email: str | None = None,
     blocked: bool = False,
+    created_at: datetime | None = None,
 ) -> str:
     user_id = str(uuid.uuid4())
     engine = make_engine()
     try:
         session_factory = make_session_factory(engine)
         async with session_factory() as session:
-            session.add(
-                User(
-                    id=user_id,
-                    name=name,
-                    email=email or f"{user_id}@example.com",
-                    plan=plan,
-                    isAdmin=is_admin,
-                    blockedAt=datetime.now(UTC).replace(tzinfo=None) if blocked else None,
-                    updatedAt=datetime.now(UTC).replace(tzinfo=None),
-                )
+            user = User(
+                id=user_id,
+                name=name,
+                email=email or f"{user_id}@example.com",
+                plan=plan,
+                isAdmin=is_admin,
+                blockedAt=datetime.now(UTC).replace(tzinfo=None) if blocked else None,
+                updatedAt=datetime.now(UTC).replace(tzinfo=None),
             )
+            if created_at is not None:
+                user.createdAt = created_at
+            session.add(user)
             await session.commit()
     finally:
         await engine.dispose()
@@ -1067,6 +1069,57 @@ def test_get_stats_returns_aggregate_counts(admin_id, target_id, analyses_daily_
         "activeScoutsTotal",
     ):
         assert isinstance(body[key], int)
+
+
+def test_get_stats_rejects_invalid_period(admin_id):
+    with TestClient(app) as client:
+        response = client.get(
+            "/v1/admin/stats", headers=_admin_headers(admin_id), params={"period": "12h"}
+        )
+    assert response.status_code == 422
+
+
+def test_get_stats_returns_signup_series_plan_distribution_and_blocked_count(admin_id):
+    blocked_id = asyncio.run(_create_user(blocked=True))
+    premium_id = asyncio.run(_create_user(plan=Plan.PREMIUM))
+    try:
+        with TestClient(app) as client:
+            response = client.get(
+                "/v1/admin/stats", headers=_admin_headers(admin_id), params={"period": "30d"}
+            )
+        assert response.status_code == 200
+        body = response.json()
+        assert isinstance(body["newSignups"], list)
+        assert all({"date", "count"} == set(point.keys()) for point in body["newSignups"])
+        assert body["usersByPlan"]["PREMIUM"] >= 1
+        assert body["blockedUsersCount"] >= 1
+    finally:
+        asyncio.run(_delete_user(blocked_id))
+        asyncio.run(_delete_user(premium_id))
+
+
+def test_get_stats_period_only_filters_new_signups(admin_id):
+    old_id = asyncio.run(
+        _create_user(
+            plan=Plan.PREMIUM,
+            blocked=True,
+            created_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(days=100),
+        )
+    )
+    try:
+        with TestClient(app) as client:
+            response = client.get(
+                "/v1/admin/stats", headers=_admin_headers(admin_id), params={"period": "7d"}
+            )
+        body = response.json()
+        signup_total = sum(point["count"] for point in body["newSignups"])
+        # The 100-day-old signup must not be counted in a 7-day window...
+        assert signup_total < body["totalUsers"]
+        # ...but the snapshot figures (unaffected by `period`) still see it.
+        assert body["usersByPlan"]["PREMIUM"] >= 1
+        assert body["blockedUsersCount"] >= 1
+    finally:
+        asyncio.run(_delete_user(old_id))
 
 
 # --- GET /v1/admin/users/{id}/audit-events (issue #150) ---

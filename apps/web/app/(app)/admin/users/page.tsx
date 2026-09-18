@@ -8,7 +8,6 @@ import { useTranslations } from "next-intl";
 
 import {
   useAdminAuditEvents,
-  useAdminStats,
   useAdminUserQuotas,
   useAdminUsers,
   useClearQuotaOverride,
@@ -30,7 +29,6 @@ import {
   type AdminUsersTableState,
 } from "@/lib/admin-users-filters";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SortableHead } from "@/components/sortable-head";
@@ -49,42 +47,6 @@ const KIND_ORDER = [
 ] as const;
 
 const PLAN_VALUES = ["FREE", "STANDARD", "PREMIUM", "ADMINISTRATEUR"] as const;
-
-function StatsPanel() {
-  const t = useTranslations("admin.users.stats");
-  const { data, isPending, isError } = useAdminStats();
-
-  if (isPending) return <p className="text-sm text-muted">{t("loading")}</p>;
-  if (isError || !data) {
-    return (
-      <p role="alert" className="text-sm text-destructive">
-        {t("loadError")}
-      </p>
-    );
-  }
-
-  const rows: Array<[string, number]> = [
-    [t("totalUsers"), data.totalUsers],
-    [t("usersOverLimitCount"), data.usersOverLimitCount],
-    [t("analysesRequestedToday"), data.analysesRequestedToday],
-    [t("analysesRequestedThisMonth"), data.analysesRequestedThisMonth],
-    [t("documentsCreatedToday"), data.documentsCreatedToday],
-    [t("activeScoutsTotal"), data.activeScoutsTotal],
-  ];
-
-  return (
-    <Card>
-      <CardContent className="grid grid-cols-2 gap-4 py-6 sm:grid-cols-3">
-        {rows.map(([label, value]) => (
-          <div key={label} className="flex flex-col gap-1">
-            <p className="text-xs text-muted">{label}</p>
-            <p className="text-lg font-semibold">{value}</p>
-          </div>
-        ))}
-      </CardContent>
-    </Card>
-  );
-}
 
 function OverrideEditor({
   userId,
@@ -760,11 +722,6 @@ export default function AdminUsersPage() {
             {t("planDefaultsLink")}
           </Link>
         </div>
-
-        <section className="flex flex-col gap-2">
-          <h2 className="text-sm font-semibold">{t("stats.title")}</h2>
-          <StatsPanel />
-        </section>
 
         <section className="flex flex-col gap-2">
           <h2 className="text-sm font-semibold">{t("table.title")}</h2>

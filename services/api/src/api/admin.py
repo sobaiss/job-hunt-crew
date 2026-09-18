@@ -1,5 +1,6 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from py_db.models import AdminAuditEvent, Plan, PlanQuotaDefault, Quotakind, QuotaOverride, User
@@ -690,6 +691,11 @@ async def list_users(
     return AdminUsersListResponse(users=rows, total=total, page=page, pageSize=page_size)
 
 
+class SignupSeriesPoint(BaseModel):
+    date: str
+    count: int
+
+
 class AdminStatsResponse(BaseModel):
     totalUsers: int
     usersOverLimitCount: int
@@ -697,24 +703,59 @@ class AdminStatsResponse(BaseModel):
     analysesRequestedThisMonth: int
     documentsCreatedToday: int
     activeScoutsTotal: int
+    newSignups: list[SignupSeriesPoint]
+    usersByPlan: dict[str, int]
+    blockedUsersCount: int
+
+
+_PERIOD_DAYS: dict[str, int | None] = {"7d": 7, "30d": 30, "90d": 90, "all": None}
+
+
+def _signup_series(users: list[User], period: str) -> list[SignupSeriesPoint]:
+    """Buckets `users` by signup date (day granularity) across `period`,
+    restricted to the window that period names — `\"all\"` includes every
+    signup date present. Only this figure reacts to `period`; every other
+    stat below is a today-snapshot (issue #145).
+    """
+    days = _PERIOD_DAYS[period]
+    cutoff = (_now() - timedelta(days=days)).date() if days is not None else None
+    counts: dict[str, int] = {}
+    for user in users:
+        signup_date = user.createdAt.date()
+        if cutoff is not None and signup_date < cutoff:
+            continue
+        key = signup_date.isoformat()
+        counts[key] = counts.get(key, 0) + 1
+    return [
+        SignupSeriesPoint(date=date, count=count)
+        for date, count in sorted(counts.items())
+    ]
 
 
 @router.get("/stats", response_model=AdminStatsResponse)
 async def get_stats(
+    period: Literal["7d", "30d", "90d", "all"] = Query(default="all"),
     _admin_id: str = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> AdminStatsResponse:
-    """Global aggregate usage numbers across every User, for the admin
-    reporting screen (issue #140): total Analyses/GeneratedDocuments/active
-    Scouts platform-wide, and how many Users are currently at or over any of
-    their own QuotaKind limits.
+    """Global aggregate usage numbers across every User, for the Admin
+    dashboard (issue #145, enriching issue #140's original 6 figures): total
+    Analyses/GeneratedDocuments/active Scouts platform-wide, how many Users
+    are currently at or over any of their own QuotaKind limits, a
+    `period`-filtered new-signups series, and today-snapshots of the Plan
+    distribution and blocked-User count that always ignore `period`.
     """
     users = (await session.scalars(select(User))).all()
     users_over_limit = 0
+    users_by_plan: dict[str, int] = {}
+    blocked_users_count = 0
     for user in users:
         _, over = await _user_quota_summary(session, user.id)
         if over:
             users_over_limit += 1
+        users_by_plan[user.plan.value] = users_by_plan.get(user.plan.value, 0) + 1
+        if user.blockedAt is not None:
+            blocked_users_count += 1
 
     return AdminStatsResponse(
         totalUsers=len(users),
@@ -723,4 +764,7 @@ async def get_stats(
         analysesRequestedThisMonth=await total_analyses_requested_this_month(session),
         documentsCreatedToday=await total_generated_documents_created_today(session),
         activeScoutsTotal=await total_active_scout_count(session),
+        newSignups=_signup_series(users, period),
+        usersByPlan=users_by_plan,
+        blockedUsersCount=blocked_users_count,
     )
