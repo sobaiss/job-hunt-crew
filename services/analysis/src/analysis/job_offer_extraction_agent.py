@@ -16,7 +16,11 @@ from py_db.structured_logging import get_logger, log_stage_event
 from pydantic import BaseModel, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .json_ld import find_job_posting, job_posting_fields
+from .json_ld import (
+    find_job_posting,
+    job_posting_fields,
+    structured_data_from_job_posting,
+)
 from .llm_json import parse_llm_json
 from .llm_provider import LLMProvider, get_llm_provider, retry_temperature
 from .s3_client import S3_BUCKET, make_s3_client
@@ -149,27 +153,37 @@ async def extract_job_offer(
             job_offer.company = fields["company"]
             job_offer.location = fields["location"]
             job_offer.postedAt = fields["postedAt"]
-            job_offer.extractionStatus = Jobofferextractionstatus.READY
-            job_offer.errorMessage = None
-            job_offer.updatedAt = _now()
-            await session.commit()
-            log_stage_event(
-                logger,
-                stage=STAGE,
-                status="SUCCEEDED",
-                job_offer_id=job_offer_id,
-                analysis_id=analysis_id,
-                ingestion_job_id=ingestion_job_id,
-            )
-            await record_pipeline_event(
-                session,
-                stage=STAGE,
-                status="SUCCEEDED",
-                message=f"job_offer_id={job_offer_id}",
-                analysis_id=analysis_id,
-                ingestion_job_id=ingestion_job_id,
-            )
-            return job_offer
+
+            structured_data = structured_data_from_job_posting(job_posting)
+            if structured_data is not None:
+                job_offer.structuredData = JobOfferStructuredData(
+                    **structured_data
+                ).model_dump()
+                job_offer.extractionStatus = Jobofferextractionstatus.READY
+                job_offer.errorMessage = None
+                job_offer.updatedAt = _now()
+                await session.commit()
+                log_stage_event(
+                    logger,
+                    stage=STAGE,
+                    status="SUCCEEDED",
+                    job_offer_id=job_offer_id,
+                    analysis_id=analysis_id,
+                    ingestion_job_id=ingestion_job_id,
+                )
+                await record_pipeline_event(
+                    session,
+                    stage=STAGE,
+                    status="SUCCEEDED",
+                    message=f"job_offer_id={job_offer_id}",
+                    analysis_id=analysis_id,
+                    ingestion_job_id=ingestion_job_id,
+                )
+                return job_offer
+            # JSON-LD resolved title/company/location/postedAt but didn't carry
+            # a usable description, so structuredData is still unset -- fall
+            # through to the LLM tier below, which fills it in and, per the
+            # merge logic there, keeps these already-resolved fields as-is.
 
     html = _strip_non_visible(raw_html)[:MAX_HTML_CHARS]
 
@@ -189,14 +203,15 @@ async def extract_job_offer(
             last_error = exc
             continue
 
-        if not structured.title:
+        title = job_offer.title or structured.title
+        if not title:
             last_error = "LLM output did not resolve a title"
             continue
 
-        job_offer.title = structured.title
-        job_offer.company = structured.company
-        job_offer.location = structured.location
-        job_offer.postedAt = _parse_posted_at(structured.postedAt)
+        job_offer.title = title
+        job_offer.company = job_offer.company or structured.company
+        job_offer.location = job_offer.location or structured.location
+        job_offer.postedAt = job_offer.postedAt or _parse_posted_at(structured.postedAt)
         job_offer.structuredData = JobOfferStructuredData(
             **structured.model_dump(
                 exclude={"title", "company", "location", "postedAt"}

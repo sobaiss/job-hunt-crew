@@ -81,6 +81,39 @@ JSON_LD_HTML = """
 </head><body><h1>Staff Platform Engineer</h1></body></html>
 """
 
+# Carries a `description` (plus baseSalary/employmentType/skills), unlike
+# JSON_LD_HTML above -- enough for structured_data_from_job_posting to build
+# JobOffer.structuredData directly, so no LLM fallback is needed at all.
+JSON_LD_HTML_WITH_DESCRIPTION = """
+<html><head>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org/",
+  "@type": "JobPosting",
+  "title": "Staff Platform Engineer",
+  "hiringOrganization": {"@type": "Organization", "name": "Globex"},
+  "jobLocation": {
+    "@type": "Place",
+    "address": {
+      "@type": "PostalAddress",
+      "addressLocality": "Lyon",
+      "addressCountry": "FR"
+    }
+  },
+  "datePosted": "2026-08-15T00:00:00Z",
+  "description": "<p>Own our platform team's roadmap.</p>",
+  "employmentType": "FULL_TIME",
+  "skills": ["Kubernetes", "Terraform"],
+  "baseSalary": {
+    "@type": "MonetaryAmount",
+    "currency": "EUR",
+    "value": {"@type": "QuantitativeValue", "minValue": 70000, "maxValue": 90000, "unitText": "YEAR"}
+  }
+}
+</script>
+</head><body><h1>Staff Platform Engineer</h1></body></html>
+"""
+
 
 class StubLLMProvider(LLMProvider):
     def __init__(self, responses):
@@ -255,7 +288,12 @@ async def test_extract_job_offer_succeeds_on_retry_after_one_malformed_attempt()
 
 
 @pytest.mark.asyncio
-async def test_extract_job_offer_reads_fields_from_json_ld_without_calling_llm():
+async def test_extract_job_offer_reads_metadata_from_json_ld_but_falls_back_for_structured_data():
+    # JSON_LD_HTML has no `description`, so structured_data_from_job_posting
+    # can't build JobOffer.structuredData from it alone (M2-T4's crew_task
+    # requires a non-null structuredData to run) -- the LLM tier must still
+    # run to fill it in, without clobbering the title/company/location/postedAt
+    # JSON-LD already resolved.
     engine = make_engine()
     session_factory = make_session_factory(engine)
     job_offer_id = f"test-{uuid.uuid4()}"
@@ -277,6 +315,7 @@ async def test_extract_job_offer_reads_fields_from_json_ld_without_calling_llm()
                 session, job_offer_id, llm_provider=provider
             )
             assert job_offer.extractionStatus == Jobofferextractionstatus.READY
+            # JSON-LD-sourced fields win over the LLM's own (unused) guesses.
             assert job_offer.title == "Staff Platform Engineer"
             assert job_offer.company == "Globex"
             assert job_offer.location == "Lyon, FR"
@@ -285,7 +324,59 @@ async def test_extract_job_offer_reads_fields_from_json_ld_without_calling_llm()
         async with session_factory() as session:
             reloaded = await session.get(JobOffer, job_offer_id)
             assert reloaded.title == "Staff Platform Engineer"
-            assert reloaded.structuredData is None
+            assert reloaded.structuredData is not None
+            assert reloaded.structuredData["description"]
+        # JSON-LD lacked a description; the LLM fallback still had to run.
+        assert provider.calls == 1
+    finally:
+        s3.delete_object(Bucket=S3_BUCKET, Key=raw_content_key)
+        await _delete_pipeline_events(session_factory, job_offer_id)
+        async with session_factory() as session:
+            job_offer = await session.get(JobOffer, job_offer_id)
+            if job_offer is not None:
+                await session.delete(job_offer)
+                await session.commit()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_extract_job_offer_reads_structured_data_from_rich_json_ld_without_calling_llm():
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    job_offer_id = f"test-{uuid.uuid4()}"
+    raw_content_key = f"raw-scrapes/{job_offer_id}.html"
+    s3 = _s3_client()
+    s3.put_object(
+        Bucket=S3_BUCKET,
+        Key=raw_content_key,
+        Body=JSON_LD_HTML_WITH_DESCRIPTION.encode("utf-8"),
+        ContentType="text/html",
+    )
+
+    await _make_scraped_job_offer(session_factory, job_offer_id, raw_content_key)
+    provider = StubLLMProvider([VALID_LLM_OUTPUT])
+
+    try:
+        async with session_factory() as session:
+            job_offer = await extract_job_offer(
+                session, job_offer_id, llm_provider=provider
+            )
+            assert job_offer.extractionStatus == Jobofferextractionstatus.READY
+            assert job_offer.title == "Staff Platform Engineer"
+            assert job_offer.company == "Globex"
+            assert job_offer.structuredData["description"] == (
+                "Own our platform team's roadmap."
+            )
+            assert job_offer.structuredData["requirements"] == [
+                "Kubernetes",
+                "Terraform",
+            ]
+            assert job_offer.structuredData["contractType"] == "full_time"
+            assert job_offer.structuredData["salary"] == "70000-90000 EUR/year"
+
+        async with session_factory() as session:
+            reloaded = await session.get(JobOffer, job_offer_id)
+            assert reloaded.structuredData is not None
         # JSON-LD resolved everything needed; no LLM call was made.
         assert provider.calls == 0
     finally:
@@ -328,7 +419,9 @@ async def test_extract_job_offer_finds_json_ld_beyond_old_truncation_cutoff():
             )
             assert job_offer.extractionStatus == Jobofferextractionstatus.READY
             assert job_offer.title == "Staff Platform Engineer"
-        assert provider.calls == 0
+        # JSON-LD (found past the old truncation cutoff) lacked a description,
+        # so the LLM fallback still had to run to fill in structuredData.
+        assert provider.calls == 1
     finally:
         s3.delete_object(Bucket=S3_BUCKET, Key=raw_content_key)
         await _delete_pipeline_events(session_factory, job_offer_id)
