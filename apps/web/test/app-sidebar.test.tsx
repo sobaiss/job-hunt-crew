@@ -24,6 +24,16 @@ const SESSION: Session = {
   user: { id: "user_1", name: "Ada Lovelace", email: "ada@example.com" },
 };
 
+const ADMIN_SESSION: Session = {
+  expires: "2999-01-01T00:00:00.000Z",
+  user: {
+    id: "admin_1",
+    name: "Grace Hopper",
+    email: "grace@example.com",
+    role: "ADMINISTRATOR",
+  },
+};
+
 beforeEach(() => {
   signOut.mockReset();
   pathname = "/analyses";
@@ -61,6 +71,39 @@ describe("AppSidebar", () => {
       "href",
       "/settings",
     );
+  });
+
+  it("shows an Admin entry linking into the Admin area to an Administrator", () => {
+    renderWithProviders(<AppSidebar />, { session: ADMIN_SESSION });
+
+    expect(screen.getByRole("link", { name: "Admin" })).toHaveAttribute(
+      "href",
+      "/admin",
+    );
+  });
+
+  it("marks the Admin entry active on a nested Admin route", () => {
+    pathname = "/admin/scouts";
+    renderWithProviders(<AppSidebar />, { session: ADMIN_SESSION });
+
+    expect(screen.getByRole("link", { name: "Admin" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+  });
+
+  it("hides the Admin entry from a non-Administrator", () => {
+    renderWithProviders(<AppSidebar />, {
+      session: { ...SESSION, user: { ...SESSION.user, role: "EXTERNAL" } },
+    });
+
+    expect(screen.queryByRole("link", { name: "Admin" })).not.toBeInTheDocument();
+  });
+
+  it("hides the Admin entry when the session carries no role", () => {
+    renderWithProviders(<AppSidebar />, { session: SESSION });
+
+    expect(screen.queryByRole("link", { name: "Admin" })).not.toBeInTheDocument();
   });
 
   it("exposes a New analysis primary action pointing at the single-offer flow", () => {

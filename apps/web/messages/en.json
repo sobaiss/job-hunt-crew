@@ -99,6 +99,7 @@
     "cvVersions": "CV versions",
     "quotas": "Quotas",
     "settings": "Settings",
+    "admin": "Admin",
     "newAnalysis": "New analysis",
     "openMenu": "Open menu"
   },
@@ -394,6 +395,15 @@
           "next": "Next"
         }
       }
+    },
+    "nav": {
+      "label": "Admin sections",
+      "dashboard": "Dashboard",
+      "users": "Users",
+      "planDefaults": "Plan defaults",
+      "analyses": "Analyses",
+      "scouts": "Scouts",
+      "cvVersions": "CV versions"
     }
   },
   "quotas": {

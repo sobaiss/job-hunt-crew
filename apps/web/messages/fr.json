@@ -99,6 +99,7 @@
     "cvVersions": "Versions de CV",
     "quotas": "Quotas",
     "settings": "Paramètres",
+    "admin": "Administration",
     "newAnalysis": "Nouvelle analyse",
     "openMenu": "Ouvrir le menu"
   },
@@ -394,6 +395,15 @@
           "next": "Suivant"
         }
       }
+    },
+    "nav": {
+      "label": "Sections d'administration",
+      "dashboard": "Tableau de bord",
+      "users": "Utilisateurs",
+      "planDefaults": "Valeurs par défaut des forfaits",
+      "analyses": "Analyses",
+      "scouts": "Scouts",
+      "cvVersions": "Versions de CV"
     }
   },
   "quotas": {

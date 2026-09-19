@@ -3,7 +3,7 @@ import { HttpResponse, http } from "msw";
 import userEvent from "@testing-library/user-event";
 import type { Session } from "next-auth";
 
-import { renderWithProviders, screen, waitFor } from "./test-utils";
+import { renderWithProviders, screen, waitFor, within } from "./test-utils";
 import { server } from "./msw/server";
 import AdminLayout from "@/app/(app)/admin/layout";
 import AdminPage from "@/app/(app)/admin/page";
@@ -12,7 +12,12 @@ const { redirect, notFound } = vi.hoisted(() => ({
   redirect: vi.fn(),
   notFound: vi.fn(),
 }));
-vi.mock("next/navigation", () => ({ redirect, notFound }));
+let pathname = "/admin";
+vi.mock("next/navigation", () => ({
+  redirect,
+  notFound,
+  usePathname: () => pathname,
+}));
 
 const { auth } = vi.hoisted(() => ({ auth: vi.fn() }));
 vi.mock("@/auth", () => ({ auth }));
@@ -36,6 +41,7 @@ beforeEach(() => {
   redirect.mockReset();
   notFound.mockReset();
   auth.mockReset();
+  pathname = "/admin";
 });
 
 describe("Admin layout gate", () => {
@@ -66,6 +72,48 @@ describe("Admin layout gate", () => {
     expect(redirect).not.toHaveBeenCalled();
     expect(notFound).not.toHaveBeenCalled();
     expect(screen.getByTestId("child")).toBeInTheDocument();
+  });
+
+  it("renders a tab strip linking all six Admin screens", async () => {
+    auth.mockResolvedValue(ADMIN_SESSION);
+
+    const element = await AdminLayout({ children: <div /> });
+    renderWithProviders(element ?? <></>);
+
+    const tabs = within(screen.getByRole("navigation", { name: "Admin sections" }));
+    const hrefs = Object.fromEntries(
+      tabs.getAllByRole("link").map((link) => [link.textContent, link.getAttribute("href")]),
+    );
+    expect(hrefs).toEqual({
+      Dashboard: "/admin",
+      Users: "/admin/users",
+      "Plan defaults": "/admin/quotas",
+      Analyses: "/admin/analyses",
+      Scouts: "/admin/scouts",
+      "CV versions": "/admin/cv-versions",
+    });
+  });
+
+  it("indicates the current screen in the tab strip", async () => {
+    auth.mockResolvedValue(ADMIN_SESSION);
+    pathname = "/admin/scouts";
+
+    const element = await AdminLayout({ children: <div /> });
+    renderWithProviders(element ?? <></>);
+
+    const tabs = within(screen.getByRole("navigation", { name: "Admin sections" }));
+    expect(tabs.getByRole("link", { name: "Scouts" })).toHaveAttribute("aria-current", "page");
+    expect(tabs.getByRole("link", { name: "Dashboard" })).not.toHaveAttribute("aria-current");
+    expect(tabs.getByRole("link", { name: "Users" })).not.toHaveAttribute("aria-current");
+  });
+
+  it("does not render the tab strip for a non-Administrator", async () => {
+    auth.mockResolvedValue(STANDARD_SESSION);
+
+    const element = await AdminLayout({ children: <div /> });
+    renderWithProviders(element ?? <></>);
+
+    expect(screen.queryByRole("navigation", { name: "Admin sections" })).not.toBeInTheDocument();
   });
 });
 

@@ -15,6 +15,7 @@ import {
   ListChecks,
   Plus,
   Settings,
+  ShieldCheck,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -42,6 +43,11 @@ export const NAV_ITEMS = [
   { href: "/quotas", key: "quotas", Icon: Gauge },
   { href: "/settings", key: "settings", Icon: Settings },
 ] as const;
+
+// The single entry into the Admin area, rendered only for an Administrator
+// (issue #164). Kept out of NAV_ITEMS so the Topbar title lookup (which walks
+// NAV_ITEMS) never names an Admin route for a non-Administrator.
+const ADMIN_NAV_ITEM = { href: "/admin", key: "admin", Icon: ShieldCheck } as const;
 
 /**
  * A nav item is active on an exact path match or when the current route is
@@ -110,13 +116,18 @@ function SidebarBrand({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
-/** The four nav rows, with the current route flagged `aria-current`. */
+/** The nav rows, with the current route flagged `aria-current`. */
 function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const t = useTranslations("nav");
   const pathname = usePathname();
+  const { data: session } = useSession();
+  const items =
+    session?.user?.role === "ADMINISTRATOR"
+      ? [...NAV_ITEMS, ADMIN_NAV_ITEM]
+      : NAV_ITEMS;
   return (
     <nav className="flex flex-col gap-0.5">
-      {NAV_ITEMS.map(({ href, key, Icon }) => {
+      {items.map(({ href, key, Icon }) => {
         const active = isNavActive(pathname, href);
         return (
           <Link
