@@ -92,10 +92,12 @@ async def _make_fixture(
     document_id,
     *,
     doc_type,
+    user_name=None,
+    user_email=None,
 ):
     now = _now()
     async with session_factory() as session:
-        session.add(User(id=user_id, updatedAt=now))
+        session.add(User(id=user_id, name=user_name, email=user_email, updatedAt=now))
         session.add(
             JobOffer(
                 id=job_offer_id,
@@ -266,6 +268,124 @@ async def test_run_generation_pipeline_fails_with_error_message_on_empty_provide
             assert reloaded.markdownContent is None
             assert reloaded.s3Key is None
     finally:
+        await _cleanup(
+            engine,
+            session_factory,
+            user_id,
+            job_offer_id,
+            cv_version_id,
+            analysis_id,
+            document_id,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "doc_type",
+    [Generateddocumenttype.COVER_LETTER, Generateddocumenttype.TAILORED_CV],
+)
+async def test_run_generation_pipeline_appends_the_owners_name_and_email(doc_type):
+    """The base CV's rendition is redacted (docs/adr/0022), so neither the
+    stubbed writer output nor the CV Markdown carries the candidate's contact
+    info — the pipeline appends it from the User row, into both the stored
+    markdownContent and its S3 mirror."""
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id = f"test-{uuid.uuid4()}"
+    user_email = f"{user_id}@example.com"
+    job_offer_id = f"test-{uuid.uuid4()}"
+    cv_version_id = f"test-{uuid.uuid4()}"
+    analysis_id = f"test-{uuid.uuid4()}"
+    document_id = f"test-{uuid.uuid4()}"
+
+    await _make_fixture(
+        session_factory,
+        user_id,
+        job_offer_id,
+        cv_version_id,
+        analysis_id,
+        document_id,
+        doc_type=doc_type,
+        user_name="Ada Lovelace",
+        user_email=user_email,
+    )
+    llm_output = "Experienced backend engineer with a strong Python background."
+    provider = StubLLMProvider([llm_output])
+    s3 = _s3_client()
+    key = generated_document_key(user_id, analysis_id, doc_type.value)
+
+    try:
+        async with session_factory() as session:
+            await run_generation_pipeline(
+                session, document_id, llm_provider=provider, s3_client=s3
+            )
+
+        async with session_factory() as session:
+            reloaded = await session.get(GeneratedDocument, document_id)
+            assert reloaded.markdownContent.startswith(llm_output)
+            assert "Ada Lovelace" in reloaded.markdownContent
+            assert user_email in reloaded.markdownContent
+            stored = reloaded.markdownContent
+
+        assert s3.get_object(Bucket=S3_BUCKET, Key=key)["Body"].read().decode() == stored
+    finally:
+        s3.delete_object(Bucket=S3_BUCKET, Key=key)
+        await _cleanup(
+            engine,
+            session_factory,
+            user_id,
+            job_offer_id,
+            cv_version_id,
+            analysis_id,
+            document_id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_run_generation_pipeline_omits_a_null_name_without_a_blank_line():
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id = f"test-{uuid.uuid4()}"
+    user_email = f"{user_id}@example.com"
+    job_offer_id = f"test-{uuid.uuid4()}"
+    cv_version_id = f"test-{uuid.uuid4()}"
+    analysis_id = f"test-{uuid.uuid4()}"
+    document_id = f"test-{uuid.uuid4()}"
+
+    await _make_fixture(
+        session_factory,
+        user_id,
+        job_offer_id,
+        cv_version_id,
+        analysis_id,
+        document_id,
+        doc_type=Generateddocumenttype.COVER_LETTER,
+        user_email=user_email,
+    )
+    provider = StubLLMProvider(["Dear Hiring Manager, I am excited to apply..."])
+    s3 = _s3_client()
+
+    try:
+        async with session_factory() as session:
+            document = await run_generation_pipeline(
+                session, document_id, llm_provider=provider, s3_client=s3
+            )
+
+        content = document.markdownContent
+        assert user_email in content
+        assert "None" not in content
+        assert "****" not in content
+        assert "\n\n\n" not in content
+        # The email is the only contact line: nothing but a single blank
+        # separator sits between the letter body and it.
+        assert content.splitlines()[-1] == user_email
+        assert content.splitlines()[-2] == ""
+        assert content.splitlines()[-3] != ""
+    finally:
+        s3.delete_object(
+            Bucket=S3_BUCKET,
+            Key=generated_document_key(user_id, analysis_id, "COVER_LETTER"),
+        )
         await _cleanup(
             engine,
             session_factory,
