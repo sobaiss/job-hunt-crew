@@ -257,9 +257,7 @@
       "saveError": "Impossible d'enregistrer ces limites."
     },
     "users": {
-      "title": "Rapports",
-      "description": "Le forfait et l'usage de chaque utilisateur, et les statistiques globales.",
-      "planDefaultsLink": "Valeurs par défaut des forfaits",
+      "title": "Utilisateurs",
       "table": {
         "title": "Utilisateurs",
         "loading": "Chargement…",

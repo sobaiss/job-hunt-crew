@@ -257,9 +257,7 @@
       "saveError": "Couldn't save these limits."
     },
     "users": {
-      "title": "Reporting",
-      "description": "Every User's Plan and usage, and global aggregate stats.",
-      "planDefaultsLink": "Plan defaults",
+      "title": "Users",
       "table": {
         "title": "Users",
         "loading": "Loading…",
