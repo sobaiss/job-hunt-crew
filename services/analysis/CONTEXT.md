@@ -5,8 +5,12 @@ The CrewAI pipeline that compares one CVVersion against one JobOffer and produce
 ## Language
 
 **Conversion** (CVVersion):
-Turning a CVVersion's uploaded file into its Markdown rendition (defined in [API](../api/CONTEXT.md)'s context) — mechanical text extraction followed by one LLM normalisation pass, skipped entirely when the upload is already Markdown or plain text. For a PDF/DOCX upload, Conversion also derives a StyleProfile (defined in [API](../api/CONTEXT.md)'s context) in the same pass — deterministic font/color/margin extraction plus one LLM call for layout archetype and per-SectionType classification — tracked by its own `styleStatus`, independent of `conversionStatus`: a StyleProfile failure never fails the Markdown rendition or blocks matching (docs/adr/0008). AnalysisWorkflow's `EnsureCVConverted` step runs it as a comparison prerequisite; the API context's manual "convert" action runs the same code off an SQS message.
+Turning a CVVersion's uploaded file into its Markdown rendition (defined in [API](../api/CONTEXT.md)'s context) — mechanical text extraction followed by one LLM normalisation pass, skipped entirely when the upload is already Markdown or plain text. Redaction (below) always runs regardless of format. For a PDF/DOCX upload, Conversion also derives a StyleProfile (defined in [API](../api/CONTEXT.md)'s context) in the same pass — deterministic font/color/margin extraction plus one LLM call for layout archetype and per-SectionType classification — tracked by its own `styleStatus`, independent of `conversionStatus`: a StyleProfile failure never fails the Markdown rendition or blocks matching (docs/adr/0008). AnalysisWorkflow's `EnsureCVConverted` step runs it as a comparison prerequisite; the API context's manual "convert" action runs the same code off an SQS message.
 _Avoid_: Parsing — the CV path no longer produces structured data. Extraction — reserved for JobOffer's structuring step, owned by the Ingestion context.
+
+**Redaction** (CVVersion):
+The step, always part of Conversion regardless of upload format, that strips the candidate's own identifying data — name, email, phone, postal address, date of birth/age, nationality, marital status, gender — and any third-party reference's contact details out of the Markdown rendition before it is saved, so no identity data reaches matching, the candidate's read-only preview, or generation (docs/adr/0022). For PDF/DOCX, its instructions are folded into the existing normalisation pass; for a Markdown/plain-text upload (which otherwise gets no LLM call at all) it runs as its own minimal-diff pass — remove only the flagged categories, reproduce everything else verbatim, deliberately not the reformatting a PDF/DOCX upload gets. A deterministic regex/exact-match check for email, phone, and the account's own `User.name`/`User.email` follows either path as a safety net; a hit there, or any Redaction LLM failure, fails Conversion outright — no unredacted fallback, no separate status field. Deliberately kept: city/country of residence or desired location, employer/school names, job titles, dates, skills, certifications, languages, project descriptions, and URLs — all still useful for matching. Because the base CVVersion's Markdown rendition loses identity data, CoverLetterWriterAgent/CvTailoringAgent (below) never write it back in; the generation pipeline injects `User.name`/`User.email` into a GeneratedDocument's `markdownContent` afterward instead.
+_Avoid_: Anonymization, PII scrubbing — Redaction is the chosen term. Sanitization — too generic, reads as input validation.
 
 **JobOfferExtractionAgent**:
 The agent that performs JobOffer extraction — called both by this context's own AnalysisWorkflow prerequisites and directly by the Ingestion context's fan-out pipeline.
@@ -59,6 +63,11 @@ CVVersion's StyleProfile — per SectionType, never the original's section
 order, which the truthfulness constraint's reordering already governs —
 without a second classification pass. CoverLetterWriterAgent's output
 carries no such tag: a cover letter is never rendered against a
-StyleProfile.
+StyleProfile. Neither agent's own output carries the candidate's name or
+contact details, since Redaction (above) has already stripped those from
+the base CVVersion's Markdown rendition it reads; the generation pipeline
+appends `User.name`/`User.email` to `GeneratedDocument.markdownContent`
+afterward, outside the LLM call, so the stored document — and every
+preview or render taken from it — stays consistent (docs/adr/0022).
 _Avoid_: CV rewriter — the output is a new GeneratedDocument, never a
 rewrite of the CVVersion itself.

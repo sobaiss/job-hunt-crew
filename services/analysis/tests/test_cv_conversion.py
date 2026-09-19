@@ -41,16 +41,17 @@ from analysis.cv_conversion import (
 from analysis.llm_provider import LLMProvider
 from analysis.s3_client import S3_BUCKET
 
+# A Redaction-clean rendition (issue #166): the candidate's name, email and
+# phone are gone; job titles, employers and dates stay.
 NORMALISED_MARKDOWN = (
-    "# Jane Doe\n\n## Experience\n\n"
+    "## Experience\n\n"
     "- **Senior Backend Engineer**, Acme Corp (2019–2024)\n\n"
     "## Skills\n\n- Python\n- AWS\n- PostgreSQL"
 )
 
 STYLE_CLASSIFICATION_JSON = (
     '{"layoutArchetype": "SINGLE_COLUMN", "sections": '
-    '[{"heading": "Jane Doe", "sectionType": "OTHER", "region": null}, '
-    '{"heading": "Experience", "sectionType": "EXPERIENCE", "region": null}, '
+    '[{"heading": "Experience", "sectionType": "EXPERIENCE", "region": null}, '
     '{"heading": "Skills", "sectionType": "SKILLS", "region": null}]}'
 )
 
@@ -161,11 +162,19 @@ def _s3_client():
 
 
 async def _make_pending_cv_version(
-    session_factory, user_id, cv_version_id, file_key, file_type, file_name
+    session_factory,
+    user_id,
+    cv_version_id,
+    file_key,
+    file_type,
+    file_name,
+    *,
+    user_name=None,
+    user_email=None,
 ):
     now = datetime.now(UTC).replace(tzinfo=None)
     async with session_factory() as session:
-        session.add(User(id=user_id, updatedAt=now))
+        session.add(User(id=user_id, updatedAt=now, name=user_name, email=user_email))
         session.add(
             CVVersion(
                 id=cv_version_id,
@@ -363,6 +372,152 @@ async def test_convert_cv_marks_docx_failed_after_bounded_normalisation_retries(
             assert reloaded.conversionError
             assert reloaded.markdownContent is None
         assert provider.calls == MAX_ATTEMPTS
+    finally:
+        await _cleanup(engine, session_factory, s3, file_key, user_id, cv_version_id)
+
+
+ACCOUNT_NAME = "Jane Doe"
+ACCOUNT_EMAIL = "jane.doe@example.com"
+
+
+@pytest.mark.parametrize(
+    ("file_type", "file_name", "file_bytes"),
+    [
+        (Cvfiletype.PDF, "cv.pdf", FIXTURE_PDF_BYTES),
+        (Cvfiletype.DOCX, "cv.docx", FIXTURE_DOCX_BYTES),
+    ],
+    ids=["pdf", "docx"],
+)
+@pytest.mark.asyncio
+async def test_convert_cv_keeps_a_redacted_rendition_for_an_account_with_identity_data(
+    file_type, file_name, file_bytes
+):
+    """Redaction rides the single existing normalisation call (issue #166):
+    exactly two LLM calls — normalise + StyleProfile classification — and the
+    redacted response is what gets stored."""
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id = f"test-user-{uuid.uuid4()}"
+    cv_version_id = f"test-cv-{uuid.uuid4()}"
+    file_key = f"cvs/{user_id}/{cv_version_id}/{file_name}"
+    s3 = _s3_client()
+    s3.put_object(Bucket=S3_BUCKET, Key=file_key, Body=file_bytes)
+
+    await _make_pending_cv_version(
+        session_factory,
+        user_id,
+        cv_version_id,
+        file_key,
+        file_type,
+        file_name,
+        user_name=ACCOUNT_NAME,
+        user_email=f"{user_id}@example.com",
+    )
+    provider = StubLLMProvider([NORMALISED_MARKDOWN, STYLE_CLASSIFICATION_JSON])
+
+    try:
+        async with session_factory() as session:
+            cv_version = await convert_cv(session, cv_version_id, llm_provider=provider)
+            assert cv_version.conversionStatus == Cvconversionstatus.CONVERTED
+            assert cv_version.markdownContent == NORMALISED_MARKDOWN
+            assert cv_version.conversionError is None
+        assert provider.calls == 2
+    finally:
+        await _cleanup(engine, session_factory, s3, file_key, user_id, cv_version_id)
+
+
+@pytest.mark.parametrize(
+    ("file_type", "file_name", "file_bytes"),
+    [
+        (Cvfiletype.PDF, "cv.pdf", FIXTURE_PDF_BYTES),
+        (Cvfiletype.DOCX, "cv.docx", FIXTURE_DOCX_BYTES),
+    ],
+    ids=["pdf", "docx"],
+)
+@pytest.mark.parametrize(
+    ("leaky_line", "leaked_value"),
+    [
+        ("Contact: someone.else@corp.example", "someone.else@corp.example"),
+        ("Tel: 06 12 34 56 78", "06 12 34 56 78"),
+        (f"# {ACCOUNT_NAME}", ACCOUNT_NAME),
+    ],
+    ids=["email-pattern", "phone-pattern", "account-name"],
+)
+@pytest.mark.asyncio
+async def test_convert_cv_fails_when_the_safety_net_finds_leftover_identity_data(
+    file_type, file_name, file_bytes, leaky_line, leaked_value
+):
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id = f"test-user-{uuid.uuid4()}"
+    cv_version_id = f"test-cv-{uuid.uuid4()}"
+    file_key = f"cvs/{user_id}/{cv_version_id}/{file_name}"
+    s3 = _s3_client()
+    s3.put_object(Bucket=S3_BUCKET, Key=file_key, Body=file_bytes)
+
+    await _make_pending_cv_version(
+        session_factory,
+        user_id,
+        cv_version_id,
+        file_key,
+        file_type,
+        file_name,
+        user_name=ACCOUNT_NAME,
+    )
+    provider = StubLLMProvider([f"{leaky_line}\n\n{NORMALISED_MARKDOWN}"])
+
+    try:
+        async with session_factory() as session:
+            with pytest.raises(CVConversionError):
+                await convert_cv(session, cv_version_id, llm_provider=provider)
+
+        async with session_factory() as session:
+            reloaded = await session.get(CVVersion, cv_version_id)
+            assert reloaded.conversionStatus == Cvconversionstatus.FAILED
+            assert reloaded.conversionError
+            # The stored error must not itself re-leak what it caught.
+            assert leaked_value not in reloaded.conversionError
+            assert reloaded.markdownContent is None
+            # A leak fails outright: no retry, and StyleProfile never runs on
+            # an unredacted rendition.
+            assert reloaded.styleProfile is None
+        assert provider.calls == 1
+    finally:
+        await _cleanup(engine, session_factory, s3, file_key, user_id, cv_version_id)
+
+
+@pytest.mark.asyncio
+async def test_convert_cv_fails_when_the_safety_net_finds_the_accounts_own_email():
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id = f"test-user-{uuid.uuid4()}"
+    cv_version_id = f"test-cv-{uuid.uuid4()}"
+    file_key = f"cvs/{user_id}/{cv_version_id}/cv.pdf"
+    s3 = _s3_client()
+    s3.put_object(Bucket=S3_BUCKET, Key=file_key, Body=FIXTURE_PDF_BYTES)
+
+    await _make_pending_cv_version(
+        session_factory,
+        user_id,
+        cv_version_id,
+        file_key,
+        Cvfiletype.PDF,
+        "cv.pdf",
+        user_email=ACCOUNT_EMAIL,
+    )
+    provider = StubLLMProvider([f"{NORMALISED_MARKDOWN}\n\n{ACCOUNT_EMAIL}"])
+
+    try:
+        async with session_factory() as session:
+            with pytest.raises(CVConversionError):
+                await convert_cv(session, cv_version_id, llm_provider=provider)
+
+        async with session_factory() as session:
+            reloaded = await session.get(CVVersion, cv_version_id)
+            assert reloaded.conversionStatus == Cvconversionstatus.FAILED
+            assert reloaded.conversionError
+            assert ACCOUNT_EMAIL not in reloaded.conversionError
+            assert reloaded.markdownContent is None
     finally:
         await _cleanup(engine, session_factory, s3, file_key, user_id, cv_version_id)
 
