@@ -92,6 +92,51 @@ describe("CvVersionsPage — list", () => {
     expect(markdownRequests).toBe(1);
   });
 
+  it("notes next to the rendition that identity info was removed from it (issue #169)", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cvVersion()] }),
+      ),
+      http.get("/api/cv-versions/cv1/markdown", () =>
+        HttpResponse.json({
+          markdownContent: "Staff Engineer since 2019",
+          conversionStatus: "CONVERTED",
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await user.click(await screen.findByText("Grad CV"));
+
+    const panel = within(await screen.findByRole("dialog"));
+    expect(
+      await panel.findByText(/Staff Engineer since 2019/),
+    ).toBeInTheDocument();
+    expect(
+      panel.getByText(/identifying information .* was removed/i),
+    ).toBeInTheDocument();
+  });
+
+  it("shows no redaction note when there is no rendition to show yet (issue #169)", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cvVersion()] }),
+      ),
+      http.get("/api/cv-versions/cv1/markdown", () =>
+        HttpResponse.json({ markdownContent: null, conversionStatus: "PENDING" }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await user.click(await screen.findByText("Grad CV"));
+
+    const panel = within(await screen.findByRole("dialog"));
+    expect(await panel.findByText(/hasn't been converted/)).toBeInTheDocument();
+    expect(panel.queryByText(/identifying information/i)).not.toBeInTheDocument();
+  });
+
   it("shows the CV's full info (file, size, dates, status, default state) in the panel", async () => {
     server.use(
       http.get("/api/cv-versions", () =>

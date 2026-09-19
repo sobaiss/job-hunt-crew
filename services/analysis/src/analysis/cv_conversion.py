@@ -6,8 +6,9 @@ replaced the CV structured-data extraction path, retired in #21.
 See docs/adr/0001-cv-matching-uses-markdown-rendition.md.
 
 Per source format:
-- MD / TXT (slice 1): the uploaded file's UTF-8 text *is* the rendition, so
-  there is no LLM call.
+- MD / TXT (slice 1, then issue #167): the uploaded file's UTF-8 text is the
+  rendition, run through one minimal-diff Redaction LLM pass that removes only
+  the candidate's identity data and reproduces everything else verbatim.
 - PDF (slice 2, issue #17): `pypdf` pulls the text, then a single LLM
   normalisation pass turns it into clean, faithful Markdown. A PDF with almost
   no extractable text (a scanned/image PDF) fails Conversion immediately with a
@@ -15,6 +16,12 @@ Per source format:
 - DOCX (slice 3, issue #18): `mammoth` converts the document to semantic HTML,
   then the same single LLM normalisation pass (and bounded retry) as the PDF
   branch produces the Markdown.
+
+Redaction (issues #166 and #167, docs/adr/0022): every format's rendition has
+the candidate's identity data stripped — folded into the PDF/DOCX normalisation
+pass, a dedicated minimal-diff pass for MD/TXT — then a deterministic safety
+net (see cv_redaction.py) fails Conversion outright on any leftover. There is no
+unredacted fallback for any format.
 
 A PDF/DOCX CVVersion additionally gets a StyleProfile (`CVVersion.styleProfile`
 / `styleStatus`, issue #96) derived in the same pass — see style_profile.py
@@ -28,13 +35,20 @@ import json
 from datetime import UTC, datetime
 
 import mammoth
-from py_db.models import CVVersion, Cvconversionstatus, Cvfiletype, Cvstylestatus
+from py_db.models import (
+    CVVersion,
+    Cvconversionstatus,
+    Cvfiletype,
+    Cvstylestatus,
+    User,
+)
 from py_db.pipeline_events import record_pipeline_event
 from py_db.session import make_engine, make_session_factory
 from py_db.structured_logging import get_logger, log_stage_event
 from pypdf import PdfReader
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .cv_redaction import REDACTION_INSTRUCTIONS, find_identity_leaks
 from .llm_provider import LLMProvider, get_llm_provider
 from .s3_client import S3_BUCKET, make_s3_client
 from .style_profile import StyleProfileError, build_style_profile
@@ -43,7 +57,8 @@ logger = get_logger(__name__)
 
 STAGE = "convert"
 
-# Formats whose uploaded bytes are already the Markdown rendition (decode only).
+# Formats whose uploaded bytes are already the Markdown rendition: no mechanical
+# extraction and no StyleProfile, only the Redaction pass.
 _TEXT_FILE_TYPES = {Cvfiletype.MD, Cvfiletype.TXT}
 
 # PDF normalisation-pass tuning.
@@ -56,13 +71,33 @@ MIN_EXTRACTED_CHARS = 50
 # of a multi-page CV runs long and must not be truncated mid-document.
 NORMALISATION_MAX_TOKENS = 8192
 
+# Redaction (issue #166, docs/adr/0022) rides this same single pass — no extra
+# LLM call — so the "reproduce faithfully" rule is scoped to what Redaction
+# does not remove.
 NORMALISATION_SYSTEM_PROMPT = (
     "You are given the raw text extracted from a candidate's CV/resume. "
     "Reproduce it faithfully as a single clean Markdown document: use section "
     "headings, bullet lists for roles, skills and achievements, and keep every "
-    "date, employer, title and detail. Do not summarise, drop, reorder or "
-    "invent anything, and add no commentary or preamble. Respond with ONLY the "
-    "Markdown document."
+    "date, employer, title and detail. Do not summarise, reorder or invent "
+    "anything, and add no commentary or preamble. Do not drop anything except "
+    "the identifying data described next. "
+    + REDACTION_INSTRUCTIONS
+    + " Respond with ONLY the Markdown document."
+)
+
+# MD/TXT Redaction pass (issue #167). Unlike the PDF/DOCX prompt above, this
+# one forbids the very rewrite that prompt asks for: these formats' text is
+# already the rendition, and docs/adr/0001's no-unnecessary-rewrite guarantee
+# means the only permitted change is removing the flagged spans.
+TEXT_REDACTION_SYSTEM_PROMPT = (
+    "You are given a candidate's CV/resume as Markdown or plain text. "
+    "Reproduce it exactly, character for character, with one exception: "
+    "remove the identifying data described next. Make the smallest possible "
+    "change — do not reformat, reorder, reword, translate, correct or "
+    "summarise anything, keep every heading, list marker, line break and blank "
+    "line as it is, and add no commentary or preamble. "
+    + REDACTION_INSTRUCTIONS
+    + " Respond with ONLY the resulting document."
 )
 
 
@@ -173,10 +208,13 @@ async def convert_cv(
     step, or standalone via the manual convert trigger) used only to tag the
     observability rows this emits.
 
-    MD / TXT: the file's decoded UTF-8 text is the rendition, no LLM call;
-    styleStatus is set to NOT_APPLICABLE, styleProfile stays null.
-    PDF: `pypdf` text extraction, then one LLM normalisation pass (up to
-    MAX_ATTEMPTS on an empty/erroring response); a PDF with under
+    MD / TXT: the file's decoded UTF-8 text goes through one minimal-diff
+    Redaction LLM pass (issue #167) with the same bounded retry and safety net
+    as PDF/DOCX; styleStatus is set to NOT_APPLICABLE, styleProfile stays null,
+    and no StyleProfile LLM call is made.
+    PDF: `pypdf` text extraction, then one LLM normalisation pass that also
+    redacts identity data (up to MAX_ATTEMPTS on an empty/erroring response;
+    a safety-net hit fails outright, see cv_redaction.py); a PDF with under
     MIN_EXTRACTED_CHARS of text goes straight to FAILED with a cause message.
     DOCX: `mammoth` docx -> HTML, then the same normalisation pass and bounded
     retry as the PDF branch.
@@ -208,7 +246,15 @@ async def convert_cv(
     if cv_version.fileType in _TEXT_FILE_TYPES:
         # Lenient UTF-8: a stray non-UTF-8 byte in an otherwise fine text CV
         # should not fail Conversion.
-        markdown = file_bytes.decode("utf-8", errors="replace")
+        source_text = file_bytes.decode("utf-8", errors="replace")
+        markdown = await _normalise_to_markdown(
+            session,
+            cv_version,
+            source_text,
+            system_prompt=TEXT_REDACTION_SYSTEM_PROMPT,
+            llm_provider=llm_provider,
+            analysis_id=analysis_id,
+        )
     elif cv_version.fileType == Cvfiletype.PDF:
         markdown = await _convert_pdf(
             session,
@@ -275,7 +321,12 @@ async def _convert_pdf(
         )
 
     return await _normalise_to_markdown(
-        session, cv_version, text, llm_provider=llm_provider, analysis_id=analysis_id
+        session,
+        cv_version,
+        text,
+        system_prompt=NORMALISATION_SYSTEM_PROMPT,
+        llm_provider=llm_provider,
+        analysis_id=analysis_id,
     )
 
 
@@ -292,8 +343,41 @@ async def _convert_docx(
     raises CVConversionError (via _mark_failed) after recording the failure."""
     html = _extract_docx_html(file_bytes)
     return await _normalise_to_markdown(
-        session, cv_version, html, llm_provider=llm_provider, analysis_id=analysis_id
+        session,
+        cv_version,
+        html,
+        system_prompt=NORMALISATION_SYSTEM_PROMPT,
+        llm_provider=llm_provider,
+        analysis_id=analysis_id,
     )
+
+
+async def _fail_on_identity_leaks(
+    session: AsyncSession,
+    cv_version: CVVersion,
+    markdown: str,
+    *,
+    analysis_id: str | None,
+) -> None:
+    """Redaction's deterministic safety net (docs/adr/0022): fails Conversion
+    if the LLM left an email, a phone number, or the CVVersion owner's own
+    account name/email in `markdown`. The error names only the categories, never
+    the matched text, so `conversionError` cannot re-leak it."""
+    owner = await session.get(User, cv_version.userId)
+    leaks = find_identity_leaks(
+        markdown,
+        user_name=owner.name if owner else None,
+        user_email=owner.email if owner else None,
+    )
+    if leaks:
+        await _mark_failed(
+            session,
+            cv_version,
+            "CV Conversion failed Redaction: identity data still present in the "
+            f"Markdown rendition ({', '.join(leaks)}) "
+            f"(cv_version_id={cv_version.id})",
+            analysis_id,
+        )
 
 
 async def _normalise_to_markdown(
@@ -301,14 +385,19 @@ async def _normalise_to_markdown(
     cv_version: CVVersion,
     source_text: str,
     *,
+    system_prompt: str,
     llm_provider: LLMProvider | None,
     analysis_id: str | None,
 ) -> str:
-    """Shared by the PDF and DOCX branches: truncate the mechanically-extracted
-    text to MAX_TEXT_CHARS and run one LLM normalisation pass, retrying up to
-    MAX_ATTEMPTS on an empty/erroring response. Returns the stripped Markdown,
-    or raises CVConversionError (via _mark_failed) with no fallback to the raw
-    text."""
+    """Shared by every format's single Redaction-carrying LLM pass: truncate
+    `source_text` (mechanically-extracted PDF/DOCX text, or an MD/TXT upload's
+    own text) to MAX_TEXT_CHARS and run one LLM pass under `system_prompt`,
+    retrying up to MAX_ATTEMPTS on an empty/erroring response. Both prompts carry
+    the Redaction instructions (issues #166/#167), so the returned Markdown is
+    then run through the deterministic safety net: any leftover identity data,
+    like an exhausted retry budget, fails Conversion via _mark_failed with no
+    unredacted fallback and no retry. Returns the stripped Markdown, or raises
+    CVConversionError."""
     prompt = source_text[:MAX_TEXT_CHARS]
     provider = llm_provider or get_llm_provider()
 
@@ -316,7 +405,7 @@ async def _normalise_to_markdown(
     for _attempt in range(1, MAX_ATTEMPTS + 1):
         try:
             raw = provider.generate(
-                system=NORMALISATION_SYSTEM_PROMPT,
+                system=system_prompt,
                 prompt=prompt,
                 max_tokens=NORMALISATION_MAX_TOKENS,
             )
@@ -324,7 +413,11 @@ async def _normalise_to_markdown(
             last_error = exc
             continue
         if raw and raw.strip():
-            return raw.strip()
+            markdown = raw.strip()
+            await _fail_on_identity_leaks(
+                session, cv_version, markdown, analysis_id=analysis_id
+            )
+            return markdown
         last_error = ValueError("empty LLM response")
 
     await _mark_failed(

@@ -880,6 +880,7 @@
       "markdownHeading": "Rendu Markdown",
       "markdownLoading": "Chargement du rendu Markdown",
       "markdownError": "Impossible de charger le rendu Markdown. Veuillez réessayer.",
+      "markdownRedactionNote": "Les informations d'identification (nom, coordonnées, adresse, etc.) ont été retirées de ce rendu pour protéger votre vie privée. Votre fichier d'origine reste inchangé.",
       "markdownEmpty": "Cette version de CV n'a pas encore été convertie en Markdown.",
       "convert": "Convertir en Markdown",
       "reconvert": "Reconvertir",

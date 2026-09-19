@@ -23,6 +23,7 @@ from py_db.models import (
     Generateddocumentstatus,
     Generateddocumenttype,
     JobOffer,
+    User,
 )
 from py_db.session import make_engine, make_session_factory
 from py_db.structured_logging import get_logger
@@ -56,6 +57,25 @@ def _offer_language(job_offer: JobOffer, *, fallback: str) -> str:
     return data.get("language") or fallback
 
 
+def _with_contact_block(markdown: str, user: User | None) -> str:
+    """Appends the account's `User.name`/`User.email` to a generated
+    document's Markdown (docs/adr/0022). The base CVVersion's rendition is
+    redacted, so neither writer agent ever sees — let alone reproduces — the
+    candidate's contact details; they come from the User row, outside the LLM
+    call, so they are never fabricated. A null name or email is left out
+    rather than rendered as a blank line; with neither, `markdown` is
+    returned unchanged.
+    """
+    lines = []
+    if user is not None and user.name:
+        lines.append(f"**{user.name}**")
+    if user is not None and user.email:
+        lines.append(user.email)
+    if not lines:
+        return markdown
+    return f"{markdown.rstrip()}\n\n" + "\n".join(lines)
+
+
 async def run_generation_pipeline(
     session: AsyncSession,
     generated_document_id: str,
@@ -68,7 +88,10 @@ async def run_generation_pipeline(
     JobOffer, and base CVVersion, runs the matching generation agent
     (CoverLetterWriterAgent for COVER_LETTER, CVTailoringAgent for
     TAILORED_CV), and writes the resulting Markdown to Postgres (canonical)
-    and S3 (mirror), transitioning status PENDING -> GENERATING -> READY.
+    and S3 (mirror), transitioning status PENDING -> GENERATING -> READY. The
+    CVVersion owner's `User.name`/`User.email` are appended to the agent's
+    output first (docs/adr/0022), since the redacted base CV no longer
+    carries them.
 
     On any failure the row is left in a terminal FAILED status with a
     non-empty errorMessage and no partial markdownContent. Raises
@@ -136,6 +159,8 @@ async def run_generation_pipeline(
         document.updatedAt = _now()
         await session.commit()
         raise GenerationPipelineError(message) from exc
+
+    markdown = _with_contact_block(markdown, await session.get(User, cv_version.userId))
 
     s3 = s3_client or make_s3_client()
     key = generated_document_key(

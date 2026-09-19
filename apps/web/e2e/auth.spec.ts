@@ -12,7 +12,9 @@ test("an unauthenticated protected route redirects to sign-in carrying the retur
   await page.goto("/analyses");
 
   await expect(page).toHaveURL("/sign-in?callbackUrl=%2Fanalyses");
-  await expect(page.getByText("Sign in", { exact: true })).toBeVisible();
+  await expect(
+    page.locator('[data-slot="card-title"]').getByText("Sign in", { exact: true }),
+  ).toBeVisible();
 });
 
 test("a session cookie lets the protected route through and stays there", async ({

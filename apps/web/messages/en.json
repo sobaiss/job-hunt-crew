@@ -880,6 +880,7 @@
       "markdownHeading": "Markdown rendition",
       "markdownLoading": "Loading the Markdown rendition",
       "markdownError": "We couldn't load the Markdown rendition. Please try again.",
+      "markdownRedactionNote": "Identifying information (name, contact details, address and similar) was removed from this rendition to protect your privacy. Your original file is unchanged.",
       "markdownEmpty": "This CV version hasn't been converted to Markdown yet.",
       "convert": "Convert to Markdown",
       "reconvert": "Reconvert",

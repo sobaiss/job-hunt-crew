@@ -60,9 +60,14 @@ function CvMarkdownPreview({ id }: { id: string }) {
       )}
       {markdown.data &&
         (markdown.data.markdownContent ? (
-          <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap rounded bg-muted/30 p-3 text-xs">
-            {markdown.data.markdownContent}
-          </pre>
+          <>
+            <p className="mt-2 text-xs text-muted">
+              {t("list.markdownRedactionNote")}
+            </p>
+            <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap rounded bg-muted/30 p-3 text-xs">
+              {markdown.data.markdownContent}
+            </pre>
+          </>
         ) : (
           <p className="mt-2 text-sm text-muted">{t("list.markdownEmpty")}</p>
         ))}
