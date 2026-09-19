@@ -13,6 +13,8 @@ import {
   Gauge,
   LayoutDashboard,
   ListChecks,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   Settings,
   ShieldCheck,
@@ -28,8 +30,71 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LocaleSwitch } from "@/components/locale-switch";
+
+// Persisted across reloads the same way ThemeToggle's choice is (a browser
+// storage key): only the desktop AppSidebar can be collapsed, so this key is
+// read/written from there alone. Read via `useSyncExternalStore` rather than
+// an effect + setState, since `localStorage` is external mutable state React
+// doesn't own — that also gives a safe `false` snapshot during SSR.
+const SIDEBAR_COLLAPSED_KEY = "sidebar-collapsed";
+const sidebarCollapsedListeners = new Set<() => void>();
+
+function subscribeSidebarCollapsed(onChange: () => void) {
+  sidebarCollapsedListeners.add(onChange);
+  return () => sidebarCollapsedListeners.delete(onChange);
+}
+
+function getSidebarCollapsedSnapshot() {
+  return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true";
+}
+
+function getSidebarCollapsedServerSnapshot() {
+  return false;
+}
+
+function useSidebarCollapsed() {
+  const collapsed = React.useSyncExternalStore(
+    subscribeSidebarCollapsed,
+    getSidebarCollapsedSnapshot,
+    getSidebarCollapsedServerSnapshot,
+  );
+
+  const toggle = React.useCallback(() => {
+    localStorage.setItem(
+      SIDEBAR_COLLAPSED_KEY,
+      String(!getSidebarCollapsedSnapshot()),
+    );
+    sidebarCollapsedListeners.forEach((listener) => listener());
+  }, []);
+
+  return [collapsed, toggle] as const;
+}
+
+/** Wraps `children` in a Tooltip showing `label`, but only when `active` — used to explain an icon-only control once its text label has been hidden. */
+function MaybeTooltip({
+  active,
+  label,
+  children,
+}: {
+  active: boolean;
+  label: string;
+  children: React.ReactNode;
+}) {
+  if (!active) return <>{children}</>;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      <TooltipContent side="right">{label}</TooltipContent>
+    </Tooltip>
+  );
+}
 
 // The primary areas a Candidate reaches from anywhere. "New analysis" is a
 // primary-action button, not a nav row, so it is not in this list. Settings is
@@ -86,14 +151,23 @@ function initials(name?: string | null, email?: string | null): string {
   return source.slice(0, 2).toUpperCase();
 }
 
-/** The brand wordmark + mark, linking home. */
-function SidebarBrand({ onNavigate }: { onNavigate?: () => void }) {
+/** The brand wordmark + mark, linking home. Icon-only when `collapsed`. */
+function SidebarBrand({
+  onNavigate,
+  collapsed,
+}: {
+  onNavigate?: () => void;
+  collapsed?: boolean;
+}) {
   const tApp = useTranslations("app");
   return (
     <Link
       href="/"
       onClick={onNavigate}
-      className="flex items-center gap-2 px-2 py-1"
+      className={cn(
+        "flex items-center gap-2 px-2 py-1",
+        collapsed && "justify-center",
+      )}
     >
       <svg
         aria-hidden="true"
@@ -125,15 +199,31 @@ function SidebarBrand({ onNavigate }: { onNavigate?: () => void }) {
           strokeLinecap="round"
         />
       </svg>
-      <span className="font-serif text-base font-semibold tracking-tight">
+      <span
+        className={cn(
+          "font-serif text-base font-semibold tracking-tight",
+          collapsed && "sr-only",
+        )}
+      >
         {tApp("name")}
       </span>
     </Link>
   );
 }
 
-/** The nav rows, with the current route flagged `aria-current`. */
-function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
+/**
+ * The nav rows, with the current route flagged `aria-current`. When
+ * `collapsed`, each row shows only its icon (the label stays in the DOM as
+ * `sr-only` so the link's accessible name is unchanged) and gains a Tooltip
+ * so the label is still reachable on hover or focus.
+ */
+function SidebarNav({
+  onNavigate,
+  collapsed,
+}: {
+  onNavigate?: () => void;
+  collapsed?: boolean;
+}) {
   const t = useTranslations("nav");
   const pathname = usePathname();
   const { data: session } = useSession();
@@ -148,22 +238,25 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
     <nav className="flex flex-col gap-0.5">
       {items.map(({ href, key, Icon }) => {
         const active = isNavActive(pathname, href);
+        const label = t(key);
         return (
-          <Link
-            key={href}
-            href={href}
-            onClick={onNavigate}
-            aria-current={active ? "page" : undefined}
-            className={cn(
-              "flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
-              active
-                ? "bg-background font-medium text-foreground shadow-xs ring-1 ring-border"
-                : "text-muted hover:bg-background/60 hover:text-foreground",
-            )}
-          >
-            <Icon className="size-4 flex-none" aria-hidden="true" />
-            {t(key)}
-          </Link>
+          <MaybeTooltip key={href} active={!!collapsed} label={label}>
+            <Link
+              href={href}
+              onClick={onNavigate}
+              aria-current={active ? "page" : undefined}
+              className={cn(
+                "flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
+                collapsed && "justify-center",
+                active
+                  ? "bg-background font-medium text-foreground shadow-xs ring-1 ring-border"
+                  : "text-muted hover:bg-background/60 hover:text-foreground",
+              )}
+            >
+              <Icon className="size-4 flex-none" aria-hidden="true" />
+              <span className={cn(collapsed && "sr-only")}>{label}</span>
+            </Link>
+          </MaybeTooltip>
         );
       })}
     </nav>
@@ -173,8 +266,10 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
 /**
  * The account menu pinned at the bottom of the Sidebar: the signed-in
  * Candidate's identity, the theme control, the language control, and sign out.
+ * When `collapsed`, only the avatar shows (the trigger's `aria-label` already
+ * names it, so no `sr-only` text is needed) and a Tooltip surfaces the name.
  */
-function SidebarAccountMenu() {
+function SidebarAccountMenu({ collapsed }: { collapsed?: boolean }) {
   const tMenu = useTranslations("userMenu");
   const { data: session } = useSession();
   const user = session?.user;
@@ -182,26 +277,39 @@ function SidebarAccountMenu() {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          aria-label={tMenu("label")}
-          className="flex w-full items-center gap-3 rounded-md border-t border-border px-2 pt-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <span className="flex size-8 flex-none items-center justify-center rounded-full bg-accent text-xs font-semibold text-white">
-            {initials(user?.name, user?.email)}
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium">{name}</span>
-            {user?.email && (
-              <span className="block truncate text-xs text-muted">
-                {user.email}
-              </span>
+      <MaybeTooltip active={!!collapsed && !!name} label={name}>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label={tMenu("label")}
+            className={cn(
+              "flex w-full items-center gap-3 rounded-md border-t border-border px-2 pt-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              collapsed && "justify-center",
             )}
-          </span>
-          <ChevronsUpDown className="size-4 flex-none text-muted" aria-hidden="true" />
-        </button>
-      </DropdownMenuTrigger>
+          >
+            <span className="flex size-8 flex-none items-center justify-center rounded-full bg-accent text-xs font-semibold text-white">
+              {initials(user?.name, user?.email)}
+            </span>
+            <span className={cn("min-w-0 flex-1", collapsed && "hidden")}>
+              <span className="block truncate text-sm font-medium">
+                {name}
+              </span>
+              {user?.email && (
+                <span className="block truncate text-xs text-muted">
+                  {user.email}
+                </span>
+              )}
+            </span>
+            <ChevronsUpDown
+              className={cn(
+                "size-4 flex-none text-muted",
+                collapsed && "hidden",
+              )}
+              aria-hidden="true"
+            />
+          </button>
+        </DropdownMenuTrigger>
+      </MaybeTooltip>
       <DropdownMenuContent align="start" side="top" className="min-w-56">
         {name && (
           <>
@@ -227,29 +335,70 @@ function SidebarAccountMenu() {
 }
 
 /**
- * The Sidebar body: brand, the "New analysis" primary action, the nav, and the
- * account menu. Shared by the persistent {@link AppSidebar} and the mobile
- * drawer rendered from `AppTopbar`. `onNavigate` lets the drawer close itself
- * when a link inside it is followed.
+ * The Sidebar body: brand (with the collapse toggle when `onToggleCollapsed`
+ * is given), the "New analysis" primary action, the nav, and the account
+ * menu. Shared by the persistent {@link AppSidebar} and the mobile drawer
+ * rendered from `AppTopbar` — the drawer never collapses, so it renders this
+ * with `collapsed`/`onToggleCollapsed` left unset. `onNavigate` lets the
+ * drawer close itself when a link inside it is followed.
  */
-export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
+export function SidebarContent({
+  onNavigate,
+  collapsed,
+  onToggleCollapsed,
+}: {
+  onNavigate?: () => void;
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
+}) {
   const t = useTranslations("nav");
   const { data: session } = useSession();
   const isAdministrator = session?.user?.role === "ADMINISTRATOR";
   return (
     <div className="flex h-full w-full flex-col gap-5">
-      <SidebarBrand onNavigate={onNavigate} />
+      <div className={cn("flex items-center gap-2", collapsed && "flex-col")}>
+        <SidebarBrand onNavigate={onNavigate} collapsed={collapsed} />
+        {onToggleCollapsed && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={onToggleCollapsed}
+                aria-label={
+                  collapsed ? t("expandSidebar") : t("collapseSidebar")
+                }
+                className={cn(!collapsed && "ml-auto flex-none")}
+              >
+                {collapsed ? (
+                  <PanelLeftOpen className="size-4" aria-hidden="true" />
+                ) : (
+                  <PanelLeftClose className="size-4" aria-hidden="true" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">
+              {collapsed ? t("expandSidebar") : t("collapseSidebar")}
+            </TooltipContent>
+          </Tooltip>
+        )}
+      </div>
       {!isAdministrator && (
-        <Button asChild className="w-full">
-          <Link href="/analyses/new" onClick={onNavigate}>
-            <Plus className="size-4" aria-hidden="true" />
-            {t("newAnalysis")}
-          </Link>
-        </Button>
+        <MaybeTooltip active={!!collapsed} label={t("newAnalysis")}>
+          <Button asChild className="w-full">
+            <Link href="/analyses/new" onClick={onNavigate}>
+              <Plus className="size-4" aria-hidden="true" />
+              <span className={cn(collapsed && "sr-only")}>
+                {t("newAnalysis")}
+              </span>
+            </Link>
+          </Button>
+        </MaybeTooltip>
       )}
-      <SidebarNav onNavigate={onNavigate} />
+      <SidebarNav onNavigate={onNavigate} collapsed={collapsed} />
       <div className="mt-auto">
-        <SidebarAccountMenu />
+        <SidebarAccountMenu collapsed={collapsed} />
       </div>
     </div>
   );
@@ -258,12 +407,19 @@ export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 /**
  * The persistent left Sidebar framing every signed-in page. Hidden below the
  * `md` breakpoint, where the same content is reached through the drawer in
- * `AppTopbar`. Mounted by `app/(app)/layout.tsx`.
+ * `AppTopbar`. Mounted by `app/(app)/layout.tsx`. Can be collapsed to an
+ * icon-only rail; the choice is remembered in `localStorage` across reloads.
  */
 export function AppSidebar() {
+  const [collapsed, toggleCollapsed] = useSidebarCollapsed();
   return (
-    <aside className="hidden w-64 flex-none border-r border-border bg-panel p-4 md:flex md:flex-col">
-      <SidebarContent />
+    <aside
+      className={cn(
+        "hidden flex-none border-r border-border bg-panel md:flex md:flex-col",
+        collapsed ? "w-18 p-3" : "w-64 p-4",
+      )}
+    >
+      <SidebarContent collapsed={collapsed} onToggleCollapsed={toggleCollapsed} />
     </aside>
   );
 }

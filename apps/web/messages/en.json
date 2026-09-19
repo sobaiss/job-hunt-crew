@@ -101,7 +101,9 @@
     "settings": "Settings",
     "admin": "Admin",
     "newAnalysis": "New analysis",
-    "openMenu": "Open menu"
+    "openMenu": "Open menu",
+    "collapseSidebar": "Collapse sidebar",
+    "expandSidebar": "Expand sidebar"
   },
   "dashboard": {
     "title": "Overview",

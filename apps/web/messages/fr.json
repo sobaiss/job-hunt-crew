@@ -101,7 +101,9 @@
     "settings": "Paramètres",
     "admin": "Administration",
     "newAnalysis": "Nouvelle analyse",
-    "openMenu": "Ouvrir le menu"
+    "openMenu": "Ouvrir le menu",
+    "collapseSidebar": "Réduire la barre latérale",
+    "expandSidebar": "Agrandir la barre latérale"
   },
   "dashboard": {
     "title": "Aperçu",
