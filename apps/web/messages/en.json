@@ -170,10 +170,6 @@
   },
   "admin": {
     "title": "Admin",
-    "description": "Reachable only by an Administrator.",
-    "loading": "Loading…",
-    "signedInAs": "Signed in as {userId} ({plan})",
-    "error": "Couldn't confirm admin access.",
     "dashboard": {
       "loading": "Loading…",
       "loadError": "Couldn't load global stats.",
@@ -400,7 +396,7 @@
       "label": "Admin sections",
       "dashboard": "Dashboard",
       "users": "Users",
-      "planDefaults": "Plan defaults",
+      "planDefaults": "Quotas",
       "analyses": "Analyses",
       "scouts": "Scouts",
       "cvVersions": "CV versions"

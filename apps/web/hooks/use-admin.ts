@@ -17,17 +17,6 @@ import {
   type AdminScoutsTableState,
 } from "@/lib/admin-scouts-filters";
 
-// Backs the bare Admin area landing page (issue #138) — confirms the
-// session's Plan actually cleared services/api's `require_admin` end to end.
-export type AdminMe = { userId: string; plan: string };
-
-export function useAdminMe() {
-  return useQuery({
-    queryKey: ["admin-me"],
-    queryFn: () => bff.get<AdminMe>("/admin/me"),
-  });
-}
-
 // Backs the admin per-user detail screen (issue #139): a target User's
 // Plan, Effective quota, current usage, and which QuotaKinds carry an
 // explicit QuotaOverride, keyed by QuotaKind (e.g. "ANALYSES_DAILY").

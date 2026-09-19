@@ -11,8 +11,8 @@ import {
   SUBNAV_LINK_CLASS,
 } from "@/components/matching-subnav";
 
-// The six screens of the Admin area, in tab order. "Plan defaults" lives at
-// /admin/quotas (issue #146).
+// The six screens of the Admin area, in tab order. The Plan defaults page
+// lives at /admin/quotas (issue #146) and is tabbed here as "Quotas".
 export const ADMIN_TABS = [
   { href: "/admin", key: "dashboard" },
   { href: "/admin/users", key: "users" },

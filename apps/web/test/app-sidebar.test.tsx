@@ -106,6 +106,30 @@ describe("AppSidebar", () => {
     expect(screen.queryByRole("link", { name: "Admin" })).not.toBeInTheDocument();
   });
 
+  it("hides the per-Candidate nav rows from an Administrator, keeping Settings", () => {
+    renderWithProviders(<AppSidebar />, { session: ADMIN_SESSION });
+
+    expect(screen.queryByRole("link", { name: "Dashboard" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Analyses" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Agents" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Applications" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "CV versions" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Quotas" })).not.toBeInTheDocument();
+
+    expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+  });
+
+  it("hides the New analysis primary action from an Administrator", () => {
+    renderWithProviders(<AppSidebar />, { session: ADMIN_SESSION });
+
+    expect(
+      screen.queryByRole("link", { name: "New analysis" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("exposes a New analysis primary action pointing at the single-offer flow", () => {
     renderWithProviders(<AppSidebar />, { session: SESSION });
 

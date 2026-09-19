@@ -170,10 +170,6 @@
   },
   "admin": {
     "title": "Administration",
-    "description": "Accessible uniquement par un administrateur.",
-    "loading": "Chargement…",
-    "signedInAs": "Connecté en tant que {userId} ({plan})",
-    "error": "Impossible de confirmer l'accès administrateur.",
     "dashboard": {
       "loading": "Chargement…",
       "loadError": "Impossible de charger les statistiques globales.",
@@ -400,7 +396,7 @@
       "label": "Sections d'administration",
       "dashboard": "Tableau de bord",
       "users": "Utilisateurs",
-      "planDefaults": "Valeurs par défaut des forfaits",
+      "planDefaults": "Quotas",
       "analyses": "Analyses",
       "scouts": "Scouts",
       "cvVersions": "Versions de CV"

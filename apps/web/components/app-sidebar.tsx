@@ -49,6 +49,22 @@ export const NAV_ITEMS = [
 // NAV_ITEMS) never names an Admin route for a non-Administrator.
 const ADMIN_NAV_ITEM = { href: "/admin", key: "admin", Icon: ShieldCheck } as const;
 
+// An Administrator has no CV, Scout, Analysis, or Application of their own —
+// that data only exists per-Candidate — so these rows (and the Dashboard,
+// which summarizes it) are meaningless for that role and hidden from its
+// Sidebar. Dashboard/Analyses/Agents/CV versions/Quotas each have an
+// Admin-area equivalent reached via ADMIN_NAV_ITEM instead; Applications has
+// none, so that route is fully gone for an Administrator (404 on direct
+// visit, see app/(app)/applications/layout.tsx) rather than redirected.
+const ADMIN_HIDDEN_NAV_KEYS = new Set<(typeof NAV_ITEMS)[number]["key"]>([
+  "dashboard",
+  "analyses",
+  "agents",
+  "cvVersions",
+  "quotas",
+  "applications",
+]);
+
 /**
  * A nav item is active on an exact path match or when the current route is
  * nested under it. `"/"` is special-cased to an exact match only — otherwise
@@ -123,7 +139,10 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const { data: session } = useSession();
   const items =
     session?.user?.role === "ADMINISTRATOR"
-      ? [...NAV_ITEMS, ADMIN_NAV_ITEM]
+      ? [
+          ...NAV_ITEMS.filter((item) => !ADMIN_HIDDEN_NAV_KEYS.has(item.key)),
+          ADMIN_NAV_ITEM,
+        ]
       : NAV_ITEMS;
   return (
     <nav className="flex flex-col gap-0.5">
@@ -215,15 +234,19 @@ function SidebarAccountMenu() {
  */
 export function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const t = useTranslations("nav");
+  const { data: session } = useSession();
+  const isAdministrator = session?.user?.role === "ADMINISTRATOR";
   return (
     <div className="flex h-full w-full flex-col gap-5">
       <SidebarBrand onNavigate={onNavigate} />
-      <Button asChild className="w-full">
-        <Link href="/analyses/new" onClick={onNavigate}>
-          <Plus className="size-4" aria-hidden="true" />
-          {t("newAnalysis")}
-        </Link>
-      </Button>
+      {!isAdministrator && (
+        <Button asChild className="w-full">
+          <Link href="/analyses/new" onClick={onNavigate}>
+            <Plus className="size-4" aria-hidden="true" />
+            {t("newAnalysis")}
+          </Link>
+        </Button>
+      )}
       <SidebarNav onNavigate={onNavigate} />
       <div className="mt-auto">
         <SidebarAccountMenu />

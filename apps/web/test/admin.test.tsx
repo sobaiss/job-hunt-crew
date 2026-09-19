@@ -87,7 +87,7 @@ describe("Admin layout gate", () => {
     expect(hrefs).toEqual({
       Dashboard: "/admin",
       Users: "/admin/users",
-      "Plan defaults": "/admin/quotas",
+      Quotas: "/admin/quotas",
       Analyses: "/admin/analyses",
       Scouts: "/admin/scouts",
       "CV versions": "/admin/cv-versions",
@@ -140,24 +140,6 @@ describe("AdminPage", () => {
     server.use(http.get("/api/admin/stats", () => HttpResponse.json(statsResponse())));
   });
 
-  it("confirms admin access via GET /api/admin/me", async () => {
-    renderWithProviders(<AdminPage />, { session: ADMIN_SESSION });
-
-    expect(
-      await screen.findByText("Signed in as admin-1 (PREMIUM)"),
-    ).toBeInTheDocument();
-  });
-
-  it("shows an error state when the admin check fails", async () => {
-    server.use(
-      http.get("/api/admin/me", () => HttpResponse.json({ error: "Forbidden" }, { status: 403 })),
-    );
-
-    renderWithProviders(<AdminPage />, { session: ADMIN_SESSION });
-
-    expect(await screen.findByText("Couldn't confirm admin access.")).toBeInTheDocument();
-  });
-
   it("renders every dashboard figure, the new-signups series, and the Plan breakdown", async () => {
     renderWithProviders(<AdminPage />, { session: ADMIN_SESSION });
 
@@ -167,17 +149,6 @@ describe("AdminPage", () => {
     expect(screen.getByText("Users by Plan")).toBeInTheDocument();
     expect(screen.getByText("FREE")).toBeInTheDocument();
     expect(screen.getByText("STANDARD")).toBeInTheDocument();
-  });
-
-  it("links to the Admin users table and the Plan defaults page", async () => {
-    renderWithProviders(<AdminPage />, { session: ADMIN_SESSION });
-
-    await screen.findByText("3");
-    expect(screen.getByRole("link", { name: "Reporting" })).toHaveAttribute("href", "/admin/users");
-    expect(screen.getByRole("link", { name: "Plan defaults" })).toHaveAttribute(
-      "href",
-      "/admin/quotas",
-    );
   });
 
   it("re-fetches stats with the selected period, filtering only the new-signups series server-side", async () => {

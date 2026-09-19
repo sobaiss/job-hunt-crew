@@ -148,14 +148,14 @@ describe("Landing route (auth gate)", () => {
     const element = await LandingRoute();
 
     expect(redirect).not.toHaveBeenCalled();
-    expect(element.type).toBe(AppShell);
+    expect(element?.type).toBe(AppShell);
   });
 
   it("renders the marketing page for a signed-out visitor", async () => {
     auth.mockResolvedValue(null);
 
     const element = await LandingRoute();
-    renderWithProviders(element);
+    renderWithProviders(element ?? <></>);
 
     expect(redirect).not.toHaveBeenCalled();
     expect(
@@ -164,5 +164,22 @@ describe("Landing route (auth gate)", () => {
         name: /match your cv against real job offers/i,
       }),
     ).toBeInTheDocument();
+  });
+
+  it("redirects an Administrator to the Admin dashboard instead of the Candidate Dashboard", async () => {
+    const session: Session = {
+      expires: "2999-01-01T00:00:00.000Z",
+      user: {
+        id: "admin-1",
+        name: "Grace",
+        email: "grace@example.com",
+        role: "ADMINISTRATOR",
+      },
+    };
+    auth.mockResolvedValue(session);
+
+    await LandingRoute();
+
+    expect(redirect).toHaveBeenCalledWith("/admin");
   });
 });

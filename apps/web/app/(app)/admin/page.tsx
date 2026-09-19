@@ -1,11 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
-import { useAdminMe, useAdminStats, type AdminStatsPeriod } from "@/hooks/use-admin";
+import { useAdminStats, type AdminStatsPeriod } from "@/hooks/use-admin";
 import { Card, CardContent } from "@/components/ui/card";
 
 const PERIODS: AdminStatsPeriod[] = ["7d", "30d", "90d", "all"];
@@ -21,7 +20,6 @@ const SELECT_CLASS =
  */
 export default function AdminPage() {
   const t = useTranslations("admin");
-  const { data: me, isPending: mePending, isError: meError } = useAdminMe();
   const [period, setPeriod] = useState<AdminStatsPeriod>("all");
   const { data: stats, isPending: statsPending, isError: statsError } = useAdminStats(period);
 
@@ -39,27 +37,7 @@ export default function AdminPage() {
 
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-8">
-      <div className="flex flex-col gap-1">
-        <h1 className="font-serif text-2xl font-semibold">{t("title")}</h1>
-        <p className="text-sm text-muted">{t("description")}</p>
-      </div>
-
-      {mePending && <p className="text-sm text-muted">{t("loading")}</p>}
-      {meError && (
-        <p role="alert" className="text-sm text-destructive">
-          {t("error")}
-        </p>
-      )}
-      {me && <p className="text-sm text-muted">{t("signedInAs", { userId: me.userId, plan: me.plan })}</p>}
-
-      <div className="flex flex-wrap gap-4 text-sm">
-        <Link href="/admin/users" className="font-medium underline">
-          {t("users.title")}
-        </Link>
-        <Link href="/admin/quotas" className="font-medium underline">
-          {t("quotas.title")}
-        </Link>
-      </div>
+      <h1 className="font-serif text-2xl font-semibold">{t("title")}</h1>
 
       <div className="flex items-center gap-2">
         <label htmlFor="admin-dashboard-period" className="text-sm text-muted">
