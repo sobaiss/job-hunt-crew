@@ -40,7 +40,7 @@ SYSTEM_PROMPT = (
     "already appear in the CV Markdown — you may reorder, re-emphasise, and "
     "re-word freely, but never invent or embellish anything the CV does not "
     "contain. Lean on the matched skills to surface relevant experience that "
-    "answers the offer. Write the letter in {language}. "
+    "answers the offer. {language_instruction} "
     "Formatting: use only #, ##, and ### headings, - or * bullets, "
     "**bold** and *italic* emphasis, and --- horizontal rules — this is the "
     "exact Markdown subset the renderer supports. Do not use tables, "
@@ -49,6 +49,17 @@ SYSTEM_PROMPT = (
     "Respond with ONLY the cover letter body as Markdown prose — no JSON, no "
     "commentary, no markdown code fences."
 )
+
+
+def _language_instruction(language: str | None) -> str:
+    # A caller-supplied language always wins. Otherwise, do NOT hardcode a
+    # default (previously "en"): forcing an English instruction against an
+    # all-French CV/offer made the local dev model (qwen3.5) degenerate into
+    # dumping the raw CV instead of writing a letter — see
+    # generation_pipeline._offer_language for where this is decided.
+    if language:
+        return f"Write the letter in {language}."
+    return "Write the letter in the same language as the CV and job offer below."
 
 
 class CoverLetterWriterError(Exception):
@@ -61,7 +72,7 @@ def run_cover_letter_writer(
     job_offer_structured_data: dict,
     matched_skills: list,
     missing_skills: list,
-    language: str = "en",
+    language: str | None = None,
     llm_provider: LLMProvider | None = None,
 ) -> str:
     """Runs the CoverLetterWriterAgent, retrying up to MAX_ATTEMPTS on an
@@ -69,7 +80,7 @@ def run_cover_letter_writer(
     fails.
     """
     provider = llm_provider or get_llm_provider()
-    system = SYSTEM_PROMPT.format(language=language)
+    system = SYSTEM_PROMPT.format(language_instruction=_language_instruction(language))
     prompt = json.dumps(
         {
             "cv_markdown": cv_markdown,

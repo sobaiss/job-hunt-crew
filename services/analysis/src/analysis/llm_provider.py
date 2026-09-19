@@ -163,22 +163,19 @@ class OllamaProvider(LLMProvider):
         temperature: float | None = None,
     ) -> str:
         optional = {"max_tokens": max_tokens} if max_tokens is not None else {}
-        # Every caller's prompt asks for "ONLY a single JSON object", but
-        # qwen3.5 (the dev default) will occasionally emit a raw quote or
-        # newline inside a string value, breaking `json.loads` with e.g.
-        # "Expecting ',' delimiter". Plain `json_object` mode only constrains
-        # decoding to syntactically valid JSON, not schema conformance, so it
-        # still lets through JSON that's missing a required field (e.g. an
-        # enum like `priority`) or nested inside an otherwise-valid object —
-        # the failure mode this doesn't cover. When a caller passes
-        # `response_schema` (its result Pydantic model's
+        # When a caller passes `response_schema` (its result Pydantic model's
         # `.model_json_schema()`), `json_schema` mode grammar-constrains
-        # decoding to that schema instead, closing both error classes at the
-        # source in most cases; callers with no JSON result shape (CV
-        # conversion/tailoring, cover letters) fall back to the older
-        # `json_object` behavior.
-        response_format = (
-            {
+        # decoding to that schema, closing the failure mode where qwen3.5
+        # (the dev default) emits a raw quote/newline inside a string value
+        # (breaking `json.loads`) or valid-but-incomplete JSON missing a
+        # required field. Callers with no JSON result shape (CV
+        # conversion/tailoring, cover letters) get no `response_format` at
+        # all: forcing `json_object` mode here previously fought their own
+        # prompt's "respond with ONLY prose, no JSON" instruction, and under
+        # that conflict qwen3.5 was observed producing hybrid CV+letter
+        # output with undecoded `\uXXXX` escapes leaking through.
+        if response_schema is not None:
+            optional["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {
                     "name": "response",
@@ -186,9 +183,6 @@ class OllamaProvider(LLMProvider):
                     "strict": True,
                 },
             }
-            if response_schema is not None
-            else {"type": "json_object"}
-        )
         response = self.client.chat.completions.create(
             model=self.model,
             messages=[
@@ -218,7 +212,6 @@ class OllamaProvider(LLMProvider):
             # OpenAI SDK param, hence extra_body — it turns thinking off so
             # `content` always carries the full answer.
             extra_body={"reasoning_effort": "none"},
-            response_format=response_format,
             **optional,
         )
         return response.choices[0].message.content

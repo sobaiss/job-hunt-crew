@@ -171,6 +171,44 @@ async def _cleanup(
     await engine.dispose()
 
 
+def test_offer_language_falls_through_to_none_not_hardcoded_english():
+    # Regression: `fallback` used to default to "en" at the call site, so
+    # every offer with no `language` in structuredData (i.e. every offer
+    # today — nothing populates it) got its cover letter/tailored CV written
+    # in English regardless of the CV/offer's actual language. Against an
+    # all-French CV/offer that mismatch made the local dev model degenerate
+    # into dumping the raw CV instead of writing prose (analysis
+    # 8132ec06-6d99-4624-8d0e-60904dfa4a19). `None` now means "let the
+    # writer agents match the CV/offer's own language" instead.
+    job_offer = JobOffer(
+        id="test-offer",
+        sourceUrl="https://example.com/jobs/test-offer",
+        sourceSite=Joboffersourcesite.OTHER,
+        extractionStatus=Jobofferextractionstatus.READY,
+        structuredData=JOB_OFFER_STRUCTURED_DATA,
+        updatedAt=_now(),
+    )
+
+    assert (
+        generation_pipeline_module._offer_language(job_offer, fallback=None) is None
+    )
+
+
+def test_offer_language_prefers_structured_data_language_over_fallback():
+    job_offer = JobOffer(
+        id="test-offer",
+        sourceUrl="https://example.com/jobs/test-offer",
+        sourceSite=Joboffersourcesite.OTHER,
+        extractionStatus=Jobofferextractionstatus.READY,
+        structuredData={**JOB_OFFER_STRUCTURED_DATA, "language": "fr"},
+        updatedAt=_now(),
+    )
+
+    assert (
+        generation_pipeline_module._offer_language(job_offer, fallback="en") == "fr"
+    )
+
+
 @pytest.mark.asyncio
 async def test_run_generation_pipeline_writes_cover_letter_markdown_and_completes():
     engine = make_engine()

@@ -127,7 +127,6 @@ def test_ollama_generate_passes_temperature_zero_and_omits_max_tokens(monkeypatc
         ],
         temperature=0,
         extra_body={"reasoning_effort": "none"},
-        response_format={"type": "json_object"},
     )
 
 
@@ -148,8 +147,53 @@ def test_ollama_generate_forwards_max_tokens_when_given(monkeypatch):
         ],
         temperature=0,
         extra_body={"reasoning_effort": "none"},
-        response_format={"type": "json_object"},
         max_tokens=8192,
+    )
+
+
+def test_ollama_generate_omits_response_format_without_schema(monkeypatch):
+    # Regression test: forcing json_object mode for prose-only callers (cover
+    # letters, CV tailoring) fought their own prompt's "respond with ONLY
+    # prose, no JSON" instruction and produced hybrid CV+letter output with
+    # undecoded `\uXXXX` escapes (analysis 8132ec06-6d99-4624-8d0e-60904dfa4a19).
+    fake_client = MagicMock()
+    fake_client.chat.completions.create.return_value = MagicMock(
+        choices=[MagicMock(message=MagicMock(content="prose reply"))]
+    )
+    provider = OllamaProvider(model="qwen2.5:7b", client=fake_client)
+
+    provider.generate(system="sys", prompt="hello")
+
+    _, kwargs = fake_client.chat.completions.create.call_args
+    assert "response_format" not in kwargs
+
+
+def test_ollama_generate_uses_json_schema_mode_when_schema_given(monkeypatch):
+    fake_client = MagicMock()
+    fake_client.chat.completions.create.return_value = MagicMock(
+        choices=[MagicMock(message=MagicMock(content="{}"))]
+    )
+    provider = OllamaProvider(model="qwen2.5:7b", client=fake_client)
+    schema = {"type": "object", "properties": {}}
+
+    provider.generate(system="sys", prompt="hello", response_schema=schema)
+
+    fake_client.chat.completions.create.assert_called_once_with(
+        model="qwen2.5:7b",
+        messages=[
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "hello"},
+        ],
+        temperature=0,
+        extra_body={"reasoning_effort": "none"},
+        response_format={
+            "type": "json_schema",
+            "json_schema": {
+                "name": "response",
+                "schema": schema,
+                "strict": True,
+            },
+        },
     )
 
 

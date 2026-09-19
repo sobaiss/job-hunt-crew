@@ -61,6 +61,27 @@ def test_run_cover_letter_writer_returns_the_provider_text():
     assert "en" in provider.last_system
 
 
+def test_run_cover_letter_writer_defaults_to_matching_cv_offer_language_not_english():
+    # Regression: this used to default to "en", which instructed the model to
+    # answer in English regardless of the CV/offer's actual language. Against
+    # an all-French CV/offer that mismatch made the local dev model degenerate
+    # into dumping the raw CV instead of writing a letter (analysis
+    # 8132ec06-6d99-4624-8d0e-60904dfa4a19).
+    provider = StubLLMProvider(["Dear Hiring Manager, ...\n\nSincerely, Jane"])
+
+    run_cover_letter_writer(
+        cv_markdown=CV_MARKDOWN,
+        job_offer_structured_data=JOB_OFFER_STRUCTURED_DATA,
+        matched_skills=MATCHED_SKILLS,
+        missing_skills=MISSING_SKILLS,
+        llm_provider=provider,
+    )
+
+    system = provider.last_system
+    assert "Write the letter in en" not in system
+    assert "same language as the CV and job offer" in system
+
+
 def test_run_cover_letter_writer_system_prompt_names_supported_markdown_constructs():
     provider = StubLLMProvider(["Dear Hiring Manager, ...\n\nSincerely, Jane"])
 

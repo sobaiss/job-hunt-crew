@@ -59,6 +59,26 @@ def test_run_cv_tailoring_returns_the_provider_text():
     assert "fr" in provider.last_system
 
 
+def test_run_cv_tailoring_defaults_to_matching_cv_offer_language_not_english():
+    # Regression: this used to default to "en", which instructed the model to
+    # answer in English regardless of the CV/offer's actual language — see
+    # test_cover_letter_writer_agent's matching test for the incident this
+    # traces back to.
+    provider = StubLLMProvider(["# Jane Doe\n\n## Skills\n\n- Python\n"])
+
+    run_cv_tailoring(
+        cv_markdown=CV_MARKDOWN,
+        job_offer_structured_data=JOB_OFFER_STRUCTURED_DATA,
+        matched_skills=MATCHED_SKILLS,
+        missing_skills=MISSING_SKILLS,
+        llm_provider=provider,
+    )
+
+    system = provider.last_system
+    assert "Write the tailored CV in en" not in system
+    assert "same language as the base CV and job offer" in system
+
+
 def test_run_cv_tailoring_system_prompt_instructs_section_type_tagging():
     provider = StubLLMProvider(["# Jane Doe\n\n## Skills\n\n- Python\n"])
 

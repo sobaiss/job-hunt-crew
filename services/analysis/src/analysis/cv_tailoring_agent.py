@@ -41,7 +41,7 @@ SYSTEM_PROMPT = (
     "employers, dates, titles, credentials, and experience that already appear "
     "in the base CV Markdown. Never invent or embellish anything absent from "
     "it. Lean on the matched skills to surface relevant experience that was "
-    "buried. Write the tailored CV in {language}. "
+    "buried. {language_instruction} "
     "After every section heading you write, on its own line immediately below "
     "the heading, add a machine-readable SectionType tag as an HTML comment: "
     "<!-- SectionType: X --> where X is exactly one of: "
@@ -58,6 +58,17 @@ SYSTEM_PROMPT = (
 )
 
 
+def _language_instruction(language: str | None) -> str:
+    # A caller-supplied language always wins. Otherwise, do NOT hardcode a
+    # default (previously "en"): forcing an English instruction against an
+    # all-French CV/offer made the local dev model (qwen3.5) degenerate into
+    # dumping the raw CV instead of tailoring it — see
+    # generation_pipeline._offer_language for where this is decided.
+    if language:
+        return f"Write the tailored CV in {language}."
+    return "Write the tailored CV in the same language as the base CV and job offer below."
+
+
 class CvTailoringError(Exception):
     pass
 
@@ -68,7 +79,7 @@ def run_cv_tailoring(
     job_offer_structured_data: dict,
     matched_skills: list,
     missing_skills: list,
-    language: str = "en",
+    language: str | None = None,
     llm_provider: LLMProvider | None = None,
 ) -> str:
     """Runs the CVTailoringAgent, retrying up to MAX_ATTEMPTS on an
@@ -76,7 +87,7 @@ def run_cv_tailoring(
     fails.
     """
     provider = llm_provider or get_llm_provider()
-    system = SYSTEM_PROMPT.format(language=language)
+    system = SYSTEM_PROMPT.format(language_instruction=_language_instruction(language))
     prompt = json.dumps(
         {
             "cv_markdown": cv_markdown,

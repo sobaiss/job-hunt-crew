@@ -47,12 +47,19 @@ def _now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-def _offer_language(job_offer: JobOffer, *, fallback: str) -> str:
+def _offer_language(job_offer: JobOffer, *, fallback: str | None) -> str | None:
     """The offer's language when its structured data carries one, else
-    `fallback` (the candidate's Locale, per issue #58's AC). Detection here is
-    a plain dict lookup, not language identification from free text — a
-    deeper implementation is deferred, same boundary as the pre-rank's
-    lexical-only similarity in slice 3 (#55)."""
+    `fallback`. Detection here is a plain dict lookup, not language
+    identification from free text — a deeper implementation is deferred,
+    same boundary as the pre-rank's lexical-only similarity in slice 3 (#55).
+    Neither `JobOffer.structuredData` nor `User`/`CVVersion` carry a language
+    anywhere today, so this always falls through to `fallback`
+    (`locale_fallback`, `None` by default) — `run_cover_letter_writer`/
+    `run_cv_tailoring` treat `None` as "match the CV/offer's own language"
+    rather than forcing one. This used to default to `"en"`, which broke
+    non-English candidates: instructing the writer to answer in English
+    against an all-French CV/offer made the local dev model (qwen3.5)
+    degenerate into dumping the raw CV instead of writing prose."""
     data = job_offer.structuredData or {}
     return data.get("language") or fallback
 
@@ -82,7 +89,7 @@ async def run_generation_pipeline(
     *,
     llm_provider: LLMProvider | None = None,
     s3_client=None,
-    locale_fallback: str = "en",
+    locale_fallback: str | None = None,
 ) -> GeneratedDocument:
     """Runs one GeneratedDocument end to end in-process: loads its Analysis,
     JobOffer, and base CVVersion, runs the matching generation agent
