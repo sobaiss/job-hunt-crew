@@ -9,7 +9,7 @@ The account record for one candidate, identified by email, keyed by the canonica
 _Avoid_: Candidate, account — "candidate" names the persona in product conversations; `User` is the row every context actually references.
 
 **Plan**:
-A usage tier — `free` | `standard` | `premium` — determining quota defaults (see PlanQuotaDefault) for whichever User holds it through their current Subscription. `free` is unlimited across every QuotaKind. Never read or written directly on User — see Subscription and Effective Plan. (`administrateur` was a fourth value that used to double as the admin-access flag; docs/adr/0015 split that into a separate field, and docs/adr/0017 later retired the value outright once Role took over admin access end to end.)
+A usage tier — `free` | `standard` | `premium` — determining quota defaults (see PlanQuotaDefault) for whichever User holds it through their current Subscription. `free`'s Subscription never expires, but its PlanQuotaDefault ceilings are the lowest of the three (docs/adr/0021) — unbounded duration and quota amount are separate axes; don't conflate them. Never read or written directly on User — see Subscription and Effective Plan. (`administrateur` was a fourth value that used to double as the admin-access flag; docs/adr/0015 split that into a separate field, and docs/adr/0017 later retired the value outright once Role took over admin access end to end.)
 _Avoid_: Profile — collides with StyleProfile, an unrelated per-CVVersion concept, despite "profile" being the word the product brief uses; Tier, Role — a separate axis from Plan (see Role, Administrator).
 
 **Subscription**:
@@ -153,7 +153,7 @@ One of the fixed set of things a Plan limits: active Scouts (concurrent count of
 _Avoid_: Agent, active agents — the Web nav label is "Agents," but the counted entity is Scout; this vocabulary never says "agent" for the same reason Scout's own entry doesn't. Resource, metric.
 
 **PlanQuotaDefault**:
-The numeric ceiling (or `null` for unlimited) a Plan sets for one QuotaKind, admin-editable without a deploy. `free`'s PlanQuotaDefault is `null` (unlimited) across every QuotaKind (docs/adr/0018).
+The numeric ceiling (or `null` for unlimited) a Plan sets for one QuotaKind, admin-editable without a deploy. `free`'s PlanQuotaDefault briefly went `null` (unlimited) across every QuotaKind as an undocumented side effect of the docs/adr/0018 migration ("Free is free"); docs/adr/0021 reinstated its original #135 seed values (2 active Scouts, 15 daily Analyses, 300 monthly Analyses, 5 daily GeneratedDocuments).
 _Avoid_: Default quota, Plan limit
 
 **QuotaOverride**:

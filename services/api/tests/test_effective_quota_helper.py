@@ -122,11 +122,11 @@ async def test_null_override_means_unlimited_even_with_a_numeric_plan_default():
 
 
 @pytest.mark.asyncio
-async def test_free_plan_default_is_unlimited_on_every_kind():
-    """docs/adr/0018: `free`'s PlanQuotaDefault became unlimited across every
-    QuotaKind in the same migration that introduced Subscription — replaces
-    the retired test that made this same assertion about the vestigial
-    `administrateur` Plan value.
+async def test_free_plan_default_matches_reinstated_ceilings():
+    """docs/adr/0021: `free`'s PlanQuotaDefault was reinstated to its
+    original #135 seed values, reversing the unlimited-on-every-kind state
+    docs/adr/0018's migration left it in ("Free is free") — an undocumented
+    side effect of that migration, not a decision of docs/adr/0018 itself.
     """
     engine = make_engine()
     session_factory = make_session_factory(engine)
@@ -138,8 +138,14 @@ async def test_free_plan_default_is_unlimited_on_every_kind():
             await session.commit()
 
         async with session_factory() as session:
+            expected = {
+                Quotakind.ACTIVE_SCOUTS: 2,
+                Quotakind.ANALYSES_DAILY: 15,
+                Quotakind.ANALYSES_MONTHLY: 300,
+                Quotakind.DOCUMENTS_DAILY: 5,
+            }
             for kind in Quotakind:
-                assert await effective_quota(session, user_id, kind) is None
+                assert await effective_quota(session, user_id, kind) == expected[kind]
     finally:
         async with session_factory() as session:
             await session.execute(delete(User).where(User.id == user_id))

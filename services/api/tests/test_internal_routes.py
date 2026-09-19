@@ -120,7 +120,9 @@ async def _load_user_role_and_effective_plan(user_id: str) -> tuple[Role, str]:
 def test_upsert_user_creates_unbounded_free_subscription_for_new_user():
     # #154: signup creates exactly one unbounded (endDate=None) FREE
     # Subscription alongside the new User, so a brand-new User's Effective
-    # Plan (docs/adr/0018) is free with unlimited quota and zero admin action.
+    # Plan (docs/adr/0018) is free with zero admin action -- unbounded in
+    # duration only, not in quota: FREE's PlanQuotaDefault ceilings still
+    # apply (docs/adr/0021).
     email = f"new-subscription-{uuid.uuid4()}@example.com"
     try:
         with TestClient(app) as client:
