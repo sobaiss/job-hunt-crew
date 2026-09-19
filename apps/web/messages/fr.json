@@ -332,6 +332,37 @@
           "next": "Suivant"
         }
       }
+    },
+    "analyses": {
+      "title": "Analyses",
+      "description": "Les Analyses de tous les candidats.",
+      "table": {
+        "loading": "Chargement…",
+        "loadError": "Impossible de charger la liste des analyses.",
+        "empty": "Aucune analyse pour l'instant.",
+        "noMatches": "Aucune analyse ne correspond à ces filtres.",
+        "candidateLabel": "Candidat",
+        "candidatePlaceholder": "Nom ou email",
+        "requestedAtFromLabel": "Demandée à partir du",
+        "requestedAtToLabel": "Demandée jusqu'au",
+        "noName": "sans nom",
+        "jobOfferFallback": "Offre d'emploi",
+        "retryAction": "Relancer l'analyse",
+        "generateDocumentsAction": "Générer les documents",
+        "columns": {
+          "candidate": "Candidat",
+          "jobOffer": "Offre",
+          "status": "Statut",
+          "requestedAt": "Demandée",
+          "actions": "Actions"
+        },
+        "pagination": {
+          "pageSizeLabel": "Lignes par page",
+          "pageInfo": "Page {page} sur {totalPages} ({total} au total)",
+          "previous": "Précédent",
+          "next": "Suivant"
+        }
+      }
     }
   },
   "quotas": {

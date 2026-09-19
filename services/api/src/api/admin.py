@@ -6,9 +6,18 @@ from typing import Literal
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from py_db.models import (
     AdminAuditEvent,
+    Analysis,
+    Analysisstatus,
+    Application,
+    Applicationstatus,
     CVVersion,
     Cvconversionstatus,
     Duration,
+    GeneratedDocument,
+    Generateddocumentstatus,
+    Generateddocumenttype,
+    IngestionJob,
+    JobOffer,
     Plan,
     PlanQuotaDefault,
     Quotakind,
@@ -37,7 +46,12 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .db import get_session
-from .sqs_client import CV_CONVERSION_QUEUE_URL, make_sqs_client
+from .sqs_client import (
+    ANALYSIS_INTAKE_QUEUE_URL,
+    CV_CONVERSION_QUEUE_URL,
+    GENERATION_INTAKE_QUEUE_URL,
+    make_sqs_client,
+)
 
 router = APIRouter(prefix="/v1/admin")
 
@@ -1004,4 +1018,267 @@ async def reconvert_cv_version(
 
     return AdminReconvertCVVersionResponse(
         cvVersionId=existing.id, conversionStatus=existing.conversionStatus.value
+    )
+
+
+class AdminAnalysisRow(BaseModel):
+    id: str
+    userId: str
+    userName: str | None
+    userEmail: str | None
+    jobOfferId: str
+    jobOfferTitle: str | None
+    jobOfferCompany: str | None
+    status: str
+    applicationStatus: str | None
+    requestedAt: datetime
+    completedAt: datetime | None
+
+
+class AdminAnalysesListResponse(BaseModel):
+    analyses: list[AdminAnalysisRow]
+    total: int
+    page: int
+    pageSize: int
+
+
+@router.get("/analyses", response_model=AdminAnalysesListResponse)
+async def list_admin_analyses(
+    user_id: str | None = Query(None, alias="userId"),
+    requested_at_from: datetime | None = Query(None, alias="requestedAtFrom"),
+    requested_at_to: datetime | None = Query(None, alias="requestedAtTo"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100, alias="pageSize"),
+    _admin_id: str = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> AdminAnalysesListResponse:
+    """Every candidate's Analysis in one cross-user, filterable, paginated
+    list (issue #161) -- filterable by `userId` and a `requestedAt` range;
+    no status filter, since Tracking status is read-only context here (the
+    candidate's own `/analyses` page owns that transition, docs/adr/0019).
+    Sorted newest first, matching the candidate-facing `list_analyses`
+    order. The owner's name/email and the linked JobOffer's title/company
+    are resolved here (mirroring `list_admin_cv_versions`) so the frontend
+    never has to do its own per-row lookup, and `applicationStatus` is
+    returned so the frontend can fold it into a Tracking-status badge the
+    same way the candidate page's `trackingStatusOf` does.
+    """
+    stmt = select(Analysis)
+    if user_id is not None:
+        stmt = stmt.where(Analysis.userId == user_id)
+    if requested_at_from is not None:
+        stmt = stmt.where(Analysis.requestedAt >= requested_at_from)
+    if requested_at_to is not None:
+        stmt = stmt.where(Analysis.requestedAt <= requested_at_to)
+    stmt = stmt.order_by(Analysis.requestedAt.desc())
+
+    total = await session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    page_stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+    rows = (await session.scalars(page_stmt)).all()
+
+    owner_ids = {row.userId for row in rows}
+    owners: dict[str, User] = {}
+    if owner_ids:
+        owner_rows = (await session.scalars(select(User).where(User.id.in_(owner_ids)))).all()
+        owners = {owner.id: owner for owner in owner_rows}
+
+    job_offer_ids = {row.jobOfferId for row in rows}
+    job_offers: dict[str, JobOffer] = {}
+    if job_offer_ids:
+        job_offer_rows = (
+            await session.scalars(select(JobOffer).where(JobOffer.id.in_(job_offer_ids)))
+        ).all()
+        job_offers = {job_offer.id: job_offer for job_offer in job_offer_rows}
+
+    analysis_ids = {row.id for row in rows}
+    applications: dict[str, Application] = {}
+    if analysis_ids:
+        application_rows = (
+            await session.scalars(
+                select(Application).where(Application.analysisId.in_(analysis_ids))
+            )
+        ).all()
+        applications = {application.analysisId: application for application in application_rows}
+
+    return AdminAnalysesListResponse(
+        analyses=[
+            AdminAnalysisRow(
+                id=row.id,
+                userId=row.userId,
+                userName=owners[row.userId].name if row.userId in owners else None,
+                userEmail=owners[row.userId].email if row.userId in owners else None,
+                jobOfferId=row.jobOfferId,
+                jobOfferTitle=job_offers[row.jobOfferId].title
+                if row.jobOfferId in job_offers
+                else None,
+                jobOfferCompany=job_offers[row.jobOfferId].company
+                if row.jobOfferId in job_offers
+                else None,
+                status=row.status.value,
+                applicationStatus=applications[row.id].status.value
+                if row.id in applications
+                else None,
+                requestedAt=row.requestedAt,
+                completedAt=row.completedAt,
+            )
+            for row in rows
+        ],
+        total=total,
+        page=page,
+        pageSize=page_size,
+    )
+
+
+class AdminRetryAnalysisResponse(BaseModel):
+    analysisId: str
+    status: str
+
+
+@router.post(
+    "/analyses/{analysis_id}/retry",
+    response_model=AdminRetryAnalysisResponse,
+    status_code=202,
+)
+async def retry_analysis(
+    analysis_id: str,
+    admin_id: str = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> AdminRetryAnalysisResponse:
+    """Admin-scoped "Relancer l'analyse" (issue #161) -- creates a brand-new
+    Analysis owned by the original candidate rather than mutating the
+    target row in place, mirroring how the candidate's own `POST
+    /v1/analyses` always creates a new row too. Ownership is derived from
+    the target Analysis itself, never from the admin caller (docs/adr/0020),
+    and no quota check applies -- an admin-triggered recovery action isn't
+    counted against the candidate's own daily/monthly analysis budget, the
+    same way `reconvert_cv_version` applies no quota either.
+    """
+    existing = await session.get(Analysis, analysis_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+
+    new_analysis = Analysis(
+        id=str(uuid.uuid4()),
+        userId=existing.userId,
+        jobOfferId=existing.jobOfferId,
+        cvVersionId=existing.cvVersionId,
+        status=Analysisstatus.PENDING,
+    )
+    session.add(new_analysis)
+
+    record_admin_audit_event(
+        session,
+        actor_user_id=admin_id,
+        target_user_id=existing.userId,
+        resource_type="Analysis",
+        resource_id=new_analysis.id,
+    )
+    await session.commit()
+
+    sqs = make_sqs_client()
+    sqs.send_message(
+        QueueUrl=ANALYSIS_INTAKE_QUEUE_URL,
+        MessageBody=json.dumps({"analysisId": new_analysis.id}),
+    )
+
+    return AdminRetryAnalysisResponse(analysisId=new_analysis.id, status=new_analysis.status.value)
+
+
+class AdminGeneratedDocumentSummary(BaseModel):
+    id: str
+    type: str
+    status: str
+
+
+class AdminGenerateDocumentsResponse(BaseModel):
+    generatedDocuments: list[AdminGeneratedDocumentSummary]
+
+
+@router.post(
+    "/analyses/{analysis_id}/generated-documents",
+    response_model=AdminGenerateDocumentsResponse,
+    status_code=202,
+)
+async def admin_create_generated_documents(
+    analysis_id: str,
+    admin_id: str = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> AdminGenerateDocumentsResponse:
+    """Admin-scoped "Générer les documents" (issue #161) -- mirrors
+    `v1.create_generated_documents` exactly (COVER_LETTER + TAILORED_CV,
+    PENDING, lazily creating the owning Application), except ownership is
+    derived from the target Analysis itself rather than a caller's own
+    userId (docs/adr/0020), no quota check applies (same rationale as
+    `retry_analysis` above), and it records one AdminAuditEvent referencing
+    the Analysis instead of mutating silently.
+    """
+    analysis = await session.get(Analysis, analysis_id)
+    if analysis is None:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    if analysis.status != Analysisstatus.COMPLETED:
+        raise HTTPException(
+            status_code=400,
+            detail="Analysis must be COMPLETED before generating documents",
+        )
+
+    existing_application = await session.scalar(
+        select(Application).where(Application.analysisId == analysis.id)
+    )
+    if existing_application is None:
+        session.add(
+            Application(
+                id=str(uuid.uuid4()),
+                userId=analysis.userId,
+                analysisId=analysis.id,
+                jobOfferId=analysis.jobOfferId,
+                cvVersionId=analysis.cvVersionId,
+                scoutId=analysis.scoutId,
+                status=Applicationstatus.DRAFT,
+                updatedAt=_now(),
+            )
+        )
+
+    scout_run_id: str | None = None
+    if analysis.ingestionJobId:
+        ingestion_job = await session.get(IngestionJob, analysis.ingestionJobId)
+        if ingestion_job is not None:
+            scout_run_id = ingestion_job.scoutRunId
+
+    now = _now()
+    documents = [
+        GeneratedDocument(
+            id=str(uuid.uuid4()),
+            type=doc_type,
+            analysisId=analysis.id,
+            jobOfferId=analysis.jobOfferId,
+            cvVersionId=analysis.cvVersionId,
+            scoutRunId=scout_run_id,
+            status=Generateddocumentstatus.PENDING,
+            updatedAt=now,
+        )
+        for doc_type in (Generateddocumenttype.COVER_LETTER, Generateddocumenttype.TAILORED_CV)
+    ]
+    session.add_all(documents)
+
+    record_admin_audit_event(
+        session,
+        actor_user_id=admin_id,
+        target_user_id=analysis.userId,
+        resource_type="Analysis",
+        resource_id=analysis.id,
+    )
+    await session.commit()
+
+    sqs = make_sqs_client()
+    for document in documents:
+        sqs.send_message(
+            QueueUrl=GENERATION_INTAKE_QUEUE_URL,
+            MessageBody=json.dumps({"generatedDocumentId": document.id}),
+        )
+
+    return AdminGenerateDocumentsResponse(
+        generatedDocuments=[
+            AdminGeneratedDocumentSummary(id=doc.id, type=doc.type.value, status=doc.status.value)
+            for doc in documents
+        ]
     )

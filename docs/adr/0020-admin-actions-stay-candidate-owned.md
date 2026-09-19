@@ -1,0 +1,7 @@
+# Admin-triggered actions stay candidate-owned; AdminAuditEvent gains resourceType/resourceId
+
+When an Administrator retries an Analysis, runs or pauses a Scout, or reconverts a CV Version on a candidate's behalf from the new admin screens (docs/adr/0019), the resulting resource (a new Analysis, a ScoutRun, a flipped conversionStatus) could have been scoped to the admin's own `userId`, the way every existing write endpoint (`POST /v1/analyses`, `POST /v1/scouts/{id}/run`, ...) scopes a new row to the caller's own `X-User-Id`. We rejected that: it would make a candidate's own Analyses/Scouts list mysteriously grow rows they never created, and would attribute pipeline work to an account that never asked for it.
+
+Admin-scoped write endpoints instead derive the owning `userId` from the resource being acted on — the Analysis, Scout, or CVVersion already has one — rather than from the caller, so results land under the candidate exactly as if they'd triggered the action themselves.
+
+That leaves the action itself untraceable on its own, so `AdminAuditEvent` (`packages/prisma/schema.prisma`) gains nullable `resourceType`/`resourceId` columns alongside its existing `field`/`oldValue`/`newValue` shape, which only fit scalar edits to a User (Role, Blocked, QuotaOverride, Plan/Subscription). The same event log — and the same Admin User-panel Audit tab — now covers both "an admin changed a field on this User" and "an admin acted on this User's Analysis/Scout/CVVersion," rather than adding a second, parallel audit mechanism.

@@ -107,7 +107,7 @@ A dedicated page/tab showing a Candidate's own Effective quota and current usage
 _Avoid_: Usage page, Dashboard (that's the overview; this is quota-specific), Plan defaults page (that's the Admin-area screen editing every Plan's PlanQuotaDefault — a different audience and content from this Candidate-facing screen)
 
 **Admin area**:
-The area reachable only by an Administrator (defined in [API](../../services/api/CONTEXT.md)'s context), gated by Role rather than Plan (docs/adr/0015, docs/adr/0017). Split across three screens, each with its own glossary entry: the Admin dashboard, the Plan defaults page, and the Admin users table plus User panel.
+The area reachable only by an Administrator (defined in [API](../../services/api/CONTEXT.md)'s context), gated by Role rather than Plan (docs/adr/0015, docs/adr/0017). Split across six screens, each with its own glossary entry: the Admin dashboard, the Plan defaults page, the Admin users table plus User panel, the Admin analyses table, the Admin scouts table, and the Admin CV versions table (docs/adr/0019) — tied together by a shared tab strip in the area's layout and a sidebar nav entry, neither of which existed before the latter three screens were added.
 _Avoid_: Admin panel (fine in prose), Dashboard (that's either the candidate overview or, in this area, specifically the Admin dashboard below)
 
 **Admin dashboard**:
@@ -125,6 +125,18 @@ _Avoid_: Users list, Admin area (that's the whole section), Analyses (a differen
 **User panel**:
 The right-hand slide-over opened by clicking an Admin users table row — replaces the former dedicated `/admin/users/[id]` page entirely. Shows the User's info (name, editable; email, not editable from here), their Role (select, inline confirm), their quotas (QuotaOverride editing and assigning a new Subscription, defined in [API](../../services/api/CONTEXT.md)'s context), and an Audit history tab listing their AdminAuditEvents. Reachable directly via a `?user=<id>` query param on `/admin/users`, the same pattern the Scout panel's `?open=<id>` uses.
 _Avoid_: Quick view, Scout panel, CV panel (different slide-overs, see their own entries), Historique (that's the Scout panel's own run-history tab; this one is Audit history)
+
+**Admin analyses table**:
+The `/admin/analyses` table listing every Analysis (defined in [API](../../services/api/CONTEXT.md)'s context) across every User — server-paginated, with a user picker (the same type-ahead the Admin users table's search backs) and a date filter on `requestedAt`. Shows Tracking status as a read-only badge; no status-transition buttons. Row-level actions only, no multi-select: Re-run ("Relancer l'analyse") and Generate documents ("Générer les documents"), docs/adr/0019, docs/adr/0020.
+_Avoid_: Analyses (that's the Candidate-facing table at `/analyses` — different filters, no status-transition actions, and results of admin actions here stay owned by the Analysis's own candidate rather than the Administrator, docs/adr/0020)
+
+**Admin scouts table**:
+The `/admin/scouts` table listing every Scout (defined in [API](../../services/api/CONTEXT.md)'s context) across every User — server-paginated, with a user picker, a `lastRunAt` filter, and a status filter (`ACTIVE`/`PAUSED`/`ARCHIVED`). Row-level actions only: Run now, Pause/Resume (bidirectional), and Archive (one-way for an Administrator — no unarchive from here). No Edit, no Create.
+_Avoid_: Agents (that's the Candidate-facing nav label for the same Scout entity, at `/scouts`, with its own broader action set including Edit and Create)
+
+**Admin CV versions table**:
+The `/admin/cv-versions` table listing every CVVersion (defined in [API](../../services/api/CONTEXT.md)'s context) across every User — server-paginated, with a user picker, a `createdAt` filter, and a status filter on `conversionStatus`. Superseded CVVersions are shown by default (no hide-toggle, unlike the Candidate-facing CV versions page) since this table exists to support auditing a candidate's full history. Row-level actions only: Reconvert. No Set default, Import, or Replace.
+_Avoid_: CV versions (that's the Candidate-facing page at `/cv-versions`, which hides superseded rows by default and has the broader action set this table deliberately withholds)
 
 **Settings**:
 The `/settings` page — theme, Locale, and read-only account details (name and email from the Session), plus sign out. No account deletion (there is no API for it).

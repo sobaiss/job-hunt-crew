@@ -8,6 +8,10 @@ import {
   adminCvVersionsTableStateToQuery,
   type AdminCvVersionsTableState,
 } from "@/lib/admin-cv-versions-filters";
+import {
+  adminAnalysesTableStateToQuery,
+  type AdminAnalysesTableState,
+} from "@/lib/admin-analyses-filters";
 
 // Backs the bare Admin area landing page (issue #138) — confirms the
 // session's Plan actually cleared services/api's `require_admin` end to end.
@@ -290,6 +294,70 @@ export function useReconvertCvVersion() {
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["admin-cv-versions"] });
+    },
+  });
+}
+
+// Backs the Admin analyses table (issue #161): every candidate's Analysis in
+// one cross-user, filterable, paginated list. `status` is the Analysis's own
+// pipeline status; `applicationStatus` (or its absence) is folded into the
+// read-only Tracking-status badge the same way the candidate-facing page's
+// `trackingStatusOf` does — no status-transition endpoint exists here.
+export type AdminAnalysisRow = {
+  id: string;
+  userId: string;
+  userName: string | null;
+  userEmail: string | null;
+  jobOfferId: string;
+  jobOfferTitle: string | null;
+  jobOfferCompany: string | null;
+  status: string;
+  applicationStatus: string | null;
+  requestedAt: string;
+  completedAt: string | null;
+};
+
+export type AdminAnalysesListResponse = {
+  analyses: AdminAnalysisRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
+export function useAdminAnalyses(state: AdminAnalysesTableState) {
+  const qs = adminAnalysesTableStateToQuery(state).toString();
+  return useQuery({
+    queryKey: ["admin-analyses", qs],
+    queryFn: () => bff.get<AdminAnalysesListResponse>(`/admin/analyses?${qs}`),
+  });
+}
+
+// Backs the "Relancer l'analyse" row action (issue #161) — creates a new
+// Analysis owned by the original candidate. A full refetch of the list picks
+// up the new row.
+export function useRetryAnalysis() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (analysisId: string) =>
+      bff.post<{ analysisId: string; status: string }>(`/admin/analyses/${analysisId}/retry`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin-analyses"] });
+    },
+  });
+}
+
+// Backs the "Générer les documents" row action (issue #161) — creates
+// GeneratedDocuments (and, lazily, the owning Application) for the target
+// Analysis, still owned by the original candidate.
+export function useGenerateAnalysisDocuments() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (analysisId: string) =>
+      bff.post<{ generatedDocuments: { id: string; type: string; status: string }[] }>(
+        `/admin/analyses/${analysisId}/generated-documents`,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin-analyses"] });
     },
   });
 }
