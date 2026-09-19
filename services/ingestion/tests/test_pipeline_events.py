@@ -57,8 +57,17 @@ JOB_OFFER_LLM_OUTPUT = json.dumps(
     }
 )
 # convert_cv's DOCX branch runs one LLM normalisation pass whose output is
-# taken as the Markdown rendition verbatim.
-CV_LLM_OUTPUT = "# Jane Doe\n\n## Skills\n\n- Python\n- AWS\n"
+# taken as the Markdown rendition verbatim. It carries no name heading, like a
+# real redacted rendition (docs/adr/0022).
+CV_LLM_OUTPUT = "## Skills\n\n- Python\n- AWS\n"
+# ...then a second LLM call classifying the StyleProfile's layout archetype and
+# per-heading SectionType (issue #96); PDF/DOCX only.
+STYLE_CLASSIFICATION_LLM_OUTPUT = json.dumps(
+    {
+        "layoutArchetype": "SINGLE_COLUMN",
+        "sections": [{"heading": "Skills", "sectionType": "SKILLS", "region": None}],
+    }
+)
 COMPARISON_LLM_OUTPUT = json.dumps(
     {
         "match_score": 82,
@@ -77,8 +86,9 @@ RECOMMENDATION_LLM_OUTPUT = json.dumps(
 
 class SequentialStubLLMProvider(LLMProvider):
     """Unlike the other tests' StubLLMProvider (which repeats its last
-    response forever), this pipeline calls the LLM 4 times across 4
-    different stages, each expecting a distinct response in order.
+    response forever), this pipeline calls the LLM 5 times across 4
+    different stages (convert makes two calls), each expecting a distinct
+    response in order.
     """
 
     def __init__(self, responses: list[str]):
@@ -184,6 +194,7 @@ async def test_full_pipeline_run_produces_a_pipeline_event_per_stage():
         [
             JOB_OFFER_LLM_OUTPUT,
             CV_LLM_OUTPUT,
+            STYLE_CLASSIFICATION_LLM_OUTPUT,
             COMPARISON_LLM_OUTPUT,
             RECOMMENDATION_LLM_OUTPUT,
         ]
