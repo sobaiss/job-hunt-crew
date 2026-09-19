@@ -204,7 +204,11 @@ async def test_ensure_cv_converted_runs_conversion_when_not_yet_converted():
         aws_secret_access_key="minioadmin",
         config=Config(s3={"addressing_style": "path"}),
     )
-    markdown = "# Jane Doe\n\n## Skills\n\n- Python\n"
+    uploaded = "# Jane Doe\n\n## Skills\n\n- Python\n"
+    # MD/TXT Conversion runs a Redaction pass (issue #167); the stub stands in
+    # for the LLM and returns the upload minus its identity heading.
+    redacted = "## Skills\n\n- Python"
+    provider = StubLLMProvider([redacted])
     async with session_factory() as session:
         cv_version = await session.get(CVVersion, cv_version_id)
         cv_version.fileType = Cvfiletype.MD
@@ -212,16 +216,16 @@ async def test_ensure_cv_converted_runs_conversion_when_not_yet_converted():
         cv_version.fileName = "cv.md"
         await session.commit()
         file_key = cv_version.fileKey
-    s3.put_object(Bucket=S3_BUCKET, Key=file_key, Body=markdown.encode("utf-8"))
+    s3.put_object(Bucket=S3_BUCKET, Key=file_key, Body=uploaded.encode("utf-8"))
 
     try:
         async with session_factory() as session:
-            await ensure_cv_converted(session, analysis_id)
+            await ensure_cv_converted(session, analysis_id, llm_provider=provider)
 
         async with session_factory() as session:
             reloaded = await session.get(CVVersion, cv_version_id)
             assert reloaded.conversionStatus == Cvconversionstatus.CONVERTED
-            assert reloaded.markdownContent == markdown
+            assert reloaded.markdownContent == redacted
     finally:
         s3.delete_object(Bucket=S3_BUCKET, Key=file_key)
         await _cleanup(

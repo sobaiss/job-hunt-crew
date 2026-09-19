@@ -1,7 +1,8 @@
 """convert_cv (issue #16): builds a CVVersion's Markdown rendition.
 
-- MD / TXT (slice 1): the uploaded file's UTF-8 text is stored verbatim as
-  CVVersion.markdownContent, with no LLM call.
+- MD / TXT (slice 1, then issue #167): the uploaded file's UTF-8 text goes
+  through one minimal-diff Redaction LLM pass, and its response is stored as
+  CVVersion.markdownContent.
 - PDF (slice 2, issue #17): `pypdf` pulls the text, then one LLM normalisation
   pass turns it into clean Markdown; a PDF with almost no extractable text
   fails immediately with a cause message and no LLM call.
@@ -49,6 +50,9 @@ NORMALISED_MARKDOWN = (
     "## Skills\n\n- Python\n- AWS\n- PostgreSQL"
 )
 
+ACCOUNT_NAME = "Jane Doe"
+ACCOUNT_EMAIL = "jane.doe@example.com"
+
 STYLE_CLASSIFICATION_JSON = (
     '{"layoutArchetype": "SINGLE_COLUMN", "sections": '
     '[{"heading": "Experience", "sectionType": "EXPERIENCE", "region": null}, '
@@ -89,6 +93,18 @@ class StubLLMProvider(LLMProvider):
     ) -> str:
         self.calls += 1
         return self._responses[min(self.calls, len(self._responses)) - 1]
+
+
+class EchoLLMProvider(StubLLMProvider):
+    """Returns the prompt it was given unchanged — an LLM that found nothing to
+    redact. Lets a test prove the uploaded text is what reaches the LLM."""
+
+    def __init__(self):
+        super().__init__([])
+
+    def generate(self, *, system: str, prompt: str, **kwargs) -> str:
+        self.calls += 1
+        return prompt
 
 
 def _build_fixture_pdf_bytes(text: str) -> bytes:
@@ -213,12 +229,23 @@ async def _cleanup(engine, session_factory, s3, file_key, user_id, cv_version_id
     await engine.dispose()
 
 
-@pytest.mark.parametrize(
-    ("file_type", "file_name"),
-    [(Cvfiletype.MD, "cv.md"), (Cvfiletype.TXT, "cv.txt")],
+TEXT_FORMATS = [(Cvfiletype.MD, "cv.md"), (Cvfiletype.TXT, "cv.txt")]
+
+# What a Markdown/plain-text upload looks like before Redaction (issue #167).
+UPLOADED_TEXT_WITH_IDENTITY = (
+    "# Jane Doe\n\n"
+    "jane.doe@example.com | 06 12 34 56 78\n\n"
+    "## Experience\n\n"
+    "- Senior Backend Engineer, Acme Corp\n"
 )
+# The same upload with only the identity spans removed — every other line kept
+# exactly as uploaded, quirky formatting included.
+REDACTED_TEXT = "## Experience\n\n- Senior Backend Engineer, Acme Corp"
+
+
+@pytest.mark.parametrize(("file_type", "file_name"), TEXT_FORMATS)
 @pytest.mark.asyncio
-async def test_convert_cv_stores_text_verbatim_without_calling_the_llm(
+async def test_convert_cv_stores_the_redaction_pass_output_for_md_and_txt(
     file_type, file_name
 ):
     engine = make_engine()
@@ -227,32 +254,39 @@ async def test_convert_cv_stores_text_verbatim_without_calling_the_llm(
     cv_version_id = f"test-cv-{uuid.uuid4()}"
     file_key = f"cvs/{user_id}/{cv_version_id}/{file_name}"
     s3 = _s3_client()
-    content = "# Jane Doe\n\n## Experience\n\n- Senior Backend Engineer, Acme Corp\n"
-    s3.put_object(Bucket=S3_BUCKET, Key=file_key, Body=content.encode("utf-8"))
+    s3.put_object(
+        Bucket=S3_BUCKET, Key=file_key, Body=UPLOADED_TEXT_WITH_IDENTITY.encode()
+    )
 
     await _make_pending_cv_version(
-        session_factory, user_id, cv_version_id, file_key, file_type, file_name
+        session_factory,
+        user_id,
+        cv_version_id,
+        file_key,
+        file_type,
+        file_name,
+        user_name=ACCOUNT_NAME,
+        user_email=ACCOUNT_EMAIL,
     )
+    provider = StubLLMProvider([REDACTED_TEXT])
 
     try:
         async with session_factory() as session:
-            cv_version = await convert_cv(
-                session, cv_version_id, llm_provider=ExplodingLLMProvider()
-            )
+            cv_version = await convert_cv(session, cv_version_id, llm_provider=provider)
             assert cv_version.conversionStatus == Cvconversionstatus.CONVERTED
-            assert cv_version.markdownContent == content
+            assert cv_version.markdownContent == REDACTED_TEXT
             assert cv_version.conversionError is None
             # An MD/TXT upload has no visual style to extract (issue #96):
             # styleStatus is NOT_APPLICABLE and styleProfile stays null, with
-            # no additional LLM call (ExplodingLLMProvider would fail the
-            # test if style extraction tried to call it).
+            # no StyleProfile LLM call — Redaction is the format's only call.
             assert cv_version.styleProfile is None
             assert cv_version.styleStatus == Cvstylestatus.NOT_APPLICABLE
+        assert provider.calls == 1
 
         async with session_factory() as session:
             reloaded = await session.get(CVVersion, cv_version_id)
             assert reloaded.conversionStatus == Cvconversionstatus.CONVERTED
-            assert reloaded.markdownContent == content
+            assert reloaded.markdownContent == REDACTED_TEXT
             assert reloaded.styleProfile is None
             assert reloaded.styleStatus == Cvstylestatus.NOT_APPLICABLE
 
@@ -265,6 +299,134 @@ async def test_convert_cv_stores_text_verbatim_without_calling_the_llm(
             ).all()
             statuses = {e.status for e in events if e.stage == "convert"}
             assert {"STARTED", "SUCCEEDED"} <= statuses
+    finally:
+        await _cleanup(engine, session_factory, s3, file_key, user_id, cv_version_id)
+
+
+@pytest.mark.parametrize(("file_type", "file_name"), TEXT_FORMATS)
+@pytest.mark.asyncio
+async def test_convert_cv_converts_an_md_or_txt_with_no_identity_data_unchanged(
+    file_type, file_name
+):
+    """A CV with nothing to redact still converts, and the redaction pass
+    changes nothing: the LLM is handed the uploaded text, and its (unchanged)
+    reproduction is what gets stored."""
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id = f"test-user-{uuid.uuid4()}"
+    cv_version_id = f"test-cv-{uuid.uuid4()}"
+    file_key = f"cvs/{user_id}/{cv_version_id}/{file_name}"
+    s3 = _s3_client()
+    s3.put_object(Bucket=S3_BUCKET, Key=file_key, Body=REDACTED_TEXT.encode())
+
+    await _make_pending_cv_version(
+        session_factory,
+        user_id,
+        cv_version_id,
+        file_key,
+        file_type,
+        file_name,
+        user_name=ACCOUNT_NAME,
+        user_email=ACCOUNT_EMAIL,
+    )
+    provider = EchoLLMProvider()
+
+    try:
+        async with session_factory() as session:
+            cv_version = await convert_cv(session, cv_version_id, llm_provider=provider)
+            assert cv_version.conversionStatus == Cvconversionstatus.CONVERTED
+            assert cv_version.markdownContent == REDACTED_TEXT
+        assert provider.calls == 1
+    finally:
+        await _cleanup(engine, session_factory, s3, file_key, user_id, cv_version_id)
+
+
+@pytest.mark.parametrize(("file_type", "file_name"), TEXT_FORMATS)
+@pytest.mark.parametrize(
+    ("leaky_line", "leaked_value"),
+    [
+        ("Contact: someone.else@corp.example", "someone.else@corp.example"),
+        ("Tel: 06 12 34 56 78", "06 12 34 56 78"),
+        (f"# {ACCOUNT_NAME}", ACCOUNT_NAME),
+    ],
+    ids=["email-pattern", "phone-pattern", "account-name"],
+)
+@pytest.mark.asyncio
+async def test_convert_cv_fails_an_md_or_txt_when_the_safety_net_finds_leftover_identity_data(
+    file_type, file_name, leaky_line, leaked_value
+):
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id = f"test-user-{uuid.uuid4()}"
+    cv_version_id = f"test-cv-{uuid.uuid4()}"
+    file_key = f"cvs/{user_id}/{cv_version_id}/{file_name}"
+    s3 = _s3_client()
+    s3.put_object(
+        Bucket=S3_BUCKET, Key=file_key, Body=UPLOADED_TEXT_WITH_IDENTITY.encode()
+    )
+
+    await _make_pending_cv_version(
+        session_factory,
+        user_id,
+        cv_version_id,
+        file_key,
+        file_type,
+        file_name,
+        user_name=ACCOUNT_NAME,
+    )
+    provider = StubLLMProvider([f"{leaky_line}\n\n{REDACTED_TEXT}"])
+
+    try:
+        async with session_factory() as session:
+            with pytest.raises(CVConversionError):
+                await convert_cv(session, cv_version_id, llm_provider=provider)
+
+        async with session_factory() as session:
+            reloaded = await session.get(CVVersion, cv_version_id)
+            assert reloaded.conversionStatus == Cvconversionstatus.FAILED
+            assert reloaded.conversionError
+            # The stored error must not itself re-leak what it caught.
+            assert leaked_value not in reloaded.conversionError
+            # No unredacted fallback: the verbatim upload is never stored.
+            assert reloaded.markdownContent is None
+        # A leak fails outright, with no retry.
+        assert provider.calls == 1
+    finally:
+        await _cleanup(engine, session_factory, s3, file_key, user_id, cv_version_id)
+
+
+@pytest.mark.parametrize(("file_type", "file_name"), TEXT_FORMATS)
+@pytest.mark.asyncio
+async def test_convert_cv_fails_an_md_or_txt_after_bounded_redaction_retries(
+    file_type, file_name
+):
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id = f"test-user-{uuid.uuid4()}"
+    cv_version_id = f"test-cv-{uuid.uuid4()}"
+    file_key = f"cvs/{user_id}/{cv_version_id}/{file_name}"
+    s3 = _s3_client()
+    s3.put_object(
+        Bucket=S3_BUCKET, Key=file_key, Body=UPLOADED_TEXT_WITH_IDENTITY.encode()
+    )
+
+    await _make_pending_cv_version(
+        session_factory, user_id, cv_version_id, file_key, file_type, file_name
+    )
+    provider = StubLLMProvider(["", "   ", ""])
+
+    try:
+        async with session_factory() as session:
+            with pytest.raises(CVConversionError):
+                await convert_cv(session, cv_version_id, llm_provider=provider)
+
+        async with session_factory() as session:
+            reloaded = await session.get(CVVersion, cv_version_id)
+            assert reloaded.conversionStatus == Cvconversionstatus.FAILED
+            assert reloaded.conversionError
+            # No unredacted fallback to the verbatim upload.
+            assert reloaded.markdownContent is None
+        assert provider.calls == MAX_ATTEMPTS
     finally:
         await _cleanup(engine, session_factory, s3, file_key, user_id, cv_version_id)
 
@@ -374,10 +536,6 @@ async def test_convert_cv_marks_docx_failed_after_bounded_normalisation_retries(
         assert provider.calls == MAX_ATTEMPTS
     finally:
         await _cleanup(engine, session_factory, s3, file_key, user_id, cv_version_id)
-
-
-ACCOUNT_NAME = "Jane Doe"
-ACCOUNT_EMAIL = "jane.doe@example.com"
 
 
 @pytest.mark.parametrize(

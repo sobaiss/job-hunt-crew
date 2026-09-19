@@ -6,8 +6,9 @@ replaced the CV structured-data extraction path, retired in #21.
 See docs/adr/0001-cv-matching-uses-markdown-rendition.md.
 
 Per source format:
-- MD / TXT (slice 1): the uploaded file's UTF-8 text *is* the rendition, so
-  there is no LLM call.
+- MD / TXT (slice 1, then issue #167): the uploaded file's UTF-8 text is the
+  rendition, run through one minimal-diff Redaction LLM pass that removes only
+  the candidate's identity data and reproduces everything else verbatim.
 - PDF (slice 2, issue #17): `pypdf` pulls the text, then a single LLM
   normalisation pass turns it into clean, faithful Markdown. A PDF with almost
   no extractable text (a scanned/image PDF) fails Conversion immediately with a
@@ -16,10 +17,11 @@ Per source format:
   then the same single LLM normalisation pass (and bounded retry) as the PDF
   branch produces the Markdown.
 
-Redaction (issue #166, docs/adr/0022): the PDF/DOCX normalisation pass also
-strips the candidate's identity data, then a deterministic safety net (see
-cv_redaction.py) fails Conversion outright on any leftover — no unredacted
-fallback. MD/TXT do not yet get Redaction (issue #167).
+Redaction (issues #166 and #167, docs/adr/0022): every format's rendition has
+the candidate's identity data stripped — folded into the PDF/DOCX normalisation
+pass, a dedicated minimal-diff pass for MD/TXT — then a deterministic safety
+net (see cv_redaction.py) fails Conversion outright on any leftover. There is no
+unredacted fallback for any format.
 
 A PDF/DOCX CVVersion additionally gets a StyleProfile (`CVVersion.styleProfile`
 / `styleStatus`, issue #96) derived in the same pass — see style_profile.py
@@ -55,7 +57,8 @@ logger = get_logger(__name__)
 
 STAGE = "convert"
 
-# Formats whose uploaded bytes are already the Markdown rendition (decode only).
+# Formats whose uploaded bytes are already the Markdown rendition: no mechanical
+# extraction and no StyleProfile, only the Redaction pass.
 _TEXT_FILE_TYPES = {Cvfiletype.MD, Cvfiletype.TXT}
 
 # PDF normalisation-pass tuning.
@@ -80,6 +83,21 @@ NORMALISATION_SYSTEM_PROMPT = (
     "the identifying data described next. "
     + REDACTION_INSTRUCTIONS
     + " Respond with ONLY the Markdown document."
+)
+
+# MD/TXT Redaction pass (issue #167). Unlike the PDF/DOCX prompt above, this
+# one forbids the very rewrite that prompt asks for: these formats' text is
+# already the rendition, and docs/adr/0001's no-unnecessary-rewrite guarantee
+# means the only permitted change is removing the flagged spans.
+TEXT_REDACTION_SYSTEM_PROMPT = (
+    "You are given a candidate's CV/resume as Markdown or plain text. "
+    "Reproduce it exactly, character for character, with one exception: "
+    "remove the identifying data described next. Make the smallest possible "
+    "change — do not reformat, reorder, reword, translate, correct or "
+    "summarise anything, keep every heading, list marker, line break and blank "
+    "line as it is, and add no commentary or preamble. "
+    + REDACTION_INSTRUCTIONS
+    + " Respond with ONLY the resulting document."
 )
 
 
@@ -190,8 +208,10 @@ async def convert_cv(
     step, or standalone via the manual convert trigger) used only to tag the
     observability rows this emits.
 
-    MD / TXT: the file's decoded UTF-8 text is the rendition, no LLM call;
-    styleStatus is set to NOT_APPLICABLE, styleProfile stays null.
+    MD / TXT: the file's decoded UTF-8 text goes through one minimal-diff
+    Redaction LLM pass (issue #167) with the same bounded retry and safety net
+    as PDF/DOCX; styleStatus is set to NOT_APPLICABLE, styleProfile stays null,
+    and no StyleProfile LLM call is made.
     PDF: `pypdf` text extraction, then one LLM normalisation pass that also
     redacts identity data (up to MAX_ATTEMPTS on an empty/erroring response;
     a safety-net hit fails outright, see cv_redaction.py); a PDF with under
@@ -226,7 +246,15 @@ async def convert_cv(
     if cv_version.fileType in _TEXT_FILE_TYPES:
         # Lenient UTF-8: a stray non-UTF-8 byte in an otherwise fine text CV
         # should not fail Conversion.
-        markdown = file_bytes.decode("utf-8", errors="replace")
+        source_text = file_bytes.decode("utf-8", errors="replace")
+        markdown = await _normalise_to_markdown(
+            session,
+            cv_version,
+            source_text,
+            system_prompt=TEXT_REDACTION_SYSTEM_PROMPT,
+            llm_provider=llm_provider,
+            analysis_id=analysis_id,
+        )
     elif cv_version.fileType == Cvfiletype.PDF:
         markdown = await _convert_pdf(
             session,
@@ -293,7 +321,12 @@ async def _convert_pdf(
         )
 
     return await _normalise_to_markdown(
-        session, cv_version, text, llm_provider=llm_provider, analysis_id=analysis_id
+        session,
+        cv_version,
+        text,
+        system_prompt=NORMALISATION_SYSTEM_PROMPT,
+        llm_provider=llm_provider,
+        analysis_id=analysis_id,
     )
 
 
@@ -310,7 +343,12 @@ async def _convert_docx(
     raises CVConversionError (via _mark_failed) after recording the failure."""
     html = _extract_docx_html(file_bytes)
     return await _normalise_to_markdown(
-        session, cv_version, html, llm_provider=llm_provider, analysis_id=analysis_id
+        session,
+        cv_version,
+        html,
+        system_prompt=NORMALISATION_SYSTEM_PROMPT,
+        llm_provider=llm_provider,
+        analysis_id=analysis_id,
     )
 
 
@@ -347,15 +385,17 @@ async def _normalise_to_markdown(
     cv_version: CVVersion,
     source_text: str,
     *,
+    system_prompt: str,
     llm_provider: LLMProvider | None,
     analysis_id: str | None,
 ) -> str:
-    """Shared by the PDF and DOCX branches: truncate the mechanically-extracted
-    text to MAX_TEXT_CHARS and run one LLM normalisation pass, retrying up to
-    MAX_ATTEMPTS on an empty/erroring response. The prompt also carries the
-    Redaction instructions (issue #166), so the returned Markdown is then run
-    through the deterministic safety net: any leftover identity data, like an
-    exhausted retry budget, fails Conversion via _mark_failed with no
+    """Shared by every format's single Redaction-carrying LLM pass: truncate
+    `source_text` (mechanically-extracted PDF/DOCX text, or an MD/TXT upload's
+    own text) to MAX_TEXT_CHARS and run one LLM pass under `system_prompt`,
+    retrying up to MAX_ATTEMPTS on an empty/erroring response. Both prompts carry
+    the Redaction instructions (issues #166/#167), so the returned Markdown is
+    then run through the deterministic safety net: any leftover identity data,
+    like an exhausted retry budget, fails Conversion via _mark_failed with no
     unredacted fallback and no retry. Returns the stripped Markdown, or raises
     CVConversionError."""
     prompt = source_text[:MAX_TEXT_CHARS]
@@ -365,7 +405,7 @@ async def _normalise_to_markdown(
     for _attempt in range(1, MAX_ATTEMPTS + 1):
         try:
             raw = provider.generate(
-                system=NORMALISATION_SYSTEM_PROMPT,
+                system=system_prompt,
                 prompt=prompt,
                 max_tokens=NORMALISATION_MAX_TOKENS,
             )
