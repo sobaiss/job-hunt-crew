@@ -363,6 +363,37 @@
           "next": "Next"
         }
       }
+    },
+    "scouts": {
+      "title": "Scouts",
+      "description": "Every candidate's Scouts.",
+      "table": {
+        "loading": "Loading…",
+        "loadError": "Couldn't load the scouts list.",
+        "empty": "No Scouts yet.",
+        "noMatches": "No Scouts match these filters.",
+        "candidateLabel": "Candidate",
+        "candidatePlaceholder": "Name or email",
+        "lastRunAtFromLabel": "Last run from",
+        "lastRunAtToLabel": "Last run to",
+        "statusFilterLabel": "Status",
+        "statusAllOption": "All statuses",
+        "noName": "no name",
+        "neverRun": "Never run",
+        "columns": {
+          "candidate": "Candidate",
+          "label": "Label",
+          "status": "Status",
+          "lastRunAt": "Last run",
+          "actions": "Actions"
+        },
+        "pagination": {
+          "pageSizeLabel": "Rows per page",
+          "pageInfo": "Page {page} of {totalPages} ({total} total)",
+          "previous": "Previous",
+          "next": "Next"
+        }
+      }
     }
   },
   "quotas": {

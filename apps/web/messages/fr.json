@@ -363,6 +363,37 @@
           "next": "Suivant"
         }
       }
+    },
+    "scouts": {
+      "title": "Scouts",
+      "description": "Les Scouts de tous les candidats.",
+      "table": {
+        "loading": "Chargement…",
+        "loadError": "Impossible de charger la liste des scouts.",
+        "empty": "Aucun Scout pour l'instant.",
+        "noMatches": "Aucun Scout ne correspond à ces filtres.",
+        "candidateLabel": "Candidat",
+        "candidatePlaceholder": "Nom ou email",
+        "lastRunAtFromLabel": "Dernière exécution à partir du",
+        "lastRunAtToLabel": "Dernière exécution jusqu'au",
+        "statusFilterLabel": "Statut",
+        "statusAllOption": "Tous les statuts",
+        "noName": "sans nom",
+        "neverRun": "Jamais exécuté",
+        "columns": {
+          "candidate": "Candidat",
+          "label": "Libellé",
+          "status": "Statut",
+          "lastRunAt": "Dernière exécution",
+          "actions": "Actions"
+        },
+        "pagination": {
+          "pageSizeLabel": "Lignes par page",
+          "pageInfo": "Page {page} sur {totalPages} ({total} au total)",
+          "previous": "Précédent",
+          "next": "Suivant"
+        }
+      }
     }
   },
   "quotas": {

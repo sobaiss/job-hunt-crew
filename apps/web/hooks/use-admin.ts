@@ -12,6 +12,10 @@ import {
   adminAnalysesTableStateToQuery,
   type AdminAnalysesTableState,
 } from "@/lib/admin-analyses-filters";
+import {
+  adminScoutsTableStateToQuery,
+  type AdminScoutsTableState,
+} from "@/lib/admin-scouts-filters";
 
 // Backs the bare Admin area landing page (issue #138) — confirms the
 // session's Plan actually cleared services/api's `require_admin` end to end.
@@ -358,6 +362,94 @@ export function useGenerateAnalysisDocuments() {
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["admin-analyses"] });
+    },
+  });
+}
+
+// Backs the Admin scouts table (issue #162): every candidate's Scout in one
+// cross-user, filterable, paginated list. No Edit or Create control exists
+// anywhere on this table — a Scout's configuration and creation stay
+// exclusively the candidate's own.
+export type AdminScoutRow = {
+  id: string;
+  userId: string;
+  userName: string | null;
+  userEmail: string | null;
+  label: string;
+  status: string;
+  matchThreshold: number;
+  lastRunAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AdminScoutsListResponse = {
+  scouts: AdminScoutRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
+export function useAdminScouts(state: AdminScoutsTableState) {
+  const qs = adminScoutsTableStateToQuery(state).toString();
+  return useQuery({
+    queryKey: ["admin-scouts", qs],
+    queryFn: () => bff.get<AdminScoutsListResponse>(`/admin/scouts?${qs}`),
+  });
+}
+
+// Backs the "Run now" row action (issue #162) — mirrors the candidate-facing
+// `useRunScout`'s same rate limit (services/api shares the one-per-hour
+// throttle between the candidate and admin endpoints). A full refetch of the
+// list picks up the Scout's unchanged row plus any later lastRunAt stamp
+// once the scout worker finishes.
+export function useAdminRunScout() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (scoutId: string) =>
+      bff.post<{ scoutId: string; scoutRunId: string; status: string }>(
+        `/admin/scouts/${scoutId}/run`,
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin-scouts"] });
+    },
+  });
+}
+
+// Backs the Pause row action (issue #162).
+export function useAdminPauseScout() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (scoutId: string) =>
+      bff.post<{ scoutId: string; status: string }>(`/admin/scouts/${scoutId}/pause`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin-scouts"] });
+    },
+  });
+}
+
+// Backs the Resume row action (issue #162) — rejected (409) by services/api
+// for an ARCHIVED Scout, since there is no admin-facing unarchive.
+export function useAdminResumeScout() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (scoutId: string) =>
+      bff.post<{ scoutId: string; status: string }>(`/admin/scouts/${scoutId}/resume`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin-scouts"] });
+    },
+  });
+}
+
+// Backs the Archive row action (issue #162) — deliberately one-directional;
+// this table offers no unarchive counterpart.
+export function useAdminArchiveScout() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (scoutId: string) =>
+      bff.post<{ scoutId: string; status: string }>(`/admin/scouts/${scoutId}/archive`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin-scouts"] });
     },
   });
 }

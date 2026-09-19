@@ -1,4 +1,5 @@
 import json
+import os
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Literal
@@ -23,6 +24,10 @@ from py_db.models import (
     Quotakind,
     QuotaOverride,
     Role,
+    Scout,
+    ScoutRun,
+    Scoutrunstatus,
+    Scoutstatus,
     Subscription,
     User,
 )
@@ -50,6 +55,7 @@ from .sqs_client import (
     ANALYSIS_INTAKE_QUEUE_URL,
     CV_CONVERSION_QUEUE_URL,
     GENERATION_INTAKE_QUEUE_URL,
+    SCOUT_INTAKE_QUEUE_URL,
     make_sqs_client,
 )
 
@@ -58,6 +64,22 @@ router = APIRouter(prefix="/v1/admin")
 
 def _now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
+
+
+# Same env var and default as `v1._scout_run_rate_limit` (issue #162) -- an
+# admin-triggered run still hits the same scraped sites, so it shares the
+# one-per-hour throttle rather than getting its own, separate budget.
+DEFAULT_SCOUT_RUN_RATE_LIMIT_SECONDS = 3600
+
+
+def _scout_run_rate_limit() -> timedelta:
+    raw = os.environ.get("SCOUT_RUN_RATE_LIMIT_SECONDS")
+    try:
+        parsed = int(raw) if raw is not None else None
+    except ValueError:
+        parsed = None
+    seconds = parsed if parsed is not None and parsed >= 0 else DEFAULT_SCOUT_RUN_RATE_LIMIT_SECONDS
+    return timedelta(seconds=seconds)
 
 
 async def require_admin(
@@ -1281,4 +1303,268 @@ async def admin_create_generated_documents(
             AdminGeneratedDocumentSummary(id=doc.id, type=doc.type.value, status=doc.status.value)
             for doc in documents
         ]
+    )
+
+
+class AdminScoutRow(BaseModel):
+    id: str
+    userId: str
+    userName: str | None
+    userEmail: str | None
+    label: str
+    status: str
+    matchThreshold: int
+    lastRunAt: datetime | None
+    createdAt: datetime
+    updatedAt: datetime
+
+
+class AdminScoutsListResponse(BaseModel):
+    scouts: list[AdminScoutRow]
+    total: int
+    page: int
+    pageSize: int
+
+
+@router.get("/scouts", response_model=AdminScoutsListResponse)
+async def list_admin_scouts(
+    user_id: str | None = Query(None, alias="userId"),
+    last_run_at_from: datetime | None = Query(None, alias="lastRunAtFrom"),
+    last_run_at_to: datetime | None = Query(None, alias="lastRunAtTo"),
+    status: Scoutstatus | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100, alias="pageSize"),
+    _admin_id: str = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> AdminScoutsListResponse:
+    """Every candidate's Scout in one cross-user, filterable, paginated list
+    (issue #162) -- filterable by `userId`, a `lastRunAt` range, and
+    `status`. Sorted newest-created first, matching every other Admin table
+    in this file. The owner's name/email are resolved here the same way
+    `list_admin_cv_versions`/`list_admin_analyses` do, so the frontend never
+    does its own per-row lookup.
+    """
+    stmt = select(Scout)
+    if user_id is not None:
+        stmt = stmt.where(Scout.userId == user_id)
+    if last_run_at_from is not None:
+        stmt = stmt.where(Scout.lastRunAt >= last_run_at_from)
+    if last_run_at_to is not None:
+        stmt = stmt.where(Scout.lastRunAt <= last_run_at_to)
+    if status is not None:
+        stmt = stmt.where(Scout.status == status)
+    stmt = stmt.order_by(Scout.createdAt.desc())
+
+    total = await session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    page_stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+    rows = (await session.scalars(page_stmt)).all()
+
+    owner_ids = {row.userId for row in rows}
+    owners: dict[str, User] = {}
+    if owner_ids:
+        owner_rows = (await session.scalars(select(User).where(User.id.in_(owner_ids)))).all()
+        owners = {owner.id: owner for owner in owner_rows}
+
+    return AdminScoutsListResponse(
+        scouts=[
+            AdminScoutRow(
+                id=row.id,
+                userId=row.userId,
+                userName=owners[row.userId].name if row.userId in owners else None,
+                userEmail=owners[row.userId].email if row.userId in owners else None,
+                label=row.label,
+                status=row.status.value,
+                matchThreshold=row.matchThreshold,
+                lastRunAt=row.lastRunAt,
+                createdAt=row.createdAt,
+                updatedAt=row.updatedAt,
+            )
+            for row in rows
+        ],
+        total=total,
+        page=page,
+        pageSize=page_size,
+    )
+
+
+class AdminScoutActionResponse(BaseModel):
+    scoutId: str
+    status: str
+
+
+@router.post(
+    "/scouts/{scout_id}/pause",
+    response_model=AdminScoutActionResponse,
+)
+async def pause_scout(
+    scout_id: str,
+    admin_id: str = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> AdminScoutActionResponse:
+    """Admin-scoped pause (issue #162) -- mirrors `v1.update_scout`'s status
+    write for a Scout that's still read/write (an ARCHIVED Scout stays
+    read-only there too), except ownership is derived from the target Scout
+    itself, never a caller override (docs/adr/0020), and it records an
+    AdminAuditEvent instead of mutating silently.
+    """
+    scout = await session.get(Scout, scout_id)
+    if scout is None:
+        raise HTTPException(status_code=404, detail="Scout not found")
+    if scout.status == Scoutstatus.ARCHIVED:
+        raise HTTPException(status_code=409, detail="Archived Scouts are read-only")
+
+    scout.status = Scoutstatus.PAUSED
+    scout.updatedAt = _now()
+
+    record_admin_audit_event(
+        session,
+        actor_user_id=admin_id,
+        target_user_id=scout.userId,
+        resource_type="Scout",
+        resource_id=scout.id,
+    )
+    await session.commit()
+
+    return AdminScoutActionResponse(scoutId=scout.id, status=scout.status.value)
+
+
+@router.post(
+    "/scouts/{scout_id}/resume",
+    response_model=AdminScoutActionResponse,
+)
+async def resume_scout(
+    scout_id: str,
+    admin_id: str = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> AdminScoutActionResponse:
+    """Admin-scoped resume (issue #162) -- the mirror of `pause_scout` above.
+    An ARCHIVED Scout stays read-only from this surface: there is no
+    admin-facing unarchive/resume-from-archived (only the candidate's own
+    Edit on `/scouts` can do that). Unlike `v1.update_scout`'s own
+    PAUSED->ACTIVE transition, no ACTIVE_SCOUTS quota check applies here --
+    same rationale as `retry_analysis`/`admin_create_generated_documents`:
+    an admin-triggered action isn't counted against the candidate's own
+    budget.
+    """
+    scout = await session.get(Scout, scout_id)
+    if scout is None:
+        raise HTTPException(status_code=404, detail="Scout not found")
+    if scout.status == Scoutstatus.ARCHIVED:
+        raise HTTPException(status_code=409, detail="Archived Scouts are read-only")
+
+    scout.status = Scoutstatus.ACTIVE
+    scout.updatedAt = _now()
+
+    record_admin_audit_event(
+        session,
+        actor_user_id=admin_id,
+        target_user_id=scout.userId,
+        resource_type="Scout",
+        resource_id=scout.id,
+    )
+    await session.commit()
+
+    return AdminScoutActionResponse(scoutId=scout.id, status=scout.status.value)
+
+
+@router.post(
+    "/scouts/{scout_id}/archive",
+    response_model=AdminScoutActionResponse,
+)
+async def archive_scout(
+    scout_id: str,
+    admin_id: str = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> AdminScoutActionResponse:
+    """Admin-scoped archive (issue #162) -- deliberately one-directional:
+    this file offers no unarchive counterpart, so once a Scout lands here it
+    can only become read/write again via the candidate's own Edit on their
+    own `/scouts` page. Idempotent for an already-ARCHIVED Scout (no error),
+    since re-archiving changes nothing.
+    """
+    scout = await session.get(Scout, scout_id)
+    if scout is None:
+        raise HTTPException(status_code=404, detail="Scout not found")
+
+    scout.status = Scoutstatus.ARCHIVED
+    scout.updatedAt = _now()
+
+    record_admin_audit_event(
+        session,
+        actor_user_id=admin_id,
+        target_user_id=scout.userId,
+        resource_type="Scout",
+        resource_id=scout.id,
+    )
+    await session.commit()
+
+    return AdminScoutActionResponse(scoutId=scout.id, status=scout.status.value)
+
+
+class AdminRunScoutResponse(BaseModel):
+    scoutId: str
+    scoutRunId: str
+    status: str
+
+
+@router.post(
+    "/scouts/{scout_id}/run",
+    response_model=AdminRunScoutResponse,
+    status_code=201,
+)
+async def admin_run_scout(
+    scout_id: str,
+    admin_id: str = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> AdminRunScoutResponse:
+    """Admin-scoped "Run now" (issue #162) -- mirrors `v1.run_scout` exactly
+    (same ARCHIVED guard, same one-run-per-hour throttle, since an
+    admin-triggered run still hits the same scraped sites a candidate's own
+    run would), except ownership is derived from the target Scout itself
+    (docs/adr/0020) and it records an AdminAuditEvent instead of mutating
+    silently.
+    """
+    scout = await session.get(Scout, scout_id)
+    if scout is None:
+        raise HTTPException(status_code=404, detail="Scout not found")
+    if scout.status == Scoutstatus.ARCHIVED:
+        raise HTTPException(status_code=409, detail="Archived Scouts cannot be run")
+
+    latest = await session.scalar(
+        select(ScoutRun)
+        .where(ScoutRun.scoutId == scout.id)
+        .order_by(ScoutRun.createdAt.desc())
+        .limit(1)
+    )
+    if latest is not None and latest.createdAt > _now() - _scout_run_rate_limit():
+        raise HTTPException(
+            status_code=429,
+            detail="This Scout ran within the last hour. Try again later.",
+        )
+
+    scout_run = ScoutRun(
+        id=str(uuid.uuid4()),
+        scoutId=scout.id,
+        status=Scoutrunstatus.PENDING,
+    )
+    session.add(scout_run)
+
+    record_admin_audit_event(
+        session,
+        actor_user_id=admin_id,
+        target_user_id=scout.userId,
+        resource_type="Scout",
+        resource_id=scout.id,
+    )
+    await session.commit()
+    await session.refresh(scout_run)
+
+    sqs = make_sqs_client()
+    sqs.send_message(
+        QueueUrl=SCOUT_INTAKE_QUEUE_URL,
+        MessageBody=json.dumps({"scoutRunId": scout_run.id}),
+    )
+
+    return AdminRunScoutResponse(
+        scoutId=scout.id, scoutRunId=scout_run.id, status=scout_run.status.value
     )
