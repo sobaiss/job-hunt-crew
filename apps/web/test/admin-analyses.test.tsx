@@ -102,6 +102,35 @@ describe("AdminAnalysesPage", () => {
     expect(capturedUrl).toContain("requestedAtTo=2026-01-31");
   });
 
+  it("sends the status filter as a server-side query param (#172)", async () => {
+    let capturedUrl = "";
+    server.use(
+      http.get("/api/admin/analyses", ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json(analysesListResponse());
+      }),
+    );
+
+    renderWithProviders(<AdminAnalysesPage />);
+    await screen.findByText("Ada Lovelace");
+
+    await userEvent.selectOptions(screen.getByLabelText("Status"), "Failed");
+
+    expect(capturedUrl).toContain("status=FAILED");
+  });
+
+  it("shows the id column with a copy button (#172)", async () => {
+    server.use(
+      http.get("/api/admin/analyses", () => HttpResponse.json(analysesListResponse())),
+    );
+
+    renderWithProviders(<AdminAnalysesPage />);
+    await screen.findByText("Ada Lovelace");
+
+    expect(screen.getByText("analysis-1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy id" })).toBeInTheDocument();
+  });
+
   it("triggers a retry from the row action", async () => {
     let retryCalled = false;
     server.use(

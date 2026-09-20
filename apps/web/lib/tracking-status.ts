@@ -24,6 +24,23 @@ export const TRACKING_STATUSES: readonly TrackingStatus[] = [
   "WITHDRAWN",
 ];
 
+/**
+ * The Analyses tables' (candidate and admin) full Statut filter vocabulary:
+ * the 5 Tracking status buckets plus `FAILED` (issue #172) -- added because a
+ * `FAILED` Analysis already shows its raw pipeline status as the Statut
+ * column's fallback (see `trackingStatusOf`'s `null` case) but had no
+ * matching filter bucket of its own. The other non-terminal pipeline
+ * statuses (`PENDING`/`QUEUED`/`RUNNING_CREW`/`AWAITING_RESULT`/
+ * `PERSISTING`) stay unfilterable individually -- only "all" ("Tous les
+ * statuts") shows them.
+ */
+export type AnalysesStatusFilter = TrackingStatus | "FAILED";
+
+export const ANALYSES_STATUS_FILTERS: readonly AnalysesStatusFilter[] = [
+  ...TRACKING_STATUSES,
+  "FAILED",
+];
+
 const APPLICATION_STATUS_TO_TRACKING: Record<ApplicationStatus, TrackingStatus> = {
   DRAFT: "TO_APPLY",
   APPLIED: "IN_PROGRESS",

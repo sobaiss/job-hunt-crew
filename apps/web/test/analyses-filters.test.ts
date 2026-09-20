@@ -14,7 +14,7 @@ import {
   sortAnalyses,
   type AnalysesTableState,
 } from "@/lib/analyses-filters";
-import { TRACKING_STATUSES } from "@/lib/tracking-status";
+import { ANALYSES_STATUS_FILTERS, TRACKING_STATUSES } from "@/lib/tracking-status";
 import type { AnalysisSummary } from "@/hooks/use-analyses";
 
 function summary(overrides: Partial<AnalysisSummary> = {}): AnalysisSummary {
@@ -146,7 +146,7 @@ describe("filterAnalyses", () => {
     ).toEqual(["a3"]);
   });
 
-  it("excludes a non-COMPLETED/FAILED Analysis from every Tracking status filter, but keeps it under \"all\"", () => {
+  it("excludes a still-running Analysis from every status filter but \"all\" and every Tracking bucket, while FAILED gets its own bucket", () => {
     expect(
       filterAnalyses(list, DEFAULT_ANALYSES_FILTERS).map((a) => a.id),
     ).toContain("a2");
@@ -158,6 +158,42 @@ describe("filterAnalyses", () => {
         ),
       ).not.toContain("a2");
     }
+
+    expect(
+      filterAnalyses(list, { ...DEFAULT_ANALYSES_FILTERS, status: "FAILED" }).map(
+        (a) => a.id,
+      ),
+    ).toEqual(["a2"]);
+  });
+
+  it("filters by the requestedAt range, inclusive of both bounds", () => {
+    const dated = [
+      summary({ id: "early", requestedAt: "2026-07-01T00:00:00.000Z" }),
+      summary({ id: "mid", requestedAt: "2026-07-15T12:00:00.000Z" }),
+      summary({ id: "late", requestedAt: "2026-08-01T00:00:00.000Z" }),
+    ];
+
+    expect(
+      filterAnalyses(dated, {
+        ...DEFAULT_ANALYSES_FILTERS,
+        requestedAtFrom: "2026-07-10",
+        requestedAtTo: "2026-07-20",
+      }).map((a) => a.id),
+    ).toEqual(["mid"]);
+
+    expect(
+      filterAnalyses(dated, {
+        ...DEFAULT_ANALYSES_FILTERS,
+        requestedAtFrom: "2026-07-15",
+      }).map((a) => a.id),
+    ).toEqual(["mid", "late"]);
+
+    expect(
+      filterAnalyses(dated, {
+        ...DEFAULT_ANALYSES_FILTERS,
+        requestedAtTo: "2026-07-15",
+      }).map((a) => a.id),
+    ).toEqual(["early", "mid"]);
   });
 });
 
@@ -224,6 +260,20 @@ describe("sortAnalyses", () => {
     ).toEqual(["later", "earlier"]);
   });
 
+  it("sorts by requestedAt as ISO-8601 UTC strings, and by id (#172)", () => {
+    const list = [
+      summary({ id: "b", requestedAt: "2026-08-01T00:00:00.000Z" }),
+      summary({ id: "a", requestedAt: "2026-07-01T00:00:00.000Z" }),
+    ];
+
+    expect(
+      sortAnalyses(list, { column: "requestedAt", direction: "asc" }).map((a) => a.id),
+    ).toEqual(["a", "b"]);
+    expect(
+      sortAnalyses(list, { column: "id", direction: "asc" }).map((a) => a.id),
+    ).toEqual(["a", "b"]);
+  });
+
   it("sorts by sourceUrl for the Lien column and by cvVersion.label for CV", () => {
     const list = [
       summary({ id: "z", jobOffer: { ...summary().jobOffer, sourceUrl: "https://z.example.com" } }),
@@ -266,6 +316,8 @@ describe("URL query-string state", () => {
       cvLabel: "Grad CV",
       platform: "LINKEDIN",
       location: "lyon",
+      requestedAtFrom: "2026-07-01",
+      requestedAtTo: "2026-07-31",
       sort: { column: "matchScore", direction: "asc" },
       page: 2,
       pageSize: 50,
@@ -282,6 +334,8 @@ describe("URL query-string state", () => {
       cvLabel: "all",
       platform: "all",
       location: "",
+      requestedAtFrom: "",
+      requestedAtTo: "",
       sort: DEFAULT_ANALYSES_SORT,
       page: 1,
       pageSize: 25,
@@ -299,6 +353,8 @@ describe("URL query-string state", () => {
       cvLabel: "all",
       platform: "all",
       location: "",
+      requestedAtFrom: "",
+      requestedAtTo: "",
       sort: DEFAULT_ANALYSES_SORT,
       page: 1,
       pageSize: 25,
@@ -313,14 +369,14 @@ describe("URL query-string state", () => {
     }
   });
 
-  it("rejects a raw pipeline AnalysisStatus as a status param — the filter is Tracking status now", () => {
-    expect(parseAnalysesTableState(new URLSearchParams("status=FAILED")).status).toBe(
-      "all",
-    );
+  it("rejects a raw pipeline AnalysisStatus other than FAILED as a status param", () => {
+    expect(
+      parseAnalysesTableState(new URLSearchParams("status=RUNNING_CREW")).status,
+    ).toBe("all");
   });
 
-  it("accepts exactly the 5 Tracking status buckets as the status param", () => {
-    for (const status of TRACKING_STATUSES) {
+  it("accepts exactly the 5 Tracking status buckets plus FAILED as the status param (#172)", () => {
+    for (const status of ANALYSES_STATUS_FILTERS) {
       expect(
         parseAnalysesTableState(new URLSearchParams(`status=${status}`)).status,
       ).toBe(status);
@@ -334,6 +390,8 @@ describe("URL query-string state", () => {
       cvLabel: "all",
       platform: "all",
       location: "",
+      requestedAtFrom: "",
+      requestedAtTo: "",
       sort: DEFAULT_ANALYSES_SORT,
       page: 1,
       pageSize: 25,
@@ -343,6 +401,8 @@ describe("URL query-string state", () => {
     expect(params.has("cv")).toBe(false);
     expect(params.has("platform")).toBe(false);
     expect(params.has("location")).toBe(false);
+    expect(params.has("requestedFrom")).toBe(false);
+    expect(params.has("requestedTo")).toBe(false);
     // Sort, page and pageSize are always written explicitly.
     expect(params.get("sort")).toBe("postedAt");
     expect(params.get("dir")).toBe("desc");

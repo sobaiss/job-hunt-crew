@@ -40,7 +40,7 @@ import {
 } from "@/lib/analyses-filters";
 import { analysesToCsv, downloadCsv } from "@/lib/analyses-csv";
 import {
-  TRACKING_STATUSES,
+  ANALYSES_STATUS_FILTERS,
   TRACKING_STATUS_TRANSITIONS,
   trackingStatusBadgeVariant,
   trackingStatusOf,
@@ -50,6 +50,7 @@ import { SHORT_FIELD_MAX_LENGTH, TITLE_MAX_LENGTH } from "@/lib/text-truncation"
 import { analysisBadgeVariant } from "@/components/analysis-row";
 import { AnalysisQuickView } from "@/components/analysis-quick-view";
 import { TruncatedCell } from "@/components/truncated-cell";
+import { CopyIdButton } from "@/components/copy-id-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -80,10 +81,12 @@ const COLUMN_VISIBILITY_STORAGE_KEY = "column-visibility:analyses";
 // at every viewport.
 const COLUMNS: ColumnConfig<AnalysesSortColumn>[] = [
   { key: "title", labelKey: "columns.title", hideable: false },
+  { key: "id", labelKey: "columns.id", hideable: true },
   { key: "company", labelKey: "columns.company", hideable: true },
   { key: "location", labelKey: "columns.location", hideable: true },
   { key: "sourceSite", labelKey: "columns.platform", hideable: true },
   { key: "postedAt", labelKey: "columns.postedAt", hideable: true },
+  { key: "requestedAt", labelKey: "columns.requestedAt", hideable: true },
   { key: "cvLabel", labelKey: "columns.cv", hideable: true },
   {
     key: "matchScore",
@@ -428,12 +431,32 @@ function AnalysesTable() {
               }
             >
               <option value="all">{t("controls.statusAll")}</option>
-              {TRACKING_STATUSES.map((status) => (
+              {ANALYSES_STATUS_FILTERS.map((status) => (
                 <option key={status} value={status}>
-                  {trackingStatusLabel(status)}
+                  {status === "FAILED" ? pipelineStatusLabel(status) : trackingStatusLabel(status)}
                 </option>
               ))}
             </select>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="analyses-requested-from">{t("controls.requestedAtFromLabel")}</Label>
+            <Input
+              id="analyses-requested-from"
+              type="date"
+              value={state.requestedAtFrom}
+              onChange={(event) => updateState({ requestedAtFrom: event.target.value })}
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="analyses-requested-to">{t("controls.requestedAtToLabel")}</Label>
+            <Input
+              id="analyses-requested-to"
+              type="date"
+              value={state.requestedAtTo}
+              onChange={(event) => updateState({ requestedAtTo: event.target.value })}
+            />
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -720,6 +743,7 @@ function AnalysesTable() {
                     generatedDocumentStatusLabel={generatedDocumentStatusLabel}
                     linkLabel={t("columns.linkLabel")}
                     jobOfferFallback={t("jobOfferFallback")}
+                    copyIdLabel={t("columns.copyId")}
                     selected={selectedIds.has(analysis.id)}
                     selectLabel={t("bulk.selectRowLabel", {
                       title: analysis.jobOffer.title ?? t("jobOfferFallback"),
@@ -815,6 +839,7 @@ function AnalysisTableRow({
   generatedDocumentStatusLabel,
   linkLabel,
   jobOfferFallback,
+  copyIdLabel,
   selected,
   selectLabel,
   onToggleSelect,
@@ -828,6 +853,7 @@ function AnalysisTableRow({
   generatedDocumentStatusLabel: (value: string) => string;
   linkLabel: string;
   jobOfferFallback: string;
+  copyIdLabel: string;
   selected: boolean;
   selectLabel: string;
   onToggleSelect: () => void;
@@ -859,6 +885,14 @@ function AnalysisTableRow({
           maxLength={TITLE_MAX_LENGTH}
         />
       </TableCell>
+      {isColumnVisible("id") && (
+        <TableCell>
+          <div className="flex items-center gap-1">
+            <span className="font-mono text-xs text-muted">{analysis.id}</span>
+            <CopyIdButton value={analysis.id} label={copyIdLabel} />
+          </div>
+        </TableCell>
+      )}
       {isColumnVisible("company") && (
         <TableCell>
           {analysis.jobOffer.company ? (
@@ -892,6 +926,9 @@ function AnalysisTableRow({
             ? new Date(analysis.jobOffer.postedAt).toLocaleDateString()
             : "—"}
         </TableCell>
+      )}
+      {isColumnVisible("requestedAt") && (
+        <TableCell>{new Date(analysis.requestedAt).toLocaleDateString()}</TableCell>
       )}
       {isColumnVisible("cvLabel") && (
         <TableCell>{analysis.cvVersion.label}</TableCell>

@@ -18,11 +18,16 @@ import {
   type AdminAnalysesTableState,
 } from "@/lib/admin-analyses-filters";
 import { useEnumLabel } from "@/lib/enum-labels";
-import { trackingStatusBadgeVariant, trackingStatusOf } from "@/lib/tracking-status";
+import {
+  ANALYSES_STATUS_FILTERS,
+  trackingStatusBadgeVariant,
+  trackingStatusOf,
+} from "@/lib/tracking-status";
 import { analysisBadgeVariant } from "@/components/analysis-row";
 import type { AnalysisStatus } from "@/hooks/use-analyses";
 import type { ApplicationStatus } from "@/hooks/use-applications";
 import { CandidatePicker } from "@/components/candidate-picker";
+import { CopyIdButton } from "@/components/copy-id-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -150,6 +155,30 @@ function AnalysesTable() {
         />
 
         <div className="flex flex-col gap-1.5">
+          <Label htmlFor="admin-analyses-status">{t("statusLabel")}</Label>
+          <select
+            id="admin-analyses-status"
+            className={SELECT_CLASS + " w-full"}
+            value={state.status ?? "all"}
+            onChange={(event) =>
+              updateState({
+                status:
+                  event.target.value === "all"
+                    ? null
+                    : (event.target.value as AdminAnalysesTableState["status"]),
+              })
+            }
+          >
+            <option value="all">{t("statusAll")}</option>
+            {ANALYSES_STATUS_FILTERS.map((status) => (
+              <option key={status} value={status}>
+                {status === "FAILED" ? pipelineStatusLabel(status) : trackingStatusLabel(status)}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
           <Label htmlFor="admin-analyses-from">{t("requestedAtFromLabel")}</Label>
           <Input
             id="admin-analyses-from"
@@ -185,6 +214,7 @@ function AnalysesTable() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead>{t("columns.id")}</TableHead>
                 <TableHead>{t("columns.candidate")}</TableHead>
                 <TableHead>{t("columns.jobOffer")}</TableHead>
                 <TableHead>{t("columns.status")}</TableHead>
@@ -195,6 +225,12 @@ function AnalysesTable() {
             <TableBody>
               {data.analyses.map((row) => (
                 <TableRow key={row.id}>
+                  <TableCell>
+                    <div className="flex items-center gap-1">
+                      <span className="font-mono text-xs text-muted">{row.id}</span>
+                      <CopyIdButton value={row.id} label={t("columns.copyId")} />
+                    </div>
+                  </TableCell>
                   <TableCell className="font-medium">
                     {row.userName ?? row.userEmail ?? t("noName")}
                   </TableCell>

@@ -3,15 +3,18 @@ import { trackingStatusOf } from "@/lib/tracking-status";
 
 // The bulk-actions bar's CSV export (issue #67): a pure, framework-free
 // formatter over already-loaded `AnalysisSummary` rows — no new endpoint, per
-// the issue. Mirrors the table's visible columns (Poste, Entreprise,
-// Plateforme, Date de publication, CV, Score, Statut) plus the offer's
-// `sourceUrl`, which the table only exposes as the icon-only "Lien" column.
+// the issue. Mirrors the table's visible columns (ID, Poste, Entreprise,
+// Plateforme, Date de publication, Demandée, CV, Score, Statut — the last two
+// added in issue #172) plus the offer's `sourceUrl`, which the table only
+// exposes as the icon-only "Lien" column.
 
 const CSV_HEADER = [
+  "ID",
   "Position",
   "Company",
   "Platform",
   "Posted",
+  "Requested",
   "CV",
   "Score",
   "Status",
@@ -41,10 +44,12 @@ export function analysesToCsv(
         ? labelers.trackingStatusLabel(tracking)
         : labelers.pipelineStatusLabel(analysis.status);
     return [
+      analysis.id,
       analysis.jobOffer.title ?? "",
       analysis.jobOffer.company ?? "",
       labelers.sourceSiteLabel(analysis.jobOffer.sourceSite),
       analysis.jobOffer.postedAt ?? "",
+      analysis.requestedAt,
       analysis.cvVersion.label,
       analysis.matchScore !== null ? String(analysis.matchScore) : "",
       status,

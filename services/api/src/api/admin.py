@@ -1064,9 +1064,25 @@ class AdminAnalysesListResponse(BaseModel):
     pageSize: int
 
 
+AdminAnalysesStatusFilter = Literal[
+    "TO_APPLY", "IN_PROGRESS", "REJECTED", "ACCEPTED", "WITHDRAWN", "FAILED"
+]
+
+# Mirrors `APPLICATION_STATUS_TO_TRACKING` in the frontend's
+# `lib/tracking-status.ts` -- DRAFT/no-Application folds into TO_APPLY,
+# handled separately below since it also has to match a missing Application row.
+_TRACKING_STATUS_TO_APPLICATION_STATUSES: dict[str, list[Applicationstatus]] = {
+    "IN_PROGRESS": [Applicationstatus.APPLIED, Applicationstatus.INTERVIEWING, Applicationstatus.OFFER],
+    "REJECTED": [Applicationstatus.REJECTED],
+    "ACCEPTED": [Applicationstatus.ACCEPTED],
+    "WITHDRAWN": [Applicationstatus.WITHDRAWN],
+}
+
+
 @router.get("/analyses", response_model=AdminAnalysesListResponse)
 async def list_admin_analyses(
     user_id: str | None = Query(None, alias="userId"),
+    status_filter: AdminAnalysesStatusFilter | None = Query(None, alias="status"),
     requested_at_from: datetime | None = Query(None, alias="requestedAtFrom"),
     requested_at_to: datetime | None = Query(None, alias="requestedAtTo"),
     page: int = Query(1, ge=1),
@@ -1075,9 +1091,16 @@ async def list_admin_analyses(
     session: AsyncSession = Depends(get_session),
 ) -> AdminAnalysesListResponse:
     """Every candidate's Analysis in one cross-user, filterable, paginated
-    list (issue #161) -- filterable by `userId` and a `requestedAt` range;
-    no status filter, since Tracking status is read-only context here (the
-    candidate's own `/analyses` page owns that transition, docs/adr/0019).
+    list (issue #161) -- filterable by `userId`, a `requestedAt` range, and
+    `status`. `status` mirrors the candidate-facing page's Tracking status
+    buckets (TO_APPLY/IN_PROGRESS/REJECTED/ACCEPTED/WITHDRAWN -- each implying
+    Analysis.status == COMPLETED, folded from the linked Application's own
+    status the same way the frontend's `trackingStatusOf` does) plus FAILED,
+    added because the read-only Tracking-status badge already shows it as a
+    fallback for a non-COMPLETED Analysis but had no matching filter bucket.
+    There is still no status-*transition* endpoint here -- the candidate's
+    own `/analyses` page owns that (docs/adr/0019); this filter only narrows
+    which rows are listed.
     Sorted newest first, matching the candidate-facing `list_analyses`
     order. The owner's name/email and the linked JobOffer's title/company
     are resolved here (mirroring `list_admin_cv_versions`) so the frontend
@@ -1092,6 +1115,18 @@ async def list_admin_analyses(
         stmt = stmt.where(Analysis.requestedAt >= requested_at_from)
     if requested_at_to is not None:
         stmt = stmt.where(Analysis.requestedAt <= requested_at_to)
+    if status_filter == "FAILED":
+        stmt = stmt.where(Analysis.status == Analysisstatus.FAILED)
+    elif status_filter == "TO_APPLY":
+        stmt = stmt.outerjoin(Application, Application.analysisId == Analysis.id).where(
+            Analysis.status == Analysisstatus.COMPLETED,
+            or_(Application.id.is_(None), Application.status == Applicationstatus.DRAFT),
+        )
+    elif status_filter is not None:
+        stmt = stmt.join(Application, Application.analysisId == Analysis.id).where(
+            Analysis.status == Analysisstatus.COMPLETED,
+            Application.status.in_(_TRACKING_STATUS_TO_APPLICATION_STATUSES[status_filter]),
+        )
     stmt = stmt.order_by(Analysis.requestedAt.desc())
 
     total = await session.scalar(select(func.count()).select_from(stmt.subquery())) or 0

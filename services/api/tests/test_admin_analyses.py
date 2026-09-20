@@ -191,6 +191,36 @@ async def _generated_documents_for(analysis_id: str) -> list[GeneratedDocument]:
         await engine.dispose()
 
 
+async def _create_application(
+    user_id: str,
+    analysis_id: str,
+    job_offer_id: str,
+    cv_version_id: str,
+    *,
+    status: Applicationstatus = Applicationstatus.DRAFT,
+) -> str:
+    application_id = str(uuid.uuid4())
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            session.add(
+                Application(
+                    id=application_id,
+                    userId=user_id,
+                    analysisId=analysis_id,
+                    jobOfferId=job_offer_id,
+                    cvVersionId=cv_version_id,
+                    status=status,
+                    updatedAt=_now(),
+                )
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+    return application_id
+
+
 async def _application_for(analysis_id: str) -> Application | None:
     engine = make_engine()
     try:
@@ -303,6 +333,81 @@ def test_list_analyses_filters_by_requested_at_range(admin_id, target_id):
     ids = {row["id"] for row in response.json()["analyses"]}
     assert recent_id in ids
     assert old_id not in ids
+
+
+def test_list_analyses_filters_by_status_failed(admin_id, target_id):
+    job_offer_id = asyncio.run(_create_job_offer())
+    cv_id = asyncio.run(_create_cv_version(target_id))
+    failed_id = asyncio.run(
+        _create_analysis(target_id, job_offer_id, cv_id, status=Analysisstatus.FAILED)
+    )
+    completed_id = asyncio.run(_create_analysis(target_id, job_offer_id, cv_id))
+    with TestClient(app) as client:
+        response = client.get(
+            "/v1/admin/analyses",
+            headers=_admin_headers(admin_id),
+            params={"userId": target_id, "status": "FAILED", "pageSize": 100},
+        )
+    assert response.status_code == 200
+    ids = {row["id"] for row in response.json()["analyses"]}
+    assert failed_id in ids
+    assert completed_id not in ids
+
+
+def test_list_analyses_filters_by_status_to_apply_with_no_application(admin_id, target_id):
+    job_offer_id = asyncio.run(_create_job_offer())
+    cv_id = asyncio.run(_create_cv_version(target_id))
+    completed_no_app_id = asyncio.run(_create_analysis(target_id, job_offer_id, cv_id))
+    failed_id = asyncio.run(
+        _create_analysis(target_id, job_offer_id, cv_id, status=Analysisstatus.FAILED)
+    )
+    with TestClient(app) as client:
+        response = client.get(
+            "/v1/admin/analyses",
+            headers=_admin_headers(admin_id),
+            params={"userId": target_id, "status": "TO_APPLY", "pageSize": 100},
+        )
+    assert response.status_code == 200
+    ids = {row["id"] for row in response.json()["analyses"]}
+    assert completed_no_app_id in ids
+    assert failed_id not in ids
+
+
+def test_list_analyses_filters_by_status_folds_application_status(admin_id, target_id):
+    job_offer_id = asyncio.run(_create_job_offer())
+    cv_id = asyncio.run(_create_cv_version(target_id))
+    in_progress_id = asyncio.run(_create_analysis(target_id, job_offer_id, cv_id))
+    asyncio.run(
+        _create_application(
+            target_id, in_progress_id, job_offer_id, cv_id, status=Applicationstatus.APPLIED
+        )
+    )
+    rejected_id = asyncio.run(_create_analysis(target_id, job_offer_id, cv_id))
+    asyncio.run(
+        _create_application(
+            target_id, rejected_id, job_offer_id, cv_id, status=Applicationstatus.REJECTED
+        )
+    )
+    with TestClient(app) as client:
+        response = client.get(
+            "/v1/admin/analyses",
+            headers=_admin_headers(admin_id),
+            params={"userId": target_id, "status": "IN_PROGRESS", "pageSize": 100},
+        )
+    assert response.status_code == 200
+    ids = {row["id"] for row in response.json()["analyses"]}
+    assert in_progress_id in ids
+    assert rejected_id not in ids
+
+
+def test_list_analyses_rejects_invalid_status(admin_id):
+    with TestClient(app) as client:
+        response = client.get(
+            "/v1/admin/analyses",
+            headers=_admin_headers(admin_id),
+            params={"status": "NOT_A_STATUS"},
+        )
+    assert response.status_code == 422
 
 
 def test_list_analyses_returns_pagination_metadata(admin_id, target_id):

@@ -2,9 +2,13 @@
 // (issue #161). Like the Admin CV versions table (lib/admin-cv-versions-filters.ts)
 // and unlike the candidate-facing analyses page, filtering, sorting (fixed:
 // newest first) and pagination are NOT applied client-side — this state is
-// sent straight through as query params to `GET /v1/admin/analyses`. No
-// status filter here: Tracking status is read-only context on this table,
-// not something an Administrator filters by.
+// sent straight through as query params to `GET /v1/admin/analyses`. A
+// `status` filter was added in issue #172, mirroring the candidate-facing
+// page's own Tracking-status-buckets-plus-FAILED vocabulary — this still
+// only narrows which rows list; there is still no status-*transition*
+// control here (that stays exclusively the candidate's own `/analyses`).
+
+import { ANALYSES_STATUS_FILTERS, type AnalysesStatusFilter } from "@/lib/tracking-status";
 
 export const ADMIN_ANALYSES_PAGE_SIZES = [20, 50] as const;
 export type AdminAnalysesPageSize = (typeof ADMIN_ANALYSES_PAGE_SIZES)[number];
@@ -17,6 +21,9 @@ export type AdminAnalysesTableState = {
    *  so it survives a page refresh even though it plays no part in the
    *  actual server-side filter. */
   candidateQuery: string;
+  /** A Tracking status bucket, or `FAILED` (issue #172), or `null` for no
+   *  status filter. */
+  status: AnalysesStatusFilter | null;
   /** `requestedAt` range, as `YYYY-MM-DD` date-input strings, or `""` for no
    *  bound on that side. */
   requestedAtFrom: string;
@@ -28,6 +35,7 @@ export type AdminAnalysesTableState = {
 export const DEFAULT_ADMIN_ANALYSES_TABLE_STATE: AdminAnalysesTableState = {
   userId: null,
   candidateQuery: "",
+  status: null,
   requestedAtFrom: "",
   requestedAtTo: "",
   page: 1,
@@ -43,10 +51,14 @@ export function parseAdminAnalysesTableState(
   const page = Number(params.get("page"));
   const pageSize = Number(params.get("pageSize"));
   const userId = params.get("userId");
+  const status = params.get("status");
 
   return {
     userId: userId && userId !== "" ? userId : null,
     candidateQuery: params.get("candidateQuery") ?? "",
+    status: ANALYSES_STATUS_FILTERS.includes(status as AnalysesStatusFilter)
+      ? (status as AnalysesStatusFilter)
+      : null,
     requestedAtFrom: params.get("from") ?? "",
     requestedAtTo: params.get("to") ?? "",
     page: Number.isInteger(page) && page > 0 ? page : 1,
@@ -64,6 +76,7 @@ export function adminAnalysesTableStateToParams(
   const params = new URLSearchParams();
   if (state.userId) params.set("userId", state.userId);
   if (state.candidateQuery) params.set("candidateQuery", state.candidateQuery);
+  if (state.status) params.set("status", state.status);
   if (state.requestedAtFrom) params.set("from", state.requestedAtFrom);
   if (state.requestedAtTo) params.set("to", state.requestedAtTo);
   params.set("page", String(state.page));
@@ -74,12 +87,14 @@ export function adminAnalysesTableStateToParams(
 /** The query string sent to `GET /v1/admin/analyses` (via the BFF route) for
  *  this table state — `requestedAtFrom`/`requestedAtTo` are widened to cover
  *  the whole named day since the endpoint takes full timestamps, not bare
- *  dates. */
+ *  dates. `status` passes straight through: the backend's
+ *  `AdminAnalysesStatusFilter` uses the exact same values. */
 export function adminAnalysesTableStateToQuery(
   state: AdminAnalysesTableState,
 ): URLSearchParams {
   const params = new URLSearchParams();
   if (state.userId) params.set("userId", state.userId);
+  if (state.status) params.set("status", state.status);
   if (state.requestedAtFrom) {
     params.set("requestedAtFrom", `${state.requestedAtFrom}T00:00:00.000Z`);
   }

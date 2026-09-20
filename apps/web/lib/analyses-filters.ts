@@ -1,5 +1,9 @@
 import type { AnalysisSummary } from "@/hooks/use-analyses";
-import { TRACKING_STATUSES, trackingStatusOf, type TrackingStatus } from "@/lib/tracking-status";
+import {
+  ANALYSES_STATUS_FILTERS,
+  trackingStatusOf,
+  type AnalysesStatusFilter,
+} from "@/lib/tracking-status";
 
 // Pure, framework-free helpers behind the Analyses table (#63). Search, status
 // filter and CVVersion filter all operate on the list already returned by
@@ -23,16 +27,23 @@ export type JobOfferSourceSite = (typeof JOB_OFFER_SOURCE_SITES)[number];
 export type AnalysesFilterState = {
   /** Substring over JobOffer title + company, case-insensitive. */
   search: string;
-  /** A Tracking status bucket (issue #64), or `"all"` for no status filter —
-   *  "all" is the only way to see a non-`COMPLETED`/`FAILED` Analysis, since
-   *  those have no Tracking status bucket of their own. */
-  status: TrackingStatus | "all";
+  /** A Tracking status bucket, or `FAILED` (issue #172), or `"all"` for no
+   *  status filter — "all" is the only way to see one of the other
+   *  non-terminal pipeline statuses, since those have no filter bucket of
+   *  their own. */
+  status: AnalysesStatusFilter | "all";
   /** A `cvVersion.label`, or `"all"` for no CVVersion filter. */
   cvLabel: string | "all";
   /** A `JobOfferSourceSite`, or `"all"` for no platform filter (#125). */
   platform: JobOfferSourceSite | "all";
   /** Substring over JobOffer location, case-insensitive (#125). */
   location: string;
+  /** `Analysis.requestedAt` range, as `YYYY-MM-DD` date-input strings, or
+   *  `""` for no bound on that side (issue #172) — mirrors the Admin
+   *  analyses table's own `requestedAtFrom`/`requestedAtTo` filter over the
+   *  same field. */
+  requestedAtFrom: string;
+  requestedAtTo: string;
 };
 
 export const DEFAULT_ANALYSES_FILTERS: AnalysesFilterState = {
@@ -41,6 +52,8 @@ export const DEFAULT_ANALYSES_FILTERS: AnalysesFilterState = {
   cvLabel: "all",
   platform: "all",
   location: "",
+  requestedAtFrom: "",
+  requestedAtTo: "",
 };
 
 /** Distinct CVVersion labels present in the list, in first-seen order. */
@@ -65,24 +78,50 @@ function matchesLocation(analysis: AnalysisSummary, term: string): boolean {
   return (analysis.jobOffer.location ?? "").toLowerCase().includes(needle);
 }
 
+/** `requestedAt` (a full ISO-8601 UTC timestamp) falls within `[from, to]`,
+ *  each a bare `YYYY-MM-DD` date-input string widened to cover the whole
+ *  named day — mirrors the Admin analyses table's own
+ *  `adminAnalysesTableStateToQuery` widening, done server-side there. */
+function matchesRequestedAtRange(
+  analysis: AnalysisSummary,
+  from: string,
+  to: string,
+): boolean {
+  if (!from && !to) return true;
+  const requestedAt = new Date(analysis.requestedAt).getTime();
+  if (from && requestedAt < new Date(`${from}T00:00:00.000Z`).getTime()) return false;
+  if (to && requestedAt > new Date(`${to}T23:59:59.999Z`).getTime()) return false;
+  return true;
+}
+
+/** A status filter matches `FAILED` directly against the Analysis's own
+ *  pipeline status, or a Tracking status bucket against `trackingStatusOf` —
+ *  mirrors `AdminAnalysesStatusFilter`'s split in `services/api`. */
+function matchesStatus(analysis: AnalysisSummary, status: AnalysesStatusFilter): boolean {
+  if (status === "FAILED") return analysis.status === "FAILED";
+  return trackingStatusOf(analysis) === status;
+}
+
 /**
- * Narrow the analyses to those matching the search term, the Tracking status
- * filter, the CVVersion filter, the platform filter and the location search
- * (#125) — all combined with AND. A specific Tracking status bucket only ever
- * matches a `COMPLETED` Analysis — a still-running or `FAILED` one has no
- * bucket and is excluded from every filter but `"all"`.
+ * Narrow the analyses to those matching the search term, the status filter,
+ * the CVVersion filter, the platform filter, the location search (#125) and
+ * the `requestedAt` range (#172) — all combined with AND. A specific
+ * Tracking status bucket only ever matches a `COMPLETED` Analysis — a
+ * still-running one (but not `FAILED`, which has its own bucket now) has no
+ * bucket and is excluded from every status filter but `"all"`.
  */
 export function filterAnalyses(
   analyses: AnalysisSummary[],
-  { search, status, cvLabel, platform, location }: AnalysesFilterState,
+  { search, status, cvLabel, platform, location, requestedAtFrom, requestedAtTo }: AnalysesFilterState,
 ): AnalysisSummary[] {
   return analyses.filter(
     (analysis) =>
       matchesSearch(analysis, search) &&
-      (status === "all" || trackingStatusOf(analysis) === status) &&
+      (status === "all" || matchesStatus(analysis, status)) &&
       (cvLabel === "all" || analysis.cvVersion.label === cvLabel) &&
       (platform === "all" || analysis.jobOffer.sourceSite === platform) &&
-      matchesLocation(analysis, location),
+      matchesLocation(analysis, location) &&
+      matchesRequestedAtRange(analysis, requestedAtFrom, requestedAtTo),
   );
 }
 
@@ -90,11 +129,13 @@ export function filterAnalyses(
 
 /** Every column the table can sort by, matching one field each. */
 export type AnalysesSortColumn =
+  | "id"
   | "title"
   | "company"
   | "location"
   | "sourceSite"
   | "postedAt"
+  | "requestedAt"
   | "cvLabel"
   | "matchScore"
   | "tailoredCvStatus"
@@ -115,11 +156,13 @@ export const DEFAULT_ANALYSES_SORT: AnalysesSortState = {
 };
 
 const SORT_COLUMNS: readonly AnalysesSortColumn[] = [
+  "id",
   "title",
   "company",
   "location",
   "sourceSite",
   "postedAt",
+  "requestedAt",
   "cvLabel",
   "matchScore",
   "tailoredCvStatus",
@@ -132,6 +175,8 @@ function sortValue(
   column: AnalysesSortColumn,
 ): string | number | null {
   switch (column) {
+    case "id":
+      return analysis.id;
     case "title":
       return analysis.jobOffer.title;
     case "company":
@@ -142,6 +187,8 @@ function sortValue(
       return analysis.jobOffer.sourceSite;
     case "postedAt":
       return analysis.jobOffer.postedAt;
+    case "requestedAt":
+      return analysis.requestedAt;
     case "cvLabel":
       return analysis.cvVersion.label;
     case "matchScore":
@@ -226,14 +273,17 @@ export function parseAnalysesTableState(
 
   return {
     search: params.get("q") ?? DEFAULT_ANALYSES_TABLE_STATE.search,
-    status: TRACKING_STATUSES.includes(status as TrackingStatus)
-      ? (status as TrackingStatus)
+    status: ANALYSES_STATUS_FILTERS.includes(status as AnalysesStatusFilter)
+      ? (status as AnalysesStatusFilter)
       : "all",
     cvLabel: cvLabel ?? "all",
     platform: JOB_OFFER_SOURCE_SITES.includes(platform as JobOfferSourceSite)
       ? (platform as JobOfferSourceSite)
       : "all",
     location: params.get("location") ?? DEFAULT_ANALYSES_TABLE_STATE.location,
+    requestedAtFrom:
+      params.get("requestedFrom") ?? DEFAULT_ANALYSES_TABLE_STATE.requestedAtFrom,
+    requestedAtTo: params.get("requestedTo") ?? DEFAULT_ANALYSES_TABLE_STATE.requestedAtTo,
     sort: {
       column: SORT_COLUMNS.includes(column as AnalysesSortColumn)
         ? (column as AnalysesSortColumn)
@@ -261,6 +311,8 @@ export function analysesTableStateToParams(
   if (state.cvLabel !== "all") params.set("cv", state.cvLabel);
   if (state.platform !== "all") params.set("platform", state.platform);
   if (state.location) params.set("location", state.location);
+  if (state.requestedAtFrom) params.set("requestedFrom", state.requestedAtFrom);
+  if (state.requestedAtTo) params.set("requestedTo", state.requestedAtTo);
   params.set("sort", state.sort.column);
   params.set("dir", state.sort.direction);
   params.set("page", String(state.page));

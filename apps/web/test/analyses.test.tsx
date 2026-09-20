@@ -189,10 +189,12 @@ describe("AnalysesDashboardPage", () => {
 
     for (const name of [
       "Position",
+      "ID",
       "Company",
       "Location",
       "Platform",
       "Posted",
+      "Requested",
       "CV",
       "Score",
       "Status",
@@ -202,7 +204,16 @@ describe("AnalysesDashboardPage", () => {
     }
 
     await user.click(screen.getByRole("button", { name: "Columns" }));
-    for (const name of ["Company", "Location", "Platform", "Posted", "CV", "Score"]) {
+    for (const name of [
+      "ID",
+      "Company",
+      "Location",
+      "Platform",
+      "Posted",
+      "Requested",
+      "CV",
+      "Score",
+    ]) {
       expect(
         screen.getByRole("menuitemcheckbox", { name }),
       ).toBeInTheDocument();
@@ -372,6 +383,79 @@ describe("AnalysesDashboardPage", () => {
     await user.selectOptions(screen.getByLabelText("Status"), "TO_APPLY");
     expect(screen.queryByText("Still Running Offer")).not.toBeInTheDocument();
     expect(screen.getByText("To Apply Offer")).toBeInTheDocument();
+  });
+
+  it("filters by the Échouée/Failed status, which now has its own filter bucket (issue #172)", async () => {
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            summary({
+              id: "s1",
+              status: "FAILED",
+              matchScore: null,
+              jobOffer: { ...summary().jobOffer, id: "j1", title: "Failed Offer" },
+            }),
+            summary({
+              id: "s2",
+              status: "COMPLETED",
+              jobOffer: { ...summary().jobOffer, id: "j2", title: "Completed Offer" },
+            }),
+          ],
+        }),
+      ),
+    );
+
+    const user = userEvent.setup();
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Failed Offer");
+
+    expect(screen.getByRole("cell", { name: "Failed" })).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("Status"), "FAILED");
+    expect(screen.getByText("Failed Offer")).toBeInTheDocument();
+    expect(screen.queryByText("Completed Offer")).not.toBeInTheDocument();
+  });
+
+  it("filters by the requestedAt range (issue #172)", async () => {
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            summary({
+              id: "s1",
+              requestedAt: "2026-07-05T00:00:00.000Z",
+              jobOffer: { ...summary().jobOffer, id: "j1", title: "Early Offer" },
+            }),
+            summary({
+              id: "s2",
+              requestedAt: "2026-08-15T00:00:00.000Z",
+              jobOffer: { ...summary().jobOffer, id: "j2", title: "Late Offer" },
+            }),
+          ],
+        }),
+      ),
+    );
+
+    const user = userEvent.setup();
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Early Offer");
+
+    await user.type(screen.getByLabelText("Requested from"), "2026-08-01");
+    expect(screen.queryByText("Early Offer")).not.toBeInTheDocument();
+    expect(screen.getByText("Late Offer")).toBeInTheDocument();
+  });
+
+  it("shows the id column with a copy button (issue #172)", async () => {
+    server.use(
+      http.get("/api/analyses", () => HttpResponse.json({ analyses: [summary({ id: "a1" })] })),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Backend Engineer");
+
+    expect(screen.getByText("a1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy id" })).toBeInTheDocument();
   });
 
   it("shows an empty state when there are no analyses", async () => {
