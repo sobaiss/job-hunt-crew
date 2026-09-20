@@ -165,9 +165,25 @@ The ceiling actually enforced for one User on one QuotaKind: their QuotaOverride
 _Avoid_: Quota limit, cap (fine in prose; "cap" is also the pre-existing env-var terminology this replaces)
 
 **AdminAuditEvent**:
-One append-only entry recording an Administrator's action on a User or on shared config — editing a QuotaOverride, a PlanQuotaDefault, or assigning a User a new Subscription; blocking or unblocking a User; editing a User's name; or changing a User's Role — actor, target User, field, old/new value, timestamp. Renamed from QuotaAuditEvent once its scope grew past quota-only actions (docs/adr/0015). Also covers an Administrator acting on a candidate's own resource from the Admin analyses/scouts/CV versions tables (re-running an Analysis, running/pausing/archiving a Scout, reconverting a CVVersion) via an optional `resourceType`/`resourceId` pair alongside the User-field columns, rather than a second, parallel audit mechanism (docs/adr/0020). A distinct trail from PipelineEvent (pipeline observability) and StatusEvent (an Application's own history): this one exists purely for admin-action provenance.
+One append-only entry recording an Administrator's action on a User or on shared config — editing a QuotaOverride, a PlanQuotaDefault, or assigning a User a new Subscription; blocking or unblocking a User; editing a User's name; changing a User's Role; or editing an LLMProviderSetting or the Active LLM provider — actor, target User, field, old/new value, timestamp. A secret Provider parameter is recorded as a set/cleared marker, never its value in any form: this trail is read by more people and kept longer than the row it describes. Renamed from QuotaAuditEvent once its scope grew past quota-only actions (docs/adr/0015). Also covers an Administrator acting on a candidate's own resource from the Admin analyses/scouts/CV versions tables (re-running an Analysis, running/pausing/archiving a Scout, reconverting a CVVersion) via an optional `resourceType`/`resourceId` pair alongside the User-field columns, rather than a second, parallel audit mechanism (docs/adr/0020). A distinct trail from PipelineEvent (pipeline observability) and StatusEvent (an Application's own history): this one exists purely for admin-action provenance.
 _Avoid_: QuotaAuditEvent (its old name, now inaccurate — the trail covers non-quota admin actions too), Audit log (ambiguous with PipelineEvent's own "_Avoid_: Audit log" note — this is the admin-provenance trail, not the pipeline one)
 
 **QuotaAlert**:
 A persisted notification for one User crossing 80% ("approaching") or 100%+ ("exceeded") of their Effective quota for one QuotaKind — one fixed threshold pair across every QuotaKind for now. Surfaced in the Web context both as a standing notification-feed entry and as an inline banner on the specific action screen at the moment it would be blocked.
 _Avoid_: Notification (reserved as the general term should a non-quota use arise later), warning
+
+**LLMProviderSetting**:
+The stored configuration for one LLM provider — the Provider parameters an Administrator has filled in, plus whether that provider is the Active LLM provider. Values are held one row each rather than as fixed columns, so a provider carries zero or more of them; which parameters a provider *requires* is never stored (see Provider parameter). Read directly by the [Analysis](../analysis/CONTEXT.md) context, like every other table this context owns.
+_Avoid_: LLM provider — that names the Analysis context's provider *interface*, not this row. Provider config, LLM settings.
+
+**Provider parameter**:
+One named input a provider needs — `apiKey`, `baseUrl`, `model` — declared in a code-owned catalogue shared by this context and [Analysis](../analysis/CONTEXT.md), not in a table: every parameter name is hardcoded into some provider's constructor, so one no code reads would be a row that does nothing. Each declares whether it is secret and which environment variable it falls back to.
+_Avoid_: Env var — a parameter stored in Postgres is no longer an environment variable, even where it carries that variable's meaning. Setting, config key.
+
+**Effective provider parameter**:
+The value actually used for one Provider parameter: its LLMProviderSetting value if stored, else that parameter's environment variable, else the provider's hardcoded default (docs/adr/0024). Resolved independently per parameter — one missing field never hands the whole provider back to the environment.
+_Avoid_: Resolved value, final value (both fine in prose; this names the resolution specifically, mirroring Effective quota)
+
+**Active LLM provider**:
+The one LLMProviderSetting flagged active, or none at all — in which case `LLM_PROVIDER` decides, which is every deployment's starting state and an explicitly selectable choice, not an absence (docs/adr/0024). Activation is refused while any parameter the provider requires has no Effective provider parameter.
+_Avoid_: Selected provider, current provider, default provider — "default" belongs to the per-provider hardcoded model/base URL, a different fallback layer.
