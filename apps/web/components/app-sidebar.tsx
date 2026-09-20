@@ -264,6 +264,45 @@ function SidebarNav({
 }
 
 /**
+ * The identity label, theme control, language control, and sign-out entries
+ * shared by the Sidebar's account menu and the Topbar's avatar-only
+ * equivalent.
+ */
+function AccountMenuItems({
+  name,
+  align,
+  side,
+}: {
+  name: string;
+  align: "start" | "end";
+  side: "top" | "bottom";
+}) {
+  const tMenu = useTranslations("userMenu");
+  return (
+    <DropdownMenuContent align={align} side={side} className="min-w-56">
+      {name && (
+        <>
+          <DropdownMenuLabel className="truncate">{name}</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+        </>
+      )}
+      <div className="flex items-center gap-1 px-1 py-0.5">
+        <span className="flex-1 text-sm text-muted">{tMenu("theme")}</span>
+        <ThemeToggle />
+      </div>
+      <div className="flex items-center gap-1 px-1 py-0.5">
+        <span className="flex-1 text-sm text-muted">{tMenu("language")}</span>
+        <LocaleSwitch />
+      </div>
+      <DropdownMenuSeparator />
+      <DropdownMenuItem onSelect={() => void signOut({ callbackUrl: "/" })}>
+        {tMenu("signOut")}
+      </DropdownMenuItem>
+    </DropdownMenuContent>
+  );
+}
+
+/**
  * The account menu pinned at the bottom of the Sidebar: the signed-in
  * Candidate's identity, the theme control, the language control, and sign out.
  * When `collapsed`, only the avatar shows (the trigger's `aria-label` already
@@ -310,26 +349,35 @@ function SidebarAccountMenu({ collapsed }: { collapsed?: boolean }) {
           </button>
         </DropdownMenuTrigger>
       </MaybeTooltip>
-      <DropdownMenuContent align="start" side="top" className="min-w-56">
-        {name && (
-          <>
-            <DropdownMenuLabel className="truncate">{name}</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-          </>
-        )}
-        <div className="flex items-center gap-1 px-1 py-0.5">
-          <span className="flex-1 text-sm text-muted">{tMenu("theme")}</span>
-          <ThemeToggle />
-        </div>
-        <div className="flex items-center gap-1 px-1 py-0.5">
-          <span className="flex-1 text-sm text-muted">{tMenu("language")}</span>
-          <LocaleSwitch />
-        </div>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => void signOut({ callbackUrl: "/" })}>
-          {tMenu("signOut")}
-        </DropdownMenuItem>
-      </DropdownMenuContent>
+      <AccountMenuItems name={name} align="start" side="top" />
+    </DropdownMenu>
+  );
+}
+
+/**
+ * Avatar-only account menu rendered in the Topbar below the `md` breakpoint,
+ * where the persistent {@link AppSidebar} (and the account entry inside it)
+ * is hidden and only reachable by opening the drawer. Keeps sign-in identity
+ * and sign out reachable from every signed-in page regardless of viewport.
+ */
+export function TopbarAccountMenu() {
+  const tMenu = useTranslations("userMenu");
+  const { data: session } = useSession();
+  const user = session?.user;
+  const name = user?.name ?? user?.email ?? "";
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={tMenu("label")}
+          className="flex size-8 flex-none items-center justify-center rounded-full bg-accent text-xs font-semibold text-white outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {initials(user?.name, user?.email)}
+        </button>
+      </DropdownMenuTrigger>
+      <AccountMenuItems name={name} align="end" side="bottom" />
     </DropdownMenu>
   );
 }
@@ -415,7 +463,7 @@ export function AppSidebar() {
   return (
     <aside
       className={cn(
-        "hidden flex-none border-r border-border bg-panel md:flex md:flex-col",
+        "hidden flex-none overflow-y-auto border-r border-border bg-panel md:flex md:flex-col",
         collapsed ? "w-18 p-3" : "w-64 p-4",
       )}
     >

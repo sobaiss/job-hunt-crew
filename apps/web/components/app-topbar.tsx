@@ -16,6 +16,7 @@ import {
 import {
   NAV_ITEMS,
   SidebarContent,
+  TopbarAccountMenu,
   isNavActive,
 } from "@/components/app-sidebar";
 import { QuotaAlertsFeed } from "@/components/quota-alerts-feed";
@@ -38,7 +39,9 @@ function usePageTitle(): string {
 /**
  * The context Topbar above every signed-in page: the current page's title, a
  * slot for that page's actions, and — below the `md` breakpoint — the button
- * that opens the Sidebar as a drawer. Mounted by `app/(app)/layout.tsx`.
+ * that opens the Sidebar as a drawer plus an avatar-only account menu, since
+ * the persistent Sidebar's own account entry is hidden at that width.
+ * Mounted by `app/(app)/layout.tsx`.
  */
 export function AppTopbar({ children }: { children?: React.ReactNode }) {
   const t = useTranslations("nav");
@@ -74,6 +77,9 @@ export function AppTopbar({ children }: { children?: React.ReactNode }) {
       <div className="ml-auto flex items-center gap-2">
         <QuotaAlertsFeed />
         {children}
+        <div className="md:hidden">
+          <TopbarAccountMenu />
+        </div>
       </div>
     </header>
   );

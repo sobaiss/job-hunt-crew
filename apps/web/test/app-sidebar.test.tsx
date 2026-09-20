@@ -240,4 +240,14 @@ describe("AppTopbar", () => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
     );
   });
+
+  it("exposes an account menu that signs out, independent of the drawer", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AppTopbar />, { session: SESSION });
+
+    await user.click(screen.getByRole("button", { name: "Account menu" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Sign out" }));
+
+    expect(signOut).toHaveBeenCalledWith({ callbackUrl: "/" });
+  });
 });
