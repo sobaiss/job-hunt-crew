@@ -43,6 +43,17 @@ describe("sortScouts", () => {
     ).toEqual(["b", "a"]);
   });
 
+  it("sorts the id column alphabetically", () => {
+    const list = [
+      scout({ id: "scout-b" }),
+      scout({ id: "scout-a" }),
+    ];
+
+    expect(
+      sortScouts(list, { column: "id", direction: "asc" }).map((s) => s.id),
+    ).toEqual(["scout-a", "scout-b"]);
+  });
+
   it("sorts the status column alphabetically", () => {
     const list = [
       scout({ id: "active", status: "ACTIVE" }),

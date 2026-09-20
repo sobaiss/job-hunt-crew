@@ -167,6 +167,28 @@ describe("AdminCvVersionsPage", () => {
     expect(screen.queryByRole("button", { name: /replace/i })).not.toBeInTheDocument();
   });
 
+  it("hides the id column by default, showing it with a copy button once toggled on from the Columns menu", async () => {
+    server.use(
+      http.get("/api/admin/cv-versions", () => HttpResponse.json(cvVersionsListResponse())),
+    );
+
+    renderWithProviders(<AdminCvVersionsPage />);
+    await screen.findByText("Ada Lovelace");
+
+    expect(screen.queryByText("cv-1")).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "ID" })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Columns" }));
+    expect(
+      screen.getByRole("menuitemcheckbox", { name: "ID" }),
+    ).toHaveAttribute("aria-checked", "false");
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: "ID" }));
+    await userEvent.keyboard("{Escape}");
+
+    expect(screen.getByText("cv-1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy id" })).toBeInTheDocument();
+  });
+
   it("shows an empty state when no CV versions match the filters", async () => {
     server.use(
       http.get("/api/admin/cv-versions", () =>

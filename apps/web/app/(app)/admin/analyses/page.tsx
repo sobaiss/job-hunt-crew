@@ -23,16 +23,37 @@ import {
   trackingStatusBadgeVariant,
   trackingStatusOf,
 } from "@/lib/tracking-status";
+import type { ColumnConfig } from "@/lib/column-visibility";
+import { useColumnVisibility } from "@/hooks/use-column-visibility";
 import { analysisBadgeVariant } from "@/components/analysis-row";
 import type { AnalysisStatus } from "@/hooks/use-analyses";
 import type { ApplicationStatus } from "@/hooks/use-applications";
 import { CandidatePicker } from "@/components/candidate-picker";
 import { CopyIdButton } from "@/components/copy-id-button";
+import { ColumnVisibilityMenu } from "@/components/column-visibility-menu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+
+// The candidate is the always-visible primary column, mirroring the
+// candidate-facing tables' Label/Position convention; id is hideable and
+// hidden by default (a support-ticket lookup, not a browsing column), same
+// as the Analyses/Scouts/CV versions Columns menu (#129/#130/#131).
+// Actions stays outside the model entirely, like those tables' own
+// selection/action columns.
+type AdminAnalysesColumn = "candidate" | "id" | "jobOffer" | "status" | "requestedAt";
+
+const COLUMNS: ColumnConfig<AdminAnalysesColumn>[] = [
+  { key: "candidate", labelKey: "columns.candidate", hideable: false },
+  { key: "id", labelKey: "columns.id", hideable: true, defaultVisible: false },
+  { key: "jobOffer", labelKey: "columns.jobOffer", hideable: true },
+  { key: "status", labelKey: "columns.status", hideable: true },
+  { key: "requestedAt", labelKey: "columns.requestedAt", hideable: true },
+];
+
+const COLUMN_VISIBILITY_STORAGE_KEY = "column-visibility:admin-analyses";
 
 const SELECT_CLASS =
   "flex h-9 w-auto rounded-md border border-border bg-background px-3 py-1 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50";
@@ -109,6 +130,7 @@ function AnalysesTable() {
 
   const state = useMemo(() => parseAdminAnalysesTableState(searchParams), [searchParams]);
   const { data, isPending, isError } = useAdminAnalyses(state);
+  const columnVisibility = useColumnVisibility(COLUMN_VISIBILITY_STORAGE_KEY, COLUMNS);
 
   const updateState = (patch: Partial<AdminAnalysesTableState>) => {
     const next: AdminAnalysesTableState = { ...state, ...patch, page: patch.page ?? 1 };
@@ -199,6 +221,18 @@ function AnalysesTable() {
         </div>
       </div>
 
+      <div className="flex justify-end">
+        <ColumnVisibilityMenu
+          columns={COLUMNS}
+          isVisible={columnVisibility.isVisible}
+          onToggle={columnVisibility.toggle}
+          onReset={columnVisibility.reset}
+          label={t("columnsLabel")}
+          columnLabel={(labelKey) => t(labelKey)}
+          resetLabel={t("columnsReset")}
+        />
+      </div>
+
       {isPending && <p className="text-sm text-muted">{t("loading")}</p>}
       {isError && (
         <p role="alert" className="text-sm text-destructive">
@@ -214,38 +248,46 @@ function AnalysesTable() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>{t("columns.id")}</TableHead>
-                <TableHead>{t("columns.candidate")}</TableHead>
-                <TableHead>{t("columns.jobOffer")}</TableHead>
-                <TableHead>{t("columns.status")}</TableHead>
-                <TableHead>{t("columns.requestedAt")}</TableHead>
+                {COLUMNS.filter((column) => columnVisibility.isVisible(column.key)).map(
+                  (column) => (
+                    <TableHead key={column.key}>{t(column.labelKey)}</TableHead>
+                  ),
+                )}
                 <TableHead>{t("columns.actions")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {data.analyses.map((row) => (
                 <TableRow key={row.id}>
-                  <TableCell>
-                    <div className="flex items-center gap-1">
-                      <span className="font-mono text-xs text-muted">{row.id}</span>
-                      <CopyIdButton value={row.id} label={t("columns.copyId")} />
-                    </div>
-                  </TableCell>
                   <TableCell className="font-medium">
                     {row.userName ?? row.userEmail ?? t("noName")}
                   </TableCell>
-                  <TableCell>
-                    {row.jobOfferTitle ?? t("jobOfferFallback")}
-                    <span className="block text-xs text-muted">{row.jobOfferCompany ?? "—"}</span>
-                  </TableCell>
-                  <TableCell>
-                    <TrackingBadge
-                      row={row}
-                      pipelineStatusLabel={pipelineStatusLabel}
-                      trackingStatusLabel={trackingStatusLabel}
-                    />
-                  </TableCell>
-                  <TableCell>{new Date(row.requestedAt).toLocaleDateString()}</TableCell>
+                  {columnVisibility.isVisible("id") && (
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        <span className="font-mono text-xs text-muted">{row.id}</span>
+                        <CopyIdButton value={row.id} label={t("columns.copyId")} />
+                      </div>
+                    </TableCell>
+                  )}
+                  {columnVisibility.isVisible("jobOffer") && (
+                    <TableCell>
+                      {row.jobOfferTitle ?? t("jobOfferFallback")}
+                      <span className="block text-xs text-muted">{row.jobOfferCompany ?? "—"}</span>
+                    </TableCell>
+                  )}
+                  {columnVisibility.isVisible("status") && (
+                    <TableCell>
+                      <TrackingBadge
+                        row={row}
+                        pipelineStatusLabel={pipelineStatusLabel}
+                        trackingStatusLabel={trackingStatusLabel}
+                      />
+                    </TableCell>
+                  )}
+                  {columnVisibility.isVisible("requestedAt") && (
+                    <TableCell>{new Date(row.requestedAt).toLocaleDateString()}</TableCell>
+                  )}
                   <TableCell>
                     <AnalysisRowActions row={row} />
                   </TableCell>

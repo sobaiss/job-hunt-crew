@@ -6,15 +6,33 @@ import { useTranslations } from "next-intl";
 
 import { useAdminPlanDefaults, useSetPlanDefaults, type AdminPlanDefault } from "@/hooks/use-admin";
 import { useEnumLabel } from "@/lib/enum-labels";
+import type { ColumnConfig } from "@/lib/column-visibility";
+import { useColumnVisibility } from "@/hooks/use-column-visibility";
+import { ColumnVisibilityMenu } from "@/components/column-visibility-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
-// The three Plans this comparison always shows, side by side — this page has
-// no control to add or remove a Plan column (issue #146).
+// The three Plans this comparison always shows, side by side. There's no
+// control to add or remove a Plan (issue #146), but each of the three
+// columns can be hidden/shown independently. There's no id column here —
+// unlike the other admin tables, a Plan default has no per-row id, only the
+// composite (plan, quotaKind) key this matrix already displays in full.
 const REAL_PLANS = ["FREE", "STANDARD", "PREMIUM"] as const;
 const KIND_ORDER = ["ACTIVE_SCOUTS", "ANALYSES_DAILY", "ANALYSES_MONTHLY", "DOCUMENTS_DAILY"] as const;
+
+type QuotaPlanColumn = (typeof REAL_PLANS)[number];
+
+// `labelKey` doubles as the rendered label here (a Plan name, not a
+// translation key) since Plan names aren't translated anywhere on this page.
+const COLUMNS: ColumnConfig<QuotaPlanColumn>[] = REAL_PLANS.map((plan) => ({
+  key: plan,
+  labelKey: plan,
+  hideable: true,
+}));
+
+const COLUMN_VISIBILITY_STORAGE_KEY = "column-visibility:admin-quotas";
 
 type LimitsByKind = Record<string, number | null>;
 
@@ -98,22 +116,35 @@ export default function AdminQuotasPage() {
   const quotaKindLabel = useEnumLabel("quotaKind");
   const { data, isPending, isError } = useAdminPlanDefaults();
   const [editingPlan, setEditingPlan] = useState<string | null>(null);
+  const columnVisibility = useColumnVisibility(COLUMN_VISIBILITY_STORAGE_KEY, COLUMNS);
 
   const byPlan = data ? groupByPlan(data.defaults) : {};
+  const visiblePlans = REAL_PLANS.filter((plan) => columnVisibility.isVisible(plan));
 
   return (
     <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 p-8">
-      <div className="flex flex-col gap-1">
-        <h1 className="font-serif text-2xl font-semibold">{t("title")}</h1>
-        <p className="text-sm text-muted">{t("description")}</p>
-        <div className="flex gap-4 pt-1">
-          <Link href="/admin" className="text-sm font-medium underline">
-            {nav("title")}
-          </Link>
-          <Link href="/admin/users" className="text-sm font-medium underline">
-            {nav("users.title")}
-          </Link>
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-1">
+          <h1 className="font-serif text-2xl font-semibold">{t("title")}</h1>
+          <p className="text-sm text-muted">{t("description")}</p>
+          <div className="flex gap-4 pt-1">
+            <Link href="/admin" className="text-sm font-medium underline">
+              {nav("title")}
+            </Link>
+            <Link href="/admin/users" className="text-sm font-medium underline">
+              {nav("users.title")}
+            </Link>
+          </div>
         </div>
+        <ColumnVisibilityMenu
+          columns={COLUMNS}
+          isVisible={columnVisibility.isVisible}
+          onToggle={columnVisibility.toggle}
+          onReset={columnVisibility.reset}
+          label={t("columnsLabel")}
+          columnLabel={(labelKey) => labelKey}
+          resetLabel={t("columnsReset")}
+        />
       </div>
 
       {isPending && <p className="text-sm text-muted">{t("loading")}</p>}
@@ -128,7 +159,7 @@ export default function AdminQuotasPage() {
           <TableHeader>
             <TableRow>
               <TableHead>{t("kindColumn")}</TableHead>
-              {REAL_PLANS.map((plan) => (
+              {visiblePlans.map((plan) => (
                 <TableHead key={plan}>{plan}</TableHead>
               ))}
             </TableRow>
@@ -137,7 +168,7 @@ export default function AdminQuotasPage() {
             {KIND_ORDER.map((kind) => (
               <TableRow key={kind}>
                 <TableCell className="font-medium">{quotaKindLabel(kind)}</TableCell>
-                {REAL_PLANS.map((plan) => {
+                {visiblePlans.map((plan) => {
                   const limit = byPlan[plan]?.[kind] ?? null;
                   return (
                     <TableCell key={plan}>{limit == null ? t("unlimitedLabel") : limit}</TableCell>
@@ -147,7 +178,7 @@ export default function AdminQuotasPage() {
             ))}
             <TableRow>
               <TableCell />
-              {REAL_PLANS.map((plan) => (
+              {visiblePlans.map((plan) => (
                 <TableCell key={plan}>
                   <Button size="sm" variant="outline" onClick={() => setEditingPlan(plan)}>
                     {t("modifyAction")}

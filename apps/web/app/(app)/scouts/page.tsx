@@ -20,6 +20,7 @@ import { TITLE_MAX_LENGTH } from "@/lib/text-truncation";
 import { SortableHead } from "@/components/sortable-head";
 import { ColumnVisibilityMenu } from "@/components/column-visibility-menu";
 import { TruncatedCell } from "@/components/truncated-cell";
+import { CopyIdButton } from "@/components/copy-id-button";
 import { ScoutPanel } from "@/components/scout-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -38,6 +39,12 @@ import {
 // (#130) and Analyses (#129).
 const COLUMNS: ColumnConfig<ScoutsSortColumn>[] = [
   { key: "label", labelKey: "list.columns.label", hideable: false },
+  {
+    key: "id",
+    labelKey: "list.columns.id",
+    hideable: true,
+    defaultVisible: false,
+  },
   { key: "status", labelKey: "list.columns.status", hideable: true },
   { key: "baseCv", labelKey: "list.columns.baseCv", hideable: true },
   { key: "sites", labelKey: "list.columns.sites", hideable: true },
@@ -231,6 +238,14 @@ function ScoutsPageContent() {
                 <TableCell className="font-medium">
                   <TruncatedCell text={scout.label} maxLength={TITLE_MAX_LENGTH} />
                 </TableCell>
+                {columnVisibility.isVisible("id") && (
+                  <TableCell>
+                    <div className="flex items-center gap-1">
+                      <span className="font-mono text-xs text-muted">{scout.id}</span>
+                      <CopyIdButton value={scout.id} label={t("list.columns.copyId")} />
+                    </div>
+                  </TableCell>
+                )}
                 {columnVisibility.isVisible("status") && (
                   <TableCell>
                     <Badge variant={statusVariant(scout.status)}>

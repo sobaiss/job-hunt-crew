@@ -27,6 +27,7 @@ import { CvVersionPanel } from "@/components/cv-version-panel";
 import { ColumnVisibilityMenu } from "@/components/column-visibility-menu";
 import { SortableHead } from "@/components/sortable-head";
 import { TruncatedCell } from "@/components/truncated-cell";
+import { CopyIdButton } from "@/components/copy-id-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -45,6 +46,12 @@ import {
 // column-visibility-menu.tsx unmodified.
 const COLUMNS: ColumnConfig<CvVersionsSortColumn>[] = [
   { key: "label", labelKey: "list.columns.label", hideable: false },
+  {
+    key: "id",
+    labelKey: "list.columns.id",
+    hideable: true,
+    defaultVisible: false,
+  },
   { key: "file", labelKey: "list.columns.file", hideable: true },
   {
     key: "size",
@@ -278,6 +285,14 @@ export default function CvVersionsPage() {
                       <TableCell className="font-medium">
                         <TruncatedCell text={cv.label} maxLength={TITLE_MAX_LENGTH} />
                       </TableCell>
+                      {columnVisibility.isVisible("id") && (
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            <span className="font-mono text-xs text-muted">{cv.id}</span>
+                            <CopyIdButton value={cv.id} label={t("list.columns.copyId")} />
+                          </div>
+                        </TableCell>
+                      )}
                       {columnVisibility.isVisible("file") && (
                         <TableCell>
                           <TruncatedCell text={cv.fileName} maxLength={TITLE_MAX_LENGTH} /> · {cv.fileType}

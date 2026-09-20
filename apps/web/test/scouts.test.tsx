@@ -168,7 +168,7 @@ describe("ScoutsPage — list", () => {
     expect(rowLabel()[0]).toContain("Zebra Scout");
   });
 
-  it("shows every column visible by default, with Label absent from the Columns menu (issue #131)", async () => {
+  it("shows every column visible by default except id, with Label absent from the Columns menu", async () => {
     const user = userEvent.setup();
     server.use(
       http.get("/api/scouts", () => HttpResponse.json({ scouts: [scout()] })),
@@ -190,9 +190,11 @@ describe("ScoutsPage — list", () => {
     ]) {
       expect(screen.getByRole("columnheader", { name })).toBeInTheDocument();
     }
+    expect(screen.queryByRole("columnheader", { name: "ID" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Columns" }));
     for (const name of [
+      "ID",
       "Status",
       "Base CV",
       "Sites",
@@ -206,6 +208,31 @@ describe("ScoutsPage — list", () => {
     expect(
       screen.queryByRole("menuitemcheckbox", { name: "Label" }),
     ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitemcheckbox", { name: "ID" }),
+    ).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("shows the id column with a copy button once toggled on from the Columns menu, hidden by default", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/scouts", () => HttpResponse.json({ scouts: [scout({ id: "scout-abc" })] })),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+    );
+
+    renderWithProviders(<ScoutsPage />);
+    await screen.findByText("Senior Backend — Remote EU");
+
+    expect(screen.queryByText("scout-abc")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Columns" }));
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "ID" }));
+    await user.keyboard("{Escape}");
+
+    expect(screen.getByText("scout-abc")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy id" })).toBeInTheDocument();
   });
 
   it("toggles a column's visibility independently and persists the choice across a remount, restored by Reset (issue #131)", async () => {

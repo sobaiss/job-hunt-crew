@@ -270,6 +270,48 @@ describe("AdminUsersPage", () => {
     expect(capturedBody).toEqual({ limit: 99 });
   });
 
+  it("hides the id column by default, showing it with a copy button once toggled on from the Columns menu", async () => {
+    mockCommon();
+    server.use(http.get("/api/admin/users", () => HttpResponse.json(usersListResponse())));
+
+    renderWithProviders(<AdminUsersPage />);
+    await screen.findByText("Ada Lovelace");
+
+    expect(screen.queryByText("user-1")).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "ID" })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Columns" }));
+    expect(
+      screen.getByRole("menuitemcheckbox", { name: "ID" }),
+    ).toHaveAttribute("aria-checked", "false");
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: "ID" }));
+    await userEvent.keyboard("{Escape}");
+
+    expect(screen.getByText("user-1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy id" })).toBeInTheDocument();
+  });
+
+  it("toggles a non-id column's visibility, restored by Reset", async () => {
+    mockCommon();
+    server.use(http.get("/api/admin/users", () => HttpResponse.json(usersListResponse())));
+
+    renderWithProviders(<AdminUsersPage />);
+    await screen.findByText("Ada Lovelace");
+
+    expect(screen.getByRole("columnheader", { name: "Plan" })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Columns" }));
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: "Plan" }));
+    await userEvent.keyboard("{Escape}");
+
+    expect(screen.queryByRole("columnheader", { name: "Plan" })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Columns" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Reset" }));
+
+    expect(screen.getByRole("columnheader", { name: "Plan" })).toBeInTheDocument();
+  });
+
   it("shows an empty state when no Users match the filters", async () => {
     mockCommon();
     server.use(

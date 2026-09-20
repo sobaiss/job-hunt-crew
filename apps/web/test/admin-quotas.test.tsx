@@ -89,6 +89,27 @@ describe("AdminQuotasPage", () => {
     });
   });
 
+  it("lets a Plan column be hidden and shown again via the Columns menu", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AdminQuotasPage />);
+    await screen.findByText("STANDARD");
+
+    expect(screen.getByRole("columnheader", { name: "PREMIUM" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Columns" }));
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "PREMIUM" }));
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("columnheader", { name: "PREMIUM" })).not.toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "FREE" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "STANDARD" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Columns" }));
+    await user.click(screen.getByRole("menuitem", { name: "Reset" }));
+
+    expect(screen.getByRole("columnheader", { name: "PREMIUM" })).toBeInTheDocument();
+  });
+
   it("submits an empty limit input as unlimited (null)", async () => {
     let capturedBody: unknown;
     server.use(

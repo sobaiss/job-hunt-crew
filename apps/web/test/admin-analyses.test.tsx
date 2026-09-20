@@ -119,13 +119,24 @@ describe("AdminAnalysesPage", () => {
     expect(capturedUrl).toContain("status=FAILED");
   });
 
-  it("shows the id column with a copy button (#172)", async () => {
+  it("hides the id column by default, showing it with a copy button once toggled on from the Columns menu", async () => {
+    const user = userEvent.setup();
     server.use(
       http.get("/api/admin/analyses", () => HttpResponse.json(analysesListResponse())),
     );
 
     renderWithProviders(<AdminAnalysesPage />);
     await screen.findByText("Ada Lovelace");
+
+    expect(screen.queryByText("analysis-1")).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "ID" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Columns" }));
+    expect(
+      screen.getByRole("menuitemcheckbox", { name: "ID" }),
+    ).toHaveAttribute("aria-checked", "false");
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "ID" }));
+    await user.keyboard("{Escape}");
 
     expect(screen.getByText("analysis-1")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Copy id" })).toBeInTheDocument();

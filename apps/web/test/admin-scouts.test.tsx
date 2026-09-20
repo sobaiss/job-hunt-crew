@@ -232,6 +232,27 @@ describe("AdminScoutsPage", () => {
     expect(screen.queryByRole("button", { name: "Archive" })).not.toBeInTheDocument();
   });
 
+  it("hides the id column by default, showing it with a copy button once toggled on from the Columns menu", async () => {
+    const user = userEvent.setup();
+    server.use(http.get("/api/admin/scouts", () => HttpResponse.json(scoutsListResponse())));
+
+    renderWithProviders(<AdminScoutsPage />);
+    await screen.findByText("Ada Lovelace");
+
+    expect(screen.queryByText("scout-1")).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "ID" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Columns" }));
+    expect(
+      screen.getByRole("menuitemcheckbox", { name: "ID" }),
+    ).toHaveAttribute("aria-checked", "false");
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "ID" }));
+    await user.keyboard("{Escape}");
+
+    expect(screen.getByText("scout-1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy id" })).toBeInTheDocument();
+  });
+
   it("shows an empty state when no scouts match the filters", async () => {
     server.use(
       http.get("/api/admin/scouts", () =>

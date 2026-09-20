@@ -30,7 +30,11 @@ import {
   type AdminUsersTableState,
 } from "@/lib/admin-users-filters";
 import { useEnumLabel } from "@/lib/enum-labels";
+import type { ColumnConfig } from "@/lib/column-visibility";
+import { useColumnVisibility } from "@/hooks/use-column-visibility";
 import { CandidatePicker } from "@/components/candidate-picker";
+import { CopyIdButton } from "@/components/copy-id-button";
+import { ColumnVisibilityMenu } from "@/components/column-visibility-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -41,6 +45,25 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const SELECT_CLASS =
   "flex h-9 w-auto rounded-md border border-border bg-background px-3 py-1 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50";
+
+// Name is the always-visible primary column; id is hideable and hidden by
+// default, mirroring the other Admin tables (analyses/scouts/cv-versions).
+// Plan and id aren't part of AdminUsersSortColumn (no server-side sort for
+// either), so they render as plain TableHead while the rest keep using
+// SortableHead — this only adds show/hide, it doesn't add new sort columns.
+type AdminUsersColumn = "name" | "id" | "email" | "plan" | "role" | "blocked" | "createdAt";
+
+const COLUMNS: ColumnConfig<AdminUsersColumn>[] = [
+  { key: "name", labelKey: "columns.name", hideable: false },
+  { key: "id", labelKey: "columns.id", hideable: true, defaultVisible: false },
+  { key: "email", labelKey: "columns.email", hideable: true },
+  { key: "plan", labelKey: "columns.plan", hideable: true },
+  { key: "role", labelKey: "columns.role", hideable: true },
+  { key: "blocked", labelKey: "columns.blocked", hideable: true },
+  { key: "createdAt", labelKey: "columns.createdAt", hideable: true },
+];
+
+const COLUMN_VISIBILITY_STORAGE_KEY = "column-visibility:admin-users";
 
 const KIND_ORDER = [
   "ACTIVE_SCOUTS",
@@ -563,6 +586,7 @@ function UsersTable() {
   const openUserId = searchParams.get("user");
 
   const { data, isPending, isError } = useAdminUsers(state);
+  const columnVisibility = useColumnVisibility(COLUMN_VISIBILITY_STORAGE_KEY, COLUMNS);
 
   const updateState = (patch: Partial<AdminUsersTableState>) => {
     const next: AdminUsersTableState = { ...state, ...patch, page: patch.page ?? 1 };
@@ -660,15 +684,26 @@ function UsersTable() {
         </div>
       </div>
 
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={state.atOrOverLimit}
-          onChange={(event) => updateState({ atOrOverLimit: event.target.checked })}
-          aria-label={t("atOrOverLimitLabel")}
+      <div className="flex items-center justify-between gap-4">
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={state.atOrOverLimit}
+            onChange={(event) => updateState({ atOrOverLimit: event.target.checked })}
+            aria-label={t("atOrOverLimitLabel")}
+          />
+          {t("atOrOverLimitLabel")}
+        </label>
+        <ColumnVisibilityMenu
+          columns={COLUMNS}
+          isVisible={columnVisibility.isVisible}
+          onToggle={columnVisibility.toggle}
+          onReset={columnVisibility.reset}
+          label={t("columnsLabel")}
+          columnLabel={(labelKey) => t(labelKey)}
+          resetLabel={t("columnsReset")}
         />
-        {t("atOrOverLimitLabel")}
-      </label>
+      </div>
 
       {isPending && <p className="text-sm text-muted">{t("loading")}</p>}
       {isError && (
@@ -686,16 +721,25 @@ function UsersTable() {
             <TableHeader>
               <TableRow>
                 <SortableHead column="name" label={t("columns.name")} sort={state.sort} onSort={toggleSort} />
-                <SortableHead column="email" label={t("columns.email")} sort={state.sort} onSort={toggleSort} />
-                <TableHead>{t("columns.plan")}</TableHead>
-                <SortableHead column="role" label={t("columns.role")} sort={state.sort} onSort={toggleSort} />
-                <SortableHead column="blocked" label={t("columns.blocked")} sort={state.sort} onSort={toggleSort} />
-                <SortableHead
-                  column="createdAt"
-                  label={t("columns.createdAt")}
-                  sort={state.sort}
-                  onSort={toggleSort}
-                />
+                {columnVisibility.isVisible("id") && <TableHead>{t("columns.id")}</TableHead>}
+                {columnVisibility.isVisible("email") && (
+                  <SortableHead column="email" label={t("columns.email")} sort={state.sort} onSort={toggleSort} />
+                )}
+                {columnVisibility.isVisible("plan") && <TableHead>{t("columns.plan")}</TableHead>}
+                {columnVisibility.isVisible("role") && (
+                  <SortableHead column="role" label={t("columns.role")} sort={state.sort} onSort={toggleSort} />
+                )}
+                {columnVisibility.isVisible("blocked") && (
+                  <SortableHead column="blocked" label={t("columns.blocked")} sort={state.sort} onSort={toggleSort} />
+                )}
+                {columnVisibility.isVisible("createdAt") && (
+                  <SortableHead
+                    column="createdAt"
+                    label={t("columns.createdAt")}
+                    sort={state.sort}
+                    onSort={toggleSort}
+                  />
+                )}
                 <TableHead>{t("columns.actions")}</TableHead>
               </TableRow>
             </TableHeader>
@@ -714,11 +758,25 @@ function UsersTable() {
                   }}
                 >
                   <TableCell className="font-medium">{user.name ?? t("noName")}</TableCell>
-                  <TableCell>{user.email ?? t("noEmail")}</TableCell>
-                  <TableCell>{user.plan}</TableCell>
-                  <TableCell>{roleLabel(user.role)}</TableCell>
-                  <TableCell>{user.blocked ? t("blockedYesOption") : "—"}</TableCell>
-                  <TableCell>{new Date(user.createdAt).toLocaleDateString()}</TableCell>
+                  {columnVisibility.isVisible("id") && (
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        <span className="font-mono text-xs text-muted">{user.id}</span>
+                        <CopyIdButton value={user.id} label={t("columns.copyId")} />
+                      </div>
+                    </TableCell>
+                  )}
+                  {columnVisibility.isVisible("email") && (
+                    <TableCell>{user.email ?? t("noEmail")}</TableCell>
+                  )}
+                  {columnVisibility.isVisible("plan") && <TableCell>{user.plan}</TableCell>}
+                  {columnVisibility.isVisible("role") && <TableCell>{roleLabel(user.role)}</TableCell>}
+                  {columnVisibility.isVisible("blocked") && (
+                    <TableCell>{user.blocked ? t("blockedYesOption") : "—"}</TableCell>
+                  )}
+                  {columnVisibility.isVisible("createdAt") && (
+                    <TableCell>{new Date(user.createdAt).toLocaleDateString()}</TableCell>
+                  )}
                   <TableCell>
                     <BlockUnblockAction
                       userId={user.id}

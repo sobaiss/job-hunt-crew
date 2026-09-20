@@ -7,6 +7,7 @@ import type { CvVersion } from "@/hooks/use-cv-versions";
 
 export type CvVersionsSortColumn =
   | "label"
+  | "id"
   | "file"
   | "size"
   | "uploaded"
@@ -33,6 +34,8 @@ function sortValue(
   switch (column) {
     case "label":
       return cv.label;
+    case "id":
+      return cv.id;
     case "file":
       return cv.fileName;
     case "size":

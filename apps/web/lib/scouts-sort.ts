@@ -6,6 +6,7 @@ import type { Scout } from "@/hooks/use-scouts";
 
 export type ScoutsSortColumn =
   | "label"
+  | "id"
   | "status"
   | "baseCv"
   | "sites"
@@ -33,6 +34,8 @@ function sortValue(
   switch (column) {
     case "label":
       return scout.label;
+    case "id":
+      return scout.id;
     case "status":
       return scout.status;
     case "baseCv":

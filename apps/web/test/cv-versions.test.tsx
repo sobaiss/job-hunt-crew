@@ -359,7 +359,7 @@ describe("CvVersionsPage — list", () => {
     expect(rowLabel()[0]).toContain("Zebra CV");
   });
 
-  it("shows every column visible by default, with Label absent from the Columns menu (issue #130)", async () => {
+  it("shows every column visible by default except id, with Label absent from the Columns menu (issue #130)", async () => {
     const user = userEvent.setup();
     server.use(
       http.get("/api/cv-versions", () =>
@@ -373,9 +373,10 @@ describe("CvVersionsPage — list", () => {
     for (const name of ["Label", "File", "Size", "Uploaded", "Status", "Default"]) {
       expect(screen.getByRole("columnheader", { name })).toBeInTheDocument();
     }
+    expect(screen.queryByRole("columnheader", { name: "ID" })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Columns" }));
-    for (const name of ["File", "Size", "Uploaded", "Status", "Default"]) {
+    for (const name of ["ID", "File", "Size", "Uploaded", "Status", "Default"]) {
       expect(
         screen.getByRole("menuitemcheckbox", { name }),
       ).toBeInTheDocument();
@@ -383,6 +384,30 @@ describe("CvVersionsPage — list", () => {
     expect(
       screen.queryByRole("menuitemcheckbox", { name: "Label" }),
     ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitemcheckbox", { name: "ID" }),
+    ).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("shows the id column with a copy button once toggled on from the Columns menu, hidden by default", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cvVersion({ id: "cv-abc" })] }),
+      ),
+    );
+
+    renderWithProviders(<CvVersionsPage />);
+    await screen.findByText("Grad CV");
+
+    expect(screen.queryByText("cv-abc")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Columns" }));
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "ID" }));
+    await user.keyboard("{Escape}");
+
+    expect(screen.getByText("cv-abc")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy id" })).toBeInTheDocument();
   });
 
   it("toggles a column's visibility independently and persists the choice across a remount, restored by Reset (issue #130)", async () => {

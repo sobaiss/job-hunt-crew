@@ -42,6 +42,16 @@ describe("sortCvVersions", () => {
     ).toEqual(["b", "a"]);
   });
 
+  it("sorts the id column ascending/descending by localeCompare", () => {
+    const list = [cv({ id: "cv-b" }), cv({ id: "cv-a" })];
+
+    expect(
+      sortCvVersions(list, { column: "id", direction: "asc" }).map(
+        (c) => c.id,
+      ),
+    ).toEqual(["cv-a", "cv-b"]);
+  });
+
   it("sorts the file column by fileName", () => {
     const list = [
       cv({ id: "z", fileName: "z.pdf" }),

@@ -22,12 +22,31 @@ import {
   type AdminScoutsTableState,
 } from "@/lib/admin-scouts-filters";
 import { BffError } from "@/lib/bff-client";
+import type { ColumnConfig } from "@/lib/column-visibility";
+import { useColumnVisibility } from "@/hooks/use-column-visibility";
 import { CandidatePicker } from "@/components/candidate-picker";
+import { CopyIdButton } from "@/components/copy-id-button";
+import { ColumnVisibilityMenu } from "@/components/column-visibility-menu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+
+// Candidate is the always-visible primary column; id is hideable and hidden
+// by default, mirroring the Admin analyses table. Actions stays outside the
+// model entirely, same as the candidate-facing tables' own action columns.
+type AdminScoutsColumn = "candidate" | "id" | "label" | "status" | "lastRunAt";
+
+const COLUMNS: ColumnConfig<AdminScoutsColumn>[] = [
+  { key: "candidate", labelKey: "columns.candidate", hideable: false },
+  { key: "id", labelKey: "columns.id", hideable: true, defaultVisible: false },
+  { key: "label", labelKey: "columns.label", hideable: true },
+  { key: "status", labelKey: "columns.status", hideable: true },
+  { key: "lastRunAt", labelKey: "columns.lastRunAt", hideable: true },
+];
+
+const COLUMN_VISIBILITY_STORAGE_KEY = "column-visibility:admin-scouts";
 
 const SELECT_CLASS =
   "flex h-9 w-auto rounded-md border border-border bg-background px-3 py-1 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50";
@@ -122,6 +141,7 @@ function ScoutsTable() {
 
   const state = useMemo(() => parseAdminScoutsTableState(searchParams), [searchParams]);
   const { data, isPending, isError } = useAdminScouts(state);
+  const columnVisibility = useColumnVisibility(COLUMN_VISIBILITY_STORAGE_KEY, COLUMNS);
 
   const updateState = (patch: Partial<AdminScoutsTableState>) => {
     const next: AdminScoutsTableState = { ...state, ...patch, page: patch.page ?? 1 };
@@ -205,6 +225,18 @@ function ScoutsTable() {
         </div>
       </div>
 
+      <div className="flex justify-end">
+        <ColumnVisibilityMenu
+          columns={COLUMNS}
+          isVisible={columnVisibility.isVisible}
+          onToggle={columnVisibility.toggle}
+          onReset={columnVisibility.reset}
+          label={t("columnsLabel")}
+          columnLabel={(labelKey) => t(labelKey)}
+          resetLabel={t("columnsReset")}
+        />
+      </div>
+
       {isPending && <p className="text-sm text-muted">{t("loading")}</p>}
       {isError && (
         <p role="alert" className="text-sm text-destructive">
@@ -220,10 +252,11 @@ function ScoutsTable() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>{t("columns.candidate")}</TableHead>
-                <TableHead>{t("columns.label")}</TableHead>
-                <TableHead>{t("columns.status")}</TableHead>
-                <TableHead>{t("columns.lastRunAt")}</TableHead>
+                {COLUMNS.filter((column) => columnVisibility.isVisible(column.key)).map(
+                  (column) => (
+                    <TableHead key={column.key}>{t(column.labelKey)}</TableHead>
+                  ),
+                )}
                 <TableHead>{t("columns.actions")}</TableHead>
               </TableRow>
             </TableHeader>
@@ -233,13 +266,25 @@ function ScoutsTable() {
                   <TableCell className="font-medium">
                     {row.userName ?? row.userEmail ?? t("noName")}
                   </TableCell>
-                  <TableCell>{row.label}</TableCell>
-                  <TableCell>
-                    <Badge variant={statusVariant(row.status)}>{tScouts(`status.${row.status}`)}</Badge>
-                  </TableCell>
-                  <TableCell>
-                    {row.lastRunAt ? new Date(row.lastRunAt).toLocaleString() : t("neverRun")}
-                  </TableCell>
+                  {columnVisibility.isVisible("id") && (
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        <span className="font-mono text-xs text-muted">{row.id}</span>
+                        <CopyIdButton value={row.id} label={t("columns.copyId")} />
+                      </div>
+                    </TableCell>
+                  )}
+                  {columnVisibility.isVisible("label") && <TableCell>{row.label}</TableCell>}
+                  {columnVisibility.isVisible("status") && (
+                    <TableCell>
+                      <Badge variant={statusVariant(row.status)}>{tScouts(`status.${row.status}`)}</Badge>
+                    </TableCell>
+                  )}
+                  {columnVisibility.isVisible("lastRunAt") && (
+                    <TableCell>
+                      {row.lastRunAt ? new Date(row.lastRunAt).toLocaleString() : t("neverRun")}
+                    </TableCell>
+                  )}
                   <TableCell>
                     <ScoutRowActions row={row} />
                   </TableCell>

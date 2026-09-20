@@ -21,12 +21,41 @@ import {
 import { useEnumLabel } from "@/lib/enum-labels";
 import { conversionBadgeVariant } from "@/lib/cv-versions-display";
 import type { CvConversionStatus } from "@/hooks/use-cv-versions";
+import type { ColumnConfig } from "@/lib/column-visibility";
+import { useColumnVisibility } from "@/hooks/use-column-visibility";
 import { CandidatePicker } from "@/components/candidate-picker";
+import { CopyIdButton } from "@/components/copy-id-button";
+import { ColumnVisibilityMenu } from "@/components/column-visibility-menu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+
+// Candidate is the always-visible primary column; id is hideable and hidden
+// by default, mirroring the Admin analyses/Scouts tables. Actions stays
+// outside the model entirely, same as the candidate-facing tables' own
+// action columns.
+type AdminCvVersionsColumn =
+  | "candidate"
+  | "id"
+  | "label"
+  | "fileName"
+  | "status"
+  | "superseded"
+  | "createdAt";
+
+const COLUMNS: ColumnConfig<AdminCvVersionsColumn>[] = [
+  { key: "candidate", labelKey: "columns.candidate", hideable: false },
+  { key: "id", labelKey: "columns.id", hideable: true, defaultVisible: false },
+  { key: "label", labelKey: "columns.label", hideable: true },
+  { key: "fileName", labelKey: "columns.fileName", hideable: true },
+  { key: "status", labelKey: "columns.status", hideable: true },
+  { key: "superseded", labelKey: "columns.superseded", hideable: true },
+  { key: "createdAt", labelKey: "columns.createdAt", hideable: true },
+];
+
+const COLUMN_VISIBILITY_STORAGE_KEY = "column-visibility:admin-cv-versions";
 
 const SELECT_CLASS =
   "flex h-9 w-auto rounded-md border border-border bg-background px-3 py-1 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50";
@@ -64,6 +93,7 @@ function CvVersionsTable() {
 
   const state = useMemo(() => parseAdminCvVersionsTableState(searchParams), [searchParams]);
   const { data, isPending, isError } = useAdminCvVersions(state);
+  const columnVisibility = useColumnVisibility(COLUMN_VISIBILITY_STORAGE_KEY, COLUMNS);
 
   const updateState = (patch: Partial<AdminCvVersionsTableState>) => {
     const next: AdminCvVersionsTableState = { ...state, ...patch, page: patch.page ?? 1 };
@@ -151,6 +181,18 @@ function CvVersionsTable() {
         </div>
       </div>
 
+      <div className="flex justify-end">
+        <ColumnVisibilityMenu
+          columns={COLUMNS}
+          isVisible={columnVisibility.isVisible}
+          onToggle={columnVisibility.toggle}
+          onReset={columnVisibility.reset}
+          label={t("columnsLabel")}
+          columnLabel={(labelKey) => t(labelKey)}
+          resetLabel={t("columnsReset")}
+        />
+      </div>
+
       {isPending && <p className="text-sm text-muted">{t("loading")}</p>}
       {isError && (
         <p role="alert" className="text-sm text-destructive">
@@ -166,12 +208,11 @@ function CvVersionsTable() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>{t("columns.candidate")}</TableHead>
-                <TableHead>{t("columns.label")}</TableHead>
-                <TableHead>{t("columns.fileName")}</TableHead>
-                <TableHead>{t("columns.status")}</TableHead>
-                <TableHead>{t("columns.superseded")}</TableHead>
-                <TableHead>{t("columns.createdAt")}</TableHead>
+                {COLUMNS.filter((column) => columnVisibility.isVisible(column.key)).map(
+                  (column) => (
+                    <TableHead key={column.key}>{t(column.labelKey)}</TableHead>
+                  ),
+                )}
                 <TableHead>{t("columns.actions")}</TableHead>
               </TableRow>
             </TableHeader>
@@ -181,19 +222,31 @@ function CvVersionsTable() {
                   <TableCell className="font-medium">
                     {row.userName ?? row.userEmail ?? t("noName")}
                   </TableCell>
-                  <TableCell>{row.label}</TableCell>
-                  <TableCell>{row.fileName}</TableCell>
-                  <TableCell>
-                    <Badge
-                      variant={conversionBadgeVariant(row.conversionStatus as CvConversionStatus)}
-                    >
-                      {conversionStatusLabel(row.conversionStatus)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    {row.supersededById ? t("supersededYes") : "—"}
-                  </TableCell>
-                  <TableCell>{new Date(row.createdAt).toLocaleDateString()}</TableCell>
+                  {columnVisibility.isVisible("id") && (
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        <span className="font-mono text-xs text-muted">{row.id}</span>
+                        <CopyIdButton value={row.id} label={t("columns.copyId")} />
+                      </div>
+                    </TableCell>
+                  )}
+                  {columnVisibility.isVisible("label") && <TableCell>{row.label}</TableCell>}
+                  {columnVisibility.isVisible("fileName") && <TableCell>{row.fileName}</TableCell>}
+                  {columnVisibility.isVisible("status") && (
+                    <TableCell>
+                      <Badge
+                        variant={conversionBadgeVariant(row.conversionStatus as CvConversionStatus)}
+                      >
+                        {conversionStatusLabel(row.conversionStatus)}
+                      </Badge>
+                    </TableCell>
+                  )}
+                  {columnVisibility.isVisible("superseded") && (
+                    <TableCell>{row.supersededById ? t("supersededYes") : "—"}</TableCell>
+                  )}
+                  {columnVisibility.isVisible("createdAt") && (
+                    <TableCell>{new Date(row.createdAt).toLocaleDateString()}</TableCell>
+                  )}
                   <TableCell>
                     <ReconvertAction cvVersionId={row.id} />
                   </TableCell>
