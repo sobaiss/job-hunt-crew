@@ -31,6 +31,7 @@ _RESPONSE_SHAPE = (
 SYSTEM_PROMPT = (
     "You compare a candidate's CV against a job offer. The CV is given as Markdown "
     "(the candidate's full CV/resume); the job offer is given as structured JSON. "
+    "Write the comparison in the same language as the CV and job offer below. "
     + _RESPONSE_SHAPE
 )
 

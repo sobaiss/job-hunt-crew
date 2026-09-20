@@ -22,6 +22,7 @@ SYSTEM_PROMPT = (
     "You write prioritized improvement suggestions and a summary for a candidate, "
     "given a JSON comparison of their CV against a job offer (matched/missing skills, "
     "strengths, weaknesses, match_score). "
+    "Write the suggestions and summary in the same language as that comparison JSON. "
     "Respond with ONLY a single JSON object, no markdown fences, no commentary, "
     "matching this shape: "
     '{"improvement_suggestions": [{"area": string, "suggestion": string, '

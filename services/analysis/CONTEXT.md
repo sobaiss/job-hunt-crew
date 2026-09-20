@@ -16,10 +16,10 @@ _Avoid_: Anonymization, PII scrubbing — Redaction is the chosen term. Sanitiza
 The agent that performs JobOffer extraction — called both by this context's own AnalysisWorkflow prerequisites and directly by the Ingestion context's fan-out pipeline.
 
 **ComparisonAnalysisAgent**:
-The agent that compares a JobOffer's structured data against a CVVersion's Markdown rendition and produces the match score, matched/missing skills, and strengths/weaknesses.
+The agent that compares a JobOffer's structured data against a CVVersion's Markdown rendition and produces the match score, matched/missing skills, and strengths/weaknesses. Always responds in the same language as the CV and job offer it is given, rather than a hardcoded default — unlike CoverLetterWriterAgent/CvTailoringAgent below, this is unconditional prompt guidance with no override, since neither JobOffer nor User carries a language/locale field to prefer instead.
 
 **RecommendationWriterAgent**:
-The agent that takes ComparisonAnalysisAgent's output and writes the prioritized improvement suggestions and summary.
+The agent that takes ComparisonAnalysisAgent's output and writes the prioritized improvement suggestions and summary. Since it never sees the CV or job offer itself, it follows suit in whatever language that JSON's own text (strengths, weaknesses, skill evidence) is already in.
 
 **AnalysisWorkflow**:
 The Step Functions state machine that sequences one Analysis's prerequisites (CVVersion converted, JobOffer extracted) and the comparison crew run, retrying each step before giving up and marking the Analysis failed. `local_pipeline` is the dev-only in-process equivalent: the same steps in the same order, chained directly with no Step Functions, so the local `worker` can drain `analysis-intake` off `docker compose up` alone — the same shape Conversion's SQS handler already has.
