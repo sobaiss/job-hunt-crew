@@ -164,9 +164,7 @@ def test_list_cv_versions_requires_admin(target_id):
     assert response.status_code == 403
 
 
-def test_list_cv_versions_filters_by_user_and_includes_superseded_rows_by_default(
-    admin_id, target_id
-):
+def test_list_cv_versions_excludes_superseded_rows_by_default(admin_id, target_id):
     new_id = asyncio.run(_create_cv_version(target_id))
     old_id = asyncio.run(_create_cv_version(target_id, superseded_by_id=new_id))
     with TestClient(app) as client:
@@ -178,11 +176,26 @@ def test_list_cv_versions_filters_by_user_and_includes_superseded_rows_by_defaul
     assert response.status_code == 200
     body = response.json()
     ids = {row["id"] for row in body["cvVersions"]}
-    assert old_id in ids
+    assert old_id not in ids
     assert new_id in ids
-    row = next(r for r in body["cvVersions"] if r["id"] == old_id)
+    row = next(r for r in body["cvVersions"] if r["id"] == new_id)
     assert row["userId"] == target_id
     assert row["conversionStatus"] == "CONVERTED"
+
+
+def test_list_cv_versions_include_superseded_returns_full_history(admin_id, target_id):
+    new_id = asyncio.run(_create_cv_version(target_id))
+    old_id = asyncio.run(_create_cv_version(target_id, superseded_by_id=new_id))
+    with TestClient(app) as client:
+        response = client.get(
+            "/v1/admin/cv-versions",
+            headers=_admin_headers(admin_id),
+            params={"userId": target_id, "includeSuperseded": "true", "pageSize": 100},
+        )
+    assert response.status_code == 200
+    ids = {row["id"] for row in response.json()["cvVersions"]}
+    assert old_id in ids
+    assert new_id in ids
 
 
 def test_list_cv_versions_filters_by_conversion_status_and_date_range(admin_id, target_id):

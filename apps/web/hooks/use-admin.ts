@@ -240,9 +240,10 @@ export function useAdminStats(period: AdminStatsPeriod = "all") {
 
 // Backs the Admin CV versions table (issue #163): every candidate's
 // CVVersion in one cross-user, filterable, paginated list — superseded rows
-// included by default, unlike the candidate-facing table. The owner's
-// name/email are resolved server-side (mirroring the audit-events actor
-// resolution) so the table never does its own per-row lookup.
+// are hidden unless `includeSuperseded` is set, same as the candidate-facing
+// table. The owner's name/email are resolved server-side (mirroring the
+// audit-events actor resolution) so the table never does its own per-row
+// lookup.
 export type AdminCvVersionRow = {
   id: string;
   userId: string;

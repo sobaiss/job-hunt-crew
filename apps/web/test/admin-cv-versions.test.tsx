@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 
-import { renderWithProviders, screen } from "./test-utils";
+import { renderWithProviders, screen, waitFor } from "./test-utils";
 import { server } from "./msw/server";
 import { __setUrl } from "./next-navigation-mock";
 import AdminCvVersionsPage from "@/app/(app)/admin/cv-versions/page";
@@ -60,7 +60,7 @@ describe("AdminCvVersionsPage", () => {
     expect(screen.getByText("cv.pdf")).toBeInTheDocument();
   });
 
-  it("shows superseded rows without needing a toggle", async () => {
+  it("shows \"Yes\" in the Superseded column for a superseded row", async () => {
     server.use(
       http.get("/api/admin/cv-versions", () =>
         HttpResponse.json(
@@ -83,6 +83,45 @@ describe("AdminCvVersionsPage", () => {
     const row = screen.getByRole("row", { name: /Ada Lovelace/ });
     const cell = row.querySelectorAll("td")[supersededColumnIndex];
     expect(cell).toHaveTextContent("Yes");
+  });
+
+  it("omits includeSuperseded from the request by default, and sends it once the checkbox is checked", async () => {
+    let capturedUrl = "";
+    server.use(
+      http.get("/api/admin/cv-versions", ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json(cvVersionsListResponse());
+      }),
+    );
+
+    renderWithProviders(<AdminCvVersionsPage />);
+    await screen.findByText("Ada Lovelace");
+    expect(capturedUrl).not.toContain("includeSuperseded");
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "Show superseded versions" }));
+    await waitFor(() => expect(capturedUrl).toContain("includeSuperseded=true"));
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "Show superseded versions" }));
+    await waitFor(() => expect(capturedUrl).not.toContain("includeSuperseded"));
+  });
+
+  it("hides the Reconvert action for superseded rows", async () => {
+    server.use(
+      http.get("/api/admin/cv-versions", () =>
+        HttpResponse.json(
+          cvVersionsListResponse({
+            cvVersions: [
+              { ...cvVersionsListResponse().cvVersions[0], id: "cv-2", supersededById: "cv-1" },
+            ],
+          }),
+        ),
+      ),
+    );
+
+    renderWithProviders(<AdminCvVersionsPage />);
+    await screen.findByText("Ada Lovelace");
+
+    expect(screen.queryByRole("button", { name: "Reconvert" })).not.toBeInTheDocument();
   });
 
   it("sends candidate, date-range, and status filters as server-side query params", async () => {

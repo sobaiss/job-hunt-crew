@@ -316,6 +316,7 @@
         "createdAtToLabel": "Created to",
         "statusFilterLabel": "Conversion status",
         "statusAllOption": "All statuses",
+        "includeSupersededLabel": "Show superseded versions",
         "noName": "no name",
         "supersededYes": "Yes",
         "reconvertAction": "Reconvert",

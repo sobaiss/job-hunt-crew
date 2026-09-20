@@ -30,6 +30,9 @@ export type AdminCvVersionsTableState = {
   createdAtFrom: string;
   createdAtTo: string;
   conversionStatus: AdminCvVersionConversionStatusFilter;
+  /** Off by default — superseded rows are hidden, matching the
+   *  candidate-facing table; check it for the full history. */
+  includeSuperseded: boolean;
   page: number;
   pageSize: AdminCvVersionsPageSize;
 };
@@ -40,6 +43,7 @@ export const DEFAULT_ADMIN_CV_VERSIONS_TABLE_STATE: AdminCvVersionsTableState = 
   createdAtFrom: "",
   createdAtTo: "",
   conversionStatus: "all",
+  includeSuperseded: false,
   page: 1,
   pageSize: 20,
 };
@@ -65,6 +69,7 @@ export function parseAdminCvVersionsTableState(
     ).includes(status ?? "")
       ? (status as AdminCvVersionConversionStatusFilter)
       : "all",
+    includeSuperseded: params.get("includeSuperseded") === "true",
     page: Number.isInteger(page) && page > 0 ? page : 1,
     pageSize: (ADMIN_CV_VERSIONS_PAGE_SIZES as readonly number[]).includes(pageSize)
       ? (pageSize as AdminCvVersionsPageSize)
@@ -84,6 +89,7 @@ export function adminCvVersionsTableStateToParams(
   if (state.createdAtFrom) params.set("from", state.createdAtFrom);
   if (state.createdAtTo) params.set("to", state.createdAtTo);
   if (state.conversionStatus !== "all") params.set("status", state.conversionStatus);
+  if (state.includeSuperseded) params.set("includeSuperseded", "true");
   params.set("page", String(state.page));
   params.set("pageSize", String(state.pageSize));
   return params;
@@ -101,6 +107,7 @@ export function adminCvVersionsTableStateToQuery(
   if (state.createdAtFrom) params.set("createdAtFrom", `${state.createdAtFrom}T00:00:00.000Z`);
   if (state.createdAtTo) params.set("createdAtTo", `${state.createdAtTo}T23:59:59.999Z`);
   if (state.conversionStatus !== "all") params.set("conversionStatus", state.conversionStatus);
+  if (state.includeSuperseded) params.set("includeSuperseded", "true");
   params.set("page", String(state.page));
   params.set("pageSize", String(state.pageSize));
   return params;

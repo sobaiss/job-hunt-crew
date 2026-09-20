@@ -316,6 +316,7 @@
         "createdAtToLabel": "Créé jusqu'à",
         "statusFilterLabel": "Statut de conversion",
         "statusAllOption": "Tous les statuts",
+        "includeSupersededLabel": "Afficher les versions remplacées",
         "noName": "aucun nom",
         "supersededYes": "Oui",
         "reconvertAction": "Reconvertir",

@@ -928,6 +928,7 @@ async def list_admin_cv_versions(
     created_at_from: datetime | None = Query(None, alias="createdAtFrom"),
     created_at_to: datetime | None = Query(None, alias="createdAtTo"),
     conversion_status: Cvconversionstatus | None = Query(None, alias="conversionStatus"),
+    include_superseded: bool = Query(False, alias="includeSuperseded"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100, alias="pageSize"),
     _admin_id: str = Depends(require_admin),
@@ -936,11 +937,12 @@ async def list_admin_cv_versions(
     """Every candidate's CVVersion in one cross-user, filterable, paginated
     list (issue #163) -- filterable by `userId`, a `createdAt` range, and
     `conversionStatus`; sorted newest first, matching the candidate-facing
-    `list_cv_versions` order. Superseded rows are included by default (no
-    extra flag needed) since an Administrator troubleshooting a stuck or
-    failed conversion needs full history, unlike the candidate-facing page.
-    The owner's name/email are resolved here (mirroring `get_audit_events`'s
-    actor resolution) so the frontend never has to do its own per-row lookup.
+    `list_cv_versions` order. Superseded rows are excluded by default, same as
+    the candidate-facing page; pass `includeSuperseded=true` for the full
+    history an Administrator needs when troubleshooting a stuck or failed
+    conversion. The owner's name/email are resolved here (mirroring
+    `get_audit_events`'s actor resolution) so the frontend never has to do its
+    own per-row lookup.
     """
     stmt = select(CVVersion)
     if user_id is not None:
@@ -951,6 +953,8 @@ async def list_admin_cv_versions(
         stmt = stmt.where(CVVersion.createdAt <= created_at_to)
     if conversion_status is not None:
         stmt = stmt.where(CVVersion.conversionStatus == conversion_status)
+    if not include_superseded:
+        stmt = stmt.where(CVVersion.supersededById.is_(None))
     stmt = stmt.order_by(CVVersion.createdAt.desc())
 
     total = await session.scalar(select(func.count()).select_from(stmt.subquery())) or 0

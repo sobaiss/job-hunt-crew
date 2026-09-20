@@ -181,7 +181,16 @@ function CvVersionsTable() {
         </div>
       </div>
 
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between gap-4">
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={state.includeSuperseded}
+            onChange={(event) => updateState({ includeSuperseded: event.target.checked })}
+            aria-label={t("includeSupersededLabel")}
+          />
+          {t("includeSupersededLabel")}
+        </label>
         <ColumnVisibilityMenu
           columns={COLUMNS}
           isVisible={columnVisibility.isVisible}
@@ -248,7 +257,9 @@ function CvVersionsTable() {
                     <TableCell>{new Date(row.createdAt).toLocaleDateString()}</TableCell>
                   )}
                   <TableCell>
-                    <ReconvertAction cvVersionId={row.id} />
+                    {/* Superseded versions are dead weight — reconverting them can't
+                        change what the candidate sees, since a newer version replaced it. */}
+                    {!row.supersededById && <ReconvertAction cvVersionId={row.id} />}
                   </TableCell>
                 </TableRow>
               ))}
