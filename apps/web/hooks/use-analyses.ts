@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 
 import { bff } from "@/lib/bff-client";
 import type { ApplicationStatus } from "@/hooks/use-applications";
+import type { GeneratedDocumentStatus } from "@/hooks/use-generated-documents";
 
 // TanStack Query read hooks for the analyses area, layered on the typed BFF
 // client (`lib/bff-client.ts`). The `/api/*` contract is unchanged — these
@@ -72,6 +73,12 @@ export type AnalysisSummary = {
    *  created lazily) — folded into the Analyses table's 5-bucket Tracking
    *  status by `lib/tracking-status.ts` (issue #64). */
   applicationStatus: ApplicationStatus | null;
+  /** The current (non-superseded) GeneratedDocument's status for the Tailored
+   *  CV, or `null` when generation was never triggered — the Analyses
+   *  table's "CV generated" column. */
+  tailoredCvStatus: GeneratedDocumentStatus | null;
+  /** Same as {@link tailoredCvStatus}, for the Cover letter. */
+  coverLetterStatus: GeneratedDocumentStatus | null;
   jobOffer: {
     id: string;
     title: string | null;

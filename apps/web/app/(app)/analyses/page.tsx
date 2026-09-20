@@ -16,6 +16,7 @@ import { useBulkSetApplicationStatus } from "@/hooks/use-applications";
 import {
   useBulkCreateGeneratedDocuments,
   useGeneratedDocumentsStatuses,
+  type GeneratedDocumentStatus,
 } from "@/hooks/use-generated-documents";
 import { useQuotas } from "@/hooks/use-quotas";
 import { useMediaQuery } from "@/hooks/use-media-query";
@@ -90,6 +91,8 @@ const COLUMNS: ColumnConfig<AnalysesSortColumn>[] = [
     hideable: true,
     className: "text-right",
   },
+  { key: "tailoredCvStatus", labelKey: "columns.tailoredCvStatus", hideable: true },
+  { key: "coverLetterStatus", labelKey: "columns.coverLetterStatus", hideable: true },
 ];
 
 function AnalysesTable() {
@@ -98,6 +101,7 @@ function AnalysesTable() {
   const sourceSiteLabel = useEnumLabel("sourceSite");
   const pipelineStatusLabel = useEnumLabel("analysisStatus");
   const trackingStatusLabel = useEnumLabel("trackingStatus");
+  const generatedDocumentStatusLabel = useEnumLabel("generatedDocumentStatus");
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -650,6 +654,9 @@ function AnalysesTable() {
                   sourceSiteLabel={sourceSiteLabel}
                   pipelineStatusLabel={pipelineStatusLabel}
                   trackingStatusLabel={trackingStatusLabel}
+                  generatedDocumentStatusLabel={generatedDocumentStatusLabel}
+                  tailoredCvLabel={td("generatedDocuments.tailoredCv")}
+                  coverLetterLabel={td("generatedDocuments.coverLetter")}
                   linkLabel={t("columns.linkLabel")}
                   jobOfferFallback={t("jobOfferFallback")}
                   selected={selectedIds.has(analysis.id)}
@@ -710,6 +717,7 @@ function AnalysesTable() {
                     sourceSiteLabel={sourceSiteLabel}
                     pipelineStatusLabel={pipelineStatusLabel}
                     trackingStatusLabel={trackingStatusLabel}
+                    generatedDocumentStatusLabel={generatedDocumentStatusLabel}
                     linkLabel={t("columns.linkLabel")}
                     jobOfferFallback={t("jobOfferFallback")}
                     selected={selectedIds.has(analysis.id)}
@@ -804,6 +812,7 @@ function AnalysisTableRow({
   sourceSiteLabel,
   pipelineStatusLabel,
   trackingStatusLabel,
+  generatedDocumentStatusLabel,
   linkLabel,
   jobOfferFallback,
   selected,
@@ -816,6 +825,7 @@ function AnalysisTableRow({
   sourceSiteLabel: (value: string) => string;
   pipelineStatusLabel: (value: string) => string;
   trackingStatusLabel: (value: string) => string;
+  generatedDocumentStatusLabel: (value: string) => string;
   linkLabel: string;
   jobOfferFallback: string;
   selected: boolean;
@@ -891,6 +901,22 @@ function AnalysisTableRow({
           {analysis.matchScore ?? "—"}
         </TableCell>
       )}
+      {isColumnVisible("tailoredCvStatus") && (
+        <TableCell>
+          <GeneratedDocumentStatusBadge
+            status={analysis.tailoredCvStatus}
+            label={generatedDocumentStatusLabel}
+          />
+        </TableCell>
+      )}
+      {isColumnVisible("coverLetterStatus") && (
+        <TableCell>
+          <GeneratedDocumentStatusBadge
+            status={analysis.coverLetterStatus}
+            label={generatedDocumentStatusLabel}
+          />
+        </TableCell>
+      )}
       <TableCell>
         <TrackingBadge
           analysis={analysis}
@@ -917,6 +943,9 @@ function AnalysisCard({
   sourceSiteLabel,
   pipelineStatusLabel,
   trackingStatusLabel,
+  generatedDocumentStatusLabel,
+  tailoredCvLabel,
+  coverLetterLabel,
   linkLabel,
   jobOfferFallback,
   selected,
@@ -928,6 +957,9 @@ function AnalysisCard({
   sourceSiteLabel: (value: string) => string;
   pipelineStatusLabel: (value: string) => string;
   trackingStatusLabel: (value: string) => string;
+  generatedDocumentStatusLabel: (value: string) => string;
+  tailoredCvLabel: string;
+  coverLetterLabel: string;
   linkLabel: string;
   jobOfferFallback: string;
   selected: boolean;
@@ -981,6 +1013,20 @@ function AnalysisCard({
           trackingStatusLabel={trackingStatusLabel}
         />
         <span className="text-muted">{analysis.cvVersion.label}</span>
+        <span className="flex items-center gap-1">
+          <span className="text-muted">{tailoredCvLabel}:</span>
+          <GeneratedDocumentStatusBadge
+            status={analysis.tailoredCvStatus}
+            label={generatedDocumentStatusLabel}
+          />
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="text-muted">{coverLetterLabel}:</span>
+          <GeneratedDocumentStatusBadge
+            status={analysis.coverLetterStatus}
+            label={generatedDocumentStatusLabel}
+          />
+        </span>
         <span className="ml-auto tabular-nums">
           {analysis.matchScore ?? "—"}
         </span>
@@ -1006,6 +1052,32 @@ function TrackingBadge({
   ) : (
     <Badge variant={analysisBadgeVariant(analysis.status)}>
       {pipelineStatusLabel(analysis.status)}
+    </Badge>
+  );
+}
+
+function generatedDocumentStatusBadgeVariant(
+  status: GeneratedDocumentStatus,
+): "secondary" | "warning" | "success" | "destructive" {
+  if (status === "READY") return "success";
+  if (status === "FAILED") return "destructive";
+  if (status === "GENERATING") return "warning";
+  return "secondary";
+}
+
+/** Renders a status Badge for a Tailored CV/Cover letter GeneratedDocument, or
+ *  a plain "—" when generation was never triggered for that Analysis. */
+function GeneratedDocumentStatusBadge({
+  status,
+  label,
+}: {
+  status: GeneratedDocumentStatus | null;
+  label: (value: string) => string;
+}) {
+  if (status === null) return <span className="text-muted">—</span>;
+  return (
+    <Badge variant={generatedDocumentStatusBadgeVariant(status)}>
+      {label(status)}
     </Badge>
   );
 }

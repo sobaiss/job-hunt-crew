@@ -499,7 +499,9 @@
       "score": "Score",
       "status": "Statut",
       "link": "Lien",
-      "linkLabel": "Ouvrir l'offre d'emploi"
+      "linkLabel": "Ouvrir l'offre d'emploi",
+      "tailoredCvStatus": "CV généré",
+      "coverLetterStatus": "Lettre générée"
     },
     "pagination": {
       "pageSizeLabel": "Lignes par page",
@@ -1008,6 +1010,12 @@
       "EXTERNAL": "Externe",
       "INTERNAL": "Interne",
       "ADMINISTRATOR": "Administrateur"
+    },
+    "generatedDocumentStatus": {
+      "PENDING": "En file d'attente",
+      "GENERATING": "Génération en cours",
+      "READY": "Généré",
+      "FAILED": "Échoué"
     }
   }
 }

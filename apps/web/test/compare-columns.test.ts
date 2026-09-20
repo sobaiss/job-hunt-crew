@@ -13,6 +13,8 @@ function analysis(over: Partial<AnalysisDetail> = {}): AnalysisDetail {
     ingestionJobId: null,
     scoutId: null,
     applicationStatus: null,
+    tailoredCvStatus: null,
+    coverLetterStatus: null,
     jobOffer: {
       id: "job1",
       title: "Backend Engineer",

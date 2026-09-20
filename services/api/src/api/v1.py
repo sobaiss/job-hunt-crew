@@ -946,6 +946,25 @@ class AnalysisResponse(BaseModel):
     # created lazily) — lets the Web Analyses table derive its 5-bucket
     # Tracking status (issue #64) without a second fetch/join.
     applicationStatus: str | None
+    # The current (non-superseded) GeneratedDocument's `status` for each type,
+    # or `null` when generation was never triggered — lets the Web Analyses
+    # table show whether a CV/cover letter has been generated without a
+    # second fetch per row.
+    tailoredCvStatus: str | None
+    coverLetterStatus: str | None
+
+
+def _current_generated_document(
+    row: Analysis, doc_type: Generateddocumenttype
+) -> GeneratedDocument | None:
+    return next(
+        (
+            document
+            for document in row.GeneratedDocument
+            if document.type == doc_type and document.supersededById is None
+        ),
+        None,
+    )
 
 
 def _analysis_response(row: Analysis) -> AnalysisResponse:
@@ -953,6 +972,8 @@ def _analysis_response(row: Analysis) -> AnalysisResponse:
     # `Application.analysisId` is unique (0 or 1 row per Analysis); the ORM
     # relationship is still a list since it's declared without `uselist=False`.
     application = row.Application[0] if row.Application else None
+    tailored_cv = _current_generated_document(row, Generateddocumenttype.TAILORED_CV)
+    cover_letter = _current_generated_document(row, Generateddocumenttype.COVER_LETTER)
     return AnalysisResponse(
         id=row.id,
         userId=row.userId,
@@ -980,6 +1001,8 @@ def _analysis_response(row: Analysis) -> AnalysisResponse:
             else None
         ),
         applicationStatus=application.status.value if application is not None else None,
+        tailoredCvStatus=tailored_cv.status.value if tailored_cv is not None else None,
+        coverLetterStatus=cover_letter.status.value if cover_letter is not None else None,
     )
 
 
@@ -1001,6 +1024,7 @@ async def list_analyses(
             selectinload(Analysis.CVVersion_),
             selectinload(Analysis.IngestionJob_),
             selectinload(Analysis.Application),
+            selectinload(Analysis.GeneratedDocument),
         )
         .where(Analysis.userId == user_id)
         .order_by(Analysis.requestedAt.desc())
@@ -1209,6 +1233,7 @@ async def get_analysis(
             selectinload(Analysis.CVVersion_),
             selectinload(Analysis.IngestionJob_),
             selectinload(Analysis.Application),
+            selectinload(Analysis.GeneratedDocument),
         )
         .where(Analysis.id == analysis_id)
     )
@@ -1613,6 +1638,7 @@ async def list_scout_finds(
                 selectinload(Analysis.CVVersion_),
                 selectinload(Analysis.IngestionJob_),
                 selectinload(Analysis.Application),
+                selectinload(Analysis.GeneratedDocument),
             )
             .where(Analysis.scoutId == scout.id, Analysis.status == Analysisstatus.COMPLETED)
             .order_by(Analysis.completedAt.desc())

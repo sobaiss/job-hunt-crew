@@ -97,6 +97,8 @@ export type AnalysesSortColumn =
   | "postedAt"
   | "cvLabel"
   | "matchScore"
+  | "tailoredCvStatus"
+  | "coverLetterStatus"
   | "sourceUrl";
 
 export type AnalysesSortDirection = "asc" | "desc";
@@ -120,6 +122,8 @@ const SORT_COLUMNS: readonly AnalysesSortColumn[] = [
   "postedAt",
   "cvLabel",
   "matchScore",
+  "tailoredCvStatus",
+  "coverLetterStatus",
   "sourceUrl",
 ];
 
@@ -142,6 +146,10 @@ function sortValue(
       return analysis.cvVersion.label;
     case "matchScore":
       return analysis.matchScore;
+    case "tailoredCvStatus":
+      return analysis.tailoredCvStatus;
+    case "coverLetterStatus":
+      return analysis.coverLetterStatus;
     case "sourceUrl":
       return analysis.jobOffer.sourceUrl;
   }

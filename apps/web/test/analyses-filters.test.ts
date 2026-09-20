@@ -27,6 +27,8 @@ function summary(overrides: Partial<AnalysisSummary> = {}): AnalysisSummary {
     ingestionJobId: null,
     scoutId: null,
     applicationStatus: null,
+    tailoredCvStatus: null,
+    coverLetterStatus: null,
     ingestionJob: null,
     jobOffer: {
       id: "job1",
