@@ -74,7 +74,7 @@ describe("Admin layout gate", () => {
     expect(screen.getByTestId("child")).toBeInTheDocument();
   });
 
-  it("renders a tab strip linking all six Admin screens", async () => {
+  it("renders a tab strip linking all seven Admin screens", async () => {
     auth.mockResolvedValue(ADMIN_SESSION);
 
     const element = await AdminLayout({ children: <div /> });
@@ -91,6 +91,7 @@ describe("Admin layout gate", () => {
       Analyses: "/admin/analyses",
       Scouts: "/admin/scouts",
       "CV versions": "/admin/cv-versions",
+      "LLM providers": "/admin/llm-providers",
     });
   });
 

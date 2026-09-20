@@ -161,6 +161,44 @@ export function useSetPlanDefaults(plan: string) {
   });
 }
 
+// Backs the Admin "LLM providers" screen (issue #174, docs/adr/0024): the five
+// providers the system implements, what each one needs and whether it is ready
+// to run. A secret never carries its value -- only `isSet`.
+export type AdminLlmProviderParameter = {
+  name: string;
+  secret: boolean;
+  required: boolean;
+  source: "stored" | "environment" | "default" | "unresolved";
+  value: string | null;
+  isSet: boolean;
+};
+
+export type AdminLlmProvider = {
+  key: string;
+  displayName: string;
+  maturity: "production" | "opt-in" | "dev-local";
+  active: boolean;
+  configuration: "configured" | "inherited" | "incomplete";
+  updatedAt: string | null;
+  settingId: string | null;
+  parameters: AdminLlmProviderParameter[];
+};
+
+export type AdminLlmProviderSettings = {
+  activeProvider: string | null;
+  // The provider LLM_PROVIDER resolves to in the API's environment, or the
+  // unsupported value it holds.
+  environmentProvider: { key: string | null; unsupportedValue: string | null };
+  providers: AdminLlmProvider[];
+};
+
+export function useAdminLlmProviderSettings() {
+  return useQuery({
+    queryKey: ["admin-llm-provider-settings"],
+    queryFn: () => bff.get<AdminLlmProviderSettings>("/admin/llm-provider-settings"),
+  });
+}
+
 // Backs the Admin users table (issue #147): a lightweight row per User —
 // Plan reassignment, quotas and overrides now live only on the User panel
 // (useAdminUserQuotas above), reached via the row's id.

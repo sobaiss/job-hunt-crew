@@ -133,6 +133,19 @@ services:
       # "Run now" on a Scout is rate-limited to once an hour by default;
       # override locally (e.g. 0) to relaunch a Scout on demand in dev.
       SCOUT_RUN_RATE_LIMIT_SECONDS: ${SCOUT_RUN_RATE_LIMIT_SECONDS:-3600}
+      # The Admin "LLM providers" screen (issue #174, docs/adr/0024) evaluates
+      # the environment itself -- to name the provider it resolves to, to show
+      # which parameters are inherited, and to validate activation -- so the
+      # API gets the same LLM variables as the worker below, or it would
+      # report a different provider than the one actually running. Keep the
+      # two blocks in step.
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      LLM_MODEL: ${LLM_MODEL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      HF_TOKEN: ${HF_TOKEN:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
       # POST /v1/analyses enforces this per-user daily cap (default 50);
       # override locally to raise it for repeated testing.
       DAILY_ANALYSIS_CAP: ${DAILY_ANALYSIS_CAP:-50}

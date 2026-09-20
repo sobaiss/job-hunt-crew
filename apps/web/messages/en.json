@@ -420,7 +420,44 @@
       "planDefaults": "Quotas",
       "analyses": "Analyses",
       "scouts": "Scouts",
-      "cvVersions": "CV versions"
+      "cvVersions": "CV versions",
+      "llmProviders": "LLM providers"
+    },
+    "llmProviders": {
+      "title": "LLM providers",
+      "description": "The LLM backends the system can run on, and what each one needs. Values you don't set here come from the environment.",
+      "loading": "Loading…",
+      "loadError": "Couldn't load the LLM providers.",
+      "columnsLabel": "Columns",
+      "columnsReset": "Reset",
+      "columns": {
+        "active": "Active",
+        "provider": "Provider",
+        "maturity": "Maturity",
+        "configuration": "Configuration",
+        "parameters": "Parameters",
+        "updatedAt": "Updated at",
+        "id": "ID",
+        "copyId": "Copy id"
+      },
+      "maturity": {
+        "production": "Production",
+        "opt-in": "Opt-in",
+        "dev-local": "Dev-local"
+      },
+      "configuration": {
+        "configured": "Configured",
+        "inherited": "Inherited",
+        "incomplete": "Incomplete"
+      },
+      "secretLabel": "Secret",
+      "noRequiredParameters": "None required",
+      "activeLabel": "Active provider: {provider}",
+      "environment": {
+        "name": "None — follow the environment",
+        "resolvesTo": "Currently: {provider}",
+        "unsupported": "LLM_PROVIDER is set to an unsupported value ({value}) — pipeline steps will fail until it is fixed."
+      }
     }
   },
   "quotas": {

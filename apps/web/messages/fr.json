@@ -420,7 +420,44 @@
       "planDefaults": "Quotas",
       "analyses": "Analyses",
       "scouts": "Scouts",
-      "cvVersions": "Versions de CV"
+      "cvVersions": "Versions de CV",
+      "llmProviders": "Fournisseurs LLM"
+    },
+    "llmProviders": {
+      "title": "Fournisseurs LLM",
+      "description": "Les backends LLM que le système peut utiliser, et ce dont chacun a besoin. Les valeurs non renseignées ici proviennent de l'environnement.",
+      "loading": "Chargement…",
+      "loadError": "Impossible de charger les fournisseurs LLM.",
+      "columnsLabel": "Colonnes",
+      "columnsReset": "Réinitialiser",
+      "columns": {
+        "active": "Actif",
+        "provider": "Fournisseur",
+        "maturity": "Maturité",
+        "configuration": "Configuration",
+        "parameters": "Paramètres",
+        "updatedAt": "Mis à jour le",
+        "id": "ID",
+        "copyId": "Copier l'id"
+      },
+      "maturity": {
+        "production": "Production",
+        "opt-in": "Sur option",
+        "dev-local": "Dev local"
+      },
+      "configuration": {
+        "configured": "Configuré",
+        "inherited": "Hérité",
+        "incomplete": "Incomplet"
+      },
+      "secretLabel": "Secret",
+      "noRequiredParameters": "Aucun requis",
+      "activeLabel": "Fournisseur actif : {provider}",
+      "environment": {
+        "name": "Aucun — suivre l'environnement",
+        "resolvesTo": "Actuellement : {provider}",
+        "unsupported": "LLM_PROVIDER contient une valeur non prise en charge ({value}) — les étapes du pipeline échoueront tant qu'elle n'est pas corrigée."
+      }
     }
   },
   "quotas": {

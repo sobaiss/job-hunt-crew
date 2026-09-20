@@ -20,6 +20,7 @@ table: every parameter name is wired into a provider constructor, so one no
 code reads would be a row that does nothing.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -115,3 +116,82 @@ def get_provider_spec(key: str) -> ProviderSpec:
         if spec.key == key:
             return spec
     raise KeyError(f"Unknown LLM provider {key!r}")
+
+
+# The provider the environment-driven factory (`analysis.llm_provider.
+# get_llm_provider`) picks when LLM_PROVIDER is unset.
+DEFAULT_ENVIRONMENT_PROVIDER = "anthropic"
+
+
+class ParameterSource(StrEnum):
+    STORED = "stored"
+    ENVIRONMENT = "environment"
+    DEFAULT = "default"
+    UNRESOLVED = "unresolved"
+
+
+class ConfigurationStatus(StrEnum):
+    CONFIGURED = "configured"
+    INHERITED = "inherited"
+    INCOMPLETE = "incomplete"
+
+
+@dataclass(frozen=True)
+class EffectiveParameter:
+    """A Provider parameter's effective value and where it came from. `value`
+    is the real value, secrets included: callers that render it (the API) are
+    responsible for never returning a secret's."""
+
+    name: str
+    value: str | None
+    source: ParameterSource
+
+
+def resolve_provider_parameters(
+    spec: ProviderSpec,
+    stored: Mapping[str, str],
+    env: Mapping[str, str],
+) -> dict[str, EffectiveParameter]:
+    """Effective value of each of `spec`'s parameters, independently: the
+    stored value, else the parameter's environment variable, else its
+    hardcoded default, else unresolved (docs/adr/0024). An empty stored or
+    environment value counts as absent. The single implementation behind both
+    what the Admin screen shows and what a pipeline step runs on."""
+    resolved: dict[str, EffectiveParameter] = {}
+    for parameter in spec.parameters:
+        value: str | None
+        source: ParameterSource
+        if stored.get(parameter.name):
+            value, source = stored[parameter.name], ParameterSource.STORED
+        elif parameter.env_var and env.get(parameter.env_var):
+            value, source = env[parameter.env_var], ParameterSource.ENVIRONMENT
+        elif parameter.default is not None:
+            value, source = parameter.default, ParameterSource.DEFAULT
+        else:
+            value, source = None, ParameterSource.UNRESOLVED
+        resolved[parameter.name] = EffectiveParameter(parameter.name, value, source)
+    return resolved
+
+
+def configuration_status(
+    spec: ProviderSpec, resolved: Mapping[str, EffectiveParameter]
+) -> ConfigurationStatus:
+    """Incomplete when a required parameter resolves nowhere; else Configured
+    when at least one parameter is stored; else Inherited."""
+    if any(
+        parameter.required and resolved[parameter.name].source is ParameterSource.UNRESOLVED
+        for parameter in spec.parameters
+    ):
+        return ConfigurationStatus.INCOMPLETE
+    if any(p.source is ParameterSource.STORED for p in resolved.values()):
+        return ConfigurationStatus.CONFIGURED
+    return ConfigurationStatus.INHERITED
+
+
+def environment_provider_key(env: Mapping[str, str]) -> str | None:
+    """The catalogue provider the environment-driven factory would build from
+    `env`, or None when LLM_PROVIDER holds an unsupported value. Resolved the
+    factory's way: case-insensitive, `DEFAULT_ENVIRONMENT_PROVIDER` when
+    unset."""
+    key = env.get("LLM_PROVIDER", DEFAULT_ENVIRONMENT_PROVIDER).lower()
+    return key if any(spec.key == key for spec in LLM_PROVIDERS) else None
