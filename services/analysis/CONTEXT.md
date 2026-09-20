@@ -66,9 +66,12 @@ carries no such tag: a cover letter is never rendered against a
 StyleProfile. Neither agent's own output carries the candidate's name or
 contact details, since Redaction (above) has already stripped those from
 the base CVVersion's Markdown rendition it reads; the generation pipeline
-appends `User.name`/`User.email` to `GeneratedDocument.markdownContent`
+adds `User.name`/`User.email` to `GeneratedDocument.markdownContent`
 afterward, outside the LLM call, so the stored document — and every
 preview or render taken from it — stays consistent (docs/adr/0022).
+Placement differs by type: a closing signature for CoverLetterWriterAgent's
+output, but right after the opening heading for CvTailoringAgent's — a
+CV's contact info reads as a header, not a letter's signature.
 CoverLetterWriterAgent also keeps the letter concise (a character budget,
 not a page count) and free of bullet lists or former-employer name-dropping
 regardless of output language, and, when writing in French, follows the

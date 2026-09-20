@@ -318,15 +318,11 @@ async def test_run_generation_pipeline_fails_with_error_message_on_empty_provide
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "doc_type",
-    [Generateddocumenttype.COVER_LETTER, Generateddocumenttype.TAILORED_CV],
-)
-async def test_run_generation_pipeline_appends_the_owners_name_and_email(doc_type):
+async def test_run_generation_pipeline_appends_contact_as_a_cover_letter_signature():
     """The base CV's rendition is redacted (docs/adr/0022), so neither the
     stubbed writer output nor the CV Markdown carries the candidate's contact
-    info — the pipeline appends it from the User row, into both the stored
-    markdownContent and its S3 mirror."""
+    info — the pipeline appends it from the User row as a closing signature,
+    into both the stored markdownContent and its S3 mirror."""
     engine = make_engine()
     session_factory = make_session_factory(engine)
     user_id = f"test-{uuid.uuid4()}"
@@ -343,14 +339,14 @@ async def test_run_generation_pipeline_appends_the_owners_name_and_email(doc_typ
         cv_version_id,
         analysis_id,
         document_id,
-        doc_type=doc_type,
+        doc_type=Generateddocumenttype.COVER_LETTER,
         user_name="Ada Lovelace",
         user_email=user_email,
     )
-    llm_output = "Experienced backend engineer with a strong Python background."
+    llm_output = "Dear Hiring Manager, I am excited to apply..."
     provider = StubLLMProvider([llm_output])
     s3 = _s3_client()
-    key = generated_document_key(user_id, analysis_id, doc_type.value)
+    key = generated_document_key(user_id, analysis_id, "COVER_LETTER")
 
     try:
         async with session_factory() as session:
@@ -366,6 +362,128 @@ async def test_run_generation_pipeline_appends_the_owners_name_and_email(doc_typ
             stored = reloaded.markdownContent
 
         assert s3.get_object(Bucket=S3_BUCKET, Key=key)["Body"].read().decode() == stored
+    finally:
+        s3.delete_object(Bucket=S3_BUCKET, Key=key)
+        await _cleanup(
+            engine,
+            session_factory,
+            user_id,
+            job_offer_id,
+            cv_version_id,
+            analysis_id,
+            document_id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_run_generation_pipeline_inserts_contact_header_after_tailored_cv_title():
+    # Regression: contact info was landing at the very end of the tailored
+    # CV, mirroring the cover letter's closing-signature convention — but a
+    # CV's contact info belongs right under the title, not as a signature.
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id = f"test-{uuid.uuid4()}"
+    user_email = f"{user_id}@example.com"
+    job_offer_id = f"test-{uuid.uuid4()}"
+    cv_version_id = f"test-{uuid.uuid4()}"
+    analysis_id = f"test-{uuid.uuid4()}"
+    document_id = f"test-{uuid.uuid4()}"
+
+    await _make_fixture(
+        session_factory,
+        user_id,
+        job_offer_id,
+        cv_version_id,
+        analysis_id,
+        document_id,
+        doc_type=Generateddocumenttype.TAILORED_CV,
+        user_name="Ada Lovelace",
+        user_email=user_email,
+    )
+    llm_output = (
+        "# Senior Backend Engineer\n"
+        "<!-- SectionType: SUMMARY -->\n\n"
+        "Experienced backend engineer with a strong Python background.\n"
+    )
+    provider = StubLLMProvider([llm_output])
+    s3 = _s3_client()
+    key = generated_document_key(user_id, analysis_id, "TAILORED_CV")
+
+    try:
+        async with session_factory() as session:
+            await run_generation_pipeline(
+                session, document_id, llm_provider=provider, s3_client=s3
+            )
+
+        async with session_factory() as session:
+            reloaded = await session.get(GeneratedDocument, document_id)
+            stored = reloaded.markdownContent
+
+        lines = stored.splitlines()
+        # Heading first, its SectionType comment immediately below it:
+        # document_render._classify_lines only attaches the comment to a
+        # heading when it is the line right after it, so the contact block
+        # must not be inserted between them.
+        assert lines[0] == "# Senior Backend Engineer"
+        assert lines[1] == "<!-- SectionType: SUMMARY -->"
+        assert "**Ada Lovelace**" in lines[:6]
+        assert user_email in lines[:6]
+        assert not stored.rstrip().endswith(user_email)  # not appended at the end
+        assert "Experienced backend engineer" in stored
+
+        assert s3.get_object(Bucket=S3_BUCKET, Key=key)["Body"].read().decode() == stored
+    finally:
+        s3.delete_object(Bucket=S3_BUCKET, Key=key)
+        await _cleanup(
+            engine,
+            session_factory,
+            user_id,
+            job_offer_id,
+            cv_version_id,
+            analysis_id,
+            document_id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_run_generation_pipeline_tailored_cv_contact_header_falls_back_to_top_without_a_heading():
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id = f"test-{uuid.uuid4()}"
+    user_email = f"{user_id}@example.com"
+    job_offer_id = f"test-{uuid.uuid4()}"
+    cv_version_id = f"test-{uuid.uuid4()}"
+    analysis_id = f"test-{uuid.uuid4()}"
+    document_id = f"test-{uuid.uuid4()}"
+
+    await _make_fixture(
+        session_factory,
+        user_id,
+        job_offer_id,
+        cv_version_id,
+        analysis_id,
+        document_id,
+        doc_type=Generateddocumenttype.TAILORED_CV,
+        user_name="Ada Lovelace",
+        user_email=user_email,
+    )
+    llm_output = "Experienced backend engineer with a strong Python background."
+    provider = StubLLMProvider([llm_output])
+    s3 = _s3_client()
+    key = generated_document_key(user_id, analysis_id, "TAILORED_CV")
+
+    try:
+        async with session_factory() as session:
+            await run_generation_pipeline(
+                session, document_id, llm_provider=provider, s3_client=s3
+            )
+
+        async with session_factory() as session:
+            reloaded = await session.get(GeneratedDocument, document_id)
+            content = reloaded.markdownContent
+
+        assert content.startswith("**Ada Lovelace**")
+        assert llm_output in content
     finally:
         s3.delete_object(Bucket=S3_BUCKET, Key=key)
         await _cleanup(

@@ -64,23 +64,61 @@ def _offer_language(job_offer: JobOffer, *, fallback: str | None) -> str | None:
     return data.get("language") or fallback
 
 
-def _with_contact_block(markdown: str, user: User | None) -> str:
-    """Appends the account's `User.name`/`User.email` to a generated
-    document's Markdown (docs/adr/0022). The base CVVersion's rendition is
-    redacted, so neither writer agent ever sees — let alone reproduces — the
-    candidate's contact details; they come from the User row, outside the LLM
-    call, so they are never fabricated. A null name or email is left out
-    rather than rendered as a blank line; with neither, `markdown` is
-    returned unchanged.
+def _contact_lines(user: User | None) -> list[str]:
+    """The account's `User.name`/`User.email` as Markdown lines (docs/adr/
+    0022). The base CVVersion's rendition is redacted, so neither writer
+    agent ever sees — let alone reproduces — the candidate's contact
+    details; they come from the User row, outside the LLM call, so they are
+    never fabricated. A null name or email is left out rather than rendered
+    as a blank line.
     """
     lines = []
     if user is not None and user.name:
         lines.append(f"**{user.name}**")
     if user is not None and user.email:
         lines.append(user.email)
+    return lines
+
+
+def _with_contact_block(markdown: str, user: User | None) -> str:
+    """Appends the contact lines to the end of a generated document's
+    Markdown, as a closing signature — used for COVER_LETTER. With neither
+    name nor email, `markdown` is returned unchanged.
+    """
+    lines = _contact_lines(user)
     if not lines:
         return markdown
     return f"{markdown.rstrip()}\n\n" + "\n".join(lines)
+
+
+def _with_contact_header(markdown: str, user: User | None) -> str:
+    """Inserts the contact lines right after the document's opening
+    heading — used for TAILORED_CV, where contact info reads as a header,
+    not a cover letter's closing signature. Inserted after the heading's
+    `<!-- SectionType: X -->` comment too, when CvTailoringAgent wrote one
+    (docs/adr #97), since `document_render._classify_lines` only attaches
+    that comment to a heading when it is the line immediately below it — an
+    intervening contact block would silently break that association. Falls
+    back to inserting at the very top if the Markdown doesn't open with a
+    heading. With neither name nor email, `markdown` is returned unchanged.
+    """
+    lines = _contact_lines(user)
+    if not lines:
+        return markdown
+
+    raw_lines = markdown.splitlines()
+    if not raw_lines or not raw_lines[0].startswith("#"):
+        return "\n".join(lines) + "\n\n" + markdown
+
+    insert_at = 1
+    if insert_at < len(raw_lines):
+        next_line = raw_lines[insert_at].strip()
+        if next_line.startswith("<!--") and next_line.endswith("-->"):
+            insert_at += 1
+
+    before = "\n".join(raw_lines[:insert_at])
+    after = "\n".join(raw_lines[insert_at:]).lstrip("\n")
+    return f"{before}\n\n" + "\n".join(lines) + f"\n\n{after}"
 
 
 async def run_generation_pipeline(
@@ -96,9 +134,10 @@ async def run_generation_pipeline(
     (CoverLetterWriterAgent for COVER_LETTER, CVTailoringAgent for
     TAILORED_CV), and writes the resulting Markdown to Postgres (canonical)
     and S3 (mirror), transitioning status PENDING -> GENERATING -> READY. The
-    CVVersion owner's `User.name`/`User.email` are appended to the agent's
+    CVVersion owner's `User.name`/`User.email` are added to the agent's
     output first (docs/adr/0022), since the redacted base CV no longer
-    carries them.
+    carries them — appended as a closing signature for COVER_LETTER, or
+    inserted right after the opening heading for TAILORED_CV.
 
     On any failure the row is left in a terminal FAILED status with a
     non-empty errorMessage and no partial markdownContent. Raises
@@ -167,7 +206,11 @@ async def run_generation_pipeline(
         await session.commit()
         raise GenerationPipelineError(message) from exc
 
-    markdown = _with_contact_block(markdown, await session.get(User, cv_version.userId))
+    user = await session.get(User, cv_version.userId)
+    if document.type == Generateddocumenttype.COVER_LETTER:
+        markdown = _with_contact_block(markdown, user)
+    else:
+        markdown = _with_contact_header(markdown, user)
 
     s3 = s3_client or make_s3_client()
     key = generated_document_key(
