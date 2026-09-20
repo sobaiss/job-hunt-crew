@@ -167,12 +167,33 @@ def _classify_lines(markdown_content: str) -> list[_Line]:
     return lines
 
 
+_UNICODE_TO_LATIN1_TRANSLITERATIONS = str.maketrans(
+    {
+        "‘": "'",  # left single quotation mark
+        "’": "'",  # right single quotation mark
+        "“": '"',  # left double quotation mark
+        "”": '"',  # right double quotation mark
+        "–": "-",  # en dash
+        "—": "-",  # em dash
+        "…": "...",  # horizontal ellipsis
+        "Œ": "OE",  # Latin capital ligature OE
+        "œ": "oe",  # Latin small ligature oe
+    }
+)
+
+
 def _latin1_safe(text: str) -> str:
     """The built-in Helvetica font only supports latin-1. LLM-generated
-    Markdown routinely contains smart quotes/em-dashes outside that range,
-    so unsupported characters are replaced rather than raising.
+    Markdown routinely contains smart quotes/em-dashes and the œ/Œ ligature
+    outside that range — "cœur" would otherwise silently degrade to "c?ur" —
+    so those are transliterated to a close latin-1 equivalent first; anything
+    else unsupported still falls back to "?" rather than raising.
     """
-    return text.encode("latin-1", errors="replace").decode("latin-1")
+    return (
+        text.translate(_UNICODE_TO_LATIN1_TRANSLITERATIONS)
+        .encode("latin-1", errors="replace")
+        .decode("latin-1")
+    )
 
 
 _STYLED_ARCHETYPES = ("SINGLE_COLUMN", "SIDEBAR_MAIN")

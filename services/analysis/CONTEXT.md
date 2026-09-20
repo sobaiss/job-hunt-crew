@@ -69,5 +69,12 @@ the base CVVersion's Markdown rendition it reads; the generation pipeline
 appends `User.name`/`User.email` to `GeneratedDocument.markdownContent`
 afterward, outside the LLM call, so the stored document — and every
 preview or render taken from it — stays consistent (docs/adr/0022).
+CoverLetterWriterAgent also keeps the letter concise (a character budget,
+not a page count) and free of bullet lists or former-employer name-dropping
+regardless of output language, and, when writing in French, follows the
+"Vous / Moi / Nous" structure with a dated Objet header — all as prompt
+guidance, per the truthfulness constraint's convention above, not a
+validated or enforced constraint. True sender/recipient address-block
+layout is deliberately excluded (docs/adr/0023).
 _Avoid_: CV rewriter — the output is a new GeneratedDocument, never a
 rewrite of the CVVersion itself.

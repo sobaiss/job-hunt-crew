@@ -104,6 +104,72 @@ def test_run_cover_letter_writer_system_prompt_names_supported_markdown_construc
         assert unsupported in lowered
 
 
+def test_run_cover_letter_writer_system_prompt_includes_length_and_style_rules():
+    # These apply regardless of language: the prompt previously had no length
+    # cap at all (falling back to DEFAULT_MAX_TOKENS=4096) and explicitly
+    # permitted bullet lists, producing letters that ran too long and used
+    # bullet-point formatting real cover letters shouldn't.
+    provider = StubLLMProvider(["Dear Hiring Manager, ...\n\nSincerely, Jane"])
+
+    run_cover_letter_writer(
+        cv_markdown=CV_MARKDOWN,
+        job_offer_structured_data=JOB_OFFER_STRUCTURED_DATA,
+        matched_skills=MATCHED_SKILLS,
+        missing_skills=MISSING_SKILLS,
+        language="en",
+        llm_provider=provider,
+    )
+
+    system = provider.last_system
+    assert "2000 characters" in system
+    assert "bullet-point lists" in system
+    assert "naming former employers" in system
+    assert "grammar and spelling" in system
+
+
+def test_run_cover_letter_writer_system_prompt_gates_french_structure_by_language():
+    # The French "Vous/Moi/Nous" structure and Objet/date header are a French
+    # business-letter convention, not a universal one. There's no reliable
+    # structured language signal in JobOffer/User today (see
+    # generation_pipeline._offer_language), so this instruction is always
+    # present and left to the model to apply based on the language it ends up
+    # writing in, rather than gated in Python on the `language` argument.
+    provider = StubLLMProvider(["Dear Hiring Manager, ...\n\nSincerely, Jane"])
+
+    run_cover_letter_writer(
+        cv_markdown=CV_MARKDOWN,
+        job_offer_structured_data=JOB_OFFER_STRUCTURED_DATA,
+        matched_skills=MATCHED_SKILLS,
+        missing_skills=MISSING_SKILLS,
+        llm_provider=provider,
+    )
+
+    system = provider.last_system
+    assert "Vous / Moi / Nous" in system
+    assert "Objet : Candidature au poste de" in system
+    assert "applies only in French" in system
+
+
+def test_run_cover_letter_writer_system_prompt_forbids_vous_moi_nous_as_literal_headings():
+    # Regression: a generated letter printed "Vous", "Moi", and "Nous" as
+    # literal bold section headings instead of using that structure as
+    # invisible guidance (analysis cover-letter-9b4f58d7-05e8-4675-bc1d-
+    # a08d566e8cec.pdf).
+    provider = StubLLMProvider(["Dear Hiring Manager, ...\n\nSincerely, Jane"])
+
+    run_cover_letter_writer(
+        cv_markdown=CV_MARKDOWN,
+        job_offer_structured_data=JOB_OFFER_STRUCTURED_DATA,
+        matched_skills=MATCHED_SKILLS,
+        missing_skills=MISSING_SKILLS,
+        llm_provider=provider,
+    )
+
+    system = provider.last_system
+    assert "Do NOT print" in system
+    assert "as section headings or labels" in system
+
+
 def test_run_cover_letter_writer_retries_on_empty_response_then_succeeds():
     provider = StubLLMProvider(["", "   ", "Dear Hiring Manager, ..."])
 

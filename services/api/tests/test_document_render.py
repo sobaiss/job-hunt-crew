@@ -42,6 +42,19 @@ def test_render_markdown_to_pdf_handles_characters_outside_latin1():
     assert pdf_bytes.startswith(b"%PDF")
 
 
+def test_latin1_safe_transliterates_unicode_punctuation_and_oe_ligature():
+    # Regression: "cœur" was silently degrading to "c?ur" in generated PDFs
+    # because œ (U+0153) isn't in latin-1, the only encoding the built-in
+    # Helvetica font supports.
+    from api.document_render import _latin1_safe
+
+    assert _latin1_safe("cœur") == "coeur"
+    assert _latin1_safe("Œuvre") == "OEuvre"
+    assert _latin1_safe("“quoted” and an em dash — here") == '"quoted" and an em dash - here'
+    assert _latin1_safe("wait…") == "wait..."
+    assert _latin1_safe("emoji: 🎉") == "emoji: ?"
+
+
 def test_render_markdown_to_docx_returns_zip_signature():
     docx_bytes = render_markdown_to_docx(markdown_content="Hello world")
     assert docx_bytes.startswith(b"PK")
