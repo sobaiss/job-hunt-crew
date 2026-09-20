@@ -1,9 +1,16 @@
 """LLM provider abstraction (PRD Section 4: "LLM provider" row).
 
-Selects between Anthropic Claude, OpenAI, and a local Ollama runtime behind a
-single interface via the LLM_PROVIDER env var (anthropic|openai|ollama), with
-the model id also configurable via env var, so CrewAI agents built on top of
-this never import an SDK directly or branch on provider.
+Selects between Anthropic Claude, OpenAI, OpenRouter, HuggingFace, and a local
+Ollama runtime behind a single interface via the LLM_PROVIDER env var
+(anthropic|openai|openrouter|huggingface|ollama), with the model id also
+configurable via env var, so CrewAI agents built on top of this never import
+an SDK directly or branch on provider.
+
+`anthropic`/`openai` are the production-supported options. `openrouter`/
+`huggingface` are also hosted, paid backends (API key required) — routed
+through their OpenAI-compatible endpoints, reusing the `openai` SDK exactly
+like `ollama` does below — but are opt-in for trying alternate models and not
+yet vetted for production traffic.
 
 `ollama` is a dev-local convenience only — no API key, no per-token cost — and
 is *not* a supported production backend; production stays on anthropic|openai.
@@ -17,6 +24,10 @@ import openai
 
 DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5"
 DEFAULT_OPENAI_MODEL = "gpt-4o"
+DEFAULT_OPENROUTER_MODEL = "anthropic/claude-sonnet-4-5"
+DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+DEFAULT_HUGGINGFACE_MODEL = "meta-llama/Llama-3.3-70B-Instruct"
+DEFAULT_HUGGINGFACE_BASE_URL = "https://router.huggingface.co/v1"
 DEFAULT_OLLAMA_MODEL = "qwen3.5:latest"
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434/v1"
 
@@ -113,6 +124,95 @@ class OpenAIProvider(LLMProvider):
             response_schema,
             temperature,
         )  # unused: OpenAI hasn't shown Ollama's failure modes
+        optional = {"max_tokens": max_tokens} if max_tokens is not None else {}
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+            **optional,
+        )
+        return response.choices[0].message.content
+
+
+class OpenRouterProvider(LLMProvider):
+    """Routes every call through OpenRouter's OpenAI-compatible API — hosted,
+    paid, API key required, opt-in for trying alternate models (not yet
+    vetted for production traffic; production stays on anthropic|openai).
+
+    Transport reuses the already-vendored `openai` SDK against a fixed
+    `base_url` — same trick as `OllamaProvider` — no new dependency. Unlike
+    Ollama, `response_schema`/`temperature` are ignored (same as Anthropic/
+    OpenAI above): OpenRouter proxies many different underlying models and
+    not all of them support strict json_schema mode, so constrained decoding
+    isn't applied here until a real model/failure shows it's needed.
+    """
+
+    def __init__(
+        self, *, model: str | None = None, client: openai.OpenAI | None = None
+    ) -> None:
+        self.model = model or os.environ.get("LLM_MODEL") or DEFAULT_OPENROUTER_MODEL
+        self.client = client or openai.OpenAI(
+            base_url=DEFAULT_OPENROUTER_BASE_URL,
+            api_key=os.environ.get("OPENROUTER_API_KEY"),
+        )
+
+    def generate(
+        self,
+        *,
+        system: str,
+        prompt: str,
+        max_tokens: int | None = None,
+        response_schema: dict | None = None,
+        temperature: float | None = None,
+    ) -> str:
+        del response_schema, temperature  # see class docstring
+        optional = {"max_tokens": max_tokens} if max_tokens is not None else {}
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+            **optional,
+        )
+        return response.choices[0].message.content
+
+
+class HuggingFaceProvider(LLMProvider):
+    """Routes every call through HuggingFace's unified OpenAI-compatible
+    Inference Providers router — hosted, paid, API key required, opt-in for
+    trying alternate models (not yet vetted for production traffic;
+    production stays on anthropic|openai).
+
+    Transport reuses the already-vendored `openai` SDK against a fixed
+    `base_url` — same trick as `OllamaProvider`/`OpenRouterProvider` — no new
+    dependency (the native `huggingface_hub` SDK is not used). Like
+    OpenRouterProvider, `response_schema`/`temperature` are ignored: the
+    router proxies many different underlying models/backends, and strict
+    json_schema support isn't consistent across them.
+    """
+
+    def __init__(
+        self, *, model: str | None = None, client: openai.OpenAI | None = None
+    ) -> None:
+        self.model = model or os.environ.get("LLM_MODEL") or DEFAULT_HUGGINGFACE_MODEL
+        self.client = client or openai.OpenAI(
+            base_url=DEFAULT_HUGGINGFACE_BASE_URL,
+            api_key=os.environ.get("HF_TOKEN"),
+        )
+
+    def generate(
+        self,
+        *,
+        system: str,
+        prompt: str,
+        max_tokens: int | None = None,
+        response_schema: dict | None = None,
+        temperature: float | None = None,
+    ) -> str:
+        del response_schema, temperature  # see class docstring
         optional = {"max_tokens": max_tokens} if max_tokens is not None else {}
         response = self.client.chat.completions.create(
             model=self.model,
@@ -222,14 +322,20 @@ class UnknownLLMProviderError(ValueError):
 
 
 def get_llm_provider() -> LLMProvider:
-    """Factory selecting the configured provider per LLM_PROVIDER (anthropic|openai|ollama)."""
+    """Factory selecting the configured provider per LLM_PROVIDER
+    (anthropic|openai|openrouter|huggingface|ollama)."""
     provider = os.environ.get("LLM_PROVIDER", "anthropic").lower()
     if provider == "anthropic":
         return AnthropicProvider()
     if provider == "openai":
         return OpenAIProvider()
+    if provider == "openrouter":
+        return OpenRouterProvider()
+    if provider == "huggingface":
+        return HuggingFaceProvider()
     if provider == "ollama":
         return OllamaProvider()
     raise UnknownLLMProviderError(
-        f"Unknown LLM_PROVIDER {provider!r}; expected anthropic | openai | ollama"
+        f"Unknown LLM_PROVIDER {provider!r}; expected "
+        "anthropic | openai | openrouter | huggingface | ollama"
     )

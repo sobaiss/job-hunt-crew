@@ -3,8 +3,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 from analysis.llm_provider import (
     AnthropicProvider,
+    HuggingFaceProvider,
     OllamaProvider,
     OpenAIProvider,
+    OpenRouterProvider,
     UnknownLLMProviderError,
     get_llm_provider,
 )
@@ -65,6 +67,78 @@ def test_get_llm_provider_openai_calls_openai_sdk(monkeypatch):
     )
     assert result == "openai reply"
     anthropic_ctor.assert_not_called()
+
+
+def test_get_llm_provider_openrouter_calls_openai_sdk(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "openrouter")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    fake_client = MagicMock()
+    fake_response = MagicMock()
+    fake_response.choices = [MagicMock(message=MagicMock(content="openrouter reply"))]
+    fake_client.chat.completions.create.return_value = fake_response
+
+    with patch(
+        "analysis.llm_provider.openai.OpenAI", return_value=fake_client
+    ) as openai_ctor:
+        provider = get_llm_provider()
+        assert isinstance(provider, OpenRouterProvider)
+        result = provider.generate(system="sys", prompt="hello")
+
+    openai_ctor.assert_called_once_with(
+        base_url="https://openrouter.ai/api/v1", api_key="or-key"
+    )
+    fake_client.chat.completions.create.assert_called_once_with(
+        model="anthropic/claude-sonnet-4-5",
+        messages=[
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "hello"},
+        ],
+    )
+    assert result == "openrouter reply"
+
+
+def test_openrouter_llm_model_env_var_overrides_default(monkeypatch):
+    monkeypatch.setenv("LLM_MODEL", "openai/gpt-4o-mini")
+    with patch("analysis.llm_provider.openai.OpenAI"):
+        provider = OpenRouterProvider()
+    assert provider.model == "openai/gpt-4o-mini"
+
+
+def test_get_llm_provider_huggingface_calls_openai_sdk(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "huggingface")
+    monkeypatch.setenv("HF_TOKEN", "hf-key")
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    fake_client = MagicMock()
+    fake_response = MagicMock()
+    fake_response.choices = [MagicMock(message=MagicMock(content="hf reply"))]
+    fake_client.chat.completions.create.return_value = fake_response
+
+    with patch(
+        "analysis.llm_provider.openai.OpenAI", return_value=fake_client
+    ) as openai_ctor:
+        provider = get_llm_provider()
+        assert isinstance(provider, HuggingFaceProvider)
+        result = provider.generate(system="sys", prompt="hello")
+
+    openai_ctor.assert_called_once_with(
+        base_url="https://router.huggingface.co/v1", api_key="hf-key"
+    )
+    fake_client.chat.completions.create.assert_called_once_with(
+        model="meta-llama/Llama-3.3-70B-Instruct",
+        messages=[
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "hello"},
+        ],
+    )
+    assert result == "hf reply"
+
+
+def test_huggingface_llm_model_env_var_overrides_default(monkeypatch):
+    monkeypatch.setenv("LLM_MODEL", "Qwen/Qwen2.5-72B-Instruct")
+    with patch("analysis.llm_provider.openai.OpenAI"):
+        provider = HuggingFaceProvider()
+    assert provider.model == "Qwen/Qwen2.5-72B-Instruct"
 
 
 def test_get_llm_provider_ollama_returns_ollama_provider(monkeypatch):
@@ -201,7 +275,9 @@ def test_get_llm_provider_unknown_message_lists_ollama(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "bogus")
     with pytest.raises(UnknownLLMProviderError) as excinfo:
         get_llm_provider()
-    assert "anthropic | openai | ollama" in str(excinfo.value)
+    assert "anthropic | openai | openrouter | huggingface | ollama" in str(
+        excinfo.value
+    )
 
 
 def test_get_llm_provider_defaults_to_anthropic(monkeypatch):

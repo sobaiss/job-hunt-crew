@@ -33,7 +33,7 @@ The one handler allowed to write an Analysis's terminal result to Postgres, trig
 _Avoid_: Result writer
 
 **LLM provider**:
-The swappable interface every agent in this context calls through, so no agent imports an LLM SDK directly. Chosen by configuration: Anthropic or OpenAI (hosted, API key required — the only options supported in production) or a local Ollama runtime (no key, dev-local only).
+The swappable interface every agent in this context calls through, so no agent imports an LLM SDK directly. Chosen by configuration: Anthropic or OpenAI (hosted, API key required — the production-supported options), OpenRouter or HuggingFace (also hosted and paid, opt-in for trying alternate models — not yet vetted for production traffic), or a local Ollama runtime (no key, dev-local only).
 
 **GenerationWorkflow**:
 The workflow that turns one Analysis into its GeneratedDocument rows —
