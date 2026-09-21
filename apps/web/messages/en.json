@@ -420,7 +420,73 @@
       "planDefaults": "Quotas",
       "analyses": "Analyses",
       "scouts": "Scouts",
-      "cvVersions": "CV versions"
+      "cvVersions": "CV versions",
+      "llmProviders": "LLM providers"
+    },
+    "llmProviders": {
+      "title": "LLM providers",
+      "description": "The LLM backends the system can run on, and what each one needs. Values you don't set here come from the environment.",
+      "loading": "Loading…",
+      "loadError": "Couldn't load the LLM providers.",
+      "columnsLabel": "Columns",
+      "columnsReset": "Reset",
+      "columns": {
+        "active": "Active",
+        "provider": "Provider",
+        "maturity": "Maturity",
+        "configuration": "Configuration",
+        "parameters": "Parameters",
+        "updatedAt": "Updated at",
+        "id": "ID",
+        "copyId": "Copy id"
+      },
+      "maturity": {
+        "production": "Production",
+        "opt-in": "Opt-in",
+        "dev-local": "Dev-local"
+      },
+      "configuration": {
+        "configured": "Configured",
+        "inherited": "Inherited",
+        "incomplete": "Incomplete"
+      },
+      "secretLabel": "Secret",
+      "noRequiredParameters": "None required",
+      "activeLabel": "Active provider: {provider}",
+      "environment": {
+        "name": "None — follow the environment",
+        "resolvesTo": "Currently: {provider}",
+        "unsupported": "LLM_PROVIDER is set to an unsupported value ({value}) — pipeline steps will fail until it is fixed."
+      },
+      "activeState": {
+        "active": "Active",
+        "inactive": "Not active"
+      },
+      "parameterNames": {
+        "apiKey": "API key",
+        "baseUrl": "Base URL",
+        "model": "Model"
+      },
+      "sources": {
+        "stored": "Stored",
+        "environment": "From the environment",
+        "default": "Provider default",
+        "unresolved": "Not set"
+      },
+      "secretPlaceholder": {
+        "stored": "Stored — ending in {lastFour}",
+        "storedNoHint": "Stored",
+        "environment": "Set via the environment",
+        "unresolved": "Not set"
+      },
+      "secretHelp": "Leave blank to keep the current value.",
+      "clearAction": "Clear",
+      "keepAction": "Keep",
+      "secretWillClear": "Will be cleared when you save",
+      "saveAction": "Save",
+      "cancelAction": "Cancel",
+      "saveError": "Couldn't save this provider.",
+      "activationError": "Couldn't change the active provider."
     }
   },
   "quotas": {

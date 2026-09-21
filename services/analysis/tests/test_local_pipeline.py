@@ -8,9 +8,12 @@ import json
 import uuid
 from datetime import UTC, datetime
 
+from unittest.mock import MagicMock, patch
+
 import boto3
 import pytest
 from botocore.client import Config
+from llm_settings import LLM_ENV_VARS, seed_setting, wipe_settings
 from py_db.models import (
     Analysis,
     Analysisstatus,
@@ -20,6 +23,7 @@ from py_db.models import (
     JobOffer,
     Jobofferextractionstatus,
     Joboffersourcesite,
+    Llmproviderkey,
     PipelineEvent,
     User,
 )
@@ -257,6 +261,206 @@ async def test_run_analysis_pipeline_lands_failed_with_message_when_a_step_fails
             assert reloaded.errorMessage
             assert "rawContentKey" in reloaded.errorMessage
     finally:
+        await _cleanup(
+            engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+        )
+
+
+EXTRACTED_OFFER_OUTPUT = json.dumps(
+    {
+        "title": "Senior Backend Engineer",
+        "company": "Acme Corp",
+        "location": "Paris, France",
+        "postedAt": "2026-09-01",
+        "description": "Senior Backend Engineer role focused on Python services.",
+        "requirements": ["5+ years Python", "AWS experience"],
+    }
+)
+
+
+def _fake_openai_client(replies: list[str]) -> MagicMock:
+    client = MagicMock()
+    client.chat.completions.create.side_effect = [
+        MagicMock(choices=[MagicMock(message=MagicMock(content=reply))])
+        for reply in replies
+    ]
+    return client
+
+
+@pytest.mark.asyncio
+async def test_run_analysis_pipeline_runs_every_step_on_the_active_llm_provider(
+    monkeypatch,
+):
+    """No injected provider: Conversion, extraction and the comparison run each
+    resolve the Active LLM provider (ollama, stored model), and the model
+    recorded on the completed Analysis is the stored one."""
+    for name in LLM_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")  # the setting overrides this
+
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id, job_offer_id, cv_version_id, analysis_id = (
+        f"test-{uuid.uuid4()}",
+        f"test-{uuid.uuid4()}",
+        f"test-{uuid.uuid4()}",
+        f"test-{uuid.uuid4()}",
+    )
+    cv_key = f"cvs/{user_id}/{cv_version_id}/cv.md"
+    raw_key = f"raw/{job_offer_id}.html"
+    s3 = _s3_client()
+    s3.put_object(Bucket=S3_BUCKET, Key=cv_key, Body=CV_MARKDOWN.encode())
+    s3.put_object(
+        Bucket=S3_BUCKET,
+        Key=raw_key,
+        Body=b"<html><body><h1>Senior Backend Engineer</h1></body></html>",
+    )
+    now = _now()
+    async with session_factory() as session:
+        session.add(User(id=user_id, updatedAt=now))
+        session.add(
+            JobOffer(
+                id=job_offer_id,
+                sourceUrl=f"https://example.com/jobs/{job_offer_id}",
+                sourceSite=Joboffersourcesite.OTHER,
+                extractionStatus=Jobofferextractionstatus.SCRAPED,
+                rawContentKey=raw_key,
+                updatedAt=now,
+            )
+        )
+        session.add(
+            CVVersion(
+                id=cv_version_id,
+                userId=user_id,
+                label="Software Engineer",
+                fileKey=cv_key,
+                fileName="cv.md",
+                fileType=Cvfiletype.MD,
+                fileSizeBytes=len(CV_MARKDOWN),
+                conversionStatus=Cvconversionstatus.PENDING,
+                updatedAt=now,
+            )
+        )
+        session.add(
+            Analysis(
+                id=analysis_id,
+                userId=user_id,
+                jobOfferId=job_offer_id,
+                cvVersionId=cv_version_id,
+                status=Analysisstatus.PENDING,
+            )
+        )
+        await session.commit()
+    await wipe_settings(session_factory)
+    await seed_setting(
+        session_factory, Llmproviderkey.OLLAMA, values={"model": "stored-wiring-model"}
+    )
+    client = _fake_openai_client(
+        [
+            CV_MARKDOWN,  # Conversion: redaction/normalisation pass
+            EXTRACTED_OFFER_OUTPUT,  # extraction
+            VALID_COMPARISON_OUTPUT,
+            VALID_RECOMMENDATION_OUTPUT,
+        ]
+    )
+
+    try:
+        with patch("analysis.llm_provider.openai.OpenAI", return_value=client) as ctor:
+            async with session_factory() as session:
+                result = await run_analysis_pipeline(session, analysis_id)
+
+        assert result.status == Analysisstatus.COMPLETED
+        assert result.resultJSON["model_used"] == "stored-wiring-model"
+        calls = client.chat.completions.create.call_args_list
+        assert len(calls) == 4
+        assert {call.kwargs["model"] for call in calls} == {"stored-wiring-model"}
+        # One resolution per step: Conversion, extraction, and the comparison run
+        # (whose comparison and recommendation share one client).
+        assert ctor.call_count == 3
+    finally:
+        await wipe_settings(session_factory)
+        for key in (cv_key, raw_key, analysis_result_key(analysis_id)):
+            s3.delete_object(Bucket=S3_BUCKET, Key=key)
+        await _cleanup(
+            engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+        )
+
+
+@pytest.mark.asyncio
+async def test_run_analysis_pipeline_fails_naming_provider_and_parameter_when_the_active_provider_has_no_key(
+    monkeypatch,
+):
+    for name in LLM_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")  # must not be fallen back to
+
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id, job_offer_id, cv_version_id, analysis_id = (
+        f"test-{uuid.uuid4()}",
+        f"test-{uuid.uuid4()}",
+        f"test-{uuid.uuid4()}",
+        f"test-{uuid.uuid4()}",
+    )
+    await _make_fixture(
+        session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+    )
+    await wipe_settings(session_factory)
+    await seed_setting(session_factory, Llmproviderkey.OPENAI)
+
+    try:
+        with patch("analysis.llm_provider.openai.OpenAI") as ctor:
+            async with session_factory() as session:
+                with pytest.raises(LocalPipelineError):
+                    await run_analysis_pipeline(session, analysis_id)
+        ctor.assert_not_called()
+
+        async with session_factory() as session:
+            reloaded = await session.get(Analysis, analysis_id)
+            assert reloaded.status == Analysisstatus.FAILED
+            assert "OpenAI" in reloaded.errorMessage
+            assert "apiKey" in reloaded.errorMessage
+    finally:
+        await wipe_settings(session_factory)
+        await _cleanup(
+            engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+        )
+
+
+@pytest.mark.asyncio
+async def test_an_injected_provider_wins_over_the_active_llm_provider(monkeypatch):
+    for name in LLM_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id, job_offer_id, cv_version_id, analysis_id = (
+        f"test-{uuid.uuid4()}",
+        f"test-{uuid.uuid4()}",
+        f"test-{uuid.uuid4()}",
+        f"test-{uuid.uuid4()}",
+    )
+    await _make_fixture(
+        session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+    )
+    await wipe_settings(session_factory)
+    await seed_setting(session_factory, Llmproviderkey.OPENAI)  # would fail: no key
+    s3 = _s3_client()
+
+    try:
+        async with session_factory() as session:
+            result = await run_analysis_pipeline(
+                session,
+                analysis_id,
+                llm_provider=StubLLMProvider(
+                    [VALID_COMPARISON_OUTPUT, VALID_RECOMMENDATION_OUTPUT]
+                ),
+            )
+        assert result.status == Analysisstatus.COMPLETED
+        assert result.resultJSON["model_used"] == "stub-model"
+    finally:
+        await wipe_settings(session_factory)
+        s3.delete_object(Bucket=S3_BUCKET, Key=analysis_result_key(analysis_id))
         await _cleanup(
             engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
         )

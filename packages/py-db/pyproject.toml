@@ -12,6 +12,9 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0",
     "asyncpg>=0.29",
     "bcrypt>=5.0.0",
+    # Fernet, for the LLM provider API keys an Administrator stores
+    # (settings_encryption.py). Imported lazily by callers that touch a secret.
+    "cryptography>=42",
 ]
 
 [build-system]

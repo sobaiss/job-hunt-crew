@@ -33,7 +33,8 @@ The one handler allowed to write an Analysis's terminal result to Postgres, trig
 _Avoid_: Result writer
 
 **LLM provider**:
-The swappable interface every agent in this context calls through, so no agent imports an LLM SDK directly. Chosen by configuration: Anthropic or OpenAI (hosted, API key required — the production-supported options), OpenRouter or HuggingFace (also hosted and paid, opt-in for trying alternate models — not yet vetted for production traffic), or a local Ollama runtime (no key, dev-local only).
+The swappable interface every agent in this context calls through, so no agent imports an LLM SDK directly. One of five backends: Anthropic or OpenAI (hosted, API key required — the production-supported options), OpenRouter or HuggingFace (also hosted and paid, opt-in for trying alternate models — not yet vetted for production traffic), or a local Ollama runtime (no key, dev-local only). Which one runs, and the parameters it runs on, come from the Active LLM provider and its Effective provider parameters (both defined in [API](../api/CONTEXT.md)'s context), falling back to the environment per parameter when nothing is stored (docs/adr/0024). Resolved where a pipeline step builds its provider, and passed down through the `llm_provider=` seam the agents already expose: one resolution per step, so a change applies from the next step to start.
+_Avoid_: LLMProviderSetting — that names the stored configuration row, not this interface.
 
 **GenerationWorkflow**:
 The workflow that turns one Analysis into its GeneratedDocument rows —

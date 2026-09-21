@@ -2,10 +2,19 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from py_db.session import make_engine, make_session_factory
 
 from .admin import router as admin_router
+from .admin_llm_provider_settings import (
+    ROUTE_PREFIX as ADMIN_LLM_PROVIDER_SETTINGS_PREFIX,
+)
+from .admin_llm_provider_settings import (
+    request_validation_error_without_input,
+    router as admin_llm_provider_settings_router,
+)
 from .internal import router as internal_router
 from .v1 import router as v1_router
 
@@ -27,6 +36,17 @@ app = FastAPI(title="job-hunt-crew api", lifespan=lifespan)
 app.include_router(internal_router)
 app.include_router(v1_router)
 app.include_router(admin_router)
+app.include_router(admin_llm_provider_settings_router)
+
+
+@app.exception_handler(RequestValidationError)
+async def handle_request_validation_error(request: Request, exc: RequestValidationError):
+    # These routes take API keys in the body, and FastAPI's default 422 echoes
+    # the offending input. Every other route keeps the framework's default.
+    if request.url.path.startswith(ADMIN_LLM_PROVIDER_SETTINGS_PREFIX):
+        return await request_validation_error_without_input(request, exc)
+    return await request_validation_exception_handler(request, exc)
+
 
 INTERNAL_API_SECRET_HEADER = "x-internal-api-secret"
 # Only these three paths (FastAPI's auto-generated docs) are ever exempt from

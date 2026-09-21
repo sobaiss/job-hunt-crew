@@ -6,10 +6,12 @@ from pathlib import Path
 import boto3
 import pytest
 from botocore.client import Config
+from llm_settings import LLM_ENV_VARS, seed_setting, wipe_settings
 from py_db.models import (
     JobOffer,
     Jobofferextractionstatus,
     Joboffersourcesite,
+    Llmproviderkey,
     PipelineEvent,
 )
 from py_db.session import make_engine, make_session_factory
@@ -242,6 +244,49 @@ async def test_extract_job_offer_marks_failed_after_bounded_retries_on_malformed
         # Bounded retries: exactly MAX_ATTEMPTS calls, never an unbounded loop.
         assert provider.calls == MAX_ATTEMPTS
     finally:
+        s3.delete_object(Bucket=S3_BUCKET, Key=raw_content_key)
+        await _delete_pipeline_events(session_factory, job_offer_id)
+        async with session_factory() as session:
+            job_offer = await session.get(JobOffer, job_offer_id)
+            if job_offer is not None:
+                await session.delete(job_offer)
+                await session.commit()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_extract_job_offer_marks_failed_naming_provider_when_the_active_provider_has_no_key(
+    monkeypatch,
+):
+    for name in LLM_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    job_offer_id = f"test-{uuid.uuid4()}"
+    raw_content_key = f"raw-scrapes/{job_offer_id}.html"
+    s3 = _s3_client()
+    s3.put_object(
+        Bucket=S3_BUCKET,
+        Key=raw_content_key,
+        Body=FIXTURE_HTML.encode("utf-8"),
+        ContentType="text/html",
+    )
+    await _make_scraped_job_offer(session_factory, job_offer_id, raw_content_key)
+    await wipe_settings(session_factory)
+    await seed_setting(session_factory, Llmproviderkey.OPENAI)
+
+    try:
+        async with session_factory() as session:
+            with pytest.raises(ExtractionError, match="OpenAI.*apiKey"):
+                await extract_job_offer(session, job_offer_id)
+
+        async with session_factory() as session:
+            reloaded = await session.get(JobOffer, job_offer_id)
+            assert reloaded.extractionStatus == Jobofferextractionstatus.FAILED
+            assert "OpenAI" in reloaded.errorMessage
+            assert "apiKey" in reloaded.errorMessage
+    finally:
+        await wipe_settings(session_factory)
         s3.delete_object(Bucket=S3_BUCKET, Key=raw_content_key)
         await _delete_pipeline_events(session_factory, job_offer_id)
         async with session_factory() as session:

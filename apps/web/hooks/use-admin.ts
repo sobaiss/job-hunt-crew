@@ -161,6 +161,90 @@ export function useSetPlanDefaults(plan: string) {
   });
 }
 
+// Backs the Admin "LLM providers" screen (issue #174, docs/adr/0024): the five
+// providers the system implements, what each one needs and whether it is ready
+// to run. A secret never carries its value -- only `isSet` and, for a stored
+// one, the `lastFour` hint (null for an environment-supplied secret).
+export type AdminLlmProviderParameter = {
+  name: string;
+  secret: boolean;
+  required: boolean;
+  source: "stored" | "environment" | "default" | "unresolved";
+  value: string | null;
+  isSet: boolean;
+  lastFour: string | null;
+};
+
+export type AdminLlmProvider = {
+  key: string;
+  displayName: string;
+  maturity: "production" | "opt-in" | "dev-local";
+  active: boolean;
+  configuration: "configured" | "inherited" | "incomplete";
+  updatedAt: string | null;
+  settingId: string | null;
+  parameters: AdminLlmProviderParameter[];
+};
+
+export type AdminLlmProviderSettings = {
+  activeProvider: string | null;
+  // The provider LLM_PROVIDER resolves to in the API's environment, or the
+  // unsupported value it holds.
+  environmentProvider: { key: string | null; unsupportedValue: string | null };
+  providers: AdminLlmProvider[];
+};
+
+export function useAdminLlmProviderSettings() {
+  return useQuery({
+    queryKey: ["admin-llm-provider-settings"],
+    queryFn: () => bff.get<AdminLlmProviderSettings>("/admin/llm-provider-settings"),
+  });
+}
+
+// Saves one provider's parameters (issues #175, #179). Per parameter: a string
+// sets it (blank removes a stored non-secret; a blank secret is unchanged),
+// null clears it, an omitted name is left unchanged -- so only changed fields
+// should be passed.
+export function useSaveLlmProviderSettings(providerKey: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (parameters: Record<string, string | null>) =>
+      bff.put<AdminLlmProvider>(`/admin/llm-provider-settings/${providerKey}`, { parameters }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin-llm-provider-settings"] });
+    },
+  });
+}
+
+// Activation (issue #176). Both refresh the list whether they succeed or are
+// refused, so the table always shows what is actually active.
+function useRefreshLlmProviderSettings() {
+  const queryClient = useQueryClient();
+  return () => {
+    void queryClient.invalidateQueries({ queryKey: ["admin-llm-provider-settings"] });
+  };
+}
+
+// Makes one provider the only active one; the API refuses with a 422 naming
+// each required parameter that resolves nowhere.
+export function useActivateLlmProvider() {
+  const refresh = useRefreshLlmProviderSettings();
+  return useMutation({
+    mutationFn: (providerKey: string) =>
+      bff.post<AdminLlmProviderSettings>(`/admin/llm-provider-settings/${providerKey}/activate`),
+    onSettled: refresh,
+  });
+}
+
+// Hands control back to the environment (the None row).
+export function useDeactivateLlmProvider() {
+  const refresh = useRefreshLlmProviderSettings();
+  return useMutation({
+    mutationFn: () => bff.post<AdminLlmProviderSettings>("/admin/llm-provider-settings/deactivate"),
+    onSettled: refresh,
+  });
+}
+
 // Backs the Admin users table (issue #147): a lightweight row per User —
 // Plan reassignment, quotas and overrides now live only on the User panel
 // (useAdminUserQuotas above), reached via the row's id.

@@ -299,3 +299,84 @@ def test_llm_model_env_var_overrides_default(monkeypatch):
     with patch("analysis.llm_provider.anthropic.Anthropic"):
         provider = AnthropicProvider()
     assert provider.model == "claude-custom"
+
+
+def test_default_models_per_provider(monkeypatch):
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    with (
+        patch("analysis.llm_provider.anthropic.Anthropic"),
+        patch("analysis.llm_provider.openai.OpenAI"),
+    ):
+        assert AnthropicProvider().model == "claude-sonnet-4-5"
+        assert OpenAIProvider().model == "gpt-4o"
+        assert OpenRouterProvider().model == "anthropic/claude-sonnet-4-5"
+        assert HuggingFaceProvider().model == "meta-llama/Llama-3.3-70B-Instruct"
+        assert OllamaProvider().model == "qwen3.5:latest"
+
+
+def test_explicit_model_beats_llm_model_env_var(monkeypatch):
+    monkeypatch.setenv("LLM_MODEL", "from-env")
+    with (
+        patch("analysis.llm_provider.anthropic.Anthropic"),
+        patch("analysis.llm_provider.openai.OpenAI"),
+    ):
+        assert AnthropicProvider(model="explicit").model == "explicit"
+        assert OpenAIProvider(model="explicit").model == "explicit"
+        assert OpenRouterProvider(model="explicit").model == "explicit"
+        assert HuggingFaceProvider(model="explicit").model == "explicit"
+        assert OllamaProvider(model="explicit").model == "explicit"
+
+
+def test_anthropic_explicit_api_key_is_passed_to_sdk(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key")
+    with patch("analysis.llm_provider.anthropic.Anthropic") as anthropic_ctor:
+        AnthropicProvider(api_key="explicit-key")
+    anthropic_ctor.assert_called_once_with(api_key="explicit-key")
+
+
+def test_anthropic_without_explicit_api_key_lets_sdk_discover_it(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "env-key")
+    with patch("analysis.llm_provider.anthropic.Anthropic") as anthropic_ctor:
+        AnthropicProvider()
+    anthropic_ctor.assert_called_once_with()
+
+
+def test_openai_explicit_api_key_is_passed_to_sdk(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "env-key")
+    with patch("analysis.llm_provider.openai.OpenAI") as openai_ctor:
+        OpenAIProvider(api_key="explicit-key")
+    openai_ctor.assert_called_once_with(api_key="explicit-key")
+
+
+def test_openai_without_explicit_api_key_lets_sdk_discover_it(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "env-key")
+    with patch("analysis.llm_provider.openai.OpenAI") as openai_ctor:
+        OpenAIProvider()
+    openai_ctor.assert_called_once_with()
+
+
+def test_openrouter_explicit_api_key_beats_environment(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "env-key")
+    with patch("analysis.llm_provider.openai.OpenAI") as openai_ctor:
+        OpenRouterProvider(api_key="explicit-key")
+    openai_ctor.assert_called_once_with(
+        base_url="https://openrouter.ai/api/v1", api_key="explicit-key"
+    )
+
+
+def test_huggingface_explicit_api_key_beats_environment(monkeypatch):
+    monkeypatch.setenv("HF_TOKEN", "env-key")
+    with patch("analysis.llm_provider.openai.OpenAI") as openai_ctor:
+        HuggingFaceProvider(api_key="explicit-key")
+    openai_ctor.assert_called_once_with(
+        base_url="https://router.huggingface.co/v1", api_key="explicit-key"
+    )
+
+
+def test_ollama_explicit_base_url_beats_environment(monkeypatch):
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://from-env:11434/v1")
+    with patch("analysis.llm_provider.openai.OpenAI") as openai_ctor:
+        OllamaProvider(base_url="http://explicit:11434/v1")
+    openai_ctor.assert_called_once_with(
+        base_url="http://explicit:11434/v1", api_key="ollama"
+    )

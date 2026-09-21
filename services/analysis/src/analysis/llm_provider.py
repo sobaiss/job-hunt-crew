@@ -21,15 +21,13 @@ from abc import ABC, abstractmethod
 
 import anthropic
 import openai
+from py_db.llm_providers import ProviderParameter, get_provider_spec
 
-DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5"
-DEFAULT_OPENAI_MODEL = "gpt-4o"
-DEFAULT_OPENROUTER_MODEL = "anthropic/claude-sonnet-4-5"
-DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-DEFAULT_HUGGINGFACE_MODEL = "meta-llama/Llama-3.3-70B-Instruct"
-DEFAULT_HUGGINGFACE_BASE_URL = "https://router.huggingface.co/v1"
-DEFAULT_OLLAMA_MODEL = "qwen3.5:latest"
-DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434/v1"
+# Fixed transport endpoints, not Provider parameters (see py_db.llm_providers).
+# Every configurable default — model ids, Ollama's base URL — lives in that
+# catalogue and is read from it below; nothing is declared twice.
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+HUGGINGFACE_BASE_URL = "https://router.huggingface.co/v1"
 
 # Response cap used when a caller does not ask for a specific one.
 DEFAULT_MAX_TOKENS = 4096
@@ -48,6 +46,26 @@ RETRY_TEMPERATURES = (0.0, 0.3, 0.6)
 def retry_temperature(attempt: int) -> float:
     """`attempt` is 1-indexed, matching every caller's retry loop."""
     return RETRY_TEMPERATURES[min(attempt - 1, len(RETRY_TEMPERATURES) - 1)]
+
+
+def _parameter(provider_key: str, name: str) -> ProviderParameter:
+    return get_provider_spec(provider_key).parameter(name)
+
+
+def _default_model(provider_key: str) -> str:
+    """Explicit `model` wins over this; `LLM_MODEL` sits between the two and
+    governs only the environment-driven construction (docs/adr/0024)."""
+    default = _parameter(provider_key, "model").default
+    assert default is not None
+    return os.environ.get("LLM_MODEL") or default
+
+
+def _env_or_default(provider_key: str, name: str) -> str | None:
+    """Parameter's environment fallback (empty counts as unset), else its
+    catalogue default."""
+    parameter = _parameter(provider_key, name)
+    env_value = os.environ.get(parameter.env_var) if parameter.env_var else None
+    return env_value or parameter.default
 
 
 class LLMProvider(ABC):
@@ -77,10 +95,19 @@ class LLMProvider(ABC):
 
 class AnthropicProvider(LLMProvider):
     def __init__(
-        self, *, model: str | None = None, client: anthropic.Anthropic | None = None
+        self,
+        *,
+        model: str | None = None,
+        api_key: str | None = None,
+        client: anthropic.Anthropic | None = None,
     ) -> None:
-        self.model = model or os.environ.get("LLM_MODEL") or DEFAULT_ANTHROPIC_MODEL
-        self.client = client or anthropic.Anthropic()
+        self.model = model or _default_model("anthropic")
+        # No explicit key: pass nothing and let the SDK discover
+        # ANTHROPIC_API_KEY itself (an explicit key that merely echoes the
+        # environment makes it warn about shadowing).
+        self.client = client or (
+            anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
+        )
 
     def generate(
         self,
@@ -106,10 +133,17 @@ class AnthropicProvider(LLMProvider):
 
 class OpenAIProvider(LLMProvider):
     def __init__(
-        self, *, model: str | None = None, client: openai.OpenAI | None = None
+        self,
+        *,
+        model: str | None = None,
+        api_key: str | None = None,
+        client: openai.OpenAI | None = None,
     ) -> None:
-        self.model = model or os.environ.get("LLM_MODEL") or DEFAULT_OPENAI_MODEL
-        self.client = client or openai.OpenAI()
+        self.model = model or _default_model("openai")
+        # No explicit key: the SDK discovers OPENAI_API_KEY itself.
+        self.client = client or (
+            openai.OpenAI(api_key=api_key) if api_key else openai.OpenAI()
+        )
 
     def generate(
         self,
@@ -150,12 +184,16 @@ class OpenRouterProvider(LLMProvider):
     """
 
     def __init__(
-        self, *, model: str | None = None, client: openai.OpenAI | None = None
+        self,
+        *,
+        model: str | None = None,
+        api_key: str | None = None,
+        client: openai.OpenAI | None = None,
     ) -> None:
-        self.model = model or os.environ.get("LLM_MODEL") or DEFAULT_OPENROUTER_MODEL
+        self.model = model or _default_model("openrouter")
         self.client = client or openai.OpenAI(
-            base_url=DEFAULT_OPENROUTER_BASE_URL,
-            api_key=os.environ.get("OPENROUTER_API_KEY"),
+            base_url=OPENROUTER_BASE_URL,
+            api_key=api_key or _env_or_default("openrouter", "apiKey"),
         )
 
     def generate(
@@ -195,12 +233,16 @@ class HuggingFaceProvider(LLMProvider):
     """
 
     def __init__(
-        self, *, model: str | None = None, client: openai.OpenAI | None = None
+        self,
+        *,
+        model: str | None = None,
+        api_key: str | None = None,
+        client: openai.OpenAI | None = None,
     ) -> None:
-        self.model = model or os.environ.get("LLM_MODEL") or DEFAULT_HUGGINGFACE_MODEL
+        self.model = model or _default_model("huggingface")
         self.client = client or openai.OpenAI(
-            base_url=DEFAULT_HUGGINGFACE_BASE_URL,
-            api_key=os.environ.get("HF_TOKEN"),
+            base_url=HUGGINGFACE_BASE_URL,
+            api_key=api_key or _env_or_default("huggingface", "apiKey"),
         )
 
     def generate(
@@ -233,7 +275,7 @@ class OllamaProvider(LLMProvider):
     Standalone (not an `OpenAIProvider` subclass) so its `temperature=0` /
     `base_url` / dummy-key contract stays decoupled from future `OpenAIProvider`
     edits. Transport reuses the already-vendored `openai` SDK — no new
-    dependency — against `OLLAMA_BASE_URL` (default `http://localhost:11434/v1`)
+    dependency — against `OLLAMA_BASE_URL` (default in `py_db.llm_providers`)
     with a hardcoded dummy key (the SDK rejects an empty one; Ollama ignores the
     value). No reachability preflight: an unreachable server surfaces as the
     caller's bounded retry loop exhausting into a terminal FAILED state, exactly
@@ -241,15 +283,19 @@ class OllamaProvider(LLMProvider):
     """
 
     def __init__(
-        self, *, model: str | None = None, client: openai.OpenAI | None = None
+        self,
+        *,
+        model: str | None = None,
+        base_url: str | None = None,
+        client: openai.OpenAI | None = None,
     ) -> None:
-        self.model = model or os.environ.get("LLM_MODEL") or DEFAULT_OLLAMA_MODEL
+        self.model = model or _default_model("ollama")
         # `or` (not get's default arg): docker-compose injects OLLAMA_BASE_URL as
         # an empty string via `${OLLAMA_BASE_URL:-}` when the host env is unset,
         # and `openai.OpenAI(base_url="")` fails every call with "Connection
         # error" rather than falling back to the real default.
         self.client = client or openai.OpenAI(
-            base_url=os.environ.get("OLLAMA_BASE_URL") or DEFAULT_OLLAMA_BASE_URL,
+            base_url=base_url or _env_or_default("ollama", "baseUrl"),
             api_key="ollama",
         )
 

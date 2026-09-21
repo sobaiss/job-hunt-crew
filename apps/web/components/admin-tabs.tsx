@@ -11,7 +11,7 @@ import {
   SUBNAV_LINK_CLASS,
 } from "@/components/matching-subnav";
 
-// The six screens of the Admin area, in tab order. The Plan defaults page
+// The seven screens of the Admin area, in tab order. The Plan defaults page
 // lives at /admin/quotas (issue #146) and is tabbed here as "Quotas".
 export const ADMIN_TABS = [
   { href: "/admin", key: "dashboard" },
@@ -20,6 +20,7 @@ export const ADMIN_TABS = [
   { href: "/admin/analyses", key: "analyses" },
   { href: "/admin/scouts", key: "scouts" },
   { href: "/admin/cv-versions", key: "cvVersions" },
+  { href: "/admin/llm-providers", key: "llmProviders" },
 ] as const;
 
 // `/admin` is the Dashboard's own route and the prefix of every other tab, so
@@ -30,7 +31,7 @@ function isTabActive(pathname: string, href: string): boolean {
 }
 
 /**
- * The shared tab strip on every Admin-area screen (issue #164): links all six
+ * The shared tab strip on every Admin-area screen (issue #164): links all seven
  * screens and flags the current one with `aria-current`. Mounted by
  * `app/(app)/admin/layout.tsx`, behind its Administrator gate, so it never
  * renders for anyone else.

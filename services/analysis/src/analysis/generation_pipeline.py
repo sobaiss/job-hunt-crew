@@ -31,7 +31,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .cover_letter_writer_agent import CoverLetterWriterError, run_cover_letter_writer
 from .cv_tailoring_agent import CvTailoringError, run_cv_tailoring
-from .llm_provider import LLMProvider, get_llm_provider
+from .llm_provider import LLMProvider
+from .llm_provider_resolver import LLMProviderResolutionError, resolve_llm_provider
 from .s3_client import S3_BUCKET, generated_document_key, make_s3_client
 
 logger = get_logger(__name__)
@@ -177,7 +178,15 @@ async def run_generation_pipeline(
     missing_skills = result.get("missing_skills", [])
     language = _offer_language(job_offer, fallback=locale_fallback)
 
-    provider = llm_provider or get_llm_provider()
+    try:
+        provider = llm_provider or await resolve_llm_provider(session)
+    except LLMProviderResolutionError as exc:
+        message = str(exc)
+        document.status = Generateddocumentstatus.FAILED
+        document.errorMessage = message
+        document.updatedAt = _now()
+        await session.commit()
+        raise GenerationPipelineError(message) from exc
 
     try:
         if document.type == Generateddocumenttype.COVER_LETTER:

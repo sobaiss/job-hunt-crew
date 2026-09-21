@@ -21,11 +21,13 @@ import boto3
 import pytest
 from botocore.client import Config
 from docx import Document as DocxDocument
+from llm_settings import LLM_ENV_VARS, seed_setting, wipe_settings
 from py_db.models import (
     CVVersion,
     Cvconversionstatus,
     Cvfiletype,
     Cvstylestatus,
+    Llmproviderkey,
     PipelineEvent,
     User,
 )
@@ -300,6 +302,40 @@ async def test_convert_cv_stores_the_redaction_pass_output_for_md_and_txt(
             statuses = {e.status for e in events if e.stage == "convert"}
             assert {"STARTED", "SUCCEEDED"} <= statuses
     finally:
+        await _cleanup(engine, session_factory, s3, file_key, user_id, cv_version_id)
+
+
+@pytest.mark.asyncio
+async def test_convert_cv_fails_naming_provider_when_the_active_provider_has_no_key(
+    monkeypatch,
+):
+    for name in LLM_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id = f"test-user-{uuid.uuid4()}"
+    cv_version_id = f"test-cv-{uuid.uuid4()}"
+    file_key = f"cvs/{user_id}/{cv_version_id}/cv.md"
+    s3 = _s3_client()
+    s3.put_object(Bucket=S3_BUCKET, Key=file_key, Body=REDACTED_TEXT.encode())
+    await _make_pending_cv_version(
+        session_factory, user_id, cv_version_id, file_key, Cvfiletype.MD, "cv.md"
+    )
+    await wipe_settings(session_factory)
+    await seed_setting(session_factory, Llmproviderkey.OPENAI)
+
+    try:
+        async with session_factory() as session:
+            with pytest.raises(CVConversionError, match="OpenAI.*apiKey"):
+                await convert_cv(session, cv_version_id)
+
+        async with session_factory() as session:
+            reloaded = await session.get(CVVersion, cv_version_id)
+            assert reloaded.conversionStatus == Cvconversionstatus.FAILED
+            assert "OpenAI" in reloaded.conversionError
+            assert reloaded.markdownContent is None
+    finally:
+        await wipe_settings(session_factory)
         await _cleanup(engine, session_factory, s3, file_key, user_id, cv_version_id)
 
 

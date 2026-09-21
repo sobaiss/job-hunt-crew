@@ -33,6 +33,7 @@ import asyncio
 import io
 import json
 from datetime import UTC, datetime
+from typing import NoReturn
 
 import mammoth
 from py_db.models import (
@@ -49,7 +50,8 @@ from pypdf import PdfReader
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .cv_redaction import REDACTION_INSTRUCTIONS, find_identity_leaks
-from .llm_provider import LLMProvider, get_llm_provider
+from .llm_provider import LLMProvider
+from .llm_provider_resolver import LLMProviderResolutionError, resolve_llm_provider
 from .s3_client import S3_BUCKET, make_s3_client
 from .style_profile import StyleProfileError, build_style_profile
 
@@ -146,7 +148,7 @@ async def _emit(
 
 async def _mark_failed(
     session: AsyncSession, cv_version: CVVersion, message: str, analysis_id: str | None
-) -> None:
+) -> NoReturn:
     cv_version.conversionStatus = Cvconversionstatus.FAILED
     cv_version.conversionError = message
     cv_version.updatedAt = _now()
@@ -166,7 +168,7 @@ def _derive_style_profile(
     file_bytes: bytes,
     markdown: str,
     *,
-    llm_provider: LLMProvider | None,
+    llm_provider: LLMProvider,
 ) -> tuple[dict | None, Cvstylestatus]:
     """Best-effort StyleProfile derivation (issue #96), run only once
     `markdownContent`/`conversionStatus` have already succeeded. A failure
@@ -183,7 +185,7 @@ def _derive_style_profile(
             file_bytes=file_bytes,
             file_type=cv_version.fileType,
             markdown=markdown,
-            llm_provider=llm_provider or get_llm_provider(),
+            llm_provider=llm_provider,
         )
     except StyleProfileError:
         logger.exception(
@@ -247,7 +249,7 @@ async def convert_cv(
         # Lenient UTF-8: a stray non-UTF-8 byte in an otherwise fine text CV
         # should not fail Conversion.
         source_text = file_bytes.decode("utf-8", errors="replace")
-        markdown = await _normalise_to_markdown(
+        markdown, provider = await _normalise_to_markdown(
             session,
             cv_version,
             source_text,
@@ -256,7 +258,7 @@ async def convert_cv(
             analysis_id=analysis_id,
         )
     elif cv_version.fileType == Cvfiletype.PDF:
-        markdown = await _convert_pdf(
+        markdown, provider = await _convert_pdf(
             session,
             cv_version,
             file_bytes,
@@ -264,7 +266,7 @@ async def convert_cv(
             analysis_id=analysis_id,
         )
     elif cv_version.fileType == Cvfiletype.DOCX:
-        markdown = await _convert_docx(
+        markdown, provider = await _convert_docx(
             session,
             cv_version,
             file_bytes,
@@ -283,8 +285,10 @@ async def convert_cv(
     cv_version.markdownContent = markdown
     cv_version.conversionStatus = Cvconversionstatus.CONVERTED
     cv_version.conversionError = None
+    # The provider the normalisation step resolved also serves the StyleProfile
+    # derivation, so one Conversion runs on one provider.
     cv_version.styleProfile, cv_version.styleStatus = _derive_style_profile(
-        cv_version, file_bytes, markdown, llm_provider=llm_provider
+        cv_version, file_bytes, markdown, llm_provider=provider
     )
     cv_version.updatedAt = _now()
     await session.commit()
@@ -306,9 +310,9 @@ async def _convert_pdf(
     *,
     llm_provider: LLMProvider | None,
     analysis_id: str | None,
-) -> str:
+) -> tuple[str, LLMProvider]:
     """PDF branch: mechanical text extraction, then one LLM normalisation pass.
-    Returns the Markdown rendition, or raises CVConversionError (via _mark_failed)
+    Returns the Markdown rendition and the provider it ran on, or raises CVConversionError (via _mark_failed)
     after recording the failure."""
     text = _extract_pdf_text(file_bytes)
     if sum(1 for ch in text if not ch.isspace()) < MIN_EXTRACTED_CHARS:
@@ -337,10 +341,10 @@ async def _convert_docx(
     *,
     llm_provider: LLMProvider | None,
     analysis_id: str | None,
-) -> str:
+) -> tuple[str, LLMProvider]:
     """DOCX branch: `mammoth` docx -> semantic HTML, then the same LLM
-    normalisation pass as the PDF branch. Returns the Markdown rendition, or
-    raises CVConversionError (via _mark_failed) after recording the failure."""
+    normalisation pass as the PDF branch. Returns the Markdown rendition and
+    the provider it ran on, or raises CVConversionError (via _mark_failed) after recording the failure."""
     html = _extract_docx_html(file_bytes)
     return await _normalise_to_markdown(
         session,
@@ -388,7 +392,7 @@ async def _normalise_to_markdown(
     system_prompt: str,
     llm_provider: LLMProvider | None,
     analysis_id: str | None,
-) -> str:
+) -> tuple[str, LLMProvider]:
     """Shared by every format's single Redaction-carrying LLM pass: truncate
     `source_text` (mechanically-extracted PDF/DOCX text, or an MD/TXT upload's
     own text) to MAX_TEXT_CHARS and run one LLM pass under `system_prompt`,
@@ -397,9 +401,13 @@ async def _normalise_to_markdown(
     then run through the deterministic safety net: any leftover identity data,
     like an exhausted retry budget, fails Conversion via _mark_failed with no
     unredacted fallback and no retry. Returns the stripped Markdown, or raises
-    CVConversionError."""
+    CVConversionError. Also returns the provider it resolved (the injected one,
+    else the Active LLM provider), for the StyleProfile derivation to reuse."""
     prompt = source_text[:MAX_TEXT_CHARS]
-    provider = llm_provider or get_llm_provider()
+    try:
+        provider = llm_provider or await resolve_llm_provider(session)
+    except LLMProviderResolutionError as exc:
+        await _mark_failed(session, cv_version, str(exc), analysis_id)
 
     last_error: Exception | None = None
     for _attempt in range(1, MAX_ATTEMPTS + 1):
@@ -417,7 +425,7 @@ async def _normalise_to_markdown(
             await _fail_on_identity_leaks(
                 session, cv_version, markdown, analysis_id=analysis_id
             )
-            return markdown
+            return markdown, provider
         last_error = ValueError("empty LLM response")
 
     await _mark_failed(

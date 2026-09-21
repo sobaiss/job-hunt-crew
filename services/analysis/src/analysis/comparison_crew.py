@@ -16,7 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .analysis_result import AnalysisResult
 from .comparison_analysis_agent import ComparisonAnalysisError, run_comparison_analysis
 from .cv_comparison_input import CVComparisonInputError, load_cv_markdown
-from .llm_provider import LLMProvider, get_llm_provider
+from .llm_provider import LLMProvider
+from .llm_provider_resolver import LLMProviderResolutionError, resolve_llm_provider
 from .recommendation_writer_agent import (
     RecommendationWriterError,
     run_recommendation_writer,
@@ -78,7 +79,14 @@ async def run_analysis(
         await session.commit()
         raise AnalysisError(message) from exc
 
-    provider = llm_provider or get_llm_provider()
+    try:
+        provider = llm_provider or await resolve_llm_provider(session)
+    except LLMProviderResolutionError as exc:
+        message = str(exc)
+        analysis.status = Analysisstatus.FAILED
+        analysis.errorMessage = message
+        await session.commit()
+        raise AnalysisError(message) from exc
 
     try:
         comparison = run_comparison_analysis(

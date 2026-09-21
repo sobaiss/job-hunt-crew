@@ -133,6 +133,26 @@ services:
       # "Run now" on a Scout is rate-limited to once an hour by default;
       # override locally (e.g. 0) to relaunch a Scout on demand in dev.
       SCOUT_RUN_RATE_LIMIT_SECONDS: ${SCOUT_RUN_RATE_LIMIT_SECONDS:-3600}
+      # Encrypts the LLM provider API keys an Administrator stores (issue #178,
+      # docs/adr/0024). Every process that writes or reads them -- this API and
+      # every Analysis and Ingestion process (the worker) -- needs the SAME key,
+      # or stored keys are ignored and the environment's are used instead.
+      # DEV-ONLY default, like INTERNAL_API_SECRET: generate your own with
+      #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:-SbSkCyNxmIyTmRKah7LjMRn8Lsjf3f8OVkNH7iZoYaw=}
+      # The Admin "LLM providers" screen (issue #174, docs/adr/0024) evaluates
+      # the environment itself -- to name the provider it resolves to, to show
+      # which parameters are inherited, and to validate activation -- so the
+      # API gets the same LLM variables as the worker below, or it would
+      # report a different provider than the one actually running. Keep the
+      # two blocks in step.
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      LLM_MODEL: ${LLM_MODEL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      HF_TOKEN: ${HF_TOKEN:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
       # POST /v1/analyses enforces this per-user daily cap (default 50);
       # override locally to raise it for repeated testing.
       DAILY_ANALYSIS_CAP: ${DAILY_ANALYSIS_CAP:-50}
@@ -207,6 +227,9 @@ services:
       SQS_GENERATION_INTAKE_QUEUE_URL: http://elasticmq:9324/000000000000/generation-intake
       SQS_ACCESS_KEY_ID: x
       SQS_SECRET_ACCESS_KEY: x
+      # Same key as the api service above, so the API-encrypted LLM provider
+      # keys can be decrypted here (issue #178).
+      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:-SbSkCyNxmIyTmRKah7LjMRn8Lsjf3f8OVkNH7iZoYaw=}
       # The crew run (analysis-intake) and any PDF/DOCX Conversion call an LLM
       # through this provider; the MD/TXT Conversion path needs none. Passed
       # through from the host env, defaulting to a local Ollama (no API key).
