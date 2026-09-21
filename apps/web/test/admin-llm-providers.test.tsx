@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 
-import { renderWithProviders, screen, within } from "./test-utils";
+import { renderWithProviders, screen, waitFor, within } from "./test-utils";
 import { server } from "./msw/server";
 import { __setUrl } from "./next-navigation-mock";
 import AdminLlmProvidersPage from "@/app/(app)/admin/llm-providers/page";
@@ -44,8 +44,8 @@ function provider(
     maturity,
     active: false,
     configuration,
-    updatedAt: null,
-    settingId: null,
+    updatedAt: null as string | null,
+    settingId: null as string | null,
     parameters,
   };
 }
@@ -223,5 +223,183 @@ describe("AdminLlmProvidersPage", () => {
     renderWithProviders(<AdminLlmProvidersPage />);
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't load");
+  });
+  describe("slide-over", () => {
+    function withStoredOllama() {
+      const stored = settingsResponse();
+      const ollama = stored.providers[4];
+      ollama.configuration = "configured";
+      ollama.settingId = "setting-ollama";
+      ollama.updatedAt = "2026-09-20T10:00:00";
+      ollama.parameters = [
+        {
+          name: "baseUrl",
+          secret: false,
+          required: false,
+          source: "default",
+          value: "http://localhost:11434/v1",
+          isSet: true,
+        },
+        {
+          name: "model",
+          secret: false,
+          required: false,
+          source: "stored",
+          value: "qwen3:8b",
+          isSet: true,
+        },
+      ];
+      server.use(http.get("/api/admin/llm-provider-settings", () => HttpResponse.json(stored)));
+    }
+
+    async function openSlideOver(name: string) {
+      const user = userEvent.setup();
+      renderWithProviders(<AdminLlmProvidersPage />);
+      await screen.findByText(name);
+      await user.click(within(rowOf(name)).getByText(name));
+      const dialog = await screen.findByRole("dialog");
+      return { user, dialog };
+    }
+
+    it("opens on a provider row and shows only that provider's parameters", async () => {
+      const { dialog } = await openSlideOver("Ollama");
+
+      expect(within(dialog).getByText("Ollama")).toBeInTheDocument();
+      expect(within(dialog).getByText("Dev-local")).toBeInTheDocument();
+      expect(within(dialog).getByLabelText("Base URL")).toBeInTheDocument();
+      expect(within(dialog).getByLabelText("Model")).toBeInTheDocument();
+      expect(within(dialog).queryByText("API key")).not.toBeInTheDocument();
+    });
+
+    it("shows the active state read-only, with no activation control", async () => {
+      const { dialog } = await openSlideOver("Ollama");
+
+      expect(within(dialog).getByText("Not active")).toBeInTheDocument();
+      expect(within(dialog).queryByRole("radio")).not.toBeInTheDocument();
+    });
+
+    it("does not open from the None row or from a radio", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<AdminLlmProvidersPage />);
+      await screen.findByText("Anthropic");
+
+      await user.click(screen.getByText("None — follow the environment"));
+      await user.click(within(rowOf("Ollama")).getByRole("radio"));
+
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    it("pre-fills a stored value and shows inherited and default values as placeholders", async () => {
+      withStoredOllama();
+      const { dialog } = await openSlideOver("Ollama");
+
+      const model = within(dialog).getByLabelText("Model");
+      expect(model).toHaveValue("qwen3:8b");
+      const baseUrl = within(dialog).getByLabelText("Base URL");
+      expect(baseUrl).toHaveValue("");
+      expect(baseUrl).toHaveAttribute("placeholder", "http://localhost:11434/v1");
+      expect(within(dialog).getByText("Stored")).toBeInTheDocument();
+      expect(within(dialog).getByText("Provider default")).toBeInTheDocument();
+    });
+
+    it("shows a secret read-only with where it comes from, and never as an input", async () => {
+      const { dialog } = await openSlideOver("OpenAI");
+
+      expect(within(dialog).getByText("API key")).toBeInTheDocument();
+      expect(within(dialog).getByText("Set via the environment")).toBeInTheDocument();
+      expect(within(dialog).queryByLabelText("API key")).not.toBeInTheDocument();
+    });
+
+    it("says a secret that resolves nowhere is not set", async () => {
+      const { dialog } = await openSlideOver("Anthropic");
+
+      expect(within(dialog).getByText("Not set")).toBeInTheDocument();
+    });
+
+    it("submits only the changed fields, then closes and refreshes the list", async () => {
+      withStoredOllama();
+      let body: unknown;
+      let listFetches = 0;
+      server.use(
+        http.get("/api/admin/llm-provider-settings", () => {
+          listFetches += 1;
+          return HttpResponse.json(settingsResponse());
+        }),
+        http.put("/api/admin/llm-provider-settings/ollama", async ({ request }) => {
+          body = await request.json();
+          return HttpResponse.json(settingsResponse().providers[4]);
+        }),
+      );
+      const { user, dialog } = await openSlideOver("Ollama");
+
+      await user.type(within(dialog).getByLabelText("Base URL"), "http://gpu-box:11434/v1");
+      await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(body).toEqual({ parameters: { baseUrl: "http://gpu-box:11434/v1" } });
+      await waitFor(() => expect(listFetches).toBeGreaterThan(1));
+    });
+
+    it("submits an emptied stored field as blank so the API removes it", async () => {
+      withStoredOllama();
+      let body: unknown;
+      server.use(
+        http.put("/api/admin/llm-provider-settings/ollama", async ({ request }) => {
+          body = await request.json();
+          return HttpResponse.json(settingsResponse().providers[4]);
+        }),
+      );
+      const { user, dialog } = await openSlideOver("Ollama");
+
+      await user.clear(within(dialog).getByLabelText("Model"));
+      await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+      await waitFor(() => expect(body).toEqual({ parameters: { model: "" } }));
+    });
+
+    it("stores nothing when saved untouched", async () => {
+      let body: unknown;
+      server.use(
+        http.put("/api/admin/llm-provider-settings/ollama", async ({ request }) => {
+          body = await request.json();
+          return HttpResponse.json(settingsResponse().providers[4]);
+        }),
+      );
+      const { user, dialog } = await openSlideOver("Ollama");
+
+      await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+      await waitFor(() => expect(body).toEqual({ parameters: {} }));
+    });
+
+    it("keeps the slide-over open with the API's message when saving fails", async () => {
+      server.use(
+        http.put("/api/admin/llm-provider-settings/ollama", () =>
+          HttpResponse.json({ detail: "baseUrl must be an absolute http(s) URL" }, { status: 422 }),
+        ),
+      );
+      const { user, dialog } = await openSlideOver("Ollama");
+
+      await user.type(within(dialog).getByLabelText("Base URL"), "gpu-box");
+      await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+      expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+        "baseUrl must be an absolute http(s) URL",
+      );
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+    });
+
+    it("falls back to a generic message when the failure carries none", async () => {
+      server.use(
+        http.put("/api/admin/llm-provider-settings/ollama", () =>
+          HttpResponse.json({ error: "Upstream service unavailable" }, { status: 502 }),
+        ),
+      );
+      const { user, dialog } = await openSlideOver("Ollama");
+
+      await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+      expect(await within(dialog).findByRole("alert")).toHaveTextContent("Couldn't save");
+    });
   });
 });

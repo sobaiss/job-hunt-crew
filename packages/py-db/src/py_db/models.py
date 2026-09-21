@@ -101,6 +101,14 @@ class Joboffersourcesite(str, enum.Enum):
     HELLOWORK = 'HELLOWORK'
 
 
+class Llmproviderkey(str, enum.Enum):
+    ANTHROPIC = 'ANTHROPIC'
+    OPENAI = 'OPENAI'
+    OPENROUTER = 'OPENROUTER'
+    HUGGINGFACE = 'HUGGINGFACE'
+    OLLAMA = 'OLLAMA'
+
+
 class Plan(str, enum.Enum):
     FREE = 'FREE'
     STANDARD = 'STANDARD'
@@ -184,6 +192,23 @@ class JobOffer(Base):
     IngestionJobOffer: Mapped[list['IngestionJobOffer']] = relationship('IngestionJobOffer', back_populates='JobOffer_')
     Application: Mapped[list['Application']] = relationship('Application', back_populates='JobOffer_')
     GeneratedDocument: Mapped[list['GeneratedDocument']] = relationship('GeneratedDocument', back_populates='JobOffer_')
+
+
+class LLMProviderSetting(Base):
+    __tablename__ = 'LLMProviderSetting'
+    __table_args__ = (
+        PrimaryKeyConstraint('id', name='LLMProviderSetting_pkey'),
+        Index('LLMProviderSetting_providerKey_key', 'providerKey', unique=True),
+        Index('LLMProviderSetting_single_active_key', 'isActive', postgresql_where='"isActive"', unique=True)
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    providerKey: Mapped[Llmproviderkey] = mapped_column(Enum(Llmproviderkey, values_callable=lambda cls: [member.value for member in cls], name='LLMProviderKey'), nullable=False)
+    isActive: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text('false'))
+    createdAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False, server_default=text('CURRENT_TIMESTAMP'))
+    updatedAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False)
+
+    LLMProviderSettingValue: Mapped[list['LLMProviderSettingValue']] = relationship('LLMProviderSettingValue', back_populates='LLMProviderSetting_')
 
 
 class PlanQuotaDefault(Base):
@@ -361,6 +386,25 @@ class CVVersion(Base):
     Analysis: Mapped[list['Analysis']] = relationship('Analysis', back_populates='CVVersion_')
     Application: Mapped[list['Application']] = relationship('Application', back_populates='CVVersion_')
     GeneratedDocument: Mapped[list['GeneratedDocument']] = relationship('GeneratedDocument', back_populates='CVVersion_')
+
+
+class LLMProviderSettingValue(Base):
+    __tablename__ = 'LLMProviderSettingValue'
+    __table_args__ = (
+        ForeignKeyConstraint(['settingId'], ['LLMProviderSetting.id'], ondelete='CASCADE', onupdate='CASCADE', name='LLMProviderSettingValue_settingId_fkey'),
+        PrimaryKeyConstraint('id', name='LLMProviderSettingValue_pkey'),
+        Index('LLMProviderSettingValue_settingId_parameterName_key', 'settingId', 'parameterName', unique=True)
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    settingId: Mapped[str] = mapped_column(Text, nullable=False)
+    parameterName: Mapped[str] = mapped_column(Text, nullable=False)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    createdAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False, server_default=text('CURRENT_TIMESTAMP'))
+    updatedAt: Mapped[datetime.datetime] = mapped_column(TIMESTAMP(precision=3), nullable=False)
+    lastFour: Mapped[Optional[str]] = mapped_column(Text)
+
+    LLMProviderSetting_: Mapped['LLMProviderSetting'] = relationship('LLMProviderSetting', back_populates='LLMProviderSettingValue')
 
 
 class QuotaAlert(Base):

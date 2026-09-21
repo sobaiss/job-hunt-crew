@@ -199,6 +199,20 @@ export function useAdminLlmProviderSettings() {
   });
 }
 
+// Saves one provider's parameters (issue #175). Per parameter: a string sets
+// it (blank removes a stored non-secret), null clears it, an omitted name is
+// left unchanged -- so only changed fields should be passed.
+export function useSaveLlmProviderSettings(providerKey: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (parameters: Record<string, string | null>) =>
+      bff.put<AdminLlmProvider>(`/admin/llm-provider-settings/${providerKey}`, { parameters }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin-llm-provider-settings"] });
+    },
+  });
+}
+
 // Backs the Admin users table (issue #147): a lightweight row per User —
 // Plan reassignment, quotas and overrides now live only on the User panel
 // (useAdminUserQuotas above), reached via the row's id.

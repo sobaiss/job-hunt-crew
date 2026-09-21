@@ -457,7 +457,31 @@
         "name": "None — follow the environment",
         "resolvesTo": "Currently: {provider}",
         "unsupported": "LLM_PROVIDER is set to an unsupported value ({value}) — pipeline steps will fail until it is fixed."
-      }
+      },
+      "activeState": {
+        "active": "Active",
+        "inactive": "Not active"
+      },
+      "parameterNames": {
+        "apiKey": "API key",
+        "baseUrl": "Base URL",
+        "model": "Model"
+      },
+      "sources": {
+        "stored": "Stored",
+        "environment": "From the environment",
+        "default": "Provider default",
+        "unresolved": "Not set"
+      },
+      "secretStatus": {
+        "stored": "Set",
+        "environment": "Set via the environment",
+        "unresolved": "Not set"
+      },
+      "secretReadOnly": "Secret values can't be edited here yet.",
+      "saveAction": "Save",
+      "cancelAction": "Cancel",
+      "saveError": "Couldn't save this provider."
     }
   },
   "quotas": {

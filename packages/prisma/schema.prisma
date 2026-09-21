@@ -138,6 +138,51 @@ model AdminAuditEvent {
   target User? @relation("AdminAuditEventTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
 }
 
+// The five LLM providers the system implements (docs/adr/0024). The catalogue
+// in py_db.llm_providers owns their display names, maturity and parameters;
+// this enum only keys a stored setting to one of them.
+enum LLMProviderKey {
+  ANTHROPIC
+  OPENAI
+  OPENROUTER
+  HUGGINGFACE
+  OLLAMA
+}
+
+// An Administrator's stored configuration for one LLM provider (issue #175,
+// docs/adr/0024). Created on the first save or activation, never seeded, so
+// "no row" honestly means "environment-driven". `isActive` marks the Active
+// LLM provider; at most one row may be active, which the write transaction
+// guarantees and a partial unique index (hand-written in the migration, so
+// invisible to Prisma) enforces.
+model LLMProviderSetting {
+  id          String         @id @default(cuid())
+  providerKey LLMProviderKey @unique
+  isActive    Boolean        @default(false)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  values LLMProviderSettingValue[]
+}
+
+// One stored Provider parameter of an LLMProviderSetting. `parameterName` is
+// a plain string validated against the catalogue (a row for a name no longer
+// in it is ignored). A non-secret holds its plaintext `value`; a secret holds
+// an encrypted payload in `value` plus a plaintext `lastFour` hint.
+model LLMProviderSettingValue {
+  id            String   @id @default(cuid())
+  settingId     String
+  parameterName String
+  value         String
+  lastFour      String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  setting LLMProviderSetting @relation(fields: [settingId], references: [id], onDelete: Cascade)
+
+  @@unique([settingId, parameterName])
+}
+
 enum QuotaAlertThreshold {
   APPROACHING
   EXCEEDED

@@ -457,7 +457,31 @@
         "name": "Aucun — suivre l'environnement",
         "resolvesTo": "Actuellement : {provider}",
         "unsupported": "LLM_PROVIDER contient une valeur non prise en charge ({value}) — les étapes du pipeline échoueront tant qu'elle n'est pas corrigée."
-      }
+      },
+      "activeState": {
+        "active": "Actif",
+        "inactive": "Inactif"
+      },
+      "parameterNames": {
+        "apiKey": "Clé d'API",
+        "baseUrl": "URL de base",
+        "model": "Modèle"
+      },
+      "sources": {
+        "stored": "Enregistré",
+        "environment": "Depuis l'environnement",
+        "default": "Valeur par défaut du fournisseur",
+        "unresolved": "Non défini"
+      },
+      "secretStatus": {
+        "stored": "Défini",
+        "environment": "Défini via l'environnement",
+        "unresolved": "Non défini"
+      },
+      "secretReadOnly": "Les valeurs secrètes ne sont pas encore modifiables ici.",
+      "saveAction": "Enregistrer",
+      "cancelAction": "Annuler",
+      "saveError": "Impossible d'enregistrer ce fournisseur."
     }
   },
   "quotas": {
