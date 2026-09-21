@@ -22,7 +22,8 @@ from .json_ld import (
     structured_data_from_job_posting,
 )
 from .llm_json import parse_llm_json
-from .llm_provider import LLMProvider, get_llm_provider, retry_temperature
+from .llm_provider import LLMProvider, retry_temperature
+from .llm_provider_resolver import LLMProviderResolutionError, resolve_llm_provider
 from .s3_client import S3_BUCKET, make_s3_client
 
 logger = get_logger(__name__)
@@ -187,7 +188,34 @@ async def extract_job_offer(
 
     html = _strip_non_visible(raw_html)[:MAX_HTML_CHARS]
 
-    provider = llm_provider or get_llm_provider()
+    async def _fail(message: str) -> None:
+        job_offer.extractionStatus = Jobofferextractionstatus.FAILED
+        job_offer.errorMessage = message
+        job_offer.updatedAt = _now()
+        await session.commit()
+        log_stage_event(
+            logger,
+            stage=STAGE,
+            status="FAILED",
+            job_offer_id=job_offer_id,
+            analysis_id=analysis_id,
+            ingestion_job_id=ingestion_job_id,
+            message=message,
+        )
+        await record_pipeline_event(
+            session,
+            stage=STAGE,
+            status="FAILED",
+            message=f"job_offer_id={job_offer_id}: {message}",
+            analysis_id=analysis_id,
+            ingestion_job_id=ingestion_job_id,
+        )
+
+    try:
+        provider = llm_provider or await resolve_llm_provider(session)
+    except LLMProviderResolutionError as exc:
+        await _fail(str(exc))
+        raise ExtractionError(str(exc)) from exc
 
     last_error: Exception | str | None = None
     for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -239,27 +267,6 @@ async def extract_job_offer(
         )
         return job_offer
 
-    job_offer.extractionStatus = Jobofferextractionstatus.FAILED
-    job_offer.errorMessage = (
-        f"Extraction failed after {MAX_ATTEMPTS} attempts: {last_error}"
-    )
-    job_offer.updatedAt = _now()
-    await session.commit()
-    log_stage_event(
-        logger,
-        stage=STAGE,
-        status="FAILED",
-        job_offer_id=job_offer_id,
-        analysis_id=analysis_id,
-        ingestion_job_id=ingestion_job_id,
-        message=job_offer.errorMessage,
-    )
-    await record_pipeline_event(
-        session,
-        stage=STAGE,
-        status="FAILED",
-        message=f"job_offer_id={job_offer_id}: {job_offer.errorMessage}",
-        analysis_id=analysis_id,
-        ingestion_job_id=ingestion_job_id,
-    )
-    raise ExtractionError(job_offer.errorMessage)
+    message = f"Extraction failed after {MAX_ATTEMPTS} attempts: {last_error}"
+    await _fail(message)
+    raise ExtractionError(message)

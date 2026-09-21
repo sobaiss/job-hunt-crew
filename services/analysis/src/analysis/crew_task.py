@@ -44,6 +44,7 @@ from .analysis_result import AnalysisResult
 from .comparison_analysis_agent import ComparisonAnalysisError, run_comparison_analysis
 from .cv_comparison_input import CVComparisonInputError, load_cv_markdown
 from .llm_provider import LLMProvider, get_llm_provider
+from .llm_provider_resolver import LLMProviderResolutionError, resolve_llm_provider
 from .recommendation_writer_agent import (
     RecommendationWriterError,
     run_recommendation_writer,
@@ -138,7 +139,16 @@ async def run_crew_task(
         await _fail(message)
         raise CrewTaskError(message) from exc
 
-    provider = llm_provider or get_llm_provider()
+    try:
+        # `get_llm_provider` is passed through (rather than left to the
+        # resolver's default) so it stays patchable on this module.
+        provider = llm_provider or await resolve_llm_provider(
+            session, environment_factory=get_llm_provider
+        )
+    except LLMProviderResolutionError as exc:
+        message = str(exc)
+        await _fail(message)
+        raise CrewTaskError(message) from exc
 
     try:
         comparison = run_comparison_analysis(

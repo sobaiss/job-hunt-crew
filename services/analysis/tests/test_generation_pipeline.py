@@ -1,9 +1,11 @@
 import uuid
 from datetime import UTC, datetime
+from unittest.mock import MagicMock, patch
 
 import boto3
 import pytest
 from botocore.client import Config
+from llm_settings import LLM_ENV_VARS, seed_setting, wipe_settings
 from py_db.models import (
     Analysis,
     Analysisstatus,
@@ -16,6 +18,7 @@ from py_db.models import (
     JobOffer,
     Jobofferextractionstatus,
     Joboffersourcesite,
+    Llmproviderkey,
     User,
 )
 from py_db.session import make_engine, make_session_factory
@@ -260,6 +263,116 @@ async def test_run_generation_pipeline_writes_cover_letter_markdown_and_complete
             Bucket=S3_BUCKET,
             Key=generated_document_key(user_id, analysis_id, "COVER_LETTER"),
         )
+        await _cleanup(
+            engine,
+            session_factory,
+            user_id,
+            job_offer_id,
+            cv_version_id,
+            analysis_id,
+            document_id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_run_generation_pipeline_runs_on_the_active_llm_provider(monkeypatch):
+    """No injected provider: the pipeline resolves the Active LLM provider
+    (ollama, stored model) and the cover letter is generated on it."""
+    for name in LLM_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")  # the setting overrides this
+
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id, job_offer_id, cv_version_id, analysis_id, document_id = (
+        f"test-{uuid.uuid4()}" for _ in range(5)
+    )
+    await _make_fixture(
+        session_factory,
+        user_id,
+        job_offer_id,
+        cv_version_id,
+        analysis_id,
+        document_id,
+        doc_type=Generateddocumenttype.COVER_LETTER,
+    )
+    await wipe_settings(session_factory)
+    await seed_setting(
+        session_factory, Llmproviderkey.OLLAMA, values={"model": "stored-wiring-model"}
+    )
+    client = MagicMock()
+    client.chat.completions.create.return_value = MagicMock(
+        choices=[MagicMock(message=MagicMock(content="Dear Hiring Manager, ..."))]
+    )
+    s3 = _s3_client()
+
+    try:
+        with patch("analysis.llm_provider.openai.OpenAI", return_value=client):
+            async with session_factory() as session:
+                document = await run_generation_pipeline(
+                    session, document_id, s3_client=s3
+                )
+        assert document.status == Generateddocumentstatus.READY
+        assert document.markdownContent == "Dear Hiring Manager, ..."
+        client.chat.completions.create.assert_called_once()
+        assert (
+            client.chat.completions.create.call_args.kwargs["model"]
+            == "stored-wiring-model"
+        )
+    finally:
+        await wipe_settings(session_factory)
+        s3.delete_object(
+            Bucket=S3_BUCKET,
+            Key=generated_document_key(user_id, analysis_id, "COVER_LETTER"),
+        )
+        await _cleanup(
+            engine,
+            session_factory,
+            user_id,
+            job_offer_id,
+            cv_version_id,
+            analysis_id,
+            document_id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_run_generation_pipeline_fails_naming_provider_and_parameter_when_the_active_provider_has_no_key(
+    monkeypatch,
+):
+    for name in LLM_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id, job_offer_id, cv_version_id, analysis_id, document_id = (
+        f"test-{uuid.uuid4()}" for _ in range(5)
+    )
+    await _make_fixture(
+        session_factory,
+        user_id,
+        job_offer_id,
+        cv_version_id,
+        analysis_id,
+        document_id,
+        doc_type=Generateddocumenttype.COVER_LETTER,
+    )
+    await wipe_settings(session_factory)
+    await seed_setting(session_factory, Llmproviderkey.OPENAI)
+
+    try:
+        async with session_factory() as session:
+            with pytest.raises(GenerationPipelineError):
+                await run_generation_pipeline(session, document_id)
+
+        async with session_factory() as session:
+            reloaded = await session.get(GeneratedDocument, document_id)
+            assert reloaded.status == Generateddocumentstatus.FAILED
+            assert "OpenAI" in reloaded.errorMessage
+            assert "apiKey" in reloaded.errorMessage
+            assert reloaded.markdownContent is None
+    finally:
+        await wipe_settings(session_factory)
         await _cleanup(
             engine,
             session_factory,
