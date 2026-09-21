@@ -1537,6 +1537,7 @@ source = { editable = "packages/py-db" }
 dependencies = [
     { name = "asyncpg" },
     { name = "bcrypt" },
+    { name = "cryptography" },
     { name = "sqlalchemy", extra = ["asyncio"] },
 ]
 
@@ -1550,6 +1551,7 @@ dev = [
 requires-dist = [
     { name = "asyncpg", specifier = ">=0.29" },
     { name = "bcrypt", specifier = ">=5.0.0" },
+    { name = "cryptography", specifier = ">=42" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0" },
 ]
 

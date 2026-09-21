@@ -10,6 +10,9 @@ screen uses, so what is displayed cannot drift from what runs. A required
 parameter that resolves nowhere fails the step; it never falls back to a
 different provider.
 
+A stored secret is decrypted with `SETTINGS_ENCRYPTION_KEY` (issue #178); one
+that cannot be decrypted is treated as absent, with a loud log line.
+
 Reads through the caller's own session (the callers already run inside an
 event loop) and caches nothing: a change made between two pipeline steps takes
 effect at the next step to start.
@@ -26,6 +29,7 @@ from py_db.llm_providers import (
     resolve_provider_parameters,
 )
 from py_db.models import LLMProviderSetting
+from py_db.settings_encryption import decrypt_secret
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -47,15 +51,26 @@ class LLMProviderResolutionError(Exception):
 
 
 def _stored_values(spec: ProviderSpec, setting: LLMProviderSetting) -> dict[str, str]:
-    """The non-secret stored values of `setting` that the catalogue still
-    declares. A row for a parameter no longer in the catalogue is ignored, and
-    so is a stored secret until the encrypted-keys ticket (#178) can read it."""
-    known = {parameter.name for parameter in spec.parameters if not parameter.secret}
-    return {
-        row.parameterName: row.value
-        for row in setting.LLMProviderSettingValue
-        if row.parameterName in known
-    }
+    """The stored values of `setting` that the catalogue still declares, secrets
+    decrypted. A row for a parameter no longer in the catalogue is ignored, and
+    so is a secret that cannot be decrypted (missing or rotated key, corrupt
+    payload): it counts as absent, so the parameter falls back to the
+    environment or is unresolved. `decrypt_secret` logs why."""
+    parameters = {parameter.name: parameter for parameter in spec.parameters}
+    values: dict[str, str] = {}
+    for row in setting.LLMProviderSettingValue:
+        parameter = parameters.get(row.parameterName)
+        if parameter is None:
+            continue
+        if not parameter.secret:
+            values[row.parameterName] = row.value
+            continue
+        secret = decrypt_secret(
+            row.value, provider=spec.key, parameter=parameter.name
+        )
+        if secret is not None:
+            values[row.parameterName] = secret
+    return values
 
 
 def _build_provider(

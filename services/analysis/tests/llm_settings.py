@@ -1,11 +1,13 @@
 """Seeding helpers shared by the tests of the Active LLM provider (#177): the
 active-provider setting rows live in real Postgres, and only one row may be
-active at a time, so tests wipe them before and after."""
+active at a time, so tests wipe them before and after. Stored secrets (#178) are
+encrypted with the real module, so the test sets `SETTINGS_ENCRYPTION_KEY`."""
 
 import uuid
 from datetime import UTC, datetime
 
 from py_db.models import Llmproviderkey, LLMProviderSetting, LLMProviderSettingValue
+from py_db.settings_encryption import encrypt_secret, last_four_hint
 from sqlalchemy import delete
 
 LLM_ENV_VARS = (
@@ -36,6 +38,7 @@ async def seed_setting(
     *,
     active: bool = True,
     values: dict[str, str] | None = None,
+    secrets: dict[str, str] | None = None,
 ) -> str:
     setting_id = str(uuid.uuid4())
     async with session_factory() as session:
@@ -52,6 +55,17 @@ async def seed_setting(
                     settingId=setting_id,
                     parameterName=name,
                     value=value,
+                    updatedAt=_now(),
+                )
+            )
+        for name, secret in (secrets or {}).items():
+            session.add(
+                LLMProviderSettingValue(
+                    id=str(uuid.uuid4()),
+                    settingId=setting_id,
+                    parameterName=name,
+                    value=encrypt_secret(secret),
+                    lastFour=last_four_hint(secret),
                     updatedAt=_now(),
                 )
             )

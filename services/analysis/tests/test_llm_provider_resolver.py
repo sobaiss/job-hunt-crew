@@ -5,13 +5,15 @@ test_llm_provider.py -- asserting what a client is built with, never how the
 resolver got there.
 """
 
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
+from cryptography.fernet import Fernet
 from llm_settings import LLM_ENV_VARS, seed_setting, wipe_settings
 from py_db.models import Llmproviderkey, LLMProviderSetting, LLMProviderSettingValue
 from py_db.session import make_engine, make_session_factory
-from sqlalchemy import update
+from sqlalchemy import select, update
 
 from analysis.llm_provider import (
     AnthropicProvider,
@@ -29,6 +31,13 @@ from analysis.llm_provider_resolver import (
 def _clean_llm_env(monkeypatch):
     for name in LLM_ENV_VARS:
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture
+def encryption_key(monkeypatch) -> str:
+    key = Fernet.generate_key().decode()
+    monkeypatch.setenv("SETTINGS_ENCRYPTION_KEY", key)
+    return key
 
 
 @pytest.fixture
@@ -232,3 +241,181 @@ async def test_nothing_is_cached_between_resolutions_on_the_same_session(
             await admin_session.commit()
 
         assert (await resolve_llm_provider(session)).model != "second-model"
+
+
+# --- Stored secrets (#178) --------------------------------------------------
+
+
+def _undecryptable_logs(caplog) -> list[logging.LogRecord]:
+    return [
+        record
+        for record in caplog.records
+        if getattr(record, "fields", {}).get("event")
+        == "llm_provider_secret_undecryptable"
+    ]
+
+
+async def test_a_stored_openai_key_reaches_the_sdk_client(
+    session_factory, openai_ctor, encryption_key, monkeypatch
+):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-env")  # the stored key beats it
+    await seed_setting(
+        session_factory,
+        Llmproviderkey.OPENAI,
+        secrets={"apiKey": "sk-stored-0123456789"},
+    )
+
+    async with session_factory() as session:
+        provider = await resolve_llm_provider(session)
+
+    assert isinstance(provider, OpenAIProvider)
+    assert openai_ctor.call_args.kwargs["api_key"] == "sk-stored-0123456789"
+
+
+async def test_a_stored_anthropic_key_reaches_the_sdk_client(
+    session_factory, anthropic_ctor, encryption_key
+):
+    await seed_setting(
+        session_factory,
+        Llmproviderkey.ANTHROPIC,
+        secrets={"apiKey": "sk-ant-stored-0123456789"},
+    )
+
+    async with session_factory() as session:
+        await resolve_llm_provider(session)
+
+    assert anthropic_ctor.call_args.kwargs["api_key"] == "sk-ant-stored-0123456789"
+
+
+async def test_a_stored_openrouter_key_beats_the_environment(
+    session_factory, openai_ctor, encryption_key, monkeypatch
+):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-env")
+    await seed_setting(
+        session_factory,
+        Llmproviderkey.OPENROUTER,
+        secrets={"apiKey": "or-stored-0123456789"},
+    )
+
+    async with session_factory() as session:
+        await resolve_llm_provider(session)
+
+    assert openai_ctor.call_args.kwargs["api_key"] == "or-stored-0123456789"
+
+
+async def test_the_stored_key_is_ciphertext_in_the_database(
+    session_factory, encryption_key
+):
+    await seed_setting(
+        session_factory,
+        Llmproviderkey.OPENAI,
+        secrets={"apiKey": "sk-stored-0123456789"},
+    )
+
+    async with session_factory() as session:
+        row = await session.scalar(select(LLMProviderSettingValue))
+
+    assert row is not None
+    assert "sk-stored-0123456789" not in row.value
+    assert row.lastFour == "6789"
+
+
+async def test_a_secret_encrypted_under_another_key_falls_back_to_the_environment(
+    session_factory, openai_ctor, encryption_key, monkeypatch, caplog
+):
+    await seed_setting(
+        session_factory,
+        Llmproviderkey.OPENAI,
+        secrets={"apiKey": "sk-stored-0123456789"},
+    )
+    # The key is rotated: what is stored can no longer be read.
+    monkeypatch.setenv("SETTINGS_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-env")
+
+    with caplog.at_level(logging.ERROR):
+        async with session_factory() as session:
+            provider = await resolve_llm_provider(session)
+
+    assert isinstance(provider, OpenAIProvider)
+    # The environment key is left to SDK discovery: nothing is passed.
+    openai_ctor.assert_called_once_with()
+    (record,) = _undecryptable_logs(caplog)
+    assert record.levelno == logging.ERROR
+    assert record.fields["provider"] == "openai"
+    assert record.fields["parameter"] == "apiKey"
+
+
+async def test_a_secret_that_cannot_be_decrypted_and_has_no_environment_key_fails_the_step(
+    session_factory, openai_ctor, encryption_key, monkeypatch, caplog
+):
+    await seed_setting(
+        session_factory,
+        Llmproviderkey.OPENAI,
+        secrets={"apiKey": "sk-stored-0123456789"},
+    )
+    monkeypatch.setenv("SETTINGS_ENCRYPTION_KEY", Fernet.generate_key().decode())
+
+    with caplog.at_level(logging.ERROR):
+        async with session_factory() as session:
+            with pytest.raises(LLMProviderResolutionError) as excinfo:
+                await resolve_llm_provider(session)
+
+    assert "OpenAI" in str(excinfo.value)
+    assert "apiKey" in str(excinfo.value)
+    openai_ctor.assert_not_called()
+    assert len(_undecryptable_logs(caplog)) == 1
+
+
+async def test_a_stored_secret_with_no_encryption_key_is_treated_as_absent(
+    session_factory, openai_ctor, encryption_key, monkeypatch, caplog
+):
+    await seed_setting(
+        session_factory,
+        Llmproviderkey.OPENAI,
+        secrets={"apiKey": "sk-stored-0123456789"},
+    )
+    monkeypatch.delenv("SETTINGS_ENCRYPTION_KEY")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-env")
+
+    with caplog.at_level(logging.ERROR):
+        async with session_factory() as session:
+            await resolve_llm_provider(session)
+
+    openai_ctor.assert_called_once_with()
+    assert len(_undecryptable_logs(caplog)) == 1
+
+
+async def test_no_log_line_contains_the_secret_or_its_ciphertext(
+    session_factory, openai_ctor, encryption_key, monkeypatch, caplog
+):
+    await seed_setting(
+        session_factory,
+        Llmproviderkey.OPENAI,
+        secrets={"apiKey": "sk-stored-0123456789"},
+    )
+    async with session_factory() as session:
+        ciphertext = (await session.scalar(select(LLMProviderSettingValue))).value
+    monkeypatch.setenv("SETTINGS_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-env")
+
+    with caplog.at_level(logging.DEBUG):
+        async with session_factory() as session:
+            await resolve_llm_provider(session)
+
+    logged = " ".join(f"{r.getMessage()} {getattr(r, 'fields', '')}" for r in caplog.records)
+    assert "sk-stored-0123456789" not in logged
+    assert ciphertext not in logged
+
+
+async def test_a_process_that_never_touches_a_secret_needs_no_encryption_key(
+    session_factory, openai_ctor, monkeypatch
+):
+    monkeypatch.delenv("SETTINGS_ENCRYPTION_KEY", raising=False)
+    await seed_setting(
+        session_factory, Llmproviderkey.OLLAMA, values={"model": "stored-model"}
+    )
+
+    async with session_factory() as session:
+        provider = await resolve_llm_provider(session)
+
+    assert provider.model == "stored-model"
