@@ -1,4 +1,4 @@
-"""Admin LLM providers (issues #174/#175, part of the #172 epic,
+"""Admin LLM providers (issues #174-#176, part of the #172 epic,
 docs/adr/0024).
 
 Each provider's state is derived from what an Administrator stored in
@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, Depends, HTTPException
 from py_db.llm_providers import (
     LLM_PROVIDERS,
+    ParameterSource,
     ProviderSpec,
     configuration_status,
     environment_provider_key,
@@ -27,6 +28,7 @@ from py_db.models import Llmproviderkey, LLMProviderSetting, LLMProviderSettingV
 from py_db.quotas import record_admin_audit_event
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -128,11 +130,28 @@ def _provider_item(
     )
 
 
-@router.get("", response_model=LLMProviderSettingsResponse)
-async def list_llm_provider_settings(
-    _admin_id: str = Depends(require_admin),
-    session: AsyncSession = Depends(get_session),
-) -> LLMProviderSettingsResponse:
+def _unresolved_required(
+    spec: ProviderSpec, stored: dict[str, str], env: dict[str, str]
+) -> list[str]:
+    """Names of `spec`'s required parameters that resolve nowhere -- what
+    refuses an activation, and an edit to the active provider."""
+    resolved = resolve_provider_parameters(spec, stored, env)
+    return [
+        parameter.name
+        for parameter in spec.parameters
+        if parameter.required and resolved[parameter.name].source is ParameterSource.UNRESOLVED
+    ]
+
+
+def _incomplete_error(spec: ProviderSpec, missing: list[str], action: str) -> HTTPException:
+    names = ", ".join(missing)
+    return HTTPException(
+        status_code=422,
+        detail=f"Cannot {action} {spec.display_name}: required parameter(s) {names} resolve nowhere",
+    )
+
+
+async def _settings_response(session: AsyncSession) -> LLMProviderSettingsResponse:
     env = dict(os.environ)
     settings = await _load_settings(session)
     environment_key = environment_provider_key(env)
@@ -144,6 +163,14 @@ async def list_llm_provider_settings(
         ),
         providers=[_provider_item(spec, env, settings.get(spec.key)) for spec in LLM_PROVIDERS],
     )
+
+
+@router.get("", response_model=LLMProviderSettingsResponse)
+async def list_llm_provider_settings(
+    _admin_id: str = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> LLMProviderSettingsResponse:
+    return await _settings_response(session)
 
 
 class SaveProviderSettingsRequest(BaseModel):
@@ -212,6 +239,18 @@ async def save_llm_provider_settings(
 
     setting = (await _load_settings(session)).get(spec.key)
     existing = {row.parameterName: row for row in setting.LLMProviderSettingValue} if setting else {}
+    if setting is not None and setting.isActive:
+        # The same rule as activation, applied to the edit: the provider that
+        # runs must keep every required parameter resolved.
+        after = _stored_values(spec, setting)
+        for name, new_value in changes.items():
+            if new_value is None:
+                after.pop(name, None)
+            else:
+                after[name] = new_value
+        missing = _unresolved_required(spec, after, dict(os.environ))
+        if missing:
+            raise _incomplete_error(spec, missing, "save")
     now = _now()
     changed = False
     for name, new_value in changes.items():
@@ -254,3 +293,86 @@ async def save_llm_provider_settings(
         setting = (await _load_settings(session)).get(spec.key)
 
     return _provider_item(spec, dict(os.environ), setting)
+
+
+def _record_active_change(
+    session: AsyncSession, admin_id: str, old: str | None, new: str | None
+) -> None:
+    record_admin_audit_event(
+        session,
+        actor_user_id=admin_id,
+        target_user_id=None,
+        field="llmProviderSetting:active",
+        old_value=old or "none",
+        new_value=new or "none",
+    )
+
+
+@router.post("/deactivate", response_model=LLMProviderSettingsResponse)
+async def deactivate_llm_provider(
+    admin_id: str = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> LLMProviderSettingsResponse:
+    """Hands control back to the environment (issue #176). Nothing to do, and
+    no audit event, when no provider is active."""
+    settings = await _load_settings(session)
+    current = next((row for row in settings.values() if row.isActive), None)
+    if current is not None:
+        current.isActive = False
+        current.updatedAt = _now()
+        _record_active_change(session, admin_id, current.providerKey.value.lower(), None)
+        await session.commit()
+    return await _settings_response(session)
+
+
+@router.post("/{provider_key}/activate", response_model=LLMProviderSettingsResponse)
+async def activate_llm_provider(
+    provider_key: str,
+    admin_id: str = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> LLMProviderSettingsResponse:
+    """Makes a provider the only active one (issue #176), creating its setting
+    if it has none. Refused with a 422 naming every required parameter that
+    resolves nowhere; activating the active provider is a no-op. Activation is
+    never blocked or confirmed on maturity -- the badge is informational."""
+    try:
+        spec = get_provider_spec(provider_key)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="LLM provider not found") from None
+
+    settings = await _load_settings(session)
+    target = settings.get(spec.key)
+    if target is not None and target.isActive:
+        return await _settings_response(session)
+    missing = _unresolved_required(spec, _stored_values(spec, target), dict(os.environ))
+    if missing:
+        raise _incomplete_error(spec, missing, "activate")
+
+    now = _now()
+    current = next((row for row in settings.values() if row.isActive), None)
+    if current is not None:
+        current.isActive = False
+        current.updatedAt = now
+        # Flushed first: the partial unique index allows one active row at any
+        # moment, and the unit of work does not order two UPDATEs for us.
+        await session.flush()
+    if target is None:
+        target = LLMProviderSetting(
+            id=str(uuid.uuid4()), providerKey=_provider_key(spec), isActive=True, updatedAt=now
+        )
+        session.add(target)
+    else:
+        target.isActive = True
+        target.updatedAt = now
+    _record_active_change(
+        session, admin_id, current.providerKey.value.lower() if current else None, spec.key
+    )
+    try:
+        await session.commit()
+    except IntegrityError:
+        # A concurrent activation won the race for the single active slot.
+        await session.rollback()
+        raise HTTPException(
+            status_code=409, detail="Another provider was activated at the same time; try again"
+        ) from None
+    return await _settings_response(session)

@@ -5,7 +5,9 @@ import { AlertTriangle, Lock } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import {
+  useActivateLlmProvider,
   useAdminLlmProviderSettings,
+  useDeactivateLlmProvider,
   useSaveLlmProviderSettings,
   type AdminLlmProvider,
   type AdminLlmProviderParameter,
@@ -58,16 +60,39 @@ const CONFIGURATION_VARIANT = {
   incomplete: "warning",
 } as const;
 
-// A read-only indicator for now: activation is not wired up yet.
-function ActiveIndicator({ label, checked }: { label: string; checked: boolean }) {
+// The API's message for a refused request (a 422 naming the missing parameter,
+// say), or null when the failure carries none.
+function failureDetail(error: unknown): string | null {
+  return error instanceof BffError &&
+    typeof error.body === "object" &&
+    error.body !== null &&
+    "detail" in error.body &&
+    typeof error.body.detail === "string"
+    ? error.body.detail
+    : null;
+}
+
+// Controlled by the list the API returned: a refused activation leaves the
+// radio where it was, and the refetch settles it on what is really active.
+function ActiveRadio({
+  label,
+  checked,
+  disabled,
+  onSelect,
+}: {
+  label: string;
+  checked: boolean;
+  disabled: boolean;
+  onSelect: () => void;
+}) {
   return (
     <input
       type="radio"
       name="llm-active-provider"
       aria-label={label}
       checked={checked}
-      readOnly
-      disabled
+      disabled={disabled}
+      onChange={onSelect}
     />
   );
 }
@@ -75,10 +100,16 @@ function ActiveIndicator({ label, checked }: { label: string; checked: boolean }
 function EnvironmentRow({
   environment,
   providers,
+  checked,
+  disabled,
+  onSelect,
   hideableColumnCount,
 }: {
   environment: AdminLlmProviderSettings["environmentProvider"];
   providers: AdminLlmProvider[];
+  checked: boolean;
+  disabled: boolean;
+  onSelect: () => void;
   hideableColumnCount: number;
 }) {
   const t = useTranslations("admin.llmProviders");
@@ -88,7 +119,12 @@ function EnvironmentRow({
   return (
     <TableRow>
       <TableCell>
-        <ActiveIndicator label={t("activeLabel", { provider: name })} checked />
+        <ActiveRadio
+          label={t("activeLabel", { provider: name })}
+          checked={checked}
+          disabled={disabled}
+          onSelect={onSelect}
+        />
       </TableCell>
       <TableCell className="font-medium">
         <div className="flex flex-col gap-1">
@@ -113,11 +149,15 @@ function EnvironmentRow({
 function ProviderRow({
   provider,
   isVisible,
+  disabled,
   onOpen,
+  onActivate,
 }: {
   provider: AdminLlmProvider;
   isVisible: (key: LlmProvidersColumn) => boolean;
+  disabled: boolean;
   onOpen: () => void;
+  onActivate: () => void;
 }) {
   const t = useTranslations("admin.llmProviders");
   const required = provider.parameters.filter((parameter) => parameter.required);
@@ -126,9 +166,11 @@ function ProviderRow({
     <TableRow className="cursor-pointer" onClick={onOpen}>
       {/* The radio is its own control: clicking it must not open the slide-over. */}
       <TableCell onClick={(event) => event.stopPropagation()}>
-        <ActiveIndicator
+        <ActiveRadio
           label={t("activeLabel", { provider: provider.displayName })}
           checked={provider.active}
+          disabled={disabled}
+          onSelect={onActivate}
         />
       </TableCell>
       <TableCell className="font-medium">
@@ -236,15 +278,6 @@ function ProviderEditForm({ provider, onClose }: { provider: AdminLlmProvider; o
   );
   const [drafts, setDrafts] = useState<Record<string, string>>(initial);
 
-  const failureDetail =
-    save.error instanceof BffError &&
-    typeof save.error.body === "object" &&
-    save.error.body !== null &&
-    "detail" in save.error.body &&
-    typeof save.error.body.detail === "string"
-      ? save.error.body.detail
-      : null;
-
   return (
     <>
       <SheetHeader>
@@ -282,7 +315,7 @@ function ProviderEditForm({ provider, onClose }: { provider: AdminLlmProvider; o
         )}
         {save.isError && (
           <p role="alert" className="text-sm text-destructive">
-            {failureDetail ?? t("saveError")}
+            {failureDetail(save.error) ?? t("saveError")}
           </p>
         )}
       </div>
@@ -316,13 +349,34 @@ function ProviderEditForm({ provider, onClose }: { provider: AdminLlmProvider; o
  * "None — follow the environment" row that names what the environment
  * currently resolves to. Clicking a provider row opens a slide-over with only
  * that provider's parameters; its non-secret ones can be edited and saved.
- * Activation is not wired up yet.
+ * Each row's radio (the None row's included) chooses the Active LLM provider
+ * (#176); a refused activation shows the API's message above the table.
  */
 export default function AdminLlmProvidersPage() {
   const t = useTranslations("admin.llmProviders");
   const { data, isPending, isError } = useAdminLlmProviderSettings();
   const columnVisibility = useColumnVisibility(COLUMN_VISIBILITY_STORAGE_KEY, COLUMNS);
   const [editingKey, setEditingKey] = useState<string | null>(null);
+  const activate = useActivateLlmProvider();
+  const deactivate = useDeactivateLlmProvider();
+
+  const changingActive = activate.isPending || deactivate.isPending;
+  const activationFailure = activate.isError
+    ? activate.error
+    : deactivate.isError
+      ? deactivate.error
+      : null;
+  const hasActivationFailure = activate.isError || deactivate.isError;
+
+  function selectProvider(key: string) {
+    deactivate.reset();
+    activate.mutate(key);
+  }
+
+  function selectEnvironment() {
+    activate.reset();
+    deactivate.mutate();
+  }
 
   const editing = data?.providers.find((provider) => provider.key === editingKey) ?? null;
   const visibleColumns = COLUMNS.filter((column) => columnVisibility.isVisible(column.key));
@@ -353,6 +407,12 @@ export default function AdminLlmProvidersPage() {
         </p>
       )}
 
+      {hasActivationFailure && (
+        <p role="alert" className="text-sm text-destructive">
+          {failureDetail(activationFailure) ?? t("activationError")}
+        </p>
+      )}
+
       {data && (
         <Table>
           <TableHeader>
@@ -366,6 +426,9 @@ export default function AdminLlmProvidersPage() {
             <EnvironmentRow
               environment={data.environmentProvider}
               providers={data.providers}
+              checked={data.activeProvider === null}
+              disabled={changingActive}
+              onSelect={selectEnvironment}
               hideableColumnCount={hideableColumnCount}
             />
             {data.providers.map((provider) => (
@@ -373,7 +436,9 @@ export default function AdminLlmProvidersPage() {
                 key={provider.key}
                 provider={provider}
                 isVisible={columnVisibility.isVisible}
+                disabled={changingActive}
                 onOpen={() => setEditingKey(provider.key)}
+                onActivate={() => selectProvider(provider.key)}
               />
             ))}
           </TableBody>

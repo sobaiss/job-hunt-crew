@@ -481,7 +481,8 @@
       "secretReadOnly": "Les valeurs secrètes ne sont pas encore modifiables ici.",
       "saveAction": "Enregistrer",
       "cancelAction": "Annuler",
-      "saveError": "Impossible d'enregistrer ce fournisseur."
+      "saveError": "Impossible d'enregistrer ce fournisseur.",
+      "activationError": "Impossible de changer le fournisseur actif."
     }
   },
   "quotas": {

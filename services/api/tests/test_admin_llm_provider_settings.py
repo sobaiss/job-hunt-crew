@@ -1,6 +1,7 @@
-"""Admin LLM providers (issues #174/#175, part of the #172 epic): the list
-`GET /v1/admin/llm-provider-settings` and the non-secret save
-`PUT /v1/admin/llm-provider-settings/{providerKey}`. Each provider's state is
+"""Admin LLM providers (issues #174-#176, part of the #172 epic): the list
+`GET /v1/admin/llm-provider-settings`, the non-secret save
+`PUT /v1/admin/llm-provider-settings/{providerKey}` and activation
+(`POST .../{providerKey}/activate`, `POST .../deactivate`). Each provider's state is
 derived from what is stored, the API's own environment and the catalogue's
 hardcoded defaults -- these tests drive it through the HTTP surface with the
 environment patched and real Postgres behind it, never the resolution
@@ -13,9 +14,10 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
-from py_db.models import AdminAuditEvent, LLMProviderSetting, Role, User
+from py_db.models import AdminAuditEvent, Llmproviderkey, LLMProviderSetting, Role, User
 from py_db.session import make_engine, make_session_factory
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 
 from api.main import app
 
@@ -476,3 +478,206 @@ def test_a_save_that_changes_nothing_writes_no_audit_event(admin):
     _put(admin, "ollama", {"model": "qwen3:8b", "baseUrl": ""})
 
     assert len(_audit_events(admin)) == before == 1
+
+
+# --- activation (issue #176) ---
+
+
+def _activate(headers: dict, provider: str):
+    with TestClient(app) as client:
+        return client.post(f"{URL}/{provider}/activate", headers=headers)
+
+
+def _deactivate(headers: dict):
+    with TestClient(app) as client:
+        return client.post(f"{URL}/deactivate", headers=headers)
+
+
+def _active_rows() -> list[str]:
+    async def read(session):
+        rows = await session.scalars(
+            select(LLMProviderSetting).where(LLMProviderSetting.isActive.is_(True))
+        )
+        return [row.providerKey.value.lower() for row in rows]
+
+    return _run(read)
+
+
+def _active_events(admin_headers: dict) -> list[tuple[str | None, str | None]]:
+    return [
+        (e.oldValue, e.newValue)
+        for e in _audit_events(admin_headers)
+        if e.field == "llmProviderSetting:active"
+    ]
+
+
+@pytest.mark.parametrize("call", [lambda h: _activate(h, "ollama"), _deactivate])
+def test_activation_endpoints_require_administrator(call):
+    response = call({**HEADERS, "X-User-Role": "EXTERNAL", "X-User-Id": "u"})
+
+    assert response.status_code == 403
+    assert _setting_rows() == []
+
+
+def test_activating_ollama_makes_it_the_only_active_provider(admin):
+    response = _activate(admin, "ollama")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["activeProvider"] == "ollama"
+    assert [p["key"] for p in body["providers"] if p["active"]] == ["ollama"]
+    assert _active_rows() == ["ollama"]
+    assert _get_as(admin)["activeProvider"] == "ollama"
+
+
+def test_activation_creates_the_setting_when_none_was_saved(admin):
+    assert _setting_rows() == []
+
+    _activate(admin, "ollama")
+
+    ollama = _provider(_get_as(admin), "ollama")
+    assert ollama["settingId"] is not None
+    assert ollama["updatedAt"] is not None
+
+
+def test_activation_keeps_the_stored_values(admin):
+    _put(admin, "ollama", {"model": "qwen3:8b"})
+
+    _activate(admin, "ollama")
+
+    assert _parameter(_provider(_get_as(admin), "ollama"), "model")["value"] == "qwen3:8b"
+
+
+def test_activating_an_unknown_provider_is_a_404(admin):
+    assert _activate(admin, "gemini").status_code == 404
+    assert _setting_rows() == []
+
+
+def test_activating_a_hosted_provider_without_its_key_is_a_422_naming_the_parameter(admin):
+    _activate(admin, "ollama")
+
+    response = _activate(admin, "openai")
+
+    assert response.status_code == 422
+    assert "apiKey" in response.json()["detail"]
+    assert _active_rows() == ["ollama"]
+    assert "openai" not in _setting_rows()
+    assert _active_events(admin) == [("none", "ollama")]
+
+
+def test_activating_a_hosted_provider_succeeds_when_its_key_is_in_the_environment(admin, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-from-the-environment")
+
+    response = _activate(admin, "openai")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["activeProvider"] == "openai"
+    assert "sk-from-the-environment" not in response.text
+
+
+def test_opt_in_and_dev_local_providers_are_activated_without_confirmation(admin, monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-key")
+
+    assert _activate(admin, "openrouter").status_code == 200
+    assert _activate(admin, "ollama").status_code == 200
+
+
+def test_switching_providers_leaves_exactly_one_active(admin, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-from-the-environment")
+    _activate(admin, "ollama")
+
+    body = _activate(admin, "openai").json()
+
+    assert body["activeProvider"] == "openai"
+    assert [p["key"] for p in body["providers"] if p["active"]] == ["openai"]
+    assert _active_rows() == ["openai"]
+    assert sorted(_setting_rows()) == ["ollama", "openai"]
+
+
+def test_the_database_rejects_a_second_active_setting(admin):
+    _activate(admin, "ollama")
+    now = datetime.now(UTC).replace(tzinfo=None)
+
+    async def insert_second_active(session):
+        session.add(
+            LLMProviderSetting(
+                id=str(uuid.uuid4()),
+                providerKey=Llmproviderkey.OPENAI,
+                isActive=True,
+                updatedAt=now,
+            )
+        )
+        await session.commit()
+
+    with pytest.raises(IntegrityError):
+        _run(insert_second_active)
+    assert _active_rows() == ["ollama"]
+
+
+def test_reactivating_the_active_provider_changes_nothing_and_writes_no_event(admin):
+    _activate(admin, "ollama")
+    before = _provider(_get_as(admin), "ollama")["updatedAt"]
+
+    response = _activate(admin, "ollama")
+
+    assert response.status_code == 200
+    assert _provider(response.json(), "ollama")["updatedAt"] == before
+    assert _active_events(admin) == [("none", "ollama")]
+
+
+def test_deactivating_returns_control_to_the_environment(admin):
+    _activate(admin, "ollama")
+
+    response = _deactivate(admin)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["activeProvider"] is None
+    assert _active_rows() == []
+    assert _get_as(admin)["activeProvider"] is None
+
+
+def test_deactivating_when_nothing_is_active_is_a_no_op_without_an_event(admin):
+    response = _deactivate(admin)
+
+    assert response.status_code == 200
+    assert response.json()["activeProvider"] is None
+    assert _setting_rows() == []
+    assert _audit_events(admin) == []
+
+
+def test_a_change_of_active_provider_is_audited_with_none_when_there_is_none(admin, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-from-the-environment")
+
+    _activate(admin, "ollama")
+    _activate(admin, "openai")
+    _deactivate(admin)
+
+    assert _active_events(admin) == [
+        ("none", "ollama"),
+        ("ollama", "openai"),
+        ("openai", "none"),
+    ]
+    assert all(e.targetUserId is None for e in _audit_events(admin))
+
+
+def test_a_save_that_would_leave_the_active_provider_incomplete_is_refused(admin, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-from-the-environment")
+    _activate(admin, "openai")
+    _put(admin, "openai", {"model": "gpt-4.1"})
+    monkeypatch.delenv("OPENAI_API_KEY")
+
+    response = _put(admin, "openai", {"model": "gpt-4o-mini"})
+
+    assert response.status_code == 422
+    assert "apiKey" in response.json()["detail"]
+    openai = _provider(_get_as(admin), "openai")
+    assert _parameter(openai, "model")["value"] == "gpt-4.1"
+    assert not any(e.newValue == "gpt-4o-mini" for e in _audit_events(admin))
+
+
+def test_the_same_save_on_an_inactive_provider_is_allowed(admin, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-from-the-environment")
+    _activate(admin, "ollama")
+    monkeypatch.delenv("OPENAI_API_KEY")
+
+    assert _put(admin, "openai", {"model": "gpt-4o-mini"}).status_code == 200

@@ -224,6 +224,150 @@ describe("AdminLlmProvidersPage", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't load");
   });
+
+  describe("activation", () => {
+    function withActiveOllama() {
+      const active = settingsResponse({ activeProvider: "ollama" });
+      active.providers[4].active = true;
+      server.use(http.get("/api/admin/llm-provider-settings", () => HttpResponse.json(active)));
+    }
+
+    it("shows the active provider's radio selected and the None row's cleared", async () => {
+      withActiveOllama();
+      renderWithProviders(<AdminLlmProvidersPage />);
+      await screen.findByText("Anthropic");
+
+      expect(within(screen.getAllByRole("row")[1]).getByRole("radio")).not.toBeChecked();
+      expect(within(rowOf("Ollama")).getByRole("radio")).toBeChecked();
+      expect(within(rowOf("OpenAI")).getByRole("radio")).not.toBeChecked();
+    });
+
+    it("activates a provider from its radio without opening the slide-over, then refreshes", async () => {
+      let activated = 0;
+      let listFetches = 0;
+      server.use(
+        http.get("/api/admin/llm-provider-settings", () => {
+          listFetches += 1;
+          return HttpResponse.json(settingsResponse());
+        }),
+        http.post("/api/admin/llm-provider-settings/ollama/activate", () => {
+          activated += 1;
+          return HttpResponse.json(settingsResponse({ activeProvider: "ollama" }));
+        }),
+      );
+      const user = userEvent.setup();
+      renderWithProviders(<AdminLlmProvidersPage />);
+      await screen.findByText("Anthropic");
+
+      await user.click(within(rowOf("Ollama")).getByRole("radio"));
+
+      await waitFor(() => expect(activated).toBe(1));
+      await waitFor(() => expect(listFetches).toBeGreaterThan(1));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    it("activates a Dev-local provider without a confirmation step", async () => {
+      let activated = false;
+      server.use(
+        http.post("/api/admin/llm-provider-settings/ollama/activate", () => {
+          activated = true;
+          return HttpResponse.json(settingsResponse({ activeProvider: "ollama" }));
+        }),
+      );
+      const user = userEvent.setup();
+      renderWithProviders(<AdminLlmProvidersPage />);
+      await screen.findByText("Anthropic");
+
+      await user.click(within(rowOf("Ollama")).getByRole("radio"));
+
+      await waitFor(() => expect(activated).toBe(true));
+      expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    });
+
+    it("returns control to the environment from the None row", async () => {
+      withActiveOllama();
+      let deactivated = 0;
+      server.use(
+        http.post("/api/admin/llm-provider-settings/deactivate", () => {
+          deactivated += 1;
+          return HttpResponse.json(settingsResponse());
+        }),
+      );
+      const user = userEvent.setup();
+      renderWithProviders(<AdminLlmProvidersPage />);
+      await screen.findByText("Anthropic");
+
+      await user.click(within(screen.getAllByRole("row")[1]).getByRole("radio"));
+
+      await waitFor(() => expect(deactivated).toBe(1));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    it("shows the API's message inline when an activation is refused, and refreshes the table", async () => {
+      let listFetches = 0;
+      server.use(
+        http.get("/api/admin/llm-provider-settings", () => {
+          listFetches += 1;
+          return HttpResponse.json(settingsResponse());
+        }),
+        http.post("/api/admin/llm-provider-settings/anthropic/activate", () =>
+          HttpResponse.json(
+            {
+              detail:
+                "Cannot activate Anthropic: required parameter(s) apiKey resolve nowhere",
+            },
+            { status: 422 },
+          ),
+        ),
+      );
+      const user = userEvent.setup();
+      renderWithProviders(<AdminLlmProvidersPage />);
+      await screen.findByText("Anthropic");
+
+      await user.click(within(rowOf("Anthropic")).getByRole("radio"));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("apiKey resolve nowhere");
+      await waitFor(() => expect(listFetches).toBeGreaterThan(1));
+      expect(within(rowOf("Anthropic")).getByRole("radio")).not.toBeChecked();
+      expect(within(screen.getAllByRole("row")[1]).getByRole("radio")).toBeChecked();
+    });
+
+    it("falls back to a generic message when the refusal carries none", async () => {
+      server.use(
+        http.post("/api/admin/llm-provider-settings/ollama/activate", () =>
+          HttpResponse.json({ error: "Upstream service unavailable" }, { status: 502 }),
+        ),
+      );
+      const user = userEvent.setup();
+      renderWithProviders(<AdminLlmProvidersPage />);
+      await screen.findByText("Anthropic");
+
+      await user.click(within(rowOf("Ollama")).getByRole("radio"));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't change the active provider");
+    });
+
+    it("clears an earlier refusal once a later change succeeds", async () => {
+      server.use(
+        http.post("/api/admin/llm-provider-settings/anthropic/activate", () =>
+          HttpResponse.json({ detail: "Cannot activate Anthropic" }, { status: 422 }),
+        ),
+        http.post("/api/admin/llm-provider-settings/ollama/activate", () =>
+          HttpResponse.json(settingsResponse({ activeProvider: "ollama" })),
+        ),
+      );
+      const user = userEvent.setup();
+      renderWithProviders(<AdminLlmProvidersPage />);
+      await screen.findByText("Anthropic");
+      await user.click(within(rowOf("Anthropic")).getByRole("radio"));
+      await screen.findByRole("alert");
+
+      await user.click(within(rowOf("Ollama")).getByRole("radio"));
+
+      await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    });
+  });
+
   describe("slide-over", () => {
     function withStoredOllama() {
       const stored = settingsResponse();
@@ -279,6 +423,11 @@ describe("AdminLlmProvidersPage", () => {
     });
 
     it("does not open from the None row or from a radio", async () => {
+      server.use(
+        http.post("/api/admin/llm-provider-settings/ollama/activate", () =>
+          HttpResponse.json(settingsResponse({ activeProvider: "ollama" })),
+        ),
+      );
       const user = userEvent.setup();
       renderWithProviders(<AdminLlmProvidersPage />);
       await screen.findByText("Anthropic");

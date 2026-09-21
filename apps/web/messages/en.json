@@ -481,7 +481,8 @@
       "secretReadOnly": "Secret values can't be edited here yet.",
       "saveAction": "Save",
       "cancelAction": "Cancel",
-      "saveError": "Couldn't save this provider."
+      "saveError": "Couldn't save this provider.",
+      "activationError": "Couldn't change the active provider."
     }
   },
   "quotas": {
