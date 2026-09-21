@@ -14,16 +14,18 @@ type Parameter = {
   source: string;
   value: string | null;
   isSet: boolean;
+  lastFour?: string | null;
 };
 
-function apiKey(source: "environment" | "unresolved"): Parameter {
+function apiKey(source: "stored" | "environment" | "unresolved", lastFour: string | null = null): Parameter {
   return {
     name: "apiKey",
     secret: true,
     required: true,
     source,
     value: null,
-    isSet: source === "environment",
+    isSet: source !== "unresolved",
+    lastFour: source === "stored" ? lastFour : null,
   };
 }
 
@@ -396,6 +398,27 @@ describe("AdminLlmProvidersPage", () => {
       server.use(http.get("/api/admin/llm-provider-settings", () => HttpResponse.json(stored)));
     }
 
+    function withStoredOpenAiKey(lastFour: string | null) {
+      const stored = settingsResponse();
+      const openai = stored.providers[1];
+      openai.configuration = "configured";
+      openai.settingId = "setting-openai";
+      openai.parameters = [apiKey("stored", lastFour), model("gpt-4o")];
+      server.use(http.get("/api/admin/llm-provider-settings", () => HttpResponse.json(stored)));
+    }
+
+    // The body of the next save to `providerKey`, read after it was submitted.
+    function captureSave(providerKey: string): () => unknown {
+      let body: unknown;
+      server.use(
+        http.put(`/api/admin/llm-provider-settings/${providerKey}`, async ({ request }) => {
+          body = await request.json();
+          return HttpResponse.json(settingsResponse().providers[1]);
+        }),
+      );
+      return () => body;
+    }
+
     async function openSlideOver(name: string) {
       const user = userEvent.setup();
       renderWithProviders(<AdminLlmProvidersPage />);
@@ -451,18 +474,134 @@ describe("AdminLlmProvidersPage", () => {
       expect(within(dialog).getByText("Provider default")).toBeInTheDocument();
     });
 
-    it("shows a secret read-only with where it comes from, and never as an input", async () => {
+    it("shows a secret as an empty password input, never its value", async () => {
       const { dialog } = await openSlideOver("OpenAI");
 
-      expect(within(dialog).getByText("API key")).toBeInTheDocument();
-      expect(within(dialog).getByText("Set via the environment")).toBeInTheDocument();
-      expect(within(dialog).queryByLabelText("API key")).not.toBeInTheDocument();
+      const input = within(dialog).getByLabelText("API key");
+      expect(input).toHaveAttribute("type", "password");
+      expect(input).toHaveValue("");
+    });
+
+    it("uses the last four of a stored secret as the placeholder", async () => {
+      withStoredOpenAiKey("WXYZ");
+      const { dialog } = await openSlideOver("OpenAI");
+
+      expect(within(dialog).getByLabelText("API key")).toHaveAttribute(
+        "placeholder",
+        "Stored — ending in WXYZ",
+      );
+      expect(within(dialog).getByText("Stored")).toBeInTheDocument();
+    });
+
+    it("shows a stored secret too short for a hint as stored, with no digits", async () => {
+      withStoredOpenAiKey(null);
+      const { dialog } = await openSlideOver("OpenAI");
+
+      expect(within(dialog).getByLabelText("API key")).toHaveAttribute("placeholder", "Stored");
+    });
+
+    it("says a secret supplied by the environment is set via the environment", async () => {
+      const { dialog } = await openSlideOver("OpenAI");
+
+      expect(within(dialog).getByLabelText("API key")).toHaveAttribute(
+        "placeholder",
+        "Set via the environment",
+      );
+      expect(within(dialog).getByText("From the environment")).toBeInTheDocument();
     });
 
     it("says a secret that resolves nowhere is not set", async () => {
       const { dialog } = await openSlideOver("Anthropic");
 
-      expect(within(dialog).getByText("Not set")).toBeInTheDocument();
+      expect(within(dialog).getByLabelText("API key")).toHaveAttribute("placeholder", "Not set");
+    });
+
+    it("offers no Clear while the value is only inherited", async () => {
+      const { dialog } = await openSlideOver("OpenAI");
+
+      expect(within(dialog).queryByRole("button", { name: "Clear" })).not.toBeInTheDocument();
+    });
+
+    it("offers Clear once a value is stored", async () => {
+      withStoredOpenAiKey("WXYZ");
+      const { dialog } = await openSlideOver("OpenAI");
+
+      expect(within(dialog).getByRole("button", { name: "Clear" })).toBeInTheDocument();
+    });
+
+    it("submits a typed secret with the fields that changed, and only those", async () => {
+      const body = captureSave("openai");
+      const { user, dialog } = await openSlideOver("OpenAI");
+
+      await user.type(within(dialog).getByLabelText("API key"), "sk-proj-typed-key");
+      await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+      await waitFor(() => expect(body()).toEqual({ parameters: { apiKey: "sk-proj-typed-key" } }));
+    });
+
+    it("leaves a blank secret out of the body so the stored key is kept", async () => {
+      withStoredOpenAiKey("WXYZ");
+      const body = captureSave("openai");
+      const { user, dialog } = await openSlideOver("OpenAI");
+
+      await user.type(within(dialog).getByLabelText("Model"), "gpt-4.1");
+      await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+      await waitFor(() => expect(body()).toEqual({ parameters: { model: "gpt-4.1" } }));
+    });
+
+    it("submits null for a secret when Clear was chosen", async () => {
+      withStoredOpenAiKey("WXYZ");
+      const body = captureSave("openai");
+      const { user, dialog } = await openSlideOver("OpenAI");
+
+      await user.click(within(dialog).getByRole("button", { name: "Clear" }));
+      expect(within(dialog).getByText("Will be cleared when you save")).toBeInTheDocument();
+      await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+      await waitFor(() => expect(body()).toEqual({ parameters: { apiKey: null } }));
+    });
+
+    it("lets a pending Clear be undone before saving", async () => {
+      withStoredOpenAiKey("WXYZ");
+      const body = captureSave("openai");
+      const { user, dialog } = await openSlideOver("OpenAI");
+
+      await user.click(within(dialog).getByRole("button", { name: "Clear" }));
+      await user.click(within(dialog).getByRole("button", { name: "Keep" }));
+      await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+      await waitFor(() => expect(body()).toEqual({ parameters: {} }));
+    });
+
+    it("clears rather than replaces when text was typed and Clear was then chosen", async () => {
+      withStoredOpenAiKey("WXYZ");
+      const body = captureSave("openai");
+      const { user, dialog } = await openSlideOver("OpenAI");
+
+      await user.type(within(dialog).getByLabelText("API key"), "sk-typed");
+      await user.click(within(dialog).getByRole("button", { name: "Clear" }));
+      await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+      await waitFor(() => expect(body()).toEqual({ parameters: { apiKey: null } }));
+    });
+
+    it("shows an error alert and stays open when the encryption key is missing", async () => {
+      server.use(
+        http.put("/api/admin/llm-provider-settings/openai", () =>
+          HttpResponse.json(
+            { detail: "SETTINGS_ENCRYPTION_KEY is not set; a secret cannot be encrypted" },
+            { status: 500 },
+          ),
+        ),
+      );
+      const { user, dialog } = await openSlideOver("OpenAI");
+
+      await user.type(within(dialog).getByLabelText("API key"), "sk-proj-typed-key");
+      await user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+      expect(await within(dialog).findByRole("alert")).toHaveTextContent("SETTINGS_ENCRYPTION_KEY");
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
     });
 
     it("submits only the changed fields, then closes and refreshes the list", async () => {

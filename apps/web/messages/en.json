@@ -473,12 +473,16 @@
         "default": "Provider default",
         "unresolved": "Not set"
       },
-      "secretStatus": {
-        "stored": "Set",
+      "secretPlaceholder": {
+        "stored": "Stored — ending in {lastFour}",
+        "storedNoHint": "Stored",
         "environment": "Set via the environment",
         "unresolved": "Not set"
       },
-      "secretReadOnly": "Secret values can't be edited here yet.",
+      "secretHelp": "Leave blank to keep the current value.",
+      "clearAction": "Clear",
+      "keepAction": "Keep",
+      "secretWillClear": "Will be cleared when you save",
       "saveAction": "Save",
       "cancelAction": "Cancel",
       "saveError": "Couldn't save this provider.",

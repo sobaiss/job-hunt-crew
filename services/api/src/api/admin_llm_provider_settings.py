@@ -1,12 +1,13 @@
-"""Admin LLM providers (issues #174-#176, part of the #172 epic,
+"""Admin LLM providers (issues #174-#176 and #179, part of the #172 epic,
 docs/adr/0024).
 
 Each provider's state is derived from what an Administrator stored in
 Postgres, the catalogue and the API's own environment. The API is given the
 same LLM-related environment as the workers in docker-compose so this matches
-what they actually run on. Only non-secret parameters can be stored so far; a
-secret supplied by the environment is reported only as set -- its value never
-leaves this module.
+what they actually run on. A secret (an API key) is stored encrypted beside a
+plaintext last-four hint; it is never returned, logged, audited or echoed in
+an error -- a response reports only whether it is set and that hint, and a
+secret supplied by the environment only that it is set.
 """
 
 import os
@@ -14,7 +15,9 @@ import uuid
 from datetime import UTC, datetime
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from py_db.llm_providers import (
     LLM_PROVIDERS,
     ParameterSource,
@@ -26,6 +29,12 @@ from py_db.llm_providers import (
 )
 from py_db.models import Llmproviderkey, LLMProviderSetting, LLMProviderSettingValue
 from py_db.quotas import record_admin_audit_event
+from py_db.settings_encryption import (
+    SettingsEncryptionError,
+    decrypt_secret,
+    encrypt_secret,
+    last_four_hint,
+)
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -35,7 +44,30 @@ from sqlalchemy.orm import selectinload
 from .admin import require_admin
 from .db import get_session
 
-router = APIRouter(prefix="/v1/admin/llm-provider-settings")
+ROUTE_PREFIX = "/v1/admin/llm-provider-settings"
+
+router = APIRouter(prefix=ROUTE_PREFIX)
+
+# What the audit trail records for a secret instead of its value (docs/adr/0024).
+SECRET_NOT_SET = "(not set)"
+SECRET_SET = "(set)"
+SECRET_CLEARED = "(cleared)"
+
+
+async def request_validation_error_without_input(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """FastAPI's default 422 echoes each offending `input` (and `ctx`), which
+    for these routes can be a submitted API key. Reports where and why only."""
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": [
+                {"type": error["type"], "loc": error["loc"], "msg": error["msg"]}
+                for error in exc.errors()
+            ]
+        },
+    )
 
 
 class ProviderParameterItem(BaseModel):
@@ -45,8 +77,11 @@ class ProviderParameterItem(BaseModel):
     source: str
     # The effective value for a non-secret; always null for a secret.
     value: str | None
-    # Whether any source resolves the value -- the only thing a secret reports.
+    # Whether any source resolves the value -- with lastFour, all a secret reports.
     isSet: bool
+    # The last four characters of a stored secret long enough to show them;
+    # null for anything else, an environment-supplied secret included.
+    lastFour: str | None
 
 
 class EnvironmentProvider(BaseModel):
@@ -82,17 +117,27 @@ def _provider_key(spec: ProviderSpec) -> Llmproviderkey:
 
 
 def _stored_values(spec: ProviderSpec, setting: LLMProviderSetting | None) -> dict[str, str]:
-    """The non-secret stored values of `setting` that the catalogue still
-    declares. A row for a parameter no longer in the catalogue is ignored, and
-    so is a stored secret until the encrypted-keys ticket (#178) can read it."""
+    """The stored values of `setting` that the catalogue still declares, secrets
+    decrypted -- what the workers will resolve. A row for a parameter no longer
+    in the catalogue is ignored, and so is a secret that cannot be decrypted
+    (missing or rotated key, corrupt payload): it counts as absent, exactly as
+    it does for the workers, so the screen never claims a key that will not
+    work. `decrypt_secret` logs why."""
     if setting is None:
         return {}
-    known = {parameter.name for parameter in spec.parameters if not parameter.secret}
-    return {
-        row.parameterName: row.value
-        for row in setting.LLMProviderSettingValue
-        if row.parameterName in known
-    }
+    parameters = {parameter.name: parameter for parameter in spec.parameters}
+    values: dict[str, str] = {}
+    for row in setting.LLMProviderSettingValue:
+        parameter = parameters.get(row.parameterName)
+        if parameter is None:
+            continue
+        if not parameter.secret:
+            values[row.parameterName] = row.value
+            continue
+        secret = decrypt_secret(row.value, provider=spec.key, parameter=parameter.name)
+        if secret is not None:
+            values[row.parameterName] = secret
+    return values
 
 
 async def _load_settings(session: AsyncSession) -> dict[str, LLMProviderSetting]:
@@ -108,6 +153,7 @@ def _provider_item(
     spec: ProviderSpec, env: dict[str, str], setting: LLMProviderSetting | None
 ) -> LLMProviderItem:
     resolved = resolve_provider_parameters(spec, _stored_values(spec, setting), env)
+    last_fours = {row.parameterName: row.lastFour for row in setting.LLMProviderSettingValue} if setting else {}
     return LLMProviderItem(
         key=spec.key,
         displayName=spec.display_name,
@@ -124,6 +170,11 @@ def _provider_item(
                 source=resolved[parameter.name].source.value,
                 value=None if parameter.secret else resolved[parameter.name].value,
                 isSet=resolved[parameter.name].value is not None,
+                lastFour=(
+                    last_fours.get(parameter.name)
+                    if parameter.secret and resolved[parameter.name].source is ParameterSource.STORED
+                    else None
+                ),
             )
             for parameter in spec.parameters
         ],
@@ -176,7 +227,7 @@ async def list_llm_provider_settings(
 class SaveProviderSettingsRequest(BaseModel):
     # Per parameter: a string sets it (blank removes a non-secret; a blank
     # secret is left unchanged), null clears it, an omitted name is left
-    # unchanged.
+    # unchanged. Never logged: it carries secrets.
     parameters: dict[str, str | None]
 
 
@@ -193,8 +244,8 @@ def _is_absolute_http_url(value: str) -> bool:
 
 def _validated_changes(spec: ProviderSpec, submitted: dict[str, str | None]) -> dict[str, str | None]:
     """The stored-value change each submitted parameter asks for -- the new
-    value, or None to remove it -- with every unchanged parameter left out.
-    Raises a 422 without echoing any submitted value."""
+    value, or None to remove it -- with every unchanged parameter left out (a
+    blank secret included). Raises a 422 without echoing any submitted value."""
     changes: dict[str, str | None] = {}
     for name, raw in submitted.items():
         try:
@@ -204,11 +255,10 @@ def _validated_changes(spec: ProviderSpec, submitted: dict[str, str | None]) -> 
                 status_code=422, detail=f"Unknown parameter {name!r} for provider {spec.key!r}"
             ) from None
         if parameter.secret:
-            # Blank means unchanged; storing one waits for encryption (#178).
-            if raw is None or raw.strip():
-                raise HTTPException(
-                    status_code=422, detail=f"Parameter {name!r} is secret and cannot be stored yet"
-                )
+            if raw is None:
+                changes[name] = None
+            elif raw.strip():
+                changes[name] = raw.strip()
             continue
         value = (raw or "").strip()
         if not value:
@@ -227,15 +277,27 @@ async def save_llm_provider_settings(
     admin_id: str = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ) -> LLMProviderItem:
-    """Saves a provider's non-secret parameters (issue #175). Saving an
-    incomplete configuration is allowed; the setting is created on the first
-    change, never for a save that changes nothing. One admin audit event per
-    parameter that actually changed, committed with the change."""
+    """Saves a provider's parameters (issues #175, #179). Saving an incomplete
+    configuration is allowed; the setting is created on the first change, never
+    for a save that changes nothing. A submitted secret is encrypted before
+    anything is staged, so a write without a usable key fails and stores
+    nothing. One admin audit event per parameter that actually changed,
+    committed with the change; a secret's event carries markers, never a
+    value."""
     try:
         spec = get_provider_spec(provider_key)
     except KeyError:
         raise HTTPException(status_code=404, detail="LLM provider not found") from None
     changes = _validated_changes(spec, req.parameters)
+    secrets = {name for name in changes if spec.parameter(name).secret}
+    try:
+        encrypted = {
+            name: encrypt_secret(value)
+            for name, value in changes.items()
+            if name in secrets and value is not None
+        }
+    except SettingsEncryptionError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from None
 
     setting = (await _load_settings(session)).get(spec.key)
     existing = {row.parameterName: row for row in setting.LLMProviderSettingValue} if setting else {}
@@ -255,15 +317,29 @@ async def save_llm_provider_settings(
     changed = False
     for name, new_value in changes.items():
         row = existing.get(name)
-        old_value = row.value if row else None
-        if new_value == old_value:
-            continue
+        if name in secrets:
+            # Any submitted secret is a change, even the value already stored:
+            # the plaintext is never read back to compare. Clearing what was
+            # never stored is not.
+            if new_value is None and row is None:
+                continue
+            stored_value = encrypted.get(name)
+            hint = last_four_hint(new_value) if new_value is not None else None
+            old_audit = SECRET_SET if row else SECRET_NOT_SET
+            new_audit = SECRET_CLEARED if new_value is None else SECRET_SET
+        else:
+            old_value = row.value if row else None
+            if new_value == old_value:
+                continue
+            stored_value, hint = new_value, None
+            old_audit = "null" if old_value is None else old_value
+            new_audit = "null" if new_value is None else new_value
         if setting is None:
             setting = LLMProviderSetting(
                 id=str(uuid.uuid4()), providerKey=_provider_key(spec), updatedAt=now
             )
             session.add(setting)
-        if new_value is None:
+        if stored_value is None:
             await session.delete(row)
         elif row is None:
             session.add(
@@ -271,20 +347,22 @@ async def save_llm_provider_settings(
                     id=str(uuid.uuid4()),
                     settingId=setting.id,
                     parameterName=name,
-                    value=new_value,
+                    value=stored_value,
+                    lastFour=hint,
                     updatedAt=now,
                 )
             )
         else:
-            row.value = new_value
+            row.value = stored_value
+            row.lastFour = hint
             row.updatedAt = now
         record_admin_audit_event(
             session,
             actor_user_id=admin_id,
             target_user_id=None,
             field=f"llmProviderSetting:{spec.key}:{name}",
-            old_value="null" if old_value is None else old_value,
-            new_value="null" if new_value is None else new_value,
+            old_value=old_audit,
+            new_value=new_audit,
         )
         changed = True
     if changed:

@@ -473,12 +473,16 @@
         "default": "Valeur par défaut du fournisseur",
         "unresolved": "Non défini"
       },
-      "secretStatus": {
-        "stored": "Défini",
-        "environment": "Défini via l'environnement",
-        "unresolved": "Non défini"
+      "secretPlaceholder": {
+        "stored": "Enregistrée — se termine par {lastFour}",
+        "storedNoHint": "Enregistrée",
+        "environment": "Définie via l'environnement",
+        "unresolved": "Non définie"
       },
-      "secretReadOnly": "Les valeurs secrètes ne sont pas encore modifiables ici.",
+      "secretHelp": "Laissez vide pour conserver la valeur actuelle.",
+      "clearAction": "Effacer",
+      "keepAction": "Conserver",
+      "secretWillClear": "Sera effacée à l'enregistrement",
       "saveAction": "Enregistrer",
       "cancelAction": "Annuler",
       "saveError": "Impossible d'enregistrer ce fournisseur.",

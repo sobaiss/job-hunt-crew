@@ -242,23 +242,73 @@ function useParameterLabel() {
   return (name: string) => (t.has(`parameterNames.${name}`) ? t(`parameterNames.${name}`) : name);
 }
 
-function SecretParameter({ parameter }: { parameter: AdminLlmProviderParameter }) {
+// A password input that is empty by default -- a stored secret is never sent
+// back to the browser -- with the last four characters (or where it comes from)
+// as its placeholder. Clear marks a stored value for removal on Save.
+function SecretParameter({
+  provider,
+  parameter,
+  draft,
+  cleared,
+  onDraftChange,
+  onClearedChange,
+}: {
+  provider: AdminLlmProvider;
+  parameter: AdminLlmProviderParameter;
+  draft: string;
+  cleared: boolean;
+  onDraftChange: (value: string) => void;
+  onClearedChange: (cleared: boolean) => void;
+}) {
   const t = useTranslations("admin.llmProviders");
   const label = useParameterLabel();
-  const status = parameter.isSet
-    ? parameter.source === "stored"
-      ? "stored"
-      : "environment"
-    : "unresolved";
+  const id = `${provider.key}-${parameter.name}`;
+  const stored = parameter.source === "stored";
+  const placeholder = !parameter.isSet
+    ? t("secretPlaceholder.unresolved")
+    : !stored
+      ? t("secretPlaceholder.environment")
+      : parameter.lastFour
+        ? t("secretPlaceholder.stored", { lastFour: parameter.lastFour })
+        : t("secretPlaceholder.storedNoHint");
 
   return (
     <div className="flex flex-col gap-1.5">
-      <span className="flex items-center gap-1 text-sm font-medium">
-        {label(parameter.name)}
-        <Lock className="size-3 text-muted" role="img" aria-label={t("secretLabel")} />
+      <div className="flex items-center justify-between gap-2">
+        <label className="flex items-center gap-1 text-sm font-medium" htmlFor={id}>
+          {label(parameter.name)}
+          <Lock className="size-3 text-muted" role="img" aria-label={t("secretLabel")} />
+        </label>
+        <Badge variant={SOURCE_VARIANT[parameter.source]}>{t(`sources.${parameter.source}`)}</Badge>
+      </div>
+      <div className="flex items-center gap-2">
+        <Input
+          id={id}
+          type="password"
+          autoComplete="new-password"
+          className="h-9"
+          placeholder={placeholder}
+          value={cleared ? "" : draft}
+          disabled={cleared}
+          onChange={(event) => onDraftChange(event.target.value)}
+        />
+        {stored && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              onDraftChange("");
+              onClearedChange(!cleared);
+            }}
+          >
+            {t(cleared ? "keepAction" : "clearAction")}
+          </Button>
+        )}
+      </div>
+      <span className="text-xs text-muted">
+        {cleared ? t("secretWillClear") : stored ? t("secretHelp") : ""}
       </span>
-      <span className="text-sm">{t(`secretStatus.${status}`)}</span>
-      <span className="text-xs text-muted">{t("secretReadOnly")}</span>
     </div>
   );
 }
@@ -268,6 +318,7 @@ function ProviderEditForm({ provider, onClose }: { provider: AdminLlmProvider; o
   const label = useParameterLabel();
   const save = useSaveLlmProviderSettings(provider.key);
   const editable = provider.parameters.filter((parameter) => !parameter.secret);
+  const secrets = provider.parameters.filter((parameter) => parameter.secret);
   // A stored value is pre-filled; an inherited or default one is only a
   // placeholder, so saving without touching it never freezes it into Postgres.
   const initial = Object.fromEntries(
@@ -277,6 +328,27 @@ function ProviderEditForm({ provider, onClose }: { provider: AdminLlmProvider; o
     ]),
   );
   const [drafts, setDrafts] = useState<Record<string, string>>(initial);
+  // A secret is never pre-filled: a typed value replaces it, and Clear removes it.
+  const [secretDrafts, setSecretDrafts] = useState<Record<string, string>>({});
+  const [clearedSecrets, setClearedSecrets] = useState<Record<string, boolean>>({});
+
+  // Only what the Administrator changed: a blank secret is left out, so saving
+  // another field keeps the stored one.
+  function changes(): Record<string, string | null> {
+    const changed: Record<string, string | null> = Object.fromEntries(
+      editable
+        .filter((parameter) => drafts[parameter.name] !== initial[parameter.name])
+        .map((parameter) => [parameter.name, drafts[parameter.name]]),
+    );
+    for (const parameter of secrets) {
+      if (clearedSecrets[parameter.name]) {
+        changed[parameter.name] = null;
+      } else if ((secretDrafts[parameter.name] ?? "").trim() !== "") {
+        changed[parameter.name] = secretDrafts[parameter.name];
+      }
+    }
+    return changed;
+  }
 
   return (
     <>
@@ -292,7 +364,17 @@ function ProviderEditForm({ provider, onClose }: { provider: AdminLlmProvider; o
       <div className="flex flex-col gap-4 px-4">
         {provider.parameters.map((parameter) =>
           parameter.secret ? (
-            <SecretParameter key={parameter.name} parameter={parameter} />
+            <SecretParameter
+              key={parameter.name}
+              provider={provider}
+              parameter={parameter}
+              draft={secretDrafts[parameter.name] ?? ""}
+              cleared={clearedSecrets[parameter.name] ?? false}
+              onDraftChange={(value) => setSecretDrafts((prev) => ({ ...prev, [parameter.name]: value }))}
+              onClearedChange={(cleared) =>
+                setClearedSecrets((prev) => ({ ...prev, [parameter.name]: cleared }))
+              }
+            />
           ) : (
             <div key={parameter.name} className="flex flex-col gap-1.5">
               <div className="flex items-center justify-between gap-2">
@@ -322,16 +404,7 @@ function ProviderEditForm({ provider, onClose }: { provider: AdminLlmProvider; o
       <SheetFooter>
         <Button
           disabled={save.isPending}
-          onClick={() =>
-            save.mutate(
-              Object.fromEntries(
-                editable
-                  .filter((parameter) => drafts[parameter.name] !== initial[parameter.name])
-                  .map((parameter) => [parameter.name, drafts[parameter.name]]),
-              ),
-              { onSuccess: onClose },
-            )
-          }
+          onClick={() => save.mutate(changes(), { onSuccess: onClose })}
         >
           {t("saveAction")}
         </Button>
@@ -348,7 +421,8 @@ function ProviderEditForm({ provider, onClose }: { provider: AdminLlmProvider; o
  * providers the system implements and what each needs to run, led by the
  * "None — follow the environment" row that names what the environment
  * currently resolves to. Clicking a provider row opens a slide-over with only
- * that provider's parameters; its non-secret ones can be edited and saved.
+ * that provider's parameters, which can be edited and saved -- an API key
+ * is a password input that starts empty (#179).
  * Each row's radio (the None row's included) chooses the Active LLM provider
  * (#176); a refused activation shows the API's message above the table.
  */

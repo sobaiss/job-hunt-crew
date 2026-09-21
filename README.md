@@ -72,7 +72,9 @@ backend behind `apps/web`'s BFF proxy.
   (`PersistResultLambda`), triggered by an S3 `ObjectCreated` event — never by
   the workflow directly.
 - **The LLM provider is swappable** (`anthropic` | `openai` | `openrouter` |
-  `huggingface` | `ollama`) via the `LLM_PROVIDER` env var, behind a single
+  `huggingface` | `ollama`) via the `LLM_PROVIDER` env var (or an
+  Administrator's override in Postgres, see "Configuring the LLM provider from
+  the Admin screen" below), behind a single
   `LLMProvider` interface (`services/analysis/src/analysis/llm_provider.py`)
   that CrewAI agents never bypass. `anthropic`/`openai` are the
   production-supported options. `openrouter`/`huggingface` are also hosted,
@@ -256,6 +258,50 @@ local Ollama server at `OLLAMA_BASE_URL` (default `http://localhost:11434/v1`;
 defaults `LLM_MODEL` to `qwen2.5:7b`. The pipeline sets no `num_ctx` and
 relies on Ollama's server default context window; on an old or
 RAM-constrained install, raise it server-side via `OLLAMA_CONTEXT_LENGTH`.
+
+#### Configuring the LLM provider from the Admin screen
+
+The environment above is only the *fallback*. An Administrator can override
+it from **Admin → LLM providers** (docs/adr/0024) without a redeploy:
+
+- Choose the **Active LLM provider** in the table, and open a provider's row to
+  set its parameters (API key, base URL, model). The change applies to the next
+  pipeline step. Selecting the **None — follow the environment** row hands
+  control back to the environment, which is exactly how an installation that
+  never touches the screen behaves.
+- Values resolve **parameter by parameter**: a stored value wins, else that
+  parameter's environment variable (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+  `OPENROUTER_API_KEY`, `HF_TOKEN`, `OLLAMA_BASE_URL`), else the provider's own
+  default. `LLM_MODEL` only governs the environment-driven mode: an empty stored
+  model falls back to the provider's default, never to `LLM_MODEL`. A provider
+  never falls back to a *different* provider; a required parameter that resolves
+  nowhere fails the pipeline step naming the provider and parameter.
+- **API keys are encrypted at rest** (Fernet) with `SETTINGS_ENCRYPTION_KEY`.
+  The screen only ever shows a key's last four characters, never the key, and
+  the audit trail records "(set)" / "(cleared)" rather than a value. Generate
+  one with:
+
+  ```bash
+  python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+  ```
+
+  **The API, the worker and every Analysis and Ingestion process must share the
+  same `SETTINGS_ENCRYPTION_KEY`.** docker-compose ships a dev-only default for
+  the `api` and `worker` services; set your own anywhere real. Saving a key
+  without a usable `SETTINGS_ENCRYPTION_KEY` fails with an error and stores
+  nothing. A stored key that can no longer be decrypted (lost or rotated
+  `SETTINGS_ENCRYPTION_KEY`) is treated as not set: the environment's key is
+  used instead, and an ERROR log line
+  (`llm_provider_secret_undecryptable`) names the provider and parameter.
+  Stored keys are not re-encrypted under a new `SETTINGS_ENCRYPTION_KEY`; enter
+  them again.
+- **The API must receive the same LLM-related environment as the workers**
+  (`LLM_PROVIDER`, `LLM_MODEL`, the four API keys, `OLLAMA_BASE_URL`). The
+  screen evaluates the environment itself — to name the provider the
+  environment resolves to, show which parameters are "Inherited", and refuse
+  activating a provider whose key lives nowhere. docker-compose passes them to
+  both services; if you deploy elsewhere, keep the two in step or the screen
+  will misreport what actually runs.
 
 ### 4. Seed the database
 

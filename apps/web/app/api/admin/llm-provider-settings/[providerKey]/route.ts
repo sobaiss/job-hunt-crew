@@ -2,9 +2,8 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { adminSessionHeaders, proxyToApi } from "@/lib/internal-api";
 
-// Saves one LLM provider's parameters (issue #175). The body is forwarded
-// untouched and never logged here — it will carry secrets once they can be
-// stored (#179). Forwards the Session's Role so `require_admin` can reject a
+// Saves one LLM provider's parameters (issues #175, #179). The body is
+// forwarded untouched and never logged here — it carries API keys. Forwards the Session's Role so `require_admin` can reject a
 // non-Administrator caller, same as the other admin routes.
 export async function PUT(
   request: Request,

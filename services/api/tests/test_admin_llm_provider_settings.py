@@ -1,6 +1,6 @@
-"""Admin LLM providers (issues #174-#176, part of the #172 epic): the list
-`GET /v1/admin/llm-provider-settings`, the non-secret save
-`PUT /v1/admin/llm-provider-settings/{providerKey}` and activation
+"""Admin LLM providers (issues #174-#176 and #179, part of the #172 epic): the
+list `GET /v1/admin/llm-provider-settings`, the save
+`PUT /v1/admin/llm-provider-settings/{providerKey}` (secrets included) and activation
 (`POST .../{providerKey}/activate`, `POST .../deactivate`). Each provider's state is
 derived from what is stored, the API's own environment and the catalogue's
 hardcoded defaults -- these tests drive it through the HTTP surface with the
@@ -9,12 +9,23 @@ internals.
 """
 
 import asyncio
+import logging
 import uuid
 from datetime import UTC, datetime
 
+from unittest.mock import MagicMock, patch
+
 import pytest
+from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
-from py_db.models import AdminAuditEvent, Llmproviderkey, LLMProviderSetting, Role, User
+from py_db.models import (
+    AdminAuditEvent,
+    Llmproviderkey,
+    LLMProviderSetting,
+    LLMProviderSettingValue,
+    Role,
+    User,
+)
 from py_db.session import make_engine, make_session_factory
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
@@ -33,6 +44,7 @@ LLM_ENV_VARS = (
     "OPENROUTER_API_KEY",
     "HF_TOKEN",
     "OLLAMA_BASE_URL",
+    "SETTINGS_ENCRYPTION_KEY",
 )
 
 
@@ -62,6 +74,14 @@ def _clean_llm_env(monkeypatch):
     _run(_wipe_settings)
     yield
     _run(_wipe_settings)
+
+
+@pytest.fixture
+def encryption_key(monkeypatch):
+    """A usable SETTINGS_ENCRYPTION_KEY, set by the test rather than inherited."""
+    key = Fernet.generate_key().decode()
+    monkeypatch.setenv("SETTINGS_ENCRYPTION_KEY", key)
+    return key
 
 
 @pytest.fixture
@@ -431,14 +451,6 @@ def test_absolute_http_and_https_base_urls_are_accepted(admin, value):
     assert _put(admin, "ollama", {"baseUrl": value}).status_code == 200
 
 
-def test_secret_values_are_refused_until_they_can_be_encrypted(admin):
-    response = _put(admin, "openai", {"apiKey": "sk-should-never-be-stored-1234", "model": "gpt-4.1"})
-
-    assert response.status_code == 422
-    assert "sk-should-never-be-stored-1234" not in response.text
-    assert _setting_rows() == []
-
-
 def test_blank_secret_means_unchanged(admin):
     response = _put(admin, "openai", {"apiKey": "", "model": "gpt-4.1"})
 
@@ -681,3 +693,329 @@ def test_the_same_save_on_an_inactive_provider_is_allowed(admin, monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY")
 
     assert _put(admin, "openai", {"model": "gpt-4o-mini"}).status_code == 200
+
+
+# --- secrets: store, replace, clear (issue #179) ---
+
+OPENAI_KEY = "sk-proj-abcdefghijklmnop-WXYZ"
+OTHER_OPENAI_KEY = "sk-proj-qrstuvwxyz012345-1234"
+
+
+def _stored_secret_rows() -> list[LLMProviderSettingValue]:
+    async def read(session):
+        rows = await session.scalars(
+            select(LLMProviderSettingValue).where(LLMProviderSettingValue.parameterName == "apiKey")
+        )
+        return list(rows)
+
+    return _run(read)
+
+
+def _api_key(headers: dict, provider: str = "openai") -> dict:
+    return _parameter(_provider(_get_as(headers), provider), "apiKey")
+
+
+def test_a_stored_key_reports_only_that_it_is_set_and_its_last_four(admin, encryption_key):
+    response = _put(admin, "openai", {"apiKey": OPENAI_KEY})
+
+    assert response.status_code == 200, response.text
+    saved = response.json()
+    api_key = _parameter(saved, "apiKey")
+    assert api_key["source"] == "stored"
+    assert api_key["isSet"] is True
+    assert api_key["value"] is None
+    assert api_key["lastFour"] == "WXYZ"
+    assert saved["configuration"] == "configured"
+    assert _api_key(admin) == api_key
+    assert OPENAI_KEY not in response.text
+
+
+def test_the_database_holds_ciphertext_and_the_last_four_not_the_key(admin, encryption_key):
+    _put(admin, "openai", {"apiKey": OPENAI_KEY})
+
+    (row,) = _stored_secret_rows()
+
+    assert row.value != OPENAI_KEY
+    assert OPENAI_KEY not in row.value
+    assert Fernet(encryption_key).decrypt(row.value.encode()).decode() == OPENAI_KEY
+    assert row.lastFour == "WXYZ"
+
+
+def test_a_key_too_short_for_a_hint_reports_none(admin, encryption_key):
+    saved = _put(admin, "openai", {"apiKey": "sk-short"}).json()
+
+    api_key = _parameter(saved, "apiKey")
+    assert api_key["isSet"] is True
+    assert api_key["lastFour"] is None
+
+
+def test_a_key_supplied_by_the_environment_reports_no_hint(admin, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-from-the-environment-6789")
+
+    api_key = _api_key(admin)
+
+    assert (api_key["source"], api_key["isSet"], api_key["lastFour"]) == ("environment", True, None)
+
+
+def test_a_stored_key_counts_as_resolved_so_the_provider_can_be_activated(admin, encryption_key):
+    assert _activate(admin, "openai").status_code == 422
+
+    _put(admin, "openai", {"apiKey": OPENAI_KEY})
+    response = _activate(admin, "openai")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["activeProvider"] == "openai"
+    assert OPENAI_KEY not in response.text
+
+
+def test_saving_another_field_with_the_secret_blank_keeps_the_stored_key(admin, encryption_key):
+    _put(admin, "openai", {"apiKey": OPENAI_KEY})
+    (before,) = _stored_secret_rows()
+
+    saved = _put(admin, "openai", {"apiKey": "", "model": "gpt-4.1"}).json()
+
+    (after,) = _stored_secret_rows()
+    assert after.value == before.value
+    assert _parameter(saved, "apiKey")["lastFour"] == "WXYZ"
+    assert _parameter(saved, "model")["value"] == "gpt-4.1"
+
+
+def test_a_new_key_replaces_the_stored_one(admin, encryption_key):
+    _put(admin, "openai", {"apiKey": OPENAI_KEY})
+
+    saved = _put(admin, "openai", {"apiKey": f"  {OTHER_OPENAI_KEY}\n"}).json()
+
+    (row,) = _stored_secret_rows()
+    assert Fernet(encryption_key).decrypt(row.value.encode()).decode() == OTHER_OPENAI_KEY
+    assert _parameter(saved, "apiKey")["lastFour"] == "1234"
+
+
+def test_clear_removes_the_stored_key_and_falls_back_to_the_environment(
+    admin, encryption_key, monkeypatch
+):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-from-the-environment-6789")
+    _put(admin, "openai", {"apiKey": OPENAI_KEY})
+
+    saved = _put(admin, "openai", {"apiKey": None}).json()
+
+    assert _stored_secret_rows() == []
+    api_key = _parameter(saved, "apiKey")
+    assert (api_key["source"], api_key["isSet"], api_key["lastFour"]) == ("environment", True, None)
+    assert saved["configuration"] == "inherited"
+
+
+def test_clear_with_no_environment_key_leaves_the_provider_incomplete(admin, encryption_key):
+    _put(admin, "openai", {"apiKey": OPENAI_KEY})
+
+    saved = _put(admin, "openai", {"apiKey": None}).json()
+
+    assert _parameter(saved, "apiKey")["source"] == "unresolved"
+    assert saved["configuration"] == "incomplete"
+
+
+def test_clearing_needs_no_encryption_key(admin, monkeypatch):
+    monkeypatch.setenv("SETTINGS_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    _put(admin, "openai", {"apiKey": OPENAI_KEY})
+    monkeypatch.delenv("SETTINGS_ENCRYPTION_KEY")
+
+    response = _put(admin, "openai", {"apiKey": None})
+
+    assert response.status_code == 200, response.text
+    assert _stored_secret_rows() == []
+
+
+def test_clearing_a_key_that_was_never_stored_changes_nothing(admin, encryption_key):
+    response = _put(admin, "openai", {"apiKey": None})
+
+    assert response.status_code == 200
+    assert response.json()["settingId"] is None
+    assert _setting_rows() == []
+    assert _audit_events(admin) == []
+
+
+@pytest.mark.parametrize("key", [None, "not-a-fernet-key"])
+def test_saving_a_secret_without_a_usable_encryption_key_fails_and_stores_nothing(
+    admin, monkeypatch, key
+):
+    if key:
+        monkeypatch.setenv("SETTINGS_ENCRYPTION_KEY", key)
+
+    response = _put(admin, "openai", {"apiKey": OPENAI_KEY, "model": "gpt-4.1"})
+
+    assert response.status_code >= 400
+    assert "SETTINGS_ENCRYPTION_KEY" in response.json()["detail"]
+    assert OPENAI_KEY not in response.text
+    assert _setting_rows() == []
+    assert _audit_events(admin) == []
+
+
+def test_a_failed_secret_save_leaves_an_existing_configuration_untouched(admin, encryption_key, monkeypatch):
+    _put(admin, "openai", {"apiKey": OPENAI_KEY, "model": "gpt-4.1"})
+    monkeypatch.delenv("SETTINGS_ENCRYPTION_KEY")
+
+    response = _put(admin, "openai", {"apiKey": OTHER_OPENAI_KEY, "model": "gpt-4o-mini"})
+
+    assert response.status_code >= 400
+    monkeypatch.setenv("SETTINGS_ENCRYPTION_KEY", encryption_key)
+    openai = _provider(_get_as(admin), "openai")
+    assert _parameter(openai, "model")["value"] == "gpt-4.1"
+    assert _parameter(openai, "apiKey")["lastFour"] == "WXYZ"
+
+
+def test_a_key_that_can_no_longer_be_decrypted_is_treated_as_not_set(admin, encryption_key, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-from-the-environment-6789")
+    _put(admin, "openai", {"apiKey": OPENAI_KEY})
+    monkeypatch.setenv("SETTINGS_ENCRYPTION_KEY", Fernet.generate_key().decode())
+
+    api_key = _api_key(admin)
+
+    assert (api_key["source"], api_key["lastFour"]) == ("environment", None)
+
+
+def test_no_secret_appears_in_any_response_or_log_line(admin, encryption_key, caplog):
+    caplog.set_level(logging.DEBUG)
+    responses = [
+        _put(admin, "openai", {"apiKey": OPENAI_KEY}),
+        _put(admin, "openai", {"apiKey": OTHER_OPENAI_KEY, "model": "gpt-4.1"}),
+        _activate(admin, "openai"),
+    ]
+    with TestClient(app) as client:
+        responses.append(client.get(URL, headers=admin))
+
+    (row,) = _stored_secret_rows()
+    for text in [r.text for r in responses] + [record.getMessage() for record in caplog.records]:
+        for secret in (OPENAI_KEY, OTHER_OPENAI_KEY, row.value):
+            assert secret not in text
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"parameters": OPENAI_KEY},
+        {"parameters": {"apiKey": [OPENAI_KEY]}},
+        {"parameters": {"apiKey": 12345678901234}},
+        {"parameters": [OPENAI_KEY]},
+    ],
+)
+def test_a_validation_error_does_not_echo_what_was_submitted(admin, encryption_key, body):
+    with TestClient(app) as client:
+        response = client.put(f"{URL}/openai", headers=admin, json=body)
+
+    assert response.status_code == 422
+    assert OPENAI_KEY not in response.text
+    assert "12345678901234" not in response.text
+    assert "input" not in response.text
+    assert _setting_rows() == []
+
+
+def test_a_malformed_body_is_a_422_that_does_not_echo_it(admin):
+    with TestClient(app) as client:
+        response = client.put(
+            f"{URL}/openai",
+            headers={**admin, "Content-Type": "application/json"},
+            content='{"parameters": {"apiKey": "' + OPENAI_KEY,
+        )
+
+    assert response.status_code == 422
+    assert OPENAI_KEY not in response.text
+
+
+def test_other_routes_keep_the_framework_default_validation_error(admin):
+    with TestClient(app) as client:
+        response = client.get("/v1/admin/analyses?page=0", headers=admin)
+
+    assert response.status_code == 422
+    assert "input" in response.text
+
+
+def test_secret_audit_events_carry_markers_only(admin, encryption_key):
+    _put(admin, "openai", {"apiKey": OPENAI_KEY})
+    _put(admin, "openai", {"apiKey": OTHER_OPENAI_KEY})
+    _put(admin, "openai", {"apiKey": None})
+
+    events = [e for e in _audit_events(admin) if e.field == "llmProviderSetting:openai:apiKey"]
+
+    assert sorted((e.oldValue, e.newValue) for e in events) == sorted(
+        [("(not set)", "(set)"), ("(set)", "(set)"), ("(set)", "(cleared)")]
+    )
+    everything = " ".join(f"{e.field} {e.oldValue} {e.newValue}" for e in _audit_events(admin))
+    for secret in (OPENAI_KEY, OTHER_OPENAI_KEY, "WXYZ", "1234"):
+        assert secret not in everything
+
+
+def test_resubmitting_the_same_secret_still_counts_as_a_change(admin, encryption_key):
+    _put(admin, "openai", {"apiKey": OPENAI_KEY})
+
+    _put(admin, "openai", {"apiKey": OPENAI_KEY})
+
+    assert [(e.oldValue, e.newValue) for e in _audit_events(admin)] == [
+        ("(not set)", "(set)"),
+        ("(set)", "(set)"),
+    ]
+
+
+def test_non_secret_audit_events_still_show_real_values_beside_a_secret(admin, encryption_key):
+    _put(admin, "openai", {"apiKey": OPENAI_KEY, "model": "gpt-4.1"})
+
+    events = {e.field: (e.oldValue, e.newValue) for e in _audit_events(admin)}
+
+    assert events == {
+        "llmProviderSetting:openai:apiKey": ("(not set)", "(set)"),
+        "llmProviderSetting:openai:model": ("null", "gpt-4.1"),
+    }
+
+
+def test_a_blank_secret_writes_no_audit_event(admin, encryption_key):
+    _put(admin, "openai", {"apiKey": OPENAI_KEY})
+    before = len(_audit_events(admin))
+
+    _put(admin, "openai", {"apiKey": "  "})
+
+    assert len(_audit_events(admin)) == before
+
+
+def test_clearing_the_key_of_the_active_provider_is_refused_when_nothing_else_supplies_it(
+    admin, encryption_key
+):
+    _put(admin, "openai", {"apiKey": OPENAI_KEY})
+    _activate(admin, "openai")
+
+    response = _put(admin, "openai", {"apiKey": None})
+
+    assert response.status_code == 422
+    assert "apiKey" in response.json()["detail"]
+    assert _api_key(admin)["lastFour"] == "WXYZ"
+
+
+def test_clearing_the_key_of_the_active_provider_is_allowed_when_the_environment_supplies_one(
+    admin, encryption_key, monkeypatch
+):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-from-the-environment-6789")
+    _put(admin, "openai", {"apiKey": OPENAI_KEY})
+    _activate(admin, "openai")
+
+    assert _put(admin, "openai", {"apiKey": None}).status_code == 200
+    assert _api_key(admin)["source"] == "environment"
+
+
+def test_end_to_end_a_stored_and_activated_key_reaches_the_client_a_pipeline_step_builds(
+    admin, encryption_key, monkeypatch
+):
+    """The one seam that crosses both contexts: the key goes in through the
+    Admin API, and the Analysis resolver -- what every pipeline step calls --
+    builds its SDK client with it. Only the SDK constructor is patched."""
+    resolver = pytest.importorskip("analysis.llm_provider_resolver")
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-from-the-environment-6789")  # the stored key beats it
+    assert _put(admin, "openai", {"apiKey": OPENAI_KEY, "model": "gpt-4.1"}).status_code == 200
+    assert _activate(admin, "openai").status_code == 200
+
+    async def build(session):
+        return await resolver.resolve_llm_provider(session)
+
+    with patch("analysis.llm_provider.openai.OpenAI", return_value=MagicMock()) as openai_ctor:
+        provider = _run(build)
+
+    assert isinstance(provider, resolver.OpenAIProvider)
+    assert openai_ctor.call_args.kwargs["api_key"] == OPENAI_KEY
+    assert provider.model == "gpt-4.1"

@@ -163,7 +163,8 @@ export function useSetPlanDefaults(plan: string) {
 
 // Backs the Admin "LLM providers" screen (issue #174, docs/adr/0024): the five
 // providers the system implements, what each one needs and whether it is ready
-// to run. A secret never carries its value -- only `isSet`.
+// to run. A secret never carries its value -- only `isSet` and, for a stored
+// one, the `lastFour` hint (null for an environment-supplied secret).
 export type AdminLlmProviderParameter = {
   name: string;
   secret: boolean;
@@ -171,6 +172,7 @@ export type AdminLlmProviderParameter = {
   source: "stored" | "environment" | "default" | "unresolved";
   value: string | null;
   isSet: boolean;
+  lastFour: string | null;
 };
 
 export type AdminLlmProvider = {
@@ -199,9 +201,10 @@ export function useAdminLlmProviderSettings() {
   });
 }
 
-// Saves one provider's parameters (issue #175). Per parameter: a string sets
-// it (blank removes a stored non-secret), null clears it, an omitted name is
-// left unchanged -- so only changed fields should be passed.
+// Saves one provider's parameters (issues #175, #179). Per parameter: a string
+// sets it (blank removes a stored non-secret; a blank secret is unchanged),
+// null clears it, an omitted name is left unchanged -- so only changed fields
+// should be passed.
 export function useSaveLlmProviderSettings(providerKey: string) {
   const queryClient = useQueryClient();
   return useMutation({
