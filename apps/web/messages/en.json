@@ -958,12 +958,12 @@
   "cvVersions": {
     "title": "CV versions",
     "form": {
-      "heading": "Upload a CV version",
+      "heading": "Import a CV",
       "labelLabel": "Label",
       "labelPlaceholder": "Software Engineer — Fintech",
       "fileLabel": "File",
       "fileHint": "PDF, DOCX, Markdown, or plain text, up to 10 MB.",
-      "submit": "Upload",
+      "submit": "Import",
       "uploading": "Uploading…",
       "labelRequired": "Give this CV version a label.",
       "fileRequired": "Choose a PDF, DOCX, Markdown, or plain-text file.",
@@ -971,6 +971,30 @@
       "fileTooLarge": "That file is larger than the 10 MB limit.",
       "success": "CV version uploaded.",
       "error": "The upload failed. Please try again."
+    },
+    "import": {
+      "close": "Close",
+      "progressLabel": "Import progress",
+      "step1": "File uploaded",
+      "step2": "Converting…",
+      "step3": "Ready",
+      "skeletonLabel": "Converting your CV",
+      "success": "CV imported and converted",
+      "finish": "Finish",
+      "edit": "Edit",
+      "failure": {
+        "network": "Connection problem.",
+        "server": "Server error.",
+        "upload": "Your CV could not be sent.",
+        "conversion": "Your CV's conversion failed."
+      },
+      "retryImport": "Retry the import",
+      "retryConversion": "Retry the conversion",
+      "replaceFile": "Replace the file",
+      "replacing": "Replacing…",
+      "slow": "This is taking longer than usual.",
+      "background": "The conversion is continuing in the background. You'll find it in your CV versions.",
+      "keepWaiting": "Keep waiting"
     },
     "list": {
       "heading": "Your CV versions",
@@ -980,6 +1004,7 @@
       "showSuperseded": "Show superseded CV versions",
       "importCv": "Import a CV",
       "refresh": "Refresh",
+      "conversionInProgress": "A conversion is in progress. Refresh to see the current status.",
       "columnsLabel": "Columns",
       "columnsReset": "Reset",
       "columns": {

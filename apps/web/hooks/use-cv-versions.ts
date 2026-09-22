@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { bff } from "@/lib/bff-client";
+import { bff, BffError } from "@/lib/bff-client";
 
 // TanStack Query read hook + mutations for the CV versions area, layered on the
 // typed BFF client (`lib/bff-client.ts`). The `/api/*` contract and the
@@ -91,30 +91,141 @@ export type CreateCvVersionResponse = {
   uploadUrl: string;
 };
 
+/** How long a presigned upload URL stays valid (services/api signs it for 5 minutes). */
+export const CV_UPLOAD_URL_TTL_MS = 5 * 60 * 1000;
+
+/** A CVVersion row whose bytes may not be in storage yet, and when it was created. */
+export type CreatedCvVersion = CreateCvVersionResponse & { createdAt: number };
+
 /**
- * Create a CVVersion then PUT the bytes straight to the presigned URL, exactly
- * as the previous hand-rolled page did. Invalidates the list on success so the
- * new row (and its `PENDING` conversion status) appears.
+ * Which part of storing a CV failed (issue #195): the create request never
+ * reached the API (`network`), the API refused or broke (`server`), or the
+ * row exists but the bytes never reached storage (`upload`). `created` is set
+ * once the row exists, so a retry can re-send to the same presigned URL and a
+ * close can discard the orphan row.
+ */
+export class CvStoreError extends Error {
+  readonly reason: "network" | "server" | "upload";
+  readonly detail: string | null;
+  readonly created: CreatedCvVersion | null;
+
+  constructor(
+    reason: CvStoreError["reason"],
+    detail: string | null,
+    created: CreatedCvVersion | null,
+  ) {
+    super(`Storing the CV failed (${reason})`);
+    this.name = "CvStoreError";
+    this.reason = reason;
+    this.detail = detail;
+    this.created = created;
+  }
+}
+
+/**
+ * The human-readable `detail` services/api put on an error response, if any:
+ * a plain string, or the `message` of a `{code, message}` detail.
+ */
+export function apiErrorDetail(error: unknown): string | null {
+  if (!(error instanceof BffError)) return null;
+  const body = error.body;
+  if (typeof body !== "object" || body === null) return null;
+  const { detail } = body as { detail?: unknown };
+  if (typeof detail === "string") return detail;
+  if (typeof detail === "object" && detail !== null) {
+    const { message } = detail as { message?: unknown };
+    if (typeof message === "string") return message;
+  }
+  return null;
+}
+
+async function putCvFile(uploadUrl: string, file: File): Promise<void> {
+  const uploadResponse = await fetch(uploadUrl, {
+    method: "PUT",
+    headers: { "Content-Type": file.type },
+    body: file,
+  });
+  if (!uploadResponse.ok) {
+    throw new Error(`Upload failed with ${uploadResponse.status}`);
+  }
+}
+
+/** The `detail.code` services/api put on an error response, if any. */
+export function apiErrorCode(error: unknown): string | null {
+  if (!(error instanceof BffError)) return null;
+  const body = error.body;
+  if (typeof body !== "object" || body === null) return null;
+  const { detail } = body as { detail?: unknown };
+  if (typeof detail !== "object" || detail === null) return null;
+  const { code } = detail as { code?: unknown };
+  return typeof code === "string" ? code : null;
+}
+
+/**
+ * Delete a CVVersion that has no file behind it, best-effort: a failure is
+ * swallowed, never surfaced (issue #195). Only the Import screen's explicit
+ * close calls this, and only after storing failed.
+ */
+export function discardCvVersion(id: string): void {
+  void bff.delete<void>(`/cv-versions/${id}`).catch(() => {
+    // Swallowed on purpose; the row stays deletable from the list.
+  });
+}
+
+/**
+ * Create a CVVersion then PUT the bytes straight to the presigned URL.
+ * Fails with a {@link CvStoreError} naming which half broke. Given the
+ * `previous` row of a failed attempt, re-sends to its URL while that is still
+ * valid; once it has expired, discards that row and starts over. Invalidates
+ * the list on success so the new row (and its `PENDING` status) appears.
  */
 export function useCreateCvVersion() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ label, file }: { label: string; file: File }) => {
-      const created = await bff.post<CreateCvVersionResponse>("/cv-versions", {
-        label,
-        fileName: file.name,
-        contentType: file.type,
-        fileSizeBytes: file.size,
-      });
+    mutationFn: async ({
+      label,
+      file,
+      previous,
+      onCreated,
+    }: {
+      label: string;
+      file: File;
+      previous?: CreatedCvVersion | null;
+      /** Called once the row exists, before its bytes are sent. */
+      onCreated?: (created: CreatedCvVersion) => void;
+    }): Promise<CreatedCvVersion> => {
+      let created: CreatedCvVersion;
+      if (previous && Date.now() - previous.createdAt < CV_UPLOAD_URL_TTL_MS) {
+        created = previous;
+      } else {
+        if (previous) discardCvVersion(previous.cvVersionId);
+        try {
+          const response = await bff.post<CreateCvVersionResponse>(
+            "/cv-versions",
+            {
+              label,
+              fileName: file.name,
+              contentType: file.type,
+              fileSizeBytes: file.size,
+            },
+          );
+          created = { ...response, createdAt: Date.now() };
+        } catch (error) {
+          const network = error instanceof BffError && error.status === 0;
+          throw new CvStoreError(
+            network ? "network" : "server",
+            apiErrorDetail(error),
+            null,
+          );
+        }
+      }
 
-      const uploadResponse = await fetch(created.uploadUrl, {
-        method: "PUT",
-        headers: { "Content-Type": file.type },
-        body: file,
-      });
-      if (!uploadResponse.ok) {
-        throw new Error(`Upload failed with ${uploadResponse.status}`);
+      onCreated?.(created);
+      try {
+        await putCvFile(created.uploadUrl, file);
+      } catch {
+        throw new CvStoreError("upload", null, created);
       }
 
       return created;
@@ -129,11 +240,15 @@ export function useCreateCvVersion() {
  * Replace an existing CVVersion with a new file, then PUT the bytes straight
  * to the presigned URL — same two-step shape as {@link useCreateCvVersion}.
  * services/api creates a new row, points the old row's `supersededById` at
- * it, transfers `isDefault` when the old row held it, and enqueues the new
- * row for Conversion. Invalidates the list on success so the new row appears
- * and the replaced row drops out of the default (non-superseded) view.
+ * it, and transfers `isDefault` when the old row held it; this hook then
+ * starts the new row's Conversion itself, after the PUT — unless
+ * `startConversion` is false, for a caller (the Import screen) that starts
+ * and follows it on its own. Invalidates the list on success so the new row
+ * appears and the replaced row drops out of the default (non-superseded) view.
  */
-export function useReplaceCvVersion() {
+export function useReplaceCvVersion({
+  startConversion = true,
+}: { startConversion?: boolean } = {}) {
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -156,13 +271,18 @@ export function useReplaceCvVersion() {
         },
       );
 
-      const uploadResponse = await fetch(created.uploadUrl, {
-        method: "PUT",
-        headers: { "Content-Type": file.type },
-        body: file,
-      });
-      if (!uploadResponse.ok) {
-        throw new Error(`Upload failed with ${uploadResponse.status}`);
+      await putCvFile(created.uploadUrl, file);
+      if (!startConversion) return created;
+
+      // The file first, the Conversion second (docs/adr/0028): services/api
+      // cannot start it on replace, the bytes only exist once this PUT is
+      // done. A failure here does not fail the Replace — the new CVVersion
+      // exists with its file stored, and the table's "Convert to Markdown"
+      // action is the recovery.
+      try {
+        await bff.post(`/cv-versions/${created.cvVersionId}/convert`);
+      } catch {
+        // Swallowed on purpose; see above.
       }
 
       return created;
@@ -176,6 +296,8 @@ export function useReplaceCvVersion() {
 export type CvVersionMarkdown = {
   markdownContent: string | null;
   conversionStatus: CvConversionStatus;
+  /** Why the last Conversion failed, verbatim from services/api. */
+  conversionError?: string | null;
 };
 
 /**
@@ -188,6 +310,39 @@ export function useCvVersionMarkdown(id: string, enabled: boolean) {
     queryKey: ["cv-versions", id, "markdown"] as const,
     queryFn: () => bff.get<CvVersionMarkdown>(`/cv-versions/${id}/markdown`),
     enabled,
+  });
+}
+
+/** Conversion statuses after which nothing moves without a new convert. */
+export const TERMINAL_CV_CONVERSION_STATUSES: ReadonlySet<CvConversionStatus> =
+  new Set(["CONVERTED", "FAILED"]);
+
+/** How often the Import screen re-reads a CVVersion's Conversion. */
+export const CV_CONVERSION_POLL_INTERVAL_MS = 2000;
+
+/**
+ * The same rendition query as {@link useCvVersionMarkdown}, polled until the
+ * Conversion reaches a terminal status — the Import screen's progress source.
+ * The endpoint answers the status and the content together, so the success
+ * state renders from the last poll with no extra request. `id` is null until
+ * the Conversion has been started; `paused` stops the polling without
+ * dropping what was last read (the Import screen's 3-minute cap, issue #196).
+ */
+export function useCvVersionConversion(
+  id: string | null,
+  { paused = false }: { paused?: boolean } = {},
+) {
+  return useQuery({
+    queryKey: ["cv-versions", id, "markdown"] as const,
+    queryFn: () => bff.get<CvVersionMarkdown>(`/cv-versions/${id}/markdown`),
+    enabled: id !== null,
+    refetchInterval: (query) => {
+      if (paused) return false;
+      const status = query.state.data?.conversionStatus;
+      return status && TERMINAL_CV_CONVERSION_STATUSES.has(status)
+        ? false
+        : CV_CONVERSION_POLL_INTERVAL_MS;
+    },
   });
 }
 
@@ -218,8 +373,10 @@ export function useSaveCvVersionMarkdown(id: string) {
 /**
  * Trigger a Conversion for one CV version — "Convert to Markdown", or
  * "Reconvert" once it is `CONVERTED`. services/api resets `conversionStatus` to
- * `PENDING` and enqueues the work on the `cv-conversion` queue; a 409 means a
- * Conversion is already running. Invalidates the list so the new status shows.
+ * `PENDING` and enqueues the work on the `cv-conversion` queue. A 409 carries
+ * `detail.code`: `CONVERSION_RUNNING` (one is already running) or
+ * `FILE_NOT_UPLOADED` (no object at the CV's fileKey yet, docs/adr/0028).
+ * Invalidates the list so the new status shows.
  */
 export function useConvertCvVersion() {
   const queryClient = useQueryClient();

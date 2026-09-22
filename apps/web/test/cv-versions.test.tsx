@@ -731,6 +731,94 @@ describe("CvVersionsPage — list", () => {
   });
 });
 
+describe("CvVersionsPage — Conversion-in-progress banner (issue #197)", () => {
+  const BANNER = /A conversion is in progress/;
+
+  it.each(["PENDING", "CONVERTING"])(
+    "shows a status banner when a row is %s",
+    async (conversionStatus) => {
+      server.use(
+        http.get("/api/cv-versions", () =>
+          HttpResponse.json({
+            cvVersions: [
+              cvVersion({ id: "cv1" }),
+              cvVersion({ id: "cv2", label: "Other CV", conversionStatus }),
+            ],
+          }),
+        ),
+      );
+      renderWithProviders(<CvVersionsPage />);
+
+      const banner = await screen.findByRole("status", { name: BANNER });
+      expect(banner).toHaveTextContent(
+        "A conversion is in progress. Refresh to see the current status.",
+      );
+      expect(
+        within(banner).getByRole("button", { name: "Refresh" }),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("alert")).toBeNull();
+    },
+  );
+
+  it("shows no banner when every row is in a terminal state", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: [
+            cvVersion({ id: "cv1" }),
+            cvVersion({
+              id: "cv2",
+              label: "Other CV",
+              conversionStatus: "FAILED",
+            }),
+          ],
+        }),
+      ),
+    );
+    renderWithProviders(<CvVersionsPage />);
+
+    expect(await screen.findByText("Other CV")).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: BANNER })).toBeNull();
+  });
+
+  it("shows no banner while the list is still loading", () => {
+    server.use(
+      http.get("/api/cv-versions", () => new Promise<never>(() => {})),
+    );
+    renderWithProviders(<CvVersionsPage />);
+
+    expect(screen.getByRole("status", { name: "Loading your CV versions" })).toBeInTheDocument();
+    expect(screen.queryByText(BANNER)).toBeNull();
+  });
+
+  it("refetches the list from the banner's own refresh, and disappears once nothing is converting", async () => {
+    const user = userEvent.setup();
+    let callCount = 0;
+    server.use(
+      http.get("/api/cv-versions", () => {
+        callCount += 1;
+        return HttpResponse.json({
+          cvVersions: [
+            cvVersion({
+              conversionStatus: callCount === 1 ? "CONVERTING" : "CONVERTED",
+            }),
+          ],
+        });
+      }),
+    );
+    renderWithProviders(<CvVersionsPage />);
+
+    const banner = await screen.findByRole("status", { name: BANNER });
+    await user.click(within(banner).getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("status", { name: BANNER })).toBeNull(),
+    );
+    expect(callCount).toBe(2);
+    expect(screen.getByText("Converted")).toBeInTheDocument();
+  });
+});
+
 describe("CvVersionsPage — replace (from the panel, issue #82)", () => {
   it("does not render a Replace button or form on the row itself", async () => {
     server.use(
@@ -800,6 +888,71 @@ describe("CvVersionsPage — replace (from the panel, issue #82)", () => {
       fileName: "updated.pdf",
       contentType: "application/pdf",
     });
+  });
+
+  function replaceHandlers(events: string[], convertStatus = 202) {
+    let replaced = false;
+    return [
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: replaced
+            ? [cvVersion({ id: "cv2", label: "Updated CV", conversionStatus: "PENDING" })]
+            : [cvVersion()],
+        }),
+      ),
+      http.post("/api/cv-versions/cv1/replace", () => {
+        events.push("replace");
+        replaced = true;
+        return HttpResponse.json(
+          { cvVersionId: "cv2", fileKey: "k", uploadUrl: UPLOAD_URL },
+          { status: 201 },
+        );
+      }),
+      http.put(UPLOAD_URL, () => {
+        events.push("put");
+        return new HttpResponse(null, { status: 200 });
+      }),
+      http.post("/api/cv-versions/cv2/convert", () => {
+        events.push("convert");
+        return convertStatus === 202
+          ? HttpResponse.json({ conversionStatus: "PENDING" }, { status: 202 })
+          : HttpResponse.json({ error: "boom" }, { status: convertStatus });
+      }),
+      http.get("/api/cv-versions/cv2/markdown", () =>
+        HttpResponse.json({ markdownContent: null, conversionStatus: "PENDING" }),
+      ),
+    ];
+  }
+
+  async function submitReplace() {
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+    await user.click(await screen.findByText("Grad CV"));
+    const panel = within(await screen.findByRole("dialog"));
+    await user.click(panel.getByRole("button", { name: "Replace" }));
+    await user.upload(panel.getByLabelText("New file"), pdf("updated.pdf"));
+    await user.click(panel.getByRole("button", { name: "Replace" }));
+    return panel;
+  }
+
+  it("starts the new CV version's Conversion only after the file is uploaded (docs/adr/0028)", async () => {
+    const events: string[] = [];
+    server.use(...replaceHandlers(events));
+
+    await submitReplace();
+
+    await waitFor(() => expect(events).toEqual(["replace", "put", "convert"]));
+  });
+
+  it("does not fail the Replace when starting the Conversion fails", async () => {
+    const events: string[] = [];
+    server.use(...replaceHandlers(events, 500));
+
+    const panel = await submitReplace();
+
+    await waitFor(() => expect(events).toContain("convert"));
+    await waitFor(() => expect(panel.getByText("Pending")).toBeInTheDocument());
+    expect(within(screen.getByRole("dialog")).getByText("Updated CV")).toBeInTheDocument();
   });
 
   it("closes the replace form on cancel without submitting", async () => {

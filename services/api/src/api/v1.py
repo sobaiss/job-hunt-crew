@@ -5,6 +5,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
+from botocore.exceptions import ClientError
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from py_db.models import (
     Analysis,
@@ -320,8 +321,9 @@ async def replace_cv_version(
     """Replace an owned CVVersion with a new file (issue #74). Never mutates or
     deletes the old row (docs/adr/0005): creates a new CVVersion, points the old
     row's `supersededById` at it, transfers `isDefault` when the old row held
-    it, and enqueues the new row for Conversion the same way `convert_cv_version`
-    does, so it starts without a separate manual step. Validation mirrors
+    it. Enqueues nothing: the bytes are not in storage until the caller PUTs
+    them to the returned URL, so the caller starts the Conversion afterwards
+    via `convert_cv_version` (docs/adr/0028). Validation mirrors
     `create_cv_version` exactly. User-scoped: another user's CV, or one that
     doesn't exist, is a 404. A CV that has already been superseded is a 409.
     """
@@ -389,12 +391,6 @@ async def replace_cv_version(
         "put_object",
         Params={"Bucket": S3_BUCKET, "Key": file_key, "ContentType": content_type},
         ExpiresIn=UPLOAD_URL_EXPIRY_SECONDS,
-    )
-
-    sqs = make_sqs_client()
-    sqs.send_message(
-        QueueUrl=CV_CONVERSION_QUEUE_URL,
-        MessageBody=json.dumps({"cvVersionId": new_cv_version_id}),
     )
 
     return CreateCVVersionResponse(cvVersionId=new_cv_version.id, fileKey=file_key, uploadUrl=upload_url)
@@ -623,6 +619,9 @@ async def delete_cv_version(
 class CVVersionMarkdownResponse(BaseModel):
     markdownContent: str | None
     conversionStatus: str
+    # Why the last Conversion failed, when it did — the Import screen polls
+    # this endpoint and shows the cause verbatim (issue #195).
+    conversionError: str | None
 
 
 @router.get(
@@ -644,6 +643,7 @@ async def get_cv_version_markdown(
     return CVVersionMarkdownResponse(
         markdownContent=existing.markdownContent,
         conversionStatus=existing.conversionStatus.value,
+        conversionError=existing.conversionError,
     )
 
 
@@ -688,11 +688,24 @@ async def update_cv_version_markdown(
     return CVVersionMarkdownResponse(
         markdownContent=existing.markdownContent,
         conversionStatus=existing.conversionStatus.value,
+        conversionError=existing.conversionError,
     )
 
 
 class ConvertCVVersionResponse(BaseModel):
     conversionStatus: str
+
+
+def _cv_file_is_uploaded(file_key: str) -> bool:
+    """head_object is a real network call this process makes itself, so it
+    goes through make_internal_s3_client (see its docstring)."""
+    try:
+        make_internal_s3_client().head_object(Bucket=S3_BUCKET, Key=file_key)
+    except ClientError as exc:
+        if exc.response["Error"]["Code"] in ("404", "NoSuchKey", "NotFound"):
+            return False
+        raise
+    return True
 
 
 @router.post(
@@ -712,13 +725,36 @@ async def convert_cv_version(
     `cv-conversion` queue (drained by services/analysis's handle_cv_conversion,
     which runs the same convert_cv the AnalysisWorkflow prerequisite uses), and
     returns 202 with the new status.
+
+    docs/adr/0028: the file first, the Conversion second. The upload is a
+    browser PUT to a presigned URL this API never sees, so before touching the
+    row or the queue this checks an object actually exists at `fileKey` and
+    answers 409 `FILE_NOT_UPLOADED` when it doesn't — otherwise convert_cv
+    would flip the row to CONVERTING and then fail on NoSuchKey, leaving it
+    stuck. Both 409s carry a machine-readable `detail.code` (the USER_BLOCKED
+    shape) so a client can tell them apart.
     """
     existing = await session.get(CVVersion, cv_version_id)
     if existing is None or existing.userId != user_id:
         raise HTTPException(status_code=404, detail="Not found")
 
     if existing.conversionStatus == Cvconversionstatus.CONVERTING:
-        raise HTTPException(status_code=409, detail="A Conversion is already running for this CV")
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "CONVERSION_RUNNING",
+                "message": "A Conversion is already running for this CV",
+            },
+        )
+
+    if not _cv_file_is_uploaded(existing.fileKey):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "FILE_NOT_UPLOADED",
+                "message": "This CV's file has not been uploaded yet",
+            },
+        )
 
     existing.conversionStatus = Cvconversionstatus.PENDING
     existing.conversionError = None

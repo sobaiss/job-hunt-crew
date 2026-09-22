@@ -958,12 +958,12 @@
   "cvVersions": {
     "title": "Versions de CV",
     "form": {
-      "heading": "Téléverser une version de CV",
+      "heading": "Importer un CV",
       "labelLabel": "Libellé",
       "labelPlaceholder": "Ingénieur logiciel — Fintech",
       "fileLabel": "Fichier",
       "fileHint": "PDF, DOCX, Markdown ou texte brut, jusqu'à 10 Mo.",
-      "submit": "Téléverser",
+      "submit": "Importer",
       "uploading": "Téléversement…",
       "labelRequired": "Donnez un libellé à cette version de CV.",
       "fileRequired": "Choisissez un fichier PDF, DOCX, Markdown ou texte brut.",
@@ -971,6 +971,30 @@
       "fileTooLarge": "Ce fichier dépasse la limite de 10 Mo.",
       "success": "Version de CV téléversée.",
       "error": "Le téléversement a échoué. Veuillez réessayer."
+    },
+    "import": {
+      "close": "Fermer",
+      "progressLabel": "Progression de l'import",
+      "step1": "Fichier téléversé",
+      "step2": "Conversion en cours…",
+      "step3": "Prêt",
+      "skeletonLabel": "Conversion de votre CV",
+      "success": "CV importé et converti",
+      "finish": "Terminer",
+      "edit": "Modifier",
+      "failure": {
+        "network": "Problème de connexion.",
+        "server": "Erreur du serveur.",
+        "upload": "Votre CV n'a pas pu être envoyé.",
+        "conversion": "La conversion de votre CV a échoué."
+      },
+      "retryImport": "Réessayer l'import",
+      "retryConversion": "Relancer la conversion",
+      "replaceFile": "Remplacer le fichier",
+      "replacing": "Remplacement…",
+      "slow": "Cela prend plus de temps que d'habitude.",
+      "background": "La conversion se poursuit en arrière-plan. Vous la retrouverez dans vos versions de CV.",
+      "keepWaiting": "Continuer d'attendre"
     },
     "list": {
       "heading": "Vos versions de CV",
@@ -980,6 +1004,7 @@
       "showSuperseded": "Afficher les versions de CV remplacées",
       "importCv": "Importer un CV",
       "refresh": "Actualiser",
+      "conversionInProgress": "Une conversion est en cours. Actualisez pour voir le statut à jour.",
       "columnsLabel": "Colonnes",
       "columnsReset": "Réinitialiser",
       "columns": {

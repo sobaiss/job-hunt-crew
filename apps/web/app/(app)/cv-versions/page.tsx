@@ -129,6 +129,32 @@ export default function CvVersionsPage() {
     [visibleCvVersions, sort],
   );
 
+  // Issue #197: the table never refetches on its own (no refetchInterval,
+  // deliberately) — a banner says so while the loaded snapshot still has a
+  // Conversion in flight, and carries the refresh itself. Computed from the
+  // whole loaded list (superseded rows included: Reconvert is offered there).
+  const conversionInProgress =
+    list.data?.some(
+      (cv) =>
+        cv.conversionStatus === "PENDING" ||
+        cv.conversionStatus === "CONVERTING",
+    ) ?? false;
+
+  const refreshButton = (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      disabled={list.isFetching}
+      onClick={() => list.refetch()}
+    >
+      <RefreshCw
+        className={list.isFetching ? "size-4 animate-spin" : "size-4"}
+      />
+      {t("list.refresh")}
+    </Button>
+  );
+
   const panelCv = list.data?.find((cv) => cv.id === panelId) ?? null;
   const panelReplacedByLabel = panelCv?.supersededById
     ? (labelById.get(panelCv.supersededById) ?? null)
@@ -162,18 +188,7 @@ export default function CvVersionsPage() {
             columnLabel={(labelKey) => t(labelKey)}
             resetLabel={t("list.columnsReset")}
           />
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={list.isFetching}
-            onClick={() => list.refetch()}
-          >
-            <RefreshCw
-              className={list.isFetching ? "size-4 animate-spin" : "size-4"}
-            />
-            {t("list.refresh")}
-          </Button>
+          {refreshButton}
           <Button asChild size="sm">
             <Link href="/cv-versions/new">{t("list.importCv")}</Link>
           </Button>
@@ -181,6 +196,19 @@ export default function CvVersionsPage() {
       </div>
 
       <section className="flex flex-col gap-4">
+        {conversionInProgress && (
+          <div
+            role="status"
+            aria-labelledby="cv-versions-conversion-banner"
+            className="flex flex-wrap items-center justify-between gap-4 rounded-md border border-border bg-muted/10 p-4 text-sm"
+          >
+            <p id="cv-versions-conversion-banner">
+              {t("list.conversionInProgress")}
+            </p>
+            {refreshButton}
+          </div>
+        )}
+
         <div className="flex items-center justify-end gap-4">
           <label className="flex items-center gap-2 text-sm">
             <input
