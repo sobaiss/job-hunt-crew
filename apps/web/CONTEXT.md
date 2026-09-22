@@ -95,8 +95,12 @@ The `/cv-versions` page — a sortable table, with Column visibility control, of
 _Avoid_: CV management, My CVs (fine in prose; the nav label and route area is "CV-versions")
 
 **CV panel**:
-The right-hand slide-over opened by clicking a CV-versions-table row: the CVVersion's Markdown rendition (fetched only while the panel is open, never inlined in the table) plus its full info, and its actions — Replace, Reconvert, Set default. A successful Replace switches the panel to the newly created CVVersion rather than closing it or lingering on the now-superseded row.
+The right-hand slide-over opened by clicking a CV-versions-table row: the CVVersion's Markdown rendition (fetched only while the panel is open, never inlined in the table) plus its full info, and its actions — Replace, Reconvert, Set default, and, on a converted non-superseded row, Modifier (links out to the CV edit page). A successful Replace switches the panel to the newly created CVVersion rather than closing it or lingering on the now-superseded row.
 _Avoid_: Quick view (that's the Analyses-list slide-over — different content and actions; this is CV-versions' own), side bar / slide bar (a candidate's own phrasing that reads as the left-nav Sidebar or a mistranslation of "slide-over" — got issue #84 pointed at the wrong component once already; this is the CV panel)
+
+**CV edit page**:
+The `/cv-versions/[id]/edit` page, reached only via the CV panel's Modifier action on a CVVersion that is not superseded and already has a converted Markdown rendition. Shows that rendition rendered as HTML by default, in a bordered white frame; a Modifier toggle switches to a plain-text editor of the raw Markdown with Enregistrer/Annuler. Enregistrer asks for confirmation, then mutates the CVVersion's Markdown rendition in place rather than creating a new CVVersion (docs/adr/0025) — the one candidate-facing CV action that isn't Replace-shaped.
+_Avoid_: CV panel (that's the slide-over this links from, and where Reconvert/Replace/Set default still live), Edit (fine in prose for the action itself, this is the page it opens)
 
 **Column visibility**:
 A per-table, per-browser preference (localStorage only, no server sync) for which data columns show in the Analyses, CV versions, and Agents tables — every column visible by default, each table's primary column always shown, selection/action columns excluded from the toggle. Long values in these tables (titles, company/location, CV/Scout labels, CV file names) are truncated to a fixed length with the full text in a tooltip on hover.

@@ -33,11 +33,11 @@ A User whose `blockedAt` is set — every one of their calls into this context i
 _Avoid_: Suspended (implies automatic or temporary), Disabled, Deactivated, Banned
 
 **CVVersion**:
-One labeled, versioned upload of a candidate's CV (PDF, DOCX, Markdown, or plain text). Exactly one per user may be the default; each carries a Markdown rendition and its `conversionStatus`, and — for a PDF/DOCX upload — a StyleProfile and its `styleStatus`. Replacing one never mutates or deletes it — it creates a new CVVersion and sets `supersededById` on the old one (docs/adr/0005), so every Analysis, Application, GeneratedDocument, and Scout that already reference it keep seeing exactly what they always saw.
+One labeled, versioned upload of a candidate's CV (PDF, DOCX, Markdown, or plain text). Exactly one per user may be the default; each carries a Markdown rendition and its `conversionStatus`, and — for a PDF/DOCX upload — a StyleProfile and its `styleStatus`. Replacing one never mutates or deletes it — it creates a new CVVersion and sets `supersededById` on the old one (docs/adr/0005), so every Analysis, Application, GeneratedDocument, and Scout that already reference it keep seeing exactly what they always saw. Its Markdown rendition is the one exception: a non-superseded CVVersion can be hand-edited in place by its candidate (docs/adr/0025), which does mutate this same row.
 _Avoid_: Resume, CV file
 
 **Markdown rendition**:
-The canonical Markdown form of one CVVersion, in `CVVersion.markdownContent` — the exact text the Analysis context's comparison reads. It is the uploaded file itself for a Markdown upload, or the output of the Analysis context's Conversion otherwise; the candidate sees it read-only.
+The canonical Markdown form of one CVVersion, in `CVVersion.markdownContent` — the exact text the Analysis context's comparison reads. It is the uploaded file itself for a Markdown upload, or the output of the Analysis context's Conversion otherwise. The candidate mostly sees it read-only, except that a non-superseded CVVersion's rendition can also be hand-edited directly by its candidate, which mutates this same field in place — no new CVVersion, no Conversion, no Redaction re-check (docs/adr/0025).
 _Avoid_: Parsed CV, CV structured data, preview
 
 **StyleProfile**:

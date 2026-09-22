@@ -220,6 +220,30 @@ export function useCvVersionMarkdown(id: string, enabled: boolean) {
 }
 
 /**
+ * Save a candidate's hand-edit of a CV version's Markdown rendition in place
+ * (issue #186, #185, docs/adr/0025) — mutates the same CVVersion row, no new
+ * row created. Invalidates both the list and this CV's own rendition query
+ * on success, so the edit page's read-only view reflects the save without a
+ * manual refetch.
+ */
+export function useSaveCvVersionMarkdown(id: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (markdownContent: string) =>
+      bff.put<CvVersionMarkdown>(`/cv-versions/${id}/markdown`, {
+        markdownContent,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: CV_VERSIONS_KEY });
+      queryClient.invalidateQueries({
+        queryKey: ["cv-versions", id, "markdown"] as const,
+      });
+    },
+  });
+}
+
+/**
  * Trigger a Conversion for one CV version — "Convert to Markdown", or
  * "Reconvert" once it is `CONVERTED`. services/api resets `conversionStatus` to
  * `PENDING` and enqueues the work on the `cv-conversion` queue; a 409 means a
