@@ -170,10 +170,7 @@ export default function CvVersionsPage() {
       </div>
 
       <section className="flex flex-col gap-4">
-        <div className="flex items-center justify-between gap-4">
-          <h2 className="font-serif text-xl font-semibold">
-            {t("list.heading")}
-          </h2>
+        <div className="flex items-center justify-end gap-4">
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"

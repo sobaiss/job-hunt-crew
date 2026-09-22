@@ -134,6 +134,7 @@ export function ScoutForm({ scout }: { scout?: Scout }) {
             id="scout-cv"
             value={cvVersionId}
             onChange={setCvVersionId}
+            autoSelectDefault={false}
           />
 
           <fieldset className="flex flex-col gap-2">

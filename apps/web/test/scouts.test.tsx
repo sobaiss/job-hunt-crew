@@ -728,6 +728,21 @@ describe("NewScoutPage — create form", () => {
     expect(franceTravail.className).toMatch(/focus-visible:ring-2/);
   });
 
+  it("does not preselect the default CV — submit stays disabled until one is chosen", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+    );
+    renderWithProviders(<NewScoutPage />);
+
+    const select = await screen.findByLabelText("CV version");
+    expect(select).toHaveValue("");
+    expect(
+      screen.getByRole("button", { name: "Create Scout" }),
+    ).toBeDisabled();
+  });
+
   it("validates an empty label and at least one site", async () => {
     server.use(
       http.get("/api/cv-versions", () =>
@@ -737,6 +752,10 @@ describe("NewScoutPage — create form", () => {
     const user = userEvent.setup();
     renderWithProviders(<NewScoutPage />);
 
+    await user.selectOptions(
+      await screen.findByLabelText("CV version"),
+      "cv-default",
+    );
     await user.click(await screen.findByRole("checkbox", { name: "France Travail" }));
     await user.click(screen.getByRole("button", { name: "Create Scout" }));
 
@@ -767,6 +786,7 @@ describe("NewScoutPage — create form", () => {
       await screen.findByLabelText("Label"),
       "Senior Backend — Remote EU",
     );
+    await user.selectOptions(screen.getByLabelText("CV version"), "cv-default");
     await user.click(screen.getByRole("checkbox", { name: "LinkedIn" }));
     await user.type(screen.getByLabelText("Keywords"), "python");
     await user.click(screen.getByRole("button", { name: "Create Scout" }));
@@ -797,6 +817,7 @@ describe("NewScoutPage — create form", () => {
     renderWithProviders(<NewScoutPage />);
 
     await user.type(await screen.findByLabelText("Label"), "Filtered Scout");
+    await user.selectOptions(screen.getByLabelText("CV version"), "cv-default");
     await user.type(screen.getByLabelText("Contract type"), "CDI");
     await user.selectOptions(screen.getByLabelText("Remote policy"), "remote");
     await user.type(screen.getByLabelText("Experience level"), "senior");
@@ -829,6 +850,7 @@ describe("NewScoutPage — create form", () => {
     renderWithProviders(<NewScoutPage />);
 
     await user.type(await screen.findByLabelText("Label"), "Sixth Scout");
+    await user.selectOptions(screen.getByLabelText("CV version"), "cv-default");
     await user.click(screen.getByRole("button", { name: "Create Scout" }));
 
     const alert = await screen.findByRole("alert");
