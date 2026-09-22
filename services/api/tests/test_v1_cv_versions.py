@@ -431,6 +431,204 @@ def test_get_markdown_returns_404_for_other_users_cv(user_id):
             asyncio.run(_delete_user(other_user_id))
 
 
+def test_update_markdown_saves_content_and_touches_only_rendition_and_updated_at(user_id):
+    with TestClient(app) as client:
+        cv_id = client.post(
+            "/v1/cv-versions",
+            headers=_headers(user_id),
+            json={
+                "label": "CV 1",
+                "fileName": "cv1.md",
+                "contentType": "text/markdown",
+                "fileSizeBytes": 1024,
+            },
+        ).json()["cvVersionId"]
+        asyncio.run(_set_markdown(cv_id, "# Jane Doe\n\nStaff Engineer"))
+
+        before = {
+            row["id"]: row
+            for row in client.get("/v1/cv-versions", headers=_headers(user_id)).json()["cvVersions"]
+        }[cv_id]
+
+        response = client.put(
+            f"/v1/cv-versions/{cv_id}/markdown",
+            headers=_headers(user_id),
+            json={"markdownContent": "# Jane Doe\n\nPrincipal Engineer"},
+        )
+        assert response.status_code == 200
+        assert response.json() == {
+            "markdownContent": "# Jane Doe\n\nPrincipal Engineer",
+            "conversionStatus": "CONVERTED",
+        }
+
+        fetched = client.get(f"/v1/cv-versions/{cv_id}/markdown", headers=_headers(user_id))
+        assert fetched.json()["markdownContent"] == "# Jane Doe\n\nPrincipal Engineer"
+
+        after = {
+            row["id"]: row
+            for row in client.get("/v1/cv-versions", headers=_headers(user_id)).json()["cvVersions"]
+        }[cv_id]
+        assert after["updatedAt"] != before["updatedAt"]
+        for field in (
+            "fileName",
+            "fileType",
+            "fileKey",
+            "fileSizeBytes",
+            "conversionStatus",
+            "conversionError",
+            "supersededById",
+        ):
+            assert after[field] == before[field]
+
+
+def test_update_markdown_returns_404_for_other_users_cv(user_id):
+    with TestClient(app) as client:
+        cv_id = client.post(
+            "/v1/cv-versions",
+            headers=_headers(user_id),
+            json={
+                "label": "CV 1",
+                "fileName": "cv1.md",
+                "contentType": "text/markdown",
+                "fileSizeBytes": 1024,
+            },
+        ).json()["cvVersionId"]
+        asyncio.run(_set_markdown(cv_id, "# Jane Doe"))
+
+        other_user_id = asyncio.run(_create_user())
+        try:
+            response = client.put(
+                f"/v1/cv-versions/{cv_id}/markdown",
+                headers=_headers(other_user_id),
+                json={"markdownContent": "# Hijacked"},
+            )
+            assert response.status_code == 404
+        finally:
+            asyncio.run(_delete_user(other_user_id))
+
+
+def test_update_markdown_returns_404_for_nonexistent_cv(user_id):
+    with TestClient(app) as client:
+        response = client.put(
+            f"/v1/cv-versions/{uuid.uuid4()}/markdown",
+            headers=_headers(user_id),
+            json={"markdownContent": "# Ghost"},
+        )
+        assert response.status_code == 404
+
+
+def test_update_markdown_rejects_superseded_cv(user_id):
+    with TestClient(app) as client:
+        old_id = client.post(
+            "/v1/cv-versions",
+            headers=_headers(user_id),
+            json={
+                "label": "Old CV",
+                "fileName": "old.md",
+                "contentType": "text/markdown",
+                "fileSizeBytes": 1024,
+            },
+        ).json()["cvVersionId"]
+        asyncio.run(_set_markdown(old_id, "# Old"))
+        client.post(
+            f"/v1/cv-versions/{old_id}/replace",
+            headers=_headers(user_id),
+            json={
+                "label": "New CV",
+                "fileName": "new.md",
+                "contentType": "text/markdown",
+                "fileSizeBytes": 2048,
+            },
+        )
+
+        response = client.put(
+            f"/v1/cv-versions/{old_id}/markdown",
+            headers=_headers(user_id),
+            json={"markdownContent": "# Edited"},
+        )
+        assert response.status_code == 409
+        assert response.json()["detail"] == "This CV version has already been replaced"
+
+
+def test_update_markdown_rejects_not_yet_converted(user_id):
+    with TestClient(app) as client:
+        cv_id = client.post(
+            "/v1/cv-versions",
+            headers=_headers(user_id),
+            json={
+                "label": "CV 1",
+                "fileName": "cv1.md",
+                "contentType": "text/markdown",
+                "fileSizeBytes": 1024,
+            },
+        ).json()["cvVersionId"]
+
+        response = client.put(
+            f"/v1/cv-versions/{cv_id}/markdown",
+            headers=_headers(user_id),
+            json={"markdownContent": "# Too early"},
+        )
+        assert response.status_code == 409
+
+        asyncio.run(_set_conversion_status(cv_id, Cvconversionstatus.FAILED))
+        failed_response = client.put(
+            f"/v1/cv-versions/{cv_id}/markdown",
+            headers=_headers(user_id),
+            json={"markdownContent": "# Still too early"},
+        )
+        assert failed_response.status_code == 409
+
+
+def test_update_markdown_rejects_empty_content(user_id):
+    with TestClient(app) as client:
+        cv_id = client.post(
+            "/v1/cv-versions",
+            headers=_headers(user_id),
+            json={
+                "label": "CV 1",
+                "fileName": "cv1.md",
+                "contentType": "text/markdown",
+                "fileSizeBytes": 1024,
+            },
+        ).json()["cvVersionId"]
+        asyncio.run(_set_markdown(cv_id, "# Jane Doe"))
+
+        response = client.put(
+            f"/v1/cv-versions/{cv_id}/markdown",
+            headers=_headers(user_id),
+            json={"markdownContent": "   \n  "},
+        )
+        assert response.status_code == 400
+
+        unchanged = client.get(f"/v1/cv-versions/{cv_id}/markdown", headers=_headers(user_id))
+        assert unchanged.json()["markdownContent"] == "# Jane Doe"
+
+
+def test_update_markdown_sends_no_queue_message(user_id):
+    _drain_cv_conversion_queue()
+    with TestClient(app) as client:
+        cv_id = client.post(
+            "/v1/cv-versions",
+            headers=_headers(user_id),
+            json={
+                "label": "CV 1",
+                "fileName": "cv1.md",
+                "contentType": "text/markdown",
+                "fileSizeBytes": 1024,
+            },
+        ).json()["cvVersionId"]
+        asyncio.run(_set_markdown(cv_id, "# Jane Doe"))
+        _drain_cv_conversion_queue()
+
+        response = client.put(
+            f"/v1/cv-versions/{cv_id}/markdown",
+            headers=_headers(user_id),
+            json={"markdownContent": "# Jane Doe, edited"},
+        )
+        assert response.status_code == 200
+        assert _drain_cv_conversion_queue() == []
+
+
 def test_patch_returns_404_for_other_users_cv(user_id):
     other_user_id = None
     with TestClient(app) as client:

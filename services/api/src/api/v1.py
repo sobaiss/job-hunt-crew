@@ -558,6 +558,50 @@ async def get_cv_version_markdown(
     )
 
 
+class UpdateCVVersionMarkdownRequest(BaseModel):
+    markdownContent: Any = None
+
+
+@router.put(
+    "/cv-versions/{cv_version_id}/markdown", response_model=CVVersionMarkdownResponse
+)
+async def update_cv_version_markdown(
+    cv_version_id: str,
+    req: UpdateCVVersionMarkdownRequest,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> CVVersionMarkdownResponse:
+    """Save a candidate's hand-edit of a CV version's Markdown rendition
+    in place (issue #185, docs/adr/0025) — deliberately not a supersede: only
+    `markdownContent` and `updatedAt` change, no new CVVersion row, no queue
+    message, no S3 write. User-scoped like the GET: another user's CV, or one
+    that doesn't exist, is a 404. Superseded is a 409, same shape `replace`
+    already uses. Not yet CONVERTED is also a 409 — there must be something
+    to edit.
+    """
+    existing = await session.get(CVVersion, cv_version_id)
+    if existing is None or existing.userId != user_id:
+        raise HTTPException(status_code=404, detail="Not found")
+    if existing.supersededById is not None:
+        raise HTTPException(status_code=409, detail="This CV version has already been replaced")
+    if existing.conversionStatus != Cvconversionstatus.CONVERTED:
+        raise HTTPException(status_code=409, detail="This CV version is not yet converted")
+
+    markdown_content = req.markdownContent if isinstance(req.markdownContent, str) else ""
+    if not markdown_content.strip():
+        raise HTTPException(status_code=400, detail="markdownContent is required")
+
+    existing.markdownContent = markdown_content
+    existing.updatedAt = _now()
+
+    await session.commit()
+
+    return CVVersionMarkdownResponse(
+        markdownContent=existing.markdownContent,
+        conversionStatus=existing.conversionStatus.value,
+    )
+
+
 class ConvertCVVersionResponse(BaseModel):
     conversionStatus: str
 
