@@ -113,6 +113,13 @@ services:
       # the docker-network hostname `minio`, or the browser's PUT to the
       # presigned URL can't resolve it.
       S3_ENDPOINT: http://localhost:9000
+      # Unlike S3_ENDPOINT above, this is for calls this container makes
+      # itself over the network (delete_object, head_object, ... —
+      # make_internal_s3_client, docs/adr/0027) rather than ones it just
+      # signs a URL for. localhost:9000 from inside this container is this
+      # container, not the host running MinIO's exposed port, so those calls
+      # need the docker-network hostname instead, same as the worker below.
+      S3_INTERNAL_ENDPOINT: http://minio:9000
       S3_REGION: us-east-1
       S3_BUCKET: job-hunt-crew
       S3_FORCE_PATH_STYLE: "true"

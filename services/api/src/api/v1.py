@@ -51,7 +51,7 @@ from .document_render import (
     render_markdown_to_pdf,
     render_markdown_to_text,
 )
-from .s3_client import S3_BUCKET, cv_file_key, make_s3_client
+from .s3_client import S3_BUCKET, cv_file_key, make_internal_s3_client, make_s3_client
 from .sqs_client import (
     ANALYSIS_INTAKE_QUEUE_URL,
     CV_CONVERSION_QUEUE_URL,
@@ -453,31 +453,73 @@ async def update_cv_version(
     return UpdateCVVersionResponse(cvVersion=_cv_version_response(existing))
 
 
+async def _cv_chain(session: AsyncSession, cv_version_id: str, user_id: str) -> list[CVVersion]:
+    """Every CVVersion in the same supersede chain as `cv_version_id` — the
+    whole CV (docs/adr/0027, CONTEXT.md's CV entry), not just that one row.
+    Walks backward via `supersededById` to the chain's root, then forward
+    from there, so the same full chain comes back regardless of which
+    member's id was passed in. Returns `[]` for an id that doesn't exist or
+    isn't owned by `user_id`.
+    """
+    current = await session.get(CVVersion, cv_version_id)
+    if current is None or current.userId != user_id:
+        return []
+
+    root = current
+    while True:
+        predecessor = await session.scalar(
+            select(CVVersion).where(CVVersion.supersededById == root.id)
+        )
+        if predecessor is None:
+            break
+        root = predecessor
+
+    chain = [root]
+    node = root
+    while node.supersededById is not None:
+        node = await session.get(CVVersion, node.supersededById)
+        chain.append(node)
+    return chain
+
+
 @router.delete("/cv-versions/{cv_version_id}", status_code=204)
 async def delete_cv_version(
     cv_version_id: str,
     user_id: str = Depends(require_user_id),
     session: AsyncSession = Depends(get_session),
 ) -> None:
-    """Delete a CV version the caller owns. Rejected with a 409 naming the
-    referencing Scouts while any Scout still uses it as its base CV — the
-    `Scout.cvVersionId` FK is `onDelete: Restrict` (issue #53). User-scoped:
-    another user's CV is a 404, not a 403.
+    """Delete a CV the caller owns — the whole supersede chain the given
+    CVVersion belongs to (docs/adr/0027), not just that one row: every
+    CVVersion the chain contains is removed, along with each one's S3
+    object, in one go. Rejected with a 409 naming the referencing
+    Scouts/Applications/GeneratedDocuments while any chain member is still
+    in use (`Scout`/`Application`/`GeneratedDocument.cvVersionId` are all
+    `onDelete: Restrict` — issues #53/#59/#73, now checked across the whole
+    chain rather than the single targeted row), or a 409 naming the count of
+    referencing Analyses/IngestionJobs while any chain member has been used
+    in either — `Analysis`/`IngestionJob.cvVersionId` are `onDelete: Cascade`
+    (docs/adr/0005), so without this check a delete would silently wipe that
+    history instead of being rejected. Any status counts, not just
+    `COMPLETED`/terminal ones. `isDefault` is not checked (docs/adr/0027):
+    deleting the default CV just leaves the account with none, the same
+    state a brand-new candidate starts in. User-scoped: another user's CV,
+    or one that doesn't exist, is a 404.
     """
-    existing = await session.get(CVVersion, cv_version_id)
-    if existing is None or existing.userId != user_id:
+    chain = await _cv_chain(session, cv_version_id, user_id)
+    if not chain:
         raise HTTPException(status_code=404, detail="Not found")
+    chain_ids = [row.id for row in chain]
 
     referencing = (
         await session.scalars(
-            select(Scout).where(Scout.cvVersionId == cv_version_id).order_by(Scout.createdAt)
+            select(Scout).where(Scout.cvVersionId.in_(chain_ids)).order_by(Scout.createdAt)
         )
     ).all()
     if referencing:
         labels = ", ".join(f'"{scout.label}"' for scout in referencing)
         raise HTTPException(
             status_code=409,
-            detail=f"This CV version is used by {len(referencing)} Scout(s): {labels}. "
+            detail=f"This CV is used by {len(referencing)} Scout(s): {labels}. "
             "Point those Scouts at another CV first.",
         )
 
@@ -488,7 +530,7 @@ async def delete_cv_version(
             await session.scalar(
                 select(func.count())
                 .select_from(Application)
-                .where(Application.cvVersionId == cv_version_id)
+                .where(Application.cvVersionId.in_(chain_ids))
             )
         )
         or 0
@@ -496,7 +538,7 @@ async def delete_cv_version(
     if application_count:
         raise HTTPException(
             status_code=409,
-            detail=f"This CV version is used by {application_count} Application(s). "
+            detail=f"This CV is used by {application_count} Application(s). "
             "It cannot be deleted while those Applications reference it.",
         )
 
@@ -505,7 +547,7 @@ async def delete_cv_version(
     referencing_documents = (
         await session.scalars(
             select(GeneratedDocument)
-            .where(GeneratedDocument.cvVersionId == cv_version_id)
+            .where(GeneratedDocument.cvVersionId.in_(chain_ids))
             .order_by(GeneratedDocument.createdAt)
         )
     ).all()
@@ -515,20 +557,67 @@ async def delete_cv_version(
         )
         raise HTTPException(
             status_code=409,
-            detail=f"This CV version is used by {len(referencing_documents)} generated "
+            detail=f"This CV is used by {len(referencing_documents)} generated "
             f"document(s): {labels}. It cannot be deleted while those documents "
             "reference it.",
         )
 
-    file_key = existing.fileKey
-    await session.delete(existing)
+    # Analysis.cvVersionId is onDelete: Cascade, not Restrict (docs/adr/0005)
+    # — the database won't stop this delete on its own, so this is the only
+    # guard standing between it and silently wiping every Analysis (any
+    # status) ever run against this CV.
+    analysis_count = int(
+        (
+            await session.scalar(
+                select(func.count())
+                .select_from(Analysis)
+                .where(Analysis.cvVersionId.in_(chain_ids))
+            )
+        )
+        or 0
+    )
+    if analysis_count:
+        raise HTTPException(
+            status_code=409,
+            detail=f"This CV is used by {analysis_count} Analysis(es). "
+            "It cannot be deleted while those Analyses reference it.",
+        )
+
+    # IngestionJob.cvVersionId is also onDelete: Cascade (docs/adr/0005) — the
+    # other FK a raw delete would otherwise cascade through silently, even
+    # for a job that hasn't produced an Analysis (yet, or at all).
+    ingestion_job_count = int(
+        (
+            await session.scalar(
+                select(func.count())
+                .select_from(IngestionJob)
+                .where(IngestionJob.cvVersionId.in_(chain_ids))
+            )
+        )
+        or 0
+    )
+    if ingestion_job_count:
+        raise HTTPException(
+            status_code=409,
+            detail=f"This CV is used by {ingestion_job_count} ingestion job(s). "
+            "It cannot be deleted while those jobs reference it.",
+        )
+
+    file_keys = [row.fileKey for row in chain]
+    for row in chain:
+        await session.delete(row)
     await session.commit()
 
-    # S3 delete_object is idempotent (no error when the key is already gone,
-    # e.g. the browser upload to the presigned URL never completed), so no
-    # existence check is needed before this call.
-    s3 = make_s3_client()
-    s3.delete_object(Bucket=S3_BUCKET, Key=file_key)
+    # delete_object is a real network call this process makes itself, unlike
+    # the presigned-URL generation elsewhere in this file — make_s3_client's
+    # endpoint is deliberately the *browser*-reachable one and isn't
+    # guaranteed to be reachable from here (it isn't, for local MinIO), so
+    # this needs make_internal_s3_client instead. Idempotent (no error when
+    # a key is already gone, e.g. the browser upload to the presigned URL
+    # never completed), so no existence check is needed before this call.
+    s3 = make_internal_s3_client()
+    for file_key in file_keys:
+        s3.delete_object(Bucket=S3_BUCKET, Key=file_key)
 
 
 class CVVersionMarkdownResponse(BaseModel):

@@ -53,7 +53,13 @@ export async function proxyToApi(path: string, init?: RequestInit): Promise<Resp
   }
   // arrayBuffer (not text) so binary bodies (e.g. the document-download route)
   // pass through byte-for-byte instead of being mangled by a UTF-8 round-trip.
-  const body = await res.arrayBuffer();
+  const buffer = await res.arrayBuffer();
+  // A "null body status" (204/205/304 — e.g. DELETE /v1/cv-versions/{id}'s
+  // 204) makes the Response constructor below throw if it's given a body at
+  // all, even a zero-length ArrayBuffer: it has to be literal `null`. That
+  // throw was uncaught here, so a successful upstream 204 surfaced as a 500
+  // to the caller instead of passing the 204 through.
+  const body = buffer.byteLength === 0 ? null : buffer;
   const headers: Record<string, string> = {
     "Content-Type": res.headers.get("Content-Type") || "application/json",
   };

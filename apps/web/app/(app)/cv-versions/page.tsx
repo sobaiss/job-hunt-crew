@@ -10,6 +10,7 @@ import {
   useConvertCvVersion,
   useSetDefaultCvVersion,
   useReplaceCvVersion,
+  useDeleteCvVersion,
 } from "@/hooks/use-cv-versions";
 import { useScouts } from "@/hooks/use-scouts";
 import { useColumnVisibility } from "@/hooks/use-column-visibility";
@@ -19,7 +20,11 @@ import {
   type CvVersionsSortColumn,
   type CvVersionsSortState,
 } from "@/lib/cv-versions-sort";
-import { conversionBadgeVariant, formatFileSize } from "@/lib/cv-versions-display";
+import {
+  conversionBadgeVariant,
+  cvChainLength,
+  formatFileSize,
+} from "@/lib/cv-versions-display";
 import type { ColumnConfig } from "@/lib/column-visibility";
 import { TITLE_MAX_LENGTH } from "@/lib/text-truncation";
 import { useEnumLabel } from "@/lib/enum-labels";
@@ -74,6 +79,7 @@ export default function CvVersionsPage() {
   const convert = useConvertCvVersion();
   const setDefault = useSetDefaultCvVersion();
   const replace = useReplaceCvVersion();
+  const deleteCv = useDeleteCvVersion();
   const scouts = useScouts();
   const [showSuperseded, setShowSuperseded] = useState(false);
   const [justReplacedId, setJustReplacedId] = useState<string | null>(null);
@@ -127,6 +133,11 @@ export default function CvVersionsPage() {
   const panelReplacedByLabel = panelCv?.supersededById
     ? (labelById.get(panelCv.supersededById) ?? null)
     : null;
+  // Only meaningful for the current (non-superseded) row the panel's Delete
+  // action is shown on (docs/adr/0027) — falls back to 1 for a superseded
+  // row, where the panel doesn't render that action anyway.
+  const panelChainLength =
+    panelCv && list.data ? cvChainLength(list.data, panelCv) : 1;
 
   const visibleColumns = COLUMNS.filter((column) =>
     columnVisibility.isVisible(column.key),
@@ -385,6 +396,7 @@ export default function CvVersionsPage() {
       <CvVersionPanel
         cv={panelCv}
         replacedByLabel={panelReplacedByLabel}
+        chainLength={panelChainLength}
         // `panelId !== null` (not `panelCv !== null`): right after a
         // successful Replace the panel switches to the new id (#82) before
         // the invalidated list query has refetched it, so `panelCv` is
@@ -399,10 +411,15 @@ export default function CvVersionsPage() {
         convert={convert}
         setDefault={setDefault}
         replace={replace}
+        deleteCv={deleteCv}
         onReplaced={(oldId, newId) => {
           setJustReplacedId(oldId);
           setPanelId(newId);
         }}
+        // The panel already closed itself by the time this fires; refetch
+        // the list the same way the "Actualiser" button does, rather than
+        // only relying on the mutation's own cache invalidation.
+        onDeleted={() => list.refetch()}
       />
     </main>
   );

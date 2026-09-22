@@ -12,6 +12,9 @@ from py_db.models import (
     CVVersion,
     Cvconversionstatus,
     GeneratedDocument,
+    IngestionJob,
+    Ingestionjobstatus,
+    Ingestionmode,
     JobOffer,
     Joboffersourcesite,
     User,
@@ -128,6 +131,34 @@ async def _delete_applications_for_analysis(analysis_id: str) -> None:
             await session.commit()
     finally:
         await engine.dispose()
+
+
+async def _seed_ingestion_job(*, user_id: str, cv_version_id: str) -> str:
+    """Seeds an IngestionJob directly (mirrors
+    test_v1_analyses.py's `_link_analysis_to_new_ingestion_job`) — there's no
+    endpoint that creates one referencing a CV without running the full
+    ingestion pipeline, so this bypasses it to exercise the delete check in
+    isolation."""
+    ingestion_job_id = str(uuid.uuid4())
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            session.add(
+                IngestionJob(
+                    id=ingestion_job_id,
+                    userId=user_id,
+                    mode=Ingestionmode.SINGLE_URL,
+                    cvVersionId=cv_version_id,
+                    maxOffers=1,
+                    status=Ingestionjobstatus.PENDING,
+                    updatedAt=_now(),
+                )
+            )
+            await session.commit()
+    finally:
+        await engine.dispose()
+    return ingestion_job_id
 
 
 async def _set_markdown(cv_version_id: str, markdown: str) -> None:
@@ -1024,3 +1055,170 @@ def test_delete_cv_version_blocked_while_generated_document_references_it(user_i
 
         still_there = client.get("/v1/cv-versions", headers=_headers(user_id)).json()["cvVersions"]
         assert any(row["id"] == cv_id for row in still_there)
+
+
+# --- Whole-chain delete (docs/adr/0027) ---
+# "Supprimer un CV" removes the whole supersede chain the targeted CVVersion
+# belongs to, not just that one row, and is only permitted when no chain
+# member has been used in an Analysis or IngestionJob (Cascade FKs
+# docs/adr/0005 flagged) — the gap the single-row Scout/Application/
+# GeneratedDocument (Restrict FK) checks above never covered.
+
+
+def _create_cv(client: TestClient, user_id: str, *, label: str = "CV", file_name: str = "cv.pdf") -> dict:
+    return client.post(
+        "/v1/cv-versions",
+        headers=_headers(user_id),
+        json={
+            "label": label,
+            "fileName": file_name,
+            "contentType": "application/pdf",
+            "fileSizeBytes": 1024,
+        },
+    ).json()
+
+
+def _replace_cv(client: TestClient, user_id: str, old_id: str, *, file_name: str) -> dict:
+    return client.post(
+        f"/v1/cv-versions/{old_id}/replace",
+        headers=_headers(user_id),
+        json={
+            "label": "CV",
+            "fileName": file_name,
+            "contentType": "application/pdf",
+            "fileSizeBytes": 1024,
+        },
+    ).json()
+
+
+def test_delete_cv_removes_every_version_in_the_chain(user_id):
+    with TestClient(app) as client:
+        v1 = _create_cv(client, user_id, file_name="v1.pdf")
+        v2 = _replace_cv(client, user_id, v1["cvVersionId"], file_name="v2.pdf")
+        v3 = _replace_cv(client, user_id, v2["cvVersionId"], file_name="v3.pdf")
+        chain = [v1, v2, v3]
+
+        s3 = make_s3_client()
+        for row in chain:
+            s3.put_object(Bucket=S3_BUCKET, Key=row["fileKey"], Body=b"pdf-bytes")
+
+        response = client.delete(
+            f"/v1/cv-versions/{v3['cvVersionId']}", headers=_headers(user_id)
+        )
+        assert response.status_code == 204
+
+        remaining_ids = {
+            row["id"]
+            for row in client.get("/v1/cv-versions", headers=_headers(user_id)).json()["cvVersions"]
+        }
+        assert remaining_ids.isdisjoint({row["cvVersionId"] for row in chain})
+        for row in chain:
+            assert not _object_exists(row["fileKey"])
+
+
+def test_delete_cv_via_a_superseded_members_id_removes_the_whole_chain(user_id):
+    """The web client only ever triggers this from the current (non-
+    superseded) row, but the API resolves the same chain regardless of which
+    member's id it's called with (docs/adr/0027)."""
+    with TestClient(app) as client:
+        old = _create_cv(client, user_id, file_name="old.pdf")
+        new = _replace_cv(client, user_id, old["cvVersionId"], file_name="new.pdf")
+
+        response = client.delete(
+            f"/v1/cv-versions/{old['cvVersionId']}", headers=_headers(user_id)
+        )
+        assert response.status_code == 204
+
+        remaining_ids = {
+            row["id"]
+            for row in client.get("/v1/cv-versions", headers=_headers(user_id)).json()["cvVersions"]
+        }
+        assert remaining_ids.isdisjoint({old["cvVersionId"], new["cvVersionId"]})
+
+
+def test_delete_cv_blocked_when_an_older_version_was_analysed(user_id):
+    with TestClient(app) as client:
+        old = _create_cv(client, user_id, file_name="old.pdf")
+        asyncio.run(
+            _seed_analysis(
+                user_id=user_id, cv_version_id=old["cvVersionId"], status=Analysisstatus.COMPLETED
+            )
+        )
+        new = _replace_cv(client, user_id, old["cvVersionId"], file_name="new.pdf")
+
+        # The Analysis is against the now-superseded version, not the
+        # current one the delete was called with — the check must still
+        # catch it, since it's the same CV (docs/adr/0027).
+        response = client.delete(
+            f"/v1/cv-versions/{new['cvVersionId']}", headers=_headers(user_id)
+        )
+        assert response.status_code == 409
+        assert "Analysis" in response.json()["detail"]
+
+        remaining_ids = {
+            row["id"]
+            for row in client.get("/v1/cv-versions", headers=_headers(user_id)).json()["cvVersions"]
+        }
+        assert {old["cvVersionId"], new["cvVersionId"]} <= remaining_ids
+
+
+def test_delete_cv_blocked_by_analysis_regardless_of_status(user_id):
+    with TestClient(app) as client:
+        cv = _create_cv(client, user_id)
+        # PENDING, not COMPLETED — still real history a delete must not
+        # silently wipe out (docs/adr/0027).
+        asyncio.run(
+            _seed_analysis(
+                user_id=user_id, cv_version_id=cv["cvVersionId"], status=Analysisstatus.PENDING
+            )
+        )
+
+        response = client.delete(f"/v1/cv-versions/{cv['cvVersionId']}", headers=_headers(user_id))
+        assert response.status_code == 409
+        assert "Analysis" in response.json()["detail"]
+
+
+def test_delete_cv_blocked_when_chain_member_referenced_by_ingestion_job(user_id):
+    with TestClient(app) as client:
+        cv = _create_cv(client, user_id)
+        asyncio.run(_seed_ingestion_job(user_id=user_id, cv_version_id=cv["cvVersionId"]))
+
+        response = client.delete(f"/v1/cv-versions/{cv['cvVersionId']}", headers=_headers(user_id))
+        assert response.status_code == 409
+        assert "ingestion job" in response.json()["detail"]
+
+        still_there = client.get("/v1/cv-versions", headers=_headers(user_id)).json()["cvVersions"]
+        assert any(row["id"] == cv["cvVersionId"] for row in still_there)
+
+
+def test_delete_cv_succeeds_even_when_it_is_the_default_cv(user_id):
+    with TestClient(app) as client:
+        cv = _create_cv(client, user_id)
+        client.patch(
+            f"/v1/cv-versions/{cv['cvVersionId']}",
+            headers=_headers(user_id),
+            json={"isDefault": True},
+        )
+
+        response = client.delete(f"/v1/cv-versions/{cv['cvVersionId']}", headers=_headers(user_id))
+        assert response.status_code == 204
+
+
+def test_delete_cv_returns_404_for_other_users_cv(user_id):
+    with TestClient(app) as client:
+        cv = _create_cv(client, user_id)
+
+        other_user_id = asyncio.run(_create_user())
+        try:
+            response = client.delete(
+                f"/v1/cv-versions/{cv['cvVersionId']}", headers=_headers(other_user_id)
+            )
+            assert response.status_code == 404
+        finally:
+            asyncio.run(_delete_user(other_user_id))
+
+
+def test_delete_cv_returns_404_for_nonexistent_cv(user_id):
+    with TestClient(app) as client:
+        response = client.delete(f"/v1/cv-versions/{uuid.uuid4()}", headers=_headers(user_id))
+        assert response.status_code == 404
