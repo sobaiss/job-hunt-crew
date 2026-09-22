@@ -238,7 +238,10 @@ export function LandingPage() {
             </a>
             <LocaleSwitch />
             <Button asChild size="sm">
-              <Link href="/sign-in">{t("signIn")}</Link>
+              <Link href="/sign-in">
+                {t("signIn")}
+                <ArrowRight aria-hidden="true" />
+              </Link>
             </Button>
           </nav>
         </div>
@@ -257,7 +260,10 @@ export function LandingPage() {
             </p>
             <div className="mt-1 flex flex-wrap items-center gap-5">
               <Button asChild size="lg">
-                <Link href="/sign-in">{t("signIn")}</Link>
+                <Link href="/sign-in">
+                  {t("signIn")}
+                  <ArrowRight aria-hidden="true" />
+                </Link>
               </Button>
               <a
                 href="#how"
@@ -424,7 +430,10 @@ export function LandingPage() {
             {t("finalCta.heading")}
           </h2>
           <Button asChild size="lg">
-            <Link href="/sign-in">{t("signIn")}</Link>
+            <Link href="/sign-in">
+              {t("signIn")}
+              <ArrowRight aria-hidden="true" />
+            </Link>
           </Button>
           <p className="text-xs text-muted">{t("signInMethods")}</p>
         </div>

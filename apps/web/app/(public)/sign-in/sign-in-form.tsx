@@ -4,6 +4,7 @@ import * as React from "react";
 import { useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { useTranslations } from "next-intl";
+import { KeyRound, LoaderCircle, LogIn, Mail } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -106,17 +107,22 @@ export function SignInForm() {
           </p>
         )}
 
+        {/* One icon per mechanism rather than per provider — lucide carries no
+            brand marks, so the key stands for "sign in with an account you
+            already have", against LogIn (password) and Mail (magic link). */}
         <div className="flex flex-col gap-2">
           <Button
             variant="outline"
             onClick={() => signIn("google", { callbackUrl })}
           >
+            <KeyRound aria-hidden="true" />
             {t("google")}
           </Button>
           <Button
             variant="outline"
             onClick={() => signIn("linkedin", { callbackUrl })}
           >
+            <KeyRound aria-hidden="true" />
             {t("linkedin")}
           </Button>
         </div>
@@ -157,6 +163,11 @@ export function SignInForm() {
             </p>
           )}
           <Button type="submit" disabled={credentialsSubmitting || !password}>
+            {credentialsSubmitting ? (
+              <LoaderCircle className="animate-spin" aria-hidden="true" />
+            ) : (
+              <LogIn aria-hidden="true" />
+            )}
             {credentialsSubmitting ? t("sending") : t("signInWithPassword")}
           </Button>
         </form>
@@ -168,6 +179,11 @@ export function SignInForm() {
             className="w-full"
             disabled={status === "sending"}
           >
+            {status === "sending" ? (
+              <LoaderCircle className="animate-spin" aria-hidden="true" />
+            ) : (
+              <Mail aria-hidden="true" />
+            )}
             {status === "sending" ? t("sending") : t("magicLink")}
           </Button>
         </form>

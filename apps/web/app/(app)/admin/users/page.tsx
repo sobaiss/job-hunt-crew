@@ -4,6 +4,18 @@ import { Suspense, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useTranslations } from "next-intl";
+import {
+  Ban,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  CircleCheck,
+  Eraser,
+  LoaderCircle,
+  Pencil,
+  Save,
+  X,
+} from "lucide-react";
 
 import {
   useAdminAuditEvents,
@@ -110,6 +122,7 @@ function OverrideEditor({
           setOverride.mutate({ kind, limit: draft.trim() === "" ? null : Number(draft) })
         }
       >
+        <Save aria-hidden="true" />
         {t("setOverride")}
       </Button>
       {hasOverride && (
@@ -119,6 +132,7 @@ function OverrideEditor({
           disabled={clearOverride.isPending}
           onClick={() => clearOverride.mutate(kind)}
         >
+          <Eraser aria-hidden="true" />
           {t("clearOverride")}
         </Button>
       )}
@@ -157,9 +171,11 @@ function BlockUnblockAction({
         <span className="text-sm text-muted">
           {blocked ? t("unblockConfirm") : t("blockConfirm")}
         </span>
+        {/* Confirming a block is the destructive half; confirming an unblock
+            gives access back, so it stays an ordinary primary action. */}
         <Button
           type="button"
-          variant="outline"
+          variant={blocked ? "default" : "destructive"}
           size="sm"
           disabled={setBlocked.isPending}
           onClick={(event) => {
@@ -167,11 +183,16 @@ function BlockUnblockAction({
             setBlocked.mutate(!blocked, { onSuccess: () => setConfirming(false) });
           }}
         >
+          {setBlocked.isPending ? (
+            <LoaderCircle className="animate-spin" aria-hidden="true" />
+          ) : (
+            <Check aria-hidden="true" />
+          )}
           {t("confirmAction")}
         </Button>
         <Button
           type="button"
-          variant="outline"
+          variant="ghost"
           size="sm"
           disabled={setBlocked.isPending}
           onClick={(event) => {
@@ -179,6 +200,7 @@ function BlockUnblockAction({
             setConfirming(false);
           }}
         >
+          <X aria-hidden="true" />
           {t("cancelAction")}
         </Button>
       </div>
@@ -188,7 +210,7 @@ function BlockUnblockAction({
   return (
     <Button
       type="button"
-      variant="outline"
+      variant={blocked ? "outline" : "destructive-ghost"}
       size="sm"
       disabled={isSelf}
       title={isSelf ? t("selfActionDisabled") : undefined}
@@ -197,6 +219,11 @@ function BlockUnblockAction({
         setConfirming(true);
       }}
     >
+      {blocked ? (
+        <CircleCheck aria-hidden="true" />
+      ) : (
+        <Ban aria-hidden="true" />
+      )}
       {blocked ? t("unblockAction") : t("blockAction")}
     </Button>
   );
@@ -225,6 +252,7 @@ function NameEditor({ userId, name }: { userId: string; name: string | null }) {
             setEditing(true);
           }}
         >
+          <Pencil aria-hidden="true" />
           {t("editNameAction")}
         </Button>
       </div>
@@ -248,9 +276,15 @@ function NameEditor({ userId, name }: { userId: string; name: string | null }) {
           setInfo.mutate(draft.trim(), { onSuccess: () => setEditing(false) })
         }
       >
+        {setInfo.isPending ? (
+          <LoaderCircle className="animate-spin" aria-hidden="true" />
+        ) : (
+          <Save aria-hidden="true" />
+        )}
         {t("saveNameAction")}
       </Button>
-      <Button type="button" variant="outline" size="sm" onClick={() => setEditing(false)}>
+      <Button type="button" variant="ghost" size="sm" onClick={() => setEditing(false)}>
+        <X aria-hidden="true" />
         {t("cancelAction")}
       </Button>
     </div>
@@ -295,15 +329,21 @@ function RoleEditor({
             setRole.mutate(pendingRole, { onSuccess: () => setPendingRole(null) })
           }
         >
+          {setRole.isPending ? (
+            <LoaderCircle className="animate-spin" aria-hidden="true" />
+          ) : (
+            <Check aria-hidden="true" />
+          )}
           {t("confirmAction")}
         </Button>
         <Button
           type="button"
-          variant="outline"
+          variant="ghost"
           size="sm"
           disabled={setRole.isPending}
           onClick={() => setPendingRole(null)}
         >
+          <X aria-hidden="true" />
           {t("cancelAction")}
         </Button>
       </div>
@@ -399,6 +439,11 @@ function PlanEditor({
             })
           }
         >
+          {setPlan.isPending ? (
+            <LoaderCircle className="animate-spin" aria-hidden="true" />
+          ) : (
+            <Check aria-hidden="true" />
+          )}
           {t("assignPlanAction")}
         </Button>
       </div>
@@ -822,6 +867,7 @@ function UsersTable() {
                 disabled={state.page <= 1}
                 onClick={() => updateState({ page: state.page - 1 })}
               >
+                <ChevronLeft aria-hidden="true" />
                 {t("pagination.previous")}
               </Button>
               <Button
@@ -832,6 +878,7 @@ function UsersTable() {
                 onClick={() => updateState({ page: state.page + 1 })}
               >
                 {t("pagination.next")}
+                <ChevronRight aria-hidden="true" />
               </Button>
             </div>
           </div>

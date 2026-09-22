@@ -4,7 +4,7 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { RefreshCw } from "lucide-react";
+import { Plus, RefreshCw } from "lucide-react";
 
 import { useScouts, type ScoutStatus } from "@/hooks/use-scouts";
 import { useCvVersions } from "@/hooks/use-cv-versions";
@@ -164,11 +164,17 @@ function ScoutsPageContent() {
             disabled={isFetching}
             onClick={() => refetch()}
           >
-            <RefreshCw className={isFetching ? "size-4 animate-spin" : "size-4"} />
+            <RefreshCw
+              aria-hidden="true"
+              className={isFetching ? "animate-spin" : undefined}
+            />
             {t("list.refresh")}
           </Button>
-          <Button asChild>
-            <Link href="/scouts/new">{t("list.new")}</Link>
+          <Button asChild size="sm">
+            <Link href="/scouts/new">
+              <Plus aria-hidden="true" />
+              {t("list.new")}
+            </Link>
           </Button>
         </div>
       </div>

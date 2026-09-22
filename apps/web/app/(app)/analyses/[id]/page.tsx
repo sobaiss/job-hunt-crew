@@ -5,7 +5,14 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useTranslations } from "next-intl";
-import { ExternalLink, GitCompare } from "lucide-react";
+import {
+  Check,
+  ExternalLink,
+  GitCompare,
+  LoaderCircle,
+  RotateCw,
+  X,
+} from "lucide-react";
 
 import {
   useAnalysis,
@@ -104,13 +111,14 @@ export default function AnalysisDetailPage() {
               {t("quickView.viewOffer")}
             </a>
           </Button>
-          <Link
-            href={`/analyses/compare/${analysis.jobOffer.id}`}
-            className="inline-flex items-center gap-1.5 text-sm text-accent hover:underline"
-          >
-            <GitCompare className="size-3.5" aria-hidden="true" />
-            {t("compareLink")}
-          </Link>
+          {/* A button, not the bare accent link it used to be — it sits in the
+              same action row as "Voir l'offre" and does the same kind of job. */}
+          <Button asChild variant="outline" size="sm">
+            <Link href={`/analyses/compare/${analysis.jobOffer.id}`}>
+              <GitCompare aria-hidden="true" />
+              {t("compareLink")}
+            </Link>
+          </Button>
         </div>
       </div>
 
@@ -151,11 +159,16 @@ export default function AnalysisDetailPage() {
                     })
                   }
                 >
+                  {rerun.isPending ? (
+                    <LoaderCircle className="animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Check aria-hidden="true" />
+                  )}
                   {t("bulk.generateConfirmAction")}
                 </Button>
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="ghost"
                   size="sm"
                   disabled={rerun.isPending}
                   onClick={() => {
@@ -163,6 +176,7 @@ export default function AnalysisDetailPage() {
                     setRelaunchCvVersionId("");
                   }}
                 >
+                  <X aria-hidden="true" />
                   {t("bulk.cancel")}
                 </Button>
               </div>
@@ -195,6 +209,11 @@ export default function AnalysisDetailPage() {
               }}
               disabled={rerun.isPending}
             >
+              {rerun.isPending ? (
+                <LoaderCircle className="animate-spin" aria-hidden="true" />
+              ) : (
+                <RotateCw aria-hidden="true" />
+              )}
               {t("detail.retry")}
             </Button>
           )}

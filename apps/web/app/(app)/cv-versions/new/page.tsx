@@ -7,7 +7,16 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useTranslations } from "next-intl";
-import { Check } from "lucide-react";
+import {
+  Check,
+  Clock,
+  LoaderCircle,
+  Pencil,
+  RotateCw,
+  Star,
+  Upload,
+  X,
+} from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -122,10 +131,14 @@ function ImportedActions({ cvVersionId }: { cvVersionId: string }) {
   return (
     <div className="flex flex-wrap gap-3">
       <Button asChild>
-        <Link href="/cv-versions">{t("import.finish")}</Link>
+        <Link href="/cv-versions">
+          <Check aria-hidden="true" />
+          {t("import.finish")}
+        </Link>
       </Button>
       <Button asChild variant="outline">
         <Link href={`/cv-versions/${cvVersionId}/edit`}>
+          <Pencil aria-hidden="true" />
           {t("import.edit")}
         </Link>
       </Button>
@@ -136,6 +149,11 @@ function ImportedActions({ cvVersionId }: { cvVersionId: string }) {
           disabled={setDefault.isPending}
           onClick={() => setDefault.mutate(cvVersionId)}
         >
+          {setDefault.isPending ? (
+            <LoaderCircle className="animate-spin" aria-hidden="true" />
+          ) : (
+            <Star aria-hidden="true" />
+          )}
           {setDefault.isPending
             ? t("list.settingDefault")
             : t("list.setDefault")}
@@ -202,6 +220,7 @@ function StoringFailed({
             retrying && "pointer-events-none opacity-50",
           )}
         >
+          <Upload aria-hidden="true" />
           {t("retryImport")}
           <input
             type="file"
@@ -213,6 +232,11 @@ function StoringFailed({
         </label>
       ) : (
         <Button type="button" disabled={retrying} onClick={onRetry}>
+          {retrying ? (
+            <LoaderCircle className="animate-spin" aria-hidden="true" />
+          ) : (
+            <RotateCw aria-hidden="true" />
+          )}
           {t("retryImport")}
         </Button>
       )}
@@ -254,6 +278,11 @@ function ConversionFailed({
   return (
     <ImportFailure message={t("import.failure.conversion")} detail={detail}>
       <Button type="button" disabled={busy} onClick={onRetry}>
+        {busy ? (
+          <LoaderCircle className="animate-spin" aria-hidden="true" />
+        ) : (
+          <RotateCw aria-hidden="true" />
+        )}
         {t("import.retryConversion")}
       </Button>
       <label
@@ -263,6 +292,7 @@ function ConversionFailed({
           busy && "pointer-events-none opacity-50",
         )}
       >
+        <Upload aria-hidden="true" />
         {busy ? t("import.replacing") : t("import.replaceFile")}
         <input
           type="file"
@@ -388,6 +418,7 @@ function ImportProgress({
               <div className="flex flex-col items-start gap-3">
                 <p className="text-sm">{t("import.background")}</p>
                 <Button type="button" variant="outline" onClick={keepWaiting}>
+                  <Clock aria-hidden="true" />
                   {t("import.keepWaiting")}
                 </Button>
               </div>
@@ -647,6 +678,7 @@ export default function NewCvVersionPage() {
         </h1>
         <Button asChild variant="ghost">
           <Link href="/cv-versions" onClick={onClose}>
+            <X aria-hidden="true" />
             {t("import.close")}
           </Link>
         </Button>
@@ -718,6 +750,7 @@ export default function NewCvVersionPage() {
               </div>
 
               <Button type="submit" className="self-start">
+                <Upload aria-hidden="true" />
                 {t("form.submit")}
               </Button>
             </form>

@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { Check, LoaderCircle, Pencil, Save, X } from "lucide-react";
 
 import {
   useCvVersions,
@@ -103,6 +104,7 @@ export default function CvVersionEditPage() {
         </div>
         {!isEditing && (
           <Button type="button" onClick={startEditing} disabled={!markdown.data}>
+            <Pencil aria-hidden="true" />
             {t("edit.modify")}
           </Button>
         )}
@@ -140,9 +142,11 @@ export default function CvVersionEditPage() {
           {!confirming && (
             <div className="flex items-center gap-2">
               <Button type="button" disabled={!canSave} onClick={() => setConfirming(true)}>
+                <Save aria-hidden="true" />
                 {t("edit.save")}
               </Button>
-              <Button type="button" variant="outline" onClick={cancelEditing}>
+              <Button type="button" variant="ghost" onClick={cancelEditing}>
+                <X aria-hidden="true" />
                 {t("edit.cancel")}
               </Button>
             </div>
@@ -152,14 +156,20 @@ export default function CvVersionEditPage() {
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted">{t("edit.saveConfirm")}</span>
               <Button type="button" disabled={save.isPending} onClick={confirmSave}>
+                {save.isPending ? (
+                  <LoaderCircle className="animate-spin" aria-hidden="true" />
+                ) : (
+                  <Check aria-hidden="true" />
+                )}
                 {t("edit.confirmAction")}
               </Button>
               <Button
                 type="button"
-                variant="outline"
+                variant="ghost"
                 disabled={save.isPending}
                 onClick={() => setConfirming(false)}
               >
+                <X aria-hidden="true" />
                 {t("edit.cancelAction")}
               </Button>
             </div>

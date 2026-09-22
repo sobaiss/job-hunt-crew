@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { ArrowLeft } from "lucide-react";
 
 import {
   useApplication,
@@ -131,7 +132,10 @@ export default function ApplicationDetailPage() {
       </section>
 
       <Button asChild variant="outline" size="sm" className="w-fit">
-        <Link href="/applications">{t("detail.back")}</Link>
+        <Link href="/applications">
+          <ArrowLeft aria-hidden="true" />
+          {t("detail.back")}
+        </Link>
       </Button>
     </main>
   );

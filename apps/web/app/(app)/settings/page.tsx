@@ -2,6 +2,7 @@
 
 import { signOut, useSession } from "next-auth/react";
 import { useTranslations } from "next-intl";
+import { LogOut } from "lucide-react";
 
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LocaleSwitch } from "@/components/locale-switch";
@@ -87,6 +88,7 @@ export default function SettingsPage() {
         <h2 className="text-sm font-medium text-muted">{t("session.heading")}</h2>
         <div>
           <Button variant="outline" onClick={() => void signOut({ callbackUrl: "/" })}>
+            <LogOut aria-hidden="true" />
             {t("session.signOut")}
           </Button>
         </div>

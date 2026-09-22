@@ -21,6 +21,45 @@ Six palette tokens (`--background`, `--panel`, `--foreground`, `--muted`,
   these six + three — see the comment above `@theme inline` in `globals.css`
   before adding a new shadcn primitive mapping.
 
+## Buttons
+
+A `Button`'s variant encodes **what the action is worth**, not what colour it
+should be, and every button that carries a label also carries a
+[lucide](https://lucide.dev) icon naming the verb. The icon leads, except when
+it points the way out of the current view — "Suivant ›", "Voir les résultats
+→" — where it trails the label it is pointing from. Icons are `aria-hidden`
+(the label is the accessible name) and need no `size-*` class, since
+`buttonVariants` sizes them.
+
+| Role | Variant | Example |
+|---|---|---|
+| The one primary action of a surface | `default` (coral) | Analyser, Importer, Run now |
+| Secondary action | `outline` | Modifier, Convertir, Exporter |
+| Tertiary / dismissive | `ghost` (muted until hover) | Annuler, Fermer, Effacer |
+| Destructive, offered among others | `destructive-ghost` | Supprimer, Bloquer |
+| Destructive, once confirmed | `destructive` | the second click only |
+| Icon-only affordance | `ghost` + `size="icon"` + `aria-label` | topbar, table rows |
+
+At most one `default` button per surface — a pair of coral buttons makes
+neither one primary. A confirmation replaces its trigger's row rather than
+adding to it, so the destructive pair reads "confirm or back out".
+
+An action that is running swaps its icon for a spinner and keeps its width:
+
+```tsx
+<Button disabled={run.isPending} onClick={() => run.mutate()}>
+  {run.isPending ? <LoaderCircle className="animate-spin" aria-hidden /> : <Play aria-hidden />}
+  {run.isPending ? t("running") : t("runNow")}
+</Button>
+```
+
+Icons are shared across surfaces so a verb keeps one shape everywhere: `Play`
+run/resume, `Pause` pause, `Archive` archive, `Pencil` edit, `Trash2` delete,
+`Check` confirm/save, `X` cancel/dismiss, `RefreshCw` refresh/re-run,
+`RotateCw` retry, `Plus` create, `Upload` import, `Download` export,
+`ExternalLink` leaves the app, `ArrowLeft`/`ArrowRight` navigate,
+`ChevronLeft`/`ChevronRight` paginate, `Sparkles` generates via the LLM.
+
 ## Type scale
 
 `--text-xs` through `--text-5xl`, each paired with a `--text-{name}--line-height`,

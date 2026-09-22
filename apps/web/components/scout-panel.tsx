@@ -234,7 +234,7 @@ export function ScoutPanel({
                     <Button
                       type="button"
                       variant="ghost"
-                      className="ml-auto text-muted hover:text-foreground"
+                      className="ml-auto"
                       disabled={update.isPending}
                       onClick={() => update.mutate({ status: "ARCHIVED" })}
                     >

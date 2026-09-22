@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { Check, LoaderCircle, Plus } from "lucide-react";
 
 import {
   useCreateScout,
@@ -184,6 +185,13 @@ export function ScoutForm({ scout }: { scout?: Scout }) {
             disabled={mutation.isPending || !cvVersionId}
             className="self-start"
           >
+            {mutation.isPending ? (
+              <LoaderCircle className="animate-spin" aria-hidden="true" />
+            ) : isEdit ? (
+              <Check aria-hidden="true" />
+            ) : (
+              <Plus aria-hidden="true" />
+            )}
             {mutation.isPending
               ? isEdit
                 ? t("saving")

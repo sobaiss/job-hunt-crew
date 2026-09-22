@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { AlertTriangle, Lock } from "lucide-react";
+import { AlertTriangle, Eraser, LoaderCircle, Lock, Save, Undo2, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import {
@@ -302,6 +302,11 @@ function SecretParameter({
               onClearedChange(!cleared);
             }}
           >
+            {cleared ? (
+              <Undo2 aria-hidden="true" />
+            ) : (
+              <Eraser aria-hidden="true" />
+            )}
             {t(cleared ? "keepAction" : "clearAction")}
           </Button>
         )}
@@ -406,9 +411,15 @@ function ProviderEditForm({ provider, onClose }: { provider: AdminLlmProvider; o
           disabled={save.isPending}
           onClick={() => save.mutate(changes(), { onSuccess: onClose })}
         >
+          {save.isPending ? (
+            <LoaderCircle className="animate-spin" aria-hidden="true" />
+          ) : (
+            <Save aria-hidden="true" />
+          )}
           {t("saveAction")}
         </Button>
-        <Button variant="outline" onClick={onClose}>
+        <Button variant="ghost" onClick={onClose}>
+          <X aria-hidden="true" />
           {t("cancelAction")}
         </Button>
       </SheetFooter>

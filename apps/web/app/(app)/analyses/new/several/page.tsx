@@ -6,6 +6,7 @@ import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useTranslations } from "next-intl";
+import { LoaderCircle, Sparkles } from "lucide-react";
 
 import {
   useCreateIngestionJob,
@@ -206,6 +207,11 @@ export default function AnalyseSeveralOffersPage() {
                     disabled={create.isPending || !cvVersionId}
                     className="self-start"
                   >
+                    {create.isPending ? (
+                      <LoaderCircle className="animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Sparkles aria-hidden="true" />
+                    )}
                     {create.isPending ? t("submitting") : t("submit")}
                   </Button>
 

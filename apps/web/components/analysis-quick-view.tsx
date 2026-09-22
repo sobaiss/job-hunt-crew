@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useTranslations } from "next-intl";
 import { useQueryClient } from "@tanstack/react-query";
+import { Check, ExternalLink, LoaderCircle, RotateCw, X } from "lucide-react";
 
 import {
   TERMINAL_ANALYSIS_STATUSES,
@@ -16,6 +17,7 @@ import { useSetApplicationStatus } from "@/hooks/use-applications";
 import {
   TRACKING_STATUS_TRANSITIONS,
   trackingStatusBadgeVariant,
+  trackingStatusIcon,
   trackingStatusOf,
 } from "@/lib/tracking-status";
 import { analysisBadgeVariant } from "@/components/analysis-row";
@@ -127,6 +129,7 @@ export function AnalysisQuickView({
                 target="_blank"
                 rel="noopener noreferrer"
               >
+                <ExternalLink aria-hidden="true" />
                 {t("quickView.viewOffer")}
               </a>
             </Button>
@@ -152,7 +155,9 @@ export function AnalysisQuickView({
                 <div className="flex flex-wrap gap-2">
                   {TRACKING_STATUS_TRANSITIONS.filter(
                     (transition) => transition.trackingStatus !== tracking,
-                  ).map((transition) => (
+                  ).map((transition) => {
+                    const Icon = trackingStatusIcon(transition.trackingStatus);
+                    return (
                     <Button
                       key={transition.trackingStatus}
                       variant="outline"
@@ -173,9 +178,11 @@ export function AnalysisQuickView({
                         )
                       }
                     >
+                      <Icon aria-hidden="true" />
                       {trackingStatusLabel(transition.trackingStatus)}
                     </Button>
-                  ))}
+                    );
+                  })}
                 </div>
                 {setApplicationStatus.isError && (
                   <p role="alert" className="text-sm text-destructive">
@@ -231,11 +238,16 @@ export function AnalysisQuickView({
                           )
                         }
                       >
+                        {relaunch.isPending ? (
+                          <LoaderCircle className="animate-spin" aria-hidden="true" />
+                        ) : (
+                          <Check aria-hidden="true" />
+                        )}
                         {t("bulk.generateConfirmAction")}
                       </Button>
                       <Button
                         type="button"
-                        variant="outline"
+                        variant="ghost"
                         size="sm"
                         disabled={relaunch.isPending}
                         onClick={() => {
@@ -243,6 +255,7 @@ export function AnalysisQuickView({
                           setRelaunchCvVersionId("");
                         }}
                       >
+                        <X aria-hidden="true" />
                         {t("bulk.cancel")}
                       </Button>
                     </div>
@@ -271,6 +284,7 @@ export function AnalysisQuickView({
                       setRelaunchConfirming(true);
                     }}
                   >
+                    <RotateCw aria-hidden="true" />
                     {td("retry")}
                   </Button>
                 )}

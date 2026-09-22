@@ -3,6 +3,7 @@
 import { Suspense, useMemo, useRef } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 
 import {
   useAdminCvVersions,
@@ -79,6 +80,10 @@ function ReconvertAction({ cvVersionId }: { cvVersionId: string }) {
       disabled={reconvert.isPending}
       onClick={() => reconvert.mutate(cvVersionId)}
     >
+      <RefreshCw
+        aria-hidden="true"
+        className={reconvert.isPending ? "animate-spin" : undefined}
+      />
       {t("reconvertAction")}
     </Button>
   );
@@ -298,6 +303,7 @@ function CvVersionsTable() {
                 disabled={state.page <= 1}
                 onClick={() => updateState({ page: state.page - 1 })}
               >
+                <ChevronLeft aria-hidden="true" />
                 {t("pagination.previous")}
               </Button>
               <Button
@@ -308,6 +314,7 @@ function CvVersionsTable() {
                 onClick={() => updateState({ page: state.page + 1 })}
               >
                 {t("pagination.next")}
+                <ChevronRight aria-hidden="true" />
               </Button>
             </div>
           </div>

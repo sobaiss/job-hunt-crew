@@ -4,7 +4,19 @@ import { Suspense, useCallback, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useQueryClient } from "@tanstack/react-query";
-import { ExternalLink, RefreshCw } from "lucide-react";
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  ExternalLink,
+  FileDown,
+  ListChecks,
+  LoaderCircle,
+  RefreshCw,
+  RotateCw,
+  Sparkles,
+  X,
+} from "lucide-react";
 
 import {
   TERMINAL_ANALYSIS_STATUSES,
@@ -43,6 +55,7 @@ import {
   ANALYSES_STATUS_FILTERS,
   TRACKING_STATUS_TRANSITIONS,
   trackingStatusBadgeVariant,
+  trackingStatusIcon,
   trackingStatusOf,
 } from "@/lib/tracking-status";
 import { useEnumLabel } from "@/lib/enum-labels";
@@ -375,7 +388,10 @@ function AnalysesTable() {
             disabled={isFetching}
             onClick={() => refetch()}
           >
-            <RefreshCw className={isFetching ? "size-4 animate-spin" : "size-4"} />
+            <RefreshCw
+              aria-hidden="true"
+              className={isFetching ? "animate-spin" : undefined}
+            />
             {t("refresh")}
           </Button>
         </div>
@@ -523,6 +539,7 @@ function AnalysesTable() {
           </span>
           {!allFilteredSelected && (
             <Button type="button" variant="link" size="sm" onClick={selectAllFiltered}>
+              <ListChecks aria-hidden="true" />
               {t("bulk.extendAction", { total: filtered.length })}
             </Button>
           )}
@@ -538,22 +555,28 @@ function AnalysesTable() {
               setBulkRelaunchConfirming(false);
             }}
           >
+            <X aria-hidden="true" />
             {t("bulk.clearSelection")}
           </Button>
           <div className="ml-auto flex flex-wrap gap-2">
-            {TRACKING_STATUS_TRANSITIONS.map((transition) => (
-              <Button
-                key={transition.trackingStatus}
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={bulkSetApplicationStatus.isPending}
-                onClick={() => handleBulkStatusChange(transition.applicationStatus)}
-              >
-                {trackingStatusLabel(transition.trackingStatus)}
-              </Button>
-            ))}
+            {TRACKING_STATUS_TRANSITIONS.map((transition) => {
+              const Icon = trackingStatusIcon(transition.trackingStatus);
+              return (
+                <Button
+                  key={transition.trackingStatus}
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={bulkSetApplicationStatus.isPending}
+                  onClick={() => handleBulkStatusChange(transition.applicationStatus)}
+                >
+                  <Icon aria-hidden="true" />
+                  {trackingStatusLabel(transition.trackingStatus)}
+                </Button>
+              );
+            })}
             <Button type="button" variant="outline" size="sm" onClick={handleExportCsv}>
+              <FileDown aria-hidden="true" />
               {t("bulk.exportCsv")}
             </Button>
             <Button
@@ -566,6 +589,7 @@ function AnalysesTable() {
                 setBulkGenerateConfirming(true);
               }}
             >
+              <Sparkles aria-hidden="true" />
               {t("bulk.generateDocuments")}
             </Button>
             <Button
@@ -578,6 +602,7 @@ function AnalysesTable() {
                 setBulkRelaunchConfirming(true);
               }}
             >
+              <RotateCw aria-hidden="true" />
               {td("retry")}
             </Button>
           </div>
@@ -601,6 +626,11 @@ function AnalysesTable() {
                   disabled={insufficientGenerationQuota || bulkCreateGeneratedDocuments.isPending}
                   onClick={handleConfirmBulkGenerate}
                 >
+                  {bulkCreateGeneratedDocuments.isPending ? (
+                    <LoaderCircle className="animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Check aria-hidden="true" />
+                  )}
                   {t("bulk.generateConfirmAction")}
                 </Button>
                 <Button
@@ -609,6 +639,7 @@ function AnalysesTable() {
                   size="sm"
                   onClick={() => setBulkGenerateConfirming(false)}
                 >
+                  <X aria-hidden="true" />
                   {t("bulk.cancel")}
                 </Button>
               </div>
@@ -645,6 +676,11 @@ function AnalysesTable() {
                   disabled={insufficientRelaunchQuota || bulkCreateAnalyses.isPending}
                   onClick={handleConfirmBulkRelaunch}
                 >
+                  {bulkCreateAnalyses.isPending ? (
+                    <LoaderCircle className="animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Check aria-hidden="true" />
+                  )}
                   {t("bulk.generateConfirmAction")}
                 </Button>
                 <Button
@@ -653,6 +689,7 @@ function AnalysesTable() {
                   size="sm"
                   onClick={() => setBulkRelaunchConfirming(false)}
                 >
+                  <X aria-hidden="true" />
                   {t("bulk.cancel")}
                 </Button>
               </div>
@@ -793,6 +830,7 @@ function AnalysesTable() {
                 disabled={page <= 1}
                 onClick={() => updateState({ page: page - 1 })}
               >
+                <ChevronLeft aria-hidden="true" />
                 {t("pagination.previous")}
               </Button>
               <Button
@@ -803,6 +841,7 @@ function AnalysesTable() {
                 onClick={() => updateState({ page: page + 1 })}
               >
                 {t("pagination.next")}
+                <ChevronRight aria-hidden="true" />
               </Button>
             </div>
           </div>

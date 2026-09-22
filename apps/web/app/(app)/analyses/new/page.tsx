@@ -20,7 +20,14 @@ import {
   useKnownOfferShortcut,
 } from "@/hooks/use-analyses";
 import { BffError } from "@/lib/bff-client";
-import { Check } from "lucide-react";
+import {
+  ArrowRight,
+  Check,
+  Eye,
+  LoaderCircle,
+  RotateCw,
+  Sparkles,
+} from "lucide-react";
 
 import { CvVersionPicker } from "@/components/cv-version-picker";
 import { InlineQuotaBanner } from "@/components/inline-quota-banner";
@@ -85,7 +92,10 @@ function WaitingState({
           {t("listing")}
         </div>
         <Button asChild className="self-start">
-          <Link href="/analyses/new/several">{t("listingCta")}</Link>
+          <Link href="/analyses/new/several">
+            {t("listingCta")}
+            <ArrowRight aria-hidden="true" />
+          </Link>
         </Button>
       </div>
     );
@@ -106,6 +116,11 @@ function WaitingState({
           disabled={retrying}
           className="self-start"
         >
+          {retrying ? (
+            <LoaderCircle className="animate-spin" aria-hidden="true" />
+          ) : (
+            <RotateCw aria-hidden="true" />
+          )}
           {retrying ? t("submitting") : t("retry")}
         </Button>
       </div>
@@ -288,6 +303,7 @@ export default function AnalyseOneOfferPage() {
           <div className="flex flex-wrap gap-3">
             <Button asChild variant="outline" className="self-start">
               <Link href={`/analyses/${alreadyAnalysed.analysisId}`}>
+                <Eye aria-hidden="true" />
                 {t("rerunView")}
               </Link>
             </Button>
@@ -297,6 +313,11 @@ export default function AnalyseOneOfferPage() {
               disabled={createAnalysis.isPending}
               className="self-start"
             >
+              {createAnalysis.isPending ? (
+                <LoaderCircle className="animate-spin" aria-hidden="true" />
+              ) : (
+                <RotateCw aria-hidden="true" />
+              )}
               {createAnalysis.isPending ? t("submitting") : t("rerun")}
             </Button>
           </div>
@@ -357,6 +378,11 @@ export default function AnalyseOneOfferPage() {
                   disabled={busy || !cvVersionId}
                   className="self-start"
                 >
+                  {busy ? (
+                    <LoaderCircle className="animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Sparkles aria-hidden="true" />
+                  )}
                   {busy ? t("submitting") : t("submit")}
                 </Button>
 
