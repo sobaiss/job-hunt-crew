@@ -460,11 +460,13 @@ describe("ScoutsPage — list", () => {
     expect(panel.getByText("Configuration")).toBeInTheDocument();
     expect(panel.getByText("Active")).toBeInTheDocument();
     expect(panel.getByText("Default CV")).toBeInTheDocument();
-    expect(panel.getByText("France Travail, LinkedIn")).toBeInTheDocument();
+    expect(panel.getByText("France Travail")).toBeInTheDocument();
+    expect(panel.getByText("LinkedIn")).toBeInTheDocument();
     expect(panel.getByText("70")).toBeInTheDocument();
-    expect(
-      panel.getByText("keywords: python, postedWithin: 7d"),
-    ).toBeInTheDocument();
+    // Filters read under the Scout form's own field labels, with the option
+    // label for the enum-valued ones — not the raw `ScoutFilters` keys.
+    expect(panel.getByText("Keywords: python")).toBeInTheDocument();
+    expect(panel.getByText("Posted within: Last 7 days")).toBeInTheDocument();
     expect(
       panel.getByText(new Date("2026-09-10T00:00:00.000Z").toLocaleString()),
     ).toBeInTheDocument();
@@ -980,7 +982,7 @@ describe("Scout panel — relevant finds (issue #56)", () => {
     };
   }
 
-  it("lists relevant finds separately from found — low fit", async () => {
+  it("lists the relevant finds and leaves the low-fit ones out entirely", async () => {
     server.use(
       http.get("/api/scouts", () => HttpResponse.json({ scouts: [scout()] })),
       http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
@@ -994,18 +996,15 @@ describe("Scout panel — relevant finds (issue #56)", () => {
     const user = userEvent.setup();
     const panel = await openPanel(user);
 
-    const relevant = within(
-      (await panel.findByText("Relevant finds")).closest("div") as HTMLElement,
-    );
-    expect(relevant.getByText("Backend Engineer")).toBeInTheDocument();
-
-    const lowFit = within(
-      panel.getByText("Found — low fit").closest("div") as HTMLElement,
-    );
-    expect(lowFit.getByText("Support Rep")).toBeInTheDocument();
+    expect(await panel.findByText("Relevant finds")).toBeInTheDocument();
+    expect(panel.getByText("Backend Engineer")).toBeInTheDocument();
+    // The endpoint still returns `lowFitFinds`; the panel no longer has a
+    // section for them, so nothing below the Scout's threshold is rendered.
+    expect(panel.queryByText("Support Rep")).not.toBeInTheDocument();
+    expect(panel.queryByText("Found — low fit")).not.toBeInTheDocument();
   });
 
-  it("shows an empty state when there are no relevant finds yet, and hides the low-fit card", async () => {
+  it("shows an empty state when there are no relevant finds yet", async () => {
     server.use(
       http.get("/api/scouts", () => HttpResponse.json({ scouts: [scout()] })),
       http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
@@ -1017,11 +1016,10 @@ describe("Scout panel — relevant finds (issue #56)", () => {
     const panel = await openPanel(user);
 
     expect(await panel.findByText("No relevant finds yet.")).toBeInTheDocument();
-    expect(panel.queryByText("Found — low fit")).not.toBeInTheDocument();
   });
 });
 
-describe("Scout panel — stats and patterns (issue #60)", () => {
+describe("Scout panel — scoped stats (issue #60)", () => {
   it("shows the scoped stats header", async () => {
     server.use(
       http.get("/api/scouts", () => HttpResponse.json({ scouts: [scout()] })),
@@ -1059,68 +1057,5 @@ describe("Scout panel — stats and patterns (issue #60)", () => {
     expect(panel.getByText("Stats")).toBeInTheDocument();
     expect(await panel.findByText("Offers discovered")).toBeInTheDocument();
     expect(panel.getByText("40")).toBeInTheDocument();
-  });
-
-  it("ranks the patterns panel's missing skills by frequency", async () => {
-    server.use(
-      http.get("/api/scouts", () => HttpResponse.json({ scouts: [scout()] })),
-      http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
-      http.get("/api/scouts/scout-1/patterns", () =>
-        HttpResponse.json({
-          patterns: [
-            { skill: "Kubernetes", count: 3 },
-            { skill: "GraphQL", count: 1 },
-          ],
-          weaknesses: [],
-        }),
-      ),
-    );
-    const user = userEvent.setup();
-    const panel = await openPanel(user);
-
-    expect(await panel.findByText("Kubernetes")).toBeInTheDocument();
-    expect(panel.getByText("GraphQL")).toBeInTheDocument();
-  });
-
-  it("ranks the patterns panel's recurring weaknesses by frequency", async () => {
-    server.use(
-      http.get("/api/scouts", () => HttpResponse.json({ scouts: [scout()] })),
-      http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
-      http.get("/api/scouts/scout-1/patterns", () =>
-        HttpResponse.json({
-          patterns: [],
-          weaknesses: [
-            { weakness: "Limited cloud experience", count: 2 },
-            { weakness: "No team leadership", count: 1 },
-          ],
-        }),
-      ),
-    );
-    const user = userEvent.setup();
-    const panel = await openPanel(user);
-
-    expect(await panel.findByText("Limited cloud experience")).toBeInTheDocument();
-    expect(panel.getByText("No team leadership")).toBeInTheDocument();
-  });
-
-  it("shows an empty state when there are no patterns yet", async () => {
-    server.use(
-      http.get("/api/scouts", () => HttpResponse.json({ scouts: [scout()] })),
-      http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
-      http.get("/api/scouts/scout-1/patterns", () =>
-        HttpResponse.json({ patterns: [], weaknesses: [] }),
-      ),
-    );
-    const user = userEvent.setup();
-    const panel = await openPanel(user);
-
-    expect(
-      await panel.findByText("No patterns yet — they'll appear as relevant finds accumulate."),
-    ).toBeInTheDocument();
-    expect(
-      await panel.findByText(
-        "No recurring weaknesses yet — they'll appear as relevant finds accumulate.",
-      ),
-    ).toBeInTheDocument();
   });
 });

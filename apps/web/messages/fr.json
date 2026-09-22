@@ -884,16 +884,7 @@
     "finds": {
       "loadError": "Impossible de charger les résultats de cet agent. Veuillez réessayer.",
       "relevantHeading": "Résultats pertinents",
-      "relevantEmpty": "Aucun résultat pertinent pour l'instant.",
-      "lowFitHeading": "Trouvé — faible pertinence"
-    },
-    "patterns": {
-      "heading": "Tendances de vos correspondances",
-      "empty": "Pas encore de tendances — elles apparaîtront à mesure que les correspondances pertinentes s'accumulent.",
-      "loadError": "Impossible de charger les tendances de ce Scout. Veuillez réessayer.",
-      "count": "{count, plural, one {# correspondance} other {# correspondances}}",
-      "weaknessesHeading": "Faiblesses récurrentes dans vos correspondances",
-      "weaknessesEmpty": "Pas encore de faiblesses récurrentes — elles apparaîtront à mesure que les correspondances pertinentes s'accumulent."
+      "relevantEmpty": "Aucun résultat pertinent pour l'instant."
     },
     "siteKeys": {
       "FRANCE_TRAVAIL": "France Travail",
