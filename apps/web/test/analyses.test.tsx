@@ -1,12 +1,40 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
+import type { Session } from "next-auth";
 
 import { renderWithProviders, screen, waitFor, within } from "./test-utils";
 import { server } from "./msw/server";
 import { __getUrl, __setUrl } from "./next-navigation-mock";
 import AnalysesDashboardPage from "@/app/(app)/analyses/page";
 import AnalysisDetailPage from "@/app/(app)/analyses/[id]/page";
+
+const INTERNAL_SESSION: Session = {
+  expires: "2999-01-01T00:00:00.000Z",
+  user: { id: "user_1", name: "Ada Lovelace", email: "ada@example.com", role: "INTERNAL" },
+};
+
+const EXTERNAL_SESSION: Session = {
+  expires: "2999-01-01T00:00:00.000Z",
+  user: { id: "candidate_1", name: "Ada Lovelace", email: "ada@example.com", role: "EXTERNAL" },
+};
+
+function cvVersion(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "cv1",
+    label: "Grad CV",
+    fileName: "cv.pdf",
+    fileType: "PDF",
+    fileSizeBytes: 1024,
+    isDefault: false,
+    conversionStatus: "CONVERTED",
+    conversionError: null,
+    supersededById: null,
+    createdAt: "2026-08-01T00:00:00.000Z",
+    updatedAt: "2026-08-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
 
 vi.mock("next/navigation", async () => {
   const mock = await vi.importActual<typeof import("./next-navigation-mock")>(
@@ -1649,7 +1677,7 @@ describe("AnalysesDashboardPage", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("relaunches a COMPLETED analysis from the Quick view after confirmation, carrying the same offer/CV pair, and switches to the new one (issue #124)", async () => {
+  it("relaunches a COMPLETED analysis from the Quick view after confirmation, carrying the same offer/CV pair, and switches to the new one, for a non-external Role (issue #124)", async () => {
     const user = userEvent.setup();
     let analyses = [detail({ status: "COMPLETED" })];
     let createBody: unknown = null;
@@ -1670,7 +1698,7 @@ describe("AnalysesDashboardPage", () => {
       }),
     );
 
-    renderWithProviders(<AnalysesDashboardPage />);
+    renderWithProviders(<AnalysesDashboardPage />, { session: INTERNAL_SESSION });
     await user.click(await screen.findByText("Backend Engineer"));
 
     const quickView = within(await screen.findByRole("dialog"));
@@ -1679,6 +1707,9 @@ describe("AnalysesDashboardPage", () => {
     expect(
       quickView.getByText(/This will use one of your daily analyses/),
     ).toBeInTheDocument();
+    expect(
+      quickView.queryByLabelText("CV version"),
+    ).not.toBeInTheDocument();
 
     await user.click(quickView.getByRole("button", { name: "Confirm" }));
 
@@ -1701,7 +1732,7 @@ describe("AnalysesDashboardPage", () => {
       }),
     );
 
-    renderWithProviders(<AnalysesDashboardPage />);
+    renderWithProviders(<AnalysesDashboardPage />, { session: INTERNAL_SESSION });
     await user.click(await screen.findByText("Backend Engineer"));
 
     const quickView = within(await screen.findByRole("dialog"));
@@ -1715,7 +1746,7 @@ describe("AnalysesDashboardPage", () => {
     expect(createCalls).toBe(0);
   });
 
-  it("shows an inline error and stays on the original analysis when a Quick view relaunch fails (issue #124)", async () => {
+  it("shows an inline error and stays on the original analysis when a Quick view relaunch fails, for a non-external Role (issue #124)", async () => {
     const user = userEvent.setup();
     server.use(
       http.get("/api/analyses", () =>
@@ -1730,7 +1761,7 @@ describe("AnalysesDashboardPage", () => {
       ),
     );
 
-    renderWithProviders(<AnalysesDashboardPage />);
+    renderWithProviders(<AnalysesDashboardPage />, { session: INTERNAL_SESSION });
     await user.click(await screen.findByText("Backend Engineer"));
 
     const quickView = within(await screen.findByRole("dialog"));
@@ -1745,6 +1776,134 @@ describe("AnalysesDashboardPage", () => {
     expect(
       quickView.getByRole("heading", { name: "Backend Engineer" }),
     ).toBeInTheDocument();
+  });
+
+  it("preselects the Analysis's own CVVersion in the relaunch CV picker for an external candidate when it is still CONVERTED (issue #181)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({ analyses: [detail({ status: "COMPLETED", cvVersionId: "cv1" })] }),
+      ),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: [
+            cvVersion({ id: "cv1", label: "Grad CV" }),
+            cvVersion({ id: "cv2", label: "Senior CV", isDefault: true }),
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />, { session: EXTERNAL_SESSION });
+    await user.click(await screen.findByText("Backend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    await user.click(quickView.getByRole("button", { name: "Run it again" }));
+
+    const picker = (await quickView.findByLabelText(
+      "CV version",
+    )) as HTMLSelectElement;
+    await waitFor(() => expect(picker.value).toBe("cv1"));
+  });
+
+  it("falls back to the candidate's default CONVERTED CV in the relaunch picker when the Analysis's own CV was superseded (issue #181)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({ analyses: [detail({ status: "COMPLETED", cvVersionId: "cv1" })] }),
+      ),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: [
+            cvVersion({ id: "cv1", label: "Grad CV", supersededById: "cv3" }),
+            cvVersion({ id: "cv2", label: "Senior CV", isDefault: true }),
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />, { session: EXTERNAL_SESSION });
+    await user.click(await screen.findByText("Backend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    await user.click(quickView.getByRole("button", { name: "Run it again" }));
+
+    const picker = (await quickView.findByLabelText(
+      "CV version",
+    )) as HTMLSelectElement;
+    await waitFor(() => expect(picker.value).toBe("cv2"));
+  });
+
+  it("disables the relaunch confirm and shows the manage-CVs link for an external candidate with no CONVERTED CV (issue #181)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({ analyses: [detail({ status: "COMPLETED", cvVersionId: "cv1" })] }),
+      ),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: [cvVersion({ id: "cv1", conversionStatus: "FAILED" })],
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />, { session: EXTERNAL_SESSION });
+    await user.click(await screen.findByText("Backend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    await user.click(quickView.getByRole("button", { name: "Run it again" }));
+
+    await quickView.findByText(
+      "None of your CV versions have been converted yet.",
+    );
+    expect(
+      quickView.getByRole("link", { name: "Import a CV" }),
+    ).toHaveAttribute("href", "/cv-versions");
+    expect(quickView.getByRole("button", { name: "Confirm" })).toBeDisabled();
+  });
+
+  it("relaunches with the CV chosen in the picker, and keeps that choice selected if the request fails, for an external candidate (issue #181)", async () => {
+    const user = userEvent.setup();
+    let createBody: unknown = null;
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({ analyses: [detail({ status: "COMPLETED", cvVersionId: "cv1" })] }),
+      ),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: [
+            cvVersion({ id: "cv1", label: "Grad CV" }),
+            cvVersion({ id: "cv2", label: "Senior CV", isDefault: true }),
+          ],
+        }),
+      ),
+      http.post("/api/analyses", async ({ request }) => {
+        createBody = await request.json();
+        return HttpResponse.json({ error: "boom" }, { status: 500 });
+      }),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />, { session: EXTERNAL_SESSION });
+    await user.click(await screen.findByText("Backend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    await user.click(quickView.getByRole("button", { name: "Run it again" }));
+
+    const picker = (await quickView.findByLabelText(
+      "CV version",
+    )) as HTMLSelectElement;
+    await waitFor(() => expect(picker.value).toBe("cv1"));
+    await user.selectOptions(picker, "cv2");
+
+    await user.click(quickView.getByRole("button", { name: "Confirm" }));
+
+    expect(
+      await quickView.findByText(
+        "We couldn't start a new analysis. Please try again.",
+      ),
+    ).toBeInTheDocument();
+    expect(createBody).toEqual({ jobOfferId: "job1", cvVersionId: "cv2" });
+    expect(picker.value).toBe("cv2");
   });
 
   it("refetches the analyses list on demand, showing a busy state while in flight, without resetting search or filters (issue #121)", async () => {

@@ -90,13 +90,17 @@ const CV_VERSIONS_KEY = ["cv-versions"] as const;
  * row's Conversion is still `PENDING` / `CONVERTING`, so a freshly imported CV's
  * status settles without a manual refresh.
  */
-export function useCvVersions(options?: { pollWhileConverting?: boolean }) {
+export function useCvVersions(options?: {
+  pollWhileConverting?: boolean;
+  enabled?: boolean;
+}) {
   const pollWhileConverting = options?.pollWhileConverting ?? false;
 
   return useQuery({
     queryKey: CV_VERSIONS_KEY,
     queryFn: () => bff.get<{ cvVersions: CvVersion[] }>("/cv-versions"),
     select: (data) => data.cvVersions,
+    enabled: options?.enabled ?? true,
     refetchInterval: (query) => {
       if (!pollWhileConverting) return false;
       const rows = query.state.data?.cvVersions ?? [];

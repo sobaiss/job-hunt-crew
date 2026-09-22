@@ -64,6 +64,10 @@ export const handlers = [
       alerts: [],
     }),
   ),
+  // The Quick view's relaunch confirmation reads the CV list for an `external`
+  // candidate (issue #181); default to none so suites exercising other parts
+  // of the Quick view don't have to stub it.
+  http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [] })),
 ];
 
 const ZERO_APPLICATION_STATS_WINDOW = {

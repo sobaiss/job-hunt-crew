@@ -2,6 +2,7 @@
 
 import { type RefObject, useState } from "react";
 import Link from "next/link";
+import { useSession } from "next-auth/react";
 import { useTranslations } from "next-intl";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -10,6 +11,7 @@ import {
   useCreateAnalysis,
   type AnalysisDetail,
 } from "@/hooks/use-analyses";
+import { useCvVersions } from "@/hooks/use-cv-versions";
 import { useSetApplicationStatus } from "@/hooks/use-applications";
 import {
   TRACKING_STATUS_TRANSITIONS,
@@ -18,6 +20,7 @@ import {
 } from "@/lib/tracking-status";
 import { analysisBadgeVariant } from "@/components/analysis-row";
 import { AnalysisResultView } from "@/components/analysis-result";
+import { CvVersionPicker } from "@/components/cv-version-picker";
 import { GeneratedDocumentsPanel } from "@/components/generated-documents-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -62,15 +65,30 @@ export function AnalysisQuickView({
   const setApplicationStatus = useSetApplicationStatus();
   const relaunch = useCreateAnalysis();
   const [relaunchConfirming, setRelaunchConfirming] = useState(false);
+  const [relaunchCvVersionId, setRelaunchCvVersionId] = useState("");
+
+  // Only an `external` candidate gets a choice of CV to relaunch with (#181);
+  // every other Role keeps the single quota-warning confirm, reusing the
+  // Analysis's own CV. A session with no Role defaults to the lowest
+  // privilege, same convention as `lib/internal-api.ts`.
+  const { data: session } = useSession();
+  const isExternal = (session?.user?.role ?? "EXTERNAL") === "EXTERNAL";
 
   const tracking = analysis ? trackingStatusOf(analysis) : null;
   const result = analysis?.resultJSON ?? null;
   const isRelaunchable =
     analysis !== null && TERMINAL_ANALYSIS_STATUSES.has(analysis.status);
 
+  // Fetched as soon as the Quick view can offer a relaunch, so the choice
+  // below is ready by the time the candidate opens the confirmation.
+  const { data: cvVersions } = useCvVersions({
+    enabled: isExternal && isRelaunchable,
+  });
+
   const handleOpenChange = (nextOpen: boolean) => {
     if (!nextOpen) {
       setRelaunchConfirming(false);
+      setRelaunchCvVersionId("");
       relaunch.reset();
     }
     onOpenChange(nextOpen);
@@ -171,6 +189,15 @@ export function AnalysisQuickView({
               <div className="flex flex-col gap-2">
                 {relaunchConfirming ? (
                   <div className="flex flex-col items-start gap-2">
+                    {isExternal && (
+                      <div className="w-full max-w-xs">
+                        <CvVersionPicker
+                          id="quick-view-relaunch-cv"
+                          value={relaunchCvVersionId}
+                          onChange={setRelaunchCvVersionId}
+                        />
+                      </div>
+                    )}
                     <p className="text-sm text-muted">
                       {t("quickView.relaunchConfirm")}
                     </p>
@@ -179,16 +206,22 @@ export function AnalysisQuickView({
                         type="button"
                         variant="outline"
                         size="sm"
-                        disabled={relaunch.isPending}
+                        disabled={
+                          relaunch.isPending ||
+                          (isExternal && !relaunchCvVersionId)
+                        }
                         onClick={() =>
                           relaunch.mutate(
                             {
                               jobOfferId: analysis.jobOffer.id,
-                              cvVersionId: analysis.cvVersionId,
+                              cvVersionId: isExternal
+                                ? relaunchCvVersionId
+                                : analysis.cvVersionId,
                             },
                             {
                               onSuccess: (data) => {
                                 setRelaunchConfirming(false);
+                                setRelaunchCvVersionId("");
                                 queryClient.invalidateQueries({
                                   queryKey: ["analyses"],
                                 });
@@ -205,7 +238,10 @@ export function AnalysisQuickView({
                         variant="outline"
                         size="sm"
                         disabled={relaunch.isPending}
-                        onClick={() => setRelaunchConfirming(false)}
+                        onClick={() => {
+                          setRelaunchConfirming(false);
+                          setRelaunchCvVersionId("");
+                        }}
                       >
                         {t("bulk.cancel")}
                       </Button>
@@ -217,7 +253,23 @@ export function AnalysisQuickView({
                     variant="outline"
                     size="sm"
                     className="w-fit"
-                    onClick={() => setRelaunchConfirming(true)}
+                    onClick={() => {
+                      // Preselect the Analysis's own CVVersion when it is
+                      // still a valid choice (non-superseded, CONVERTED);
+                      // otherwise leave it blank for `CvVersionPicker`'s own
+                      // fallback (the candidate's default CONVERTED CV).
+                      if (isExternal) {
+                        const ownCv = cvVersions?.find(
+                          (cv) => cv.id === analysis.cvVersionId,
+                        );
+                        const ownCvValid =
+                          ownCv &&
+                          ownCv.supersededById === null &&
+                          ownCv.conversionStatus === "CONVERTED";
+                        setRelaunchCvVersionId(ownCvValid ? ownCv.id : "");
+                      }
+                      setRelaunchConfirming(true);
+                    }}
                   >
                     {td("retry")}
                   </Button>
