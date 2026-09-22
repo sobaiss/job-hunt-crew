@@ -1004,6 +1004,7 @@
       "showSuperseded": "Show superseded CV versions",
       "importCv": "Import a CV",
       "refresh": "Refresh",
+      "conversionInProgress": "A conversion is in progress. Refresh to see the current status.",
       "columnsLabel": "Columns",
       "columnsReset": "Reset",
       "columns": {

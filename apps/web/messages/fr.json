@@ -1004,6 +1004,7 @@
       "showSuperseded": "Afficher les versions de CV remplacées",
       "importCv": "Importer un CV",
       "refresh": "Actualiser",
+      "conversionInProgress": "Une conversion est en cours. Actualisez pour voir le statut à jour.",
       "columnsLabel": "Colonnes",
       "columnsReset": "Réinitialiser",
       "columns": {
