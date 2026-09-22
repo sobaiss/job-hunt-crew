@@ -619,6 +619,9 @@ async def delete_cv_version(
 class CVVersionMarkdownResponse(BaseModel):
     markdownContent: str | None
     conversionStatus: str
+    # Why the last Conversion failed, when it did — the Import screen polls
+    # this endpoint and shows the cause verbatim (issue #195).
+    conversionError: str | None
 
 
 @router.get(
@@ -640,6 +643,7 @@ async def get_cv_version_markdown(
     return CVVersionMarkdownResponse(
         markdownContent=existing.markdownContent,
         conversionStatus=existing.conversionStatus.value,
+        conversionError=existing.conversionError,
     )
 
 
@@ -684,6 +688,7 @@ async def update_cv_version_markdown(
     return CVVersionMarkdownResponse(
         markdownContent=existing.markdownContent,
         conversionStatus=existing.conversionStatus.value,
+        conversionError=existing.conversionError,
     )
 
 

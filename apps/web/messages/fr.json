@@ -982,7 +982,16 @@
       "success": "CV importé et converti",
       "finish": "Terminer",
       "edit": "Modifier",
-      "conversionFailed": "La conversion de votre CV a échoué."
+      "failure": {
+        "network": "Problème de connexion.",
+        "server": "Erreur du serveur.",
+        "upload": "Votre CV n'a pas pu être envoyé.",
+        "conversion": "La conversion de votre CV a échoué."
+      },
+      "retryImport": "Réessayer l'import",
+      "retryConversion": "Relancer la conversion",
+      "replaceFile": "Remplacer le fichier",
+      "replacing": "Remplacement…"
     },
     "list": {
       "heading": "Vos versions de CV",

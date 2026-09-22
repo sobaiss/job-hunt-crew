@@ -275,3 +275,280 @@ describe("NewCvVersionPage — the Import in place", () => {
     expect(screen.queryByRole("button", { name: "Set as default" })).toBeNull();
   });
 });
+
+function user() {
+  return userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+}
+
+describe("NewCvVersionPage — storing the CV failed", () => {
+  beforeEach(() => {
+    replace.mockClear();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("says so when the network fails creating the CVVersion", async () => {
+    importHandlers({ statuses: ["CONVERTED"] });
+    server.use(http.post("/api/cv-versions", () => HttpResponse.error()));
+    renderWithProviders(<NewCvVersionPage />);
+    await submitImport();
+
+    expect(await screen.findByText("Connection problem.")).toBeInTheDocument();
+    expect(closeLink()).toHaveAttribute("href", "/cv-versions");
+  });
+
+  it("says so, with the API's detail, when the server fails creating it", async () => {
+    importHandlers({ statuses: ["CONVERTED"] });
+    server.use(
+      http.post("/api/cv-versions", () =>
+        HttpResponse.json({ detail: "Database unavailable" }, { status: 500 }),
+      ),
+    );
+    renderWithProviders(<NewCvVersionPage />);
+    await submitImport();
+
+    expect(await screen.findByText("Server error.")).toBeInTheDocument();
+    expect(screen.getByText("Database unavailable")).toBeInTheDocument();
+  });
+
+  it("says so when the bytes could not be sent, and retries on the same upload URL", async () => {
+    const { events } = importHandlers({ statuses: ["CONVERTED"] });
+    let puts = 0;
+    server.use(
+      http.put(UPLOAD_URL, () => {
+        puts += 1;
+        events.push("put");
+        return new HttpResponse(null, { status: puts === 1 ? 500 : 200 });
+      }),
+    );
+    renderWithProviders(<NewCvVersionPage />);
+    await submitImport();
+
+    expect(
+      await screen.findByText("Your CV could not be sent."),
+    ).toBeInTheDocument();
+    await user().click(
+      screen.getByRole("button", { name: "Retry the import" }),
+    );
+
+    expect(
+      await screen.findByText("CV imported and converted"),
+    ).toBeInTheDocument();
+    expect(events).toEqual(["create", "put", "put", "convert"]);
+  });
+
+  it("runs the whole create-then-upload again once the upload URL has expired", async () => {
+    const { events } = importHandlers({ statuses: ["CONVERTED"] });
+    let puts = 0;
+    server.use(
+      http.put(UPLOAD_URL, () => {
+        puts += 1;
+        events.push("put");
+        return new HttpResponse(null, { status: puts === 1 ? 500 : 200 });
+      }),
+      http.delete("/api/cv-versions/cv9", () => {
+        events.push("delete");
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    renderWithProviders(<NewCvVersionPage />);
+    await submitImport();
+    await screen.findByText("Your CV could not be sent.");
+
+    await vi.advanceTimersByTimeAsync(6 * 60 * 1000);
+    await user().click(
+      screen.getByRole("button", { name: "Retry the import" }),
+    );
+
+    await screen.findByText("CV imported and converted");
+    expect(events.filter((e) => e === "create")).toHaveLength(2);
+  });
+
+  it("deletes the orphan CVVersion when the candidate closes the screen", async () => {
+    importHandlers({ statuses: ["CONVERTED"] });
+    let deleted: string | null = null;
+    server.use(
+      http.put(UPLOAD_URL, () => new HttpResponse(null, { status: 500 })),
+      http.delete("/api/cv-versions/:id", ({ params }) => {
+        deleted = params.id as string;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    renderWithProviders(<NewCvVersionPage />);
+    await submitImport();
+    await screen.findByText("Your CV could not be sent.");
+
+    await user().click(closeLink());
+
+    await vi.waitFor(() => expect(deleted).toBe("cv9"));
+  });
+
+  it("swallows a failed orphan delete", async () => {
+    importHandlers({ statuses: ["CONVERTED"] });
+    let deletes = 0;
+    server.use(
+      http.put(UPLOAD_URL, () => new HttpResponse(null, { status: 500 })),
+      http.delete("/api/cv-versions/:id", () => {
+        deletes += 1;
+        return HttpResponse.json({ detail: "boom" }, { status: 500 });
+      }),
+    );
+    renderWithProviders(<NewCvVersionPage />);
+    await submitImport();
+    await screen.findByText("Your CV could not be sent.");
+
+    await user().click(closeLink());
+
+    await vi.waitFor(() => expect(deletes).toBe(1));
+    expect(screen.queryByText("boom")).toBeNull();
+  });
+});
+
+describe("NewCvVersionPage — converting the CV failed", () => {
+  beforeEach(() => {
+    replace.mockClear();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+  afterEach(() => vi.useRealTimers());
+
+  function failedConversion(error: string) {
+    server.use(
+      http.get("/api/cv-versions/cv9/markdown", () =>
+        HttpResponse.json({
+          conversionStatus: "FAILED",
+          markdownContent: null,
+          conversionError: error,
+        }),
+      ),
+    );
+  }
+
+  it("shows the stored cause under the failure sentence, and keeps the CVVersion on close", async () => {
+    importHandlers({ statuses: ["CONVERTED"] });
+    failedConversion("no usable text layer");
+    let deletes = 0;
+    server.use(
+      http.delete("/api/cv-versions/:id", () => {
+        deletes += 1;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    renderWithProviders(<NewCvVersionPage />);
+    await submitImport();
+
+    expect(
+      await screen.findByText("Your CV's conversion failed."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("no usable text layer")).toBeInTheDocument();
+
+    await user().click(closeLink());
+    await vi.advanceTimersByTimeAsync(100);
+    expect(deletes).toBe(0);
+  });
+
+  it("lands here, not in the storing failure, when the convert request itself fails", async () => {
+    importHandlers({ statuses: ["CONVERTED"] });
+    let deletes = 0;
+    server.use(
+      http.post("/api/cv-versions/cv9/convert", () =>
+        HttpResponse.json({ detail: "Queue unavailable" }, { status: 500 }),
+      ),
+      http.delete("/api/cv-versions/:id", () => {
+        deletes += 1;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    renderWithProviders(<NewCvVersionPage />);
+    await submitImport();
+
+    expect(
+      await screen.findByText("Your CV's conversion failed."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Your CV could not be sent.")).toBeNull();
+
+    await user().click(closeLink());
+    await vi.advanceTimersByTimeAsync(100);
+    expect(deletes).toBe(0);
+  });
+
+  it("retries the Conversion on the same CVVersion", async () => {
+    const { events } = importHandlers({ statuses: ["CONVERTED"] });
+    let converts = 0;
+    server.use(
+      http.post("/api/cv-versions/cv9/convert", () => {
+        converts += 1;
+        events.push("convert");
+        return converts === 1
+          ? HttpResponse.json({ detail: "Queue unavailable" }, { status: 500 })
+          : HttpResponse.json({ conversionStatus: "PENDING" });
+      }),
+    );
+    renderWithProviders(<NewCvVersionPage />);
+    await submitImport();
+    await screen.findByText("Your CV's conversion failed.");
+
+    await user().click(
+      screen.getByRole("button", { name: "Retry the conversion" }),
+    );
+
+    expect(
+      await screen.findByText("CV imported and converted"),
+    ).toBeInTheDocument();
+    expect(events).toEqual(["create", "put", "convert", "convert"]);
+  });
+
+  it("replaces the file, then follows the new CVVersion", async () => {
+    const { events } = importHandlers({ statuses: ["CONVERTED"] });
+    failedConversion("no usable text layer");
+    let replaceBody: Record<string, unknown> | null = null;
+    server.use(
+      http.post("/api/cv-versions/cv9/replace", async ({ request }) => {
+        replaceBody = (await request.json()) as Record<string, unknown>;
+        events.push("replace");
+        return HttpResponse.json(
+          { cvVersionId: "cv10", fileKey: "k2", uploadUrl: UPLOAD_URL },
+          { status: 201 },
+        );
+      }),
+      http.post("/api/cv-versions/cv10/convert", () => {
+        events.push("convert cv10");
+        return HttpResponse.json({ conversionStatus: "PENDING" });
+      }),
+      http.get("/api/cv-versions/cv10/markdown", () =>
+        HttpResponse.json({
+          conversionStatus: "CONVERTED",
+          markdownContent: "# Replaced CV",
+          conversionError: null,
+        }),
+      ),
+    );
+    renderWithProviders(<NewCvVersionPage />);
+    await submitImport();
+    await screen.findByText("Your CV's conversion failed.");
+
+    await user().upload(
+      screen.getByLabelText("Replace the file"),
+      pdf("fixed.pdf"),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Replaced CV" }),
+    ).toBeInTheDocument();
+    expect(replaceBody).toMatchObject({
+      label: "Fintech CV",
+      fileName: "fixed.pdf",
+    });
+    expect(events).toEqual([
+      "create",
+      "put",
+      "convert",
+      "replace",
+      "put",
+      "convert cv10",
+    ]);
+    expect(screen.getByRole("link", { name: "Edit" })).toHaveAttribute(
+      "href",
+      "/cv-versions/cv10/edit",
+    );
+  });
+});

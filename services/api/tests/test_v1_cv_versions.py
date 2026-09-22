@@ -450,7 +450,11 @@ def test_get_markdown_returns_content_and_status(user_id):
 
         before = client.get(f"/v1/cv-versions/{cv_id}/markdown", headers=_headers(user_id))
         assert before.status_code == 200
-        assert before.json() == {"markdownContent": None, "conversionStatus": "PENDING"}
+        assert before.json() == {
+            "markdownContent": None,
+            "conversionStatus": "PENDING",
+            "conversionError": None,
+        }
 
         asyncio.run(_set_markdown(cv_id, "# Jane Doe\n\nStaff Engineer"))
 
@@ -459,6 +463,32 @@ def test_get_markdown_returns_content_and_status(user_id):
         assert after.json() == {
             "markdownContent": "# Jane Doe\n\nStaff Engineer",
             "conversionStatus": "CONVERTED",
+            "conversionError": None,
+        }
+
+
+def test_get_markdown_returns_the_stored_conversion_error(user_id):
+    """The Import screen polls this endpoint and has no other way to read why
+    a Conversion failed (issue #195)."""
+    with TestClient(app) as client:
+        cv_id = client.post(
+            "/v1/cv-versions",
+            headers=_headers(user_id),
+            json={
+                "label": "CV 1",
+                "fileName": "cv1.pdf",
+                "contentType": "application/pdf",
+                "fileSizeBytes": 1024,
+            },
+        ).json()["cvVersionId"]
+        asyncio.run(_set_conversion_failed(cv_id, "no usable text layer"))
+
+        response = client.get(f"/v1/cv-versions/{cv_id}/markdown", headers=_headers(user_id))
+        assert response.status_code == 200
+        assert response.json() == {
+            "markdownContent": None,
+            "conversionStatus": "FAILED",
+            "conversionError": "no usable text layer",
         }
 
 
@@ -513,6 +543,7 @@ def test_update_markdown_saves_content_and_touches_only_rendition_and_updated_at
         assert response.json() == {
             "markdownContent": "# Jane Doe\n\nPrincipal Engineer",
             "conversionStatus": "CONVERTED",
+            "conversionError": None,
         }
 
         fetched = client.get(f"/v1/cv-versions/{cv_id}/markdown", headers=_headers(user_id))
