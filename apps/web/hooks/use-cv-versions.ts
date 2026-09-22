@@ -129,8 +129,9 @@ export function useCreateCvVersion() {
  * Replace an existing CVVersion with a new file, then PUT the bytes straight
  * to the presigned URL — same two-step shape as {@link useCreateCvVersion}.
  * services/api creates a new row, points the old row's `supersededById` at
- * it, transfers `isDefault` when the old row held it, and enqueues the new
- * row for Conversion. Invalidates the list on success so the new row appears
+ * it, and transfers `isDefault` when the old row held it; this hook then
+ * starts the new row's Conversion itself, after the PUT. Invalidates the list
+ * on success so the new row appears
  * and the replaced row drops out of the default (non-superseded) view.
  */
 export function useReplaceCvVersion() {
@@ -163,6 +164,17 @@ export function useReplaceCvVersion() {
       });
       if (!uploadResponse.ok) {
         throw new Error(`Upload failed with ${uploadResponse.status}`);
+      }
+
+      // The file first, the Conversion second (docs/adr/0028): services/api
+      // cannot start it on replace, the bytes only exist once this PUT is
+      // done. A failure here does not fail the Replace — the new CVVersion
+      // exists with its file stored, and the table's "Convert to Markdown"
+      // action is the recovery.
+      try {
+        await bff.post(`/cv-versions/${created.cvVersionId}/convert`);
+      } catch {
+        // Swallowed on purpose; see above.
       }
 
       return created;
@@ -218,8 +230,10 @@ export function useSaveCvVersionMarkdown(id: string) {
 /**
  * Trigger a Conversion for one CV version — "Convert to Markdown", or
  * "Reconvert" once it is `CONVERTED`. services/api resets `conversionStatus` to
- * `PENDING` and enqueues the work on the `cv-conversion` queue; a 409 means a
- * Conversion is already running. Invalidates the list so the new status shows.
+ * `PENDING` and enqueues the work on the `cv-conversion` queue. A 409 carries
+ * `detail.code`: `CONVERSION_RUNNING` (one is already running) or
+ * `FILE_NOT_UPLOADED` (no object at the CV's fileKey yet, docs/adr/0028).
+ * Invalidates the list so the new status shows.
  */
 export function useConvertCvVersion() {
   const queryClient = useQueryClient();

@@ -802,6 +802,71 @@ describe("CvVersionsPage — replace (from the panel, issue #82)", () => {
     });
   });
 
+  function replaceHandlers(events: string[], convertStatus = 202) {
+    let replaced = false;
+    return [
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: replaced
+            ? [cvVersion({ id: "cv2", label: "Updated CV", conversionStatus: "PENDING" })]
+            : [cvVersion()],
+        }),
+      ),
+      http.post("/api/cv-versions/cv1/replace", () => {
+        events.push("replace");
+        replaced = true;
+        return HttpResponse.json(
+          { cvVersionId: "cv2", fileKey: "k", uploadUrl: UPLOAD_URL },
+          { status: 201 },
+        );
+      }),
+      http.put(UPLOAD_URL, () => {
+        events.push("put");
+        return new HttpResponse(null, { status: 200 });
+      }),
+      http.post("/api/cv-versions/cv2/convert", () => {
+        events.push("convert");
+        return convertStatus === 202
+          ? HttpResponse.json({ conversionStatus: "PENDING" }, { status: 202 })
+          : HttpResponse.json({ error: "boom" }, { status: convertStatus });
+      }),
+      http.get("/api/cv-versions/cv2/markdown", () =>
+        HttpResponse.json({ markdownContent: null, conversionStatus: "PENDING" }),
+      ),
+    ];
+  }
+
+  async function submitReplace() {
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+    await user.click(await screen.findByText("Grad CV"));
+    const panel = within(await screen.findByRole("dialog"));
+    await user.click(panel.getByRole("button", { name: "Replace" }));
+    await user.upload(panel.getByLabelText("New file"), pdf("updated.pdf"));
+    await user.click(panel.getByRole("button", { name: "Replace" }));
+    return panel;
+  }
+
+  it("starts the new CV version's Conversion only after the file is uploaded (docs/adr/0028)", async () => {
+    const events: string[] = [];
+    server.use(...replaceHandlers(events));
+
+    await submitReplace();
+
+    await waitFor(() => expect(events).toEqual(["replace", "put", "convert"]));
+  });
+
+  it("does not fail the Replace when starting the Conversion fails", async () => {
+    const events: string[] = [];
+    server.use(...replaceHandlers(events, 500));
+
+    const panel = await submitReplace();
+
+    await waitFor(() => expect(events).toContain("convert"));
+    await waitFor(() => expect(panel.getByText("Pending")).toBeInTheDocument());
+    expect(within(screen.getByRole("dialog")).getByText("Updated CV")).toBeInTheDocument();
+  });
+
   it("closes the replace form on cancel without submitting", async () => {
     server.use(
       http.get("/api/cv-versions", () =>

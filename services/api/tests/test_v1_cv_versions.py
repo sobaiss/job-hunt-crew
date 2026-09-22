@@ -186,6 +186,29 @@ async def _set_conversion_status(cv_version_id: str, status: Cvconversionstatus)
         await engine.dispose()
 
 
+async def _set_conversion_failed(cv_version_id: str, error: str) -> None:
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            row = await session.get(CVVersion, cv_version_id)
+            row.conversionStatus = Cvconversionstatus.FAILED
+            row.conversionError = error
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+
+async def _get_cv_version(cv_version_id: str) -> CVVersion:
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            return await session.get(CVVersion, cv_version_id)
+    finally:
+        await engine.dispose()
+
+
 def _drain_cv_conversion_queue() -> list[str]:
     """Receives and deletes everything on the cv-conversion queue, returning the
     message bodies. Keeps the queue clean between tests that assert on it."""
@@ -690,7 +713,7 @@ def test_patch_returns_404_for_other_users_cv(user_id):
 def test_convert_sets_pending_and_enqueues(user_id):
     _drain_cv_conversion_queue()
     with TestClient(app) as client:
-        cv_id = client.post(
+        created = client.post(
             "/v1/cv-versions",
             headers=_headers(user_id),
             json={
@@ -699,7 +722,9 @@ def test_convert_sets_pending_and_enqueues(user_id):
                 "contentType": "application/pdf",
                 "fileSizeBytes": 1024,
             },
-        ).json()["cvVersionId"]
+        ).json()
+        cv_id = created["cvVersionId"]
+        make_s3_client().put_object(Bucket=S3_BUCKET, Key=created["fileKey"], Body=b"pdf-bytes")
 
         asyncio.run(_set_conversion_status(cv_id, Cvconversionstatus.CONVERTED))
 
@@ -732,6 +757,36 @@ def test_convert_returns_409_while_converting(user_id):
 
         response = client.post(f"/v1/cv-versions/{cv_id}/convert", headers=_headers(user_id))
         assert response.status_code == 409
+        assert response.json()["detail"]["code"] == "CONVERSION_RUNNING"
+        assert _drain_cv_conversion_queue() == []
+
+
+def test_convert_rejects_when_the_file_was_never_uploaded(user_id):
+    """docs/adr/0028: the file first, the Conversion second. A convert call for
+    a fileKey with no object behind it (the browser's PUT never happened, or
+    has not happened yet) is refused, and the row is left exactly as it was."""
+    _drain_cv_conversion_queue()
+    with TestClient(app) as client:
+        cv_id = client.post(
+            "/v1/cv-versions",
+            headers=_headers(user_id),
+            json={
+                "label": "CV 1",
+                "fileName": "cv1.pdf",
+                "contentType": "application/pdf",
+                "fileSizeBytes": 1024,
+            },
+        ).json()["cvVersionId"]
+
+        asyncio.run(_set_conversion_failed(cv_id, "previous failure"))
+
+        response = client.post(f"/v1/cv-versions/{cv_id}/convert", headers=_headers(user_id))
+        assert response.status_code == 409
+        assert response.json()["detail"]["code"] == "FILE_NOT_UPLOADED"
+
+        row = asyncio.run(_get_cv_version(cv_id))
+        assert row.conversionStatus == Cvconversionstatus.FAILED
+        assert row.conversionError == "previous failure"
         assert _drain_cv_conversion_queue() == []
 
 
@@ -844,8 +899,9 @@ def test_replace_cv_version_creates_new_row_and_supersedes_old(user_id):
         assert listed[new_id]["supersededById"] is None
         assert listed[new_id]["conversionStatus"] == "PENDING"
 
-        bodies = [json.loads(b) for b in _drain_cv_conversion_queue()]
-        assert bodies == [{"cvVersionId": new_id}]
+        # docs/adr/0028: the bytes are not in storage yet when replace returns,
+        # so the client starts the Conversion after its own PUT.
+        assert _drain_cv_conversion_queue() == []
 
 
 def test_replace_cv_version_transfers_default_status(user_id):
