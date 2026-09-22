@@ -4,15 +4,13 @@ import { useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import type { Components } from "react-markdown";
 
 import {
   useCvVersions,
   useCvVersionMarkdown,
   useSaveCvVersionMarkdown,
 } from "@/hooks/use-cv-versions";
+import { CvMarkdownContent } from "@/components/cv-markdown-content";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -22,30 +20,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 // it in place (docs/adr/0025, #185's API). Not linked from anywhere yet
 // (that's #187) — reachable only by navigating here directly. Metadata comes
 // from the already-cached CV-versions list query (find-by-id), content from
-// the existing per-CV rendition query — no new read endpoint.
-
-const MARKDOWN_COMPONENTS: Components = {
-  h1: ({ ...props }) => <h1 className="text-xl font-semibold" {...props} />,
-  h2: ({ ...props }) => <h2 className="mt-4 text-lg font-semibold" {...props} />,
-  h3: ({ ...props }) => <h3 className="mt-3 text-base font-semibold" {...props} />,
-  p: ({ ...props }) => <p className="mt-2 leading-relaxed" {...props} />,
-  ul: ({ ...props }) => <ul className="mt-2 list-disc pl-5" {...props} />,
-  ol: ({ ...props }) => <ol className="mt-2 list-decimal pl-5" {...props} />,
-  li: ({ ...props }) => <li className="mt-1" {...props} />,
-  a: ({ ...props }) => (
-    <a className="text-accent underline" target="_blank" rel="noreferrer" {...props} />
-  ),
-  table: ({ ...props }) => (
-    <div className="mt-2 overflow-x-auto">
-      <table className="w-full border-collapse text-sm" {...props} />
-    </div>
-  ),
-  th: ({ ...props }) => (
-    <th className="border border-border bg-muted/30 px-2 py-1 text-left" {...props} />
-  ),
-  td: ({ ...props }) => <td className="border border-border px-2 py-1" {...props} />,
-  hr: ({ ...props }) => <hr className="mt-4 border-border" {...props} />,
-};
+// the existing per-CV rendition query — no new read endpoint. The rendering
+// itself lives in `CvMarkdownContent`, shared with the CV panel's own
+// preview so both surfaces render a CV's content identically.
 
 export default function CvVersionEditPage() {
   const params = useParams<{ id: string }>();
@@ -136,9 +113,7 @@ export default function CvVersionEditPage() {
             </p>
           )}
           {markdown.data && (
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
-              {markdown.data.markdownContent ?? ""}
-            </ReactMarkdown>
+            <CvMarkdownContent content={markdown.data.markdownContent ?? ""} />
           )}
         </div>
       )}
