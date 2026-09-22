@@ -52,14 +52,18 @@
 
   /* shadcn/ui primitives address a wider semantic vocabulary than the six
      claude.ai palette tokens. Rather than re-introduce shadcn's own raw
-     colours, alias its names onto the palette: `card`/`secondary` -> panel,
+     colours, alias its names onto the palette: `secondary` -> panel,
      `popover` -> paper background, `primary` -> the coral accent, `input`/
      `ring` -> border/accent, `destructive` -> the danger status colour.
+     `card` -> the paper background itself (not panel): the reviewed
+     mockups (design/AnalysisDetail.dc.html's `.card`) sit flush with the
+     page and read as "clear/light", set apart only by their border, not by
+     a filled tint.
      NOTE: shadcn's stock components use `bg-accent` for subtle hover/highlight
      surfaces; that would paint them coral here, so the affected primitives
      (button ghost/outline, dropdown-menu, select, sheet/dialog close) use
      `bg-panel` for hover instead — see those files. */
-  --color-card: var(--panel);
+  --color-card: var(--background);
   --color-card-foreground: var(--foreground);
   --color-popover: var(--background);
   --color-popover-foreground: var(--foreground);

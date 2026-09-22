@@ -1,4 +1,5 @@
 import type { AnalysisSummary } from "@/hooks/use-analyses";
+import type { CvVersion } from "@/hooks/use-cv-versions";
 import type { Scout } from "@/hooks/use-scouts";
 
 // Pure, framework-free helpers behind the Dashboard (`components/dashboard.tsx`).
@@ -79,6 +80,39 @@ export type TrendPoint = {
   score: number;
   movingAverage: number;
 };
+
+/** The job offer identity of the Analysis carrying {@link DashboardStats.bestScore}
+ *  — the "Best score" stat tile's caption in the reviewed mockup
+ *  (design/Shell.dc.html). `null` until at least one Analysis is scored. */
+export function bestScoreOffer(
+  analyses: AnalysisSummary[],
+): { title: string | null; company: string | null } | null {
+  const scored = analyses.filter(isScored);
+  if (scored.length === 0) return null;
+  const best = scored.reduce((a, b) => (b.matchScore > a.matchScore ? b : a));
+  return { title: best.jobOffer.title, company: best.jobOffer.company };
+}
+
+/** Count of Analyses requested within the trailing 7 days from `now` — the
+ *  "Analyses" stat tile's caption. `now` defaults to the wall clock and is
+ *  only overridden by tests. */
+export function analysesThisWeek(
+  analyses: AnalysisSummary[],
+  now: number = Date.now(),
+): number {
+  const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+  return analyses.filter(
+    (a) => now - new Date(a.requestedAt).getTime() <= WEEK_MS,
+  ).length;
+}
+
+/** Label of the Candidate's default CV version — the "CV versions" stat
+ *  tile's caption. `null` when no version is currently marked default. */
+export function defaultCvLabel(
+  cvVersions: Pick<CvVersion, "label" | "isDefault">[],
+): string | null {
+  return cvVersions.find((cv) => cv.isDefault)?.label ?? null;
+}
 
 /**
  * The Dashboard's "N new matches from your agents" block (issue #56): the

@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  analysesThisWeek,
+  bestScoreOffer,
   computeStats,
+  defaultCvLabel,
   newMatchesCount,
   onboardingSteps,
   scoreTrend,
 } from "@/lib/dashboard-metrics";
 import type { AnalysisSummary } from "@/hooks/use-analyses";
+import type { CvVersion } from "@/hooks/use-cv-versions";
 import type { Scout } from "@/hooks/use-scouts";
 
 function scout(overrides: Partial<Scout> = {}): Scout {
@@ -86,6 +90,97 @@ describe("computeStats", () => {
     );
     expect(stats.averageScore).toBeNull();
     expect(stats.bestScore).toBeNull();
+  });
+});
+
+function cvVersion(overrides: Partial<CvVersion> = {}): CvVersion {
+  return {
+    id: "cv1",
+    label: "CV",
+    fileName: "cv.pdf",
+    fileType: "PDF",
+    fileSizeBytes: 1024,
+    isDefault: false,
+    conversionStatus: "CONVERTED",
+    conversionError: null,
+    supersededById: null,
+    createdAt: "2026-08-01T00:00:00.000Z",
+    updatedAt: "2026-08-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("bestScoreOffer", () => {
+  it("returns the job offer of the highest-scoring completed analysis", () => {
+    expect(
+      bestScoreOffer([
+        analysis({
+          id: "a1",
+          matchScore: 60,
+          jobOffer: {
+            id: "job1",
+            title: "Low",
+            company: "LowCo",
+            location: "Paris",
+            sourceSite: "OTHER",
+            postedAt: null,
+            sourceUrl: "https://example.com/jobs/job1",
+          },
+        }),
+        analysis({
+          id: "a2",
+          matchScore: 90,
+          jobOffer: {
+            id: "job2",
+            title: "High",
+            company: "HighCo",
+            location: "Paris",
+            sourceSite: "OTHER",
+            postedAt: null,
+            sourceUrl: "https://example.com/jobs/job2",
+          },
+        }),
+      ]),
+    ).toEqual({ title: "High", company: "HighCo" });
+  });
+
+  it("is null when nothing is scored", () => {
+    expect(bestScoreOffer([analysis({ status: "QUEUED", matchScore: null })])).toBeNull();
+  });
+});
+
+describe("analysesThisWeek", () => {
+  const now = new Date("2026-08-10T00:00:00.000Z").getTime();
+
+  it("counts only analyses requested within the trailing 7 days", () => {
+    const count = analysesThisWeek(
+      [
+        analysis({ id: "a1", requestedAt: "2026-08-09T00:00:00.000Z" }),
+        analysis({ id: "a2", requestedAt: "2026-08-04T00:00:00.000Z" }),
+        analysis({ id: "a3", requestedAt: "2026-07-20T00:00:00.000Z" }),
+      ],
+      now,
+    );
+    expect(count).toBe(2);
+  });
+
+  it("is zero-safe with no analyses", () => {
+    expect(analysesThisWeek([], now)).toBe(0);
+  });
+});
+
+describe("defaultCvLabel", () => {
+  it("returns the label of the default CV version", () => {
+    expect(
+      defaultCvLabel([
+        cvVersion({ id: "cv1", label: "Backend", isDefault: false }),
+        cvVersion({ id: "cv2", label: "Data — Fintech", isDefault: true }),
+      ]),
+    ).toBe("Data — Fintech");
+  });
+
+  it("is null when no version is marked default", () => {
+    expect(defaultCvLabel([cvVersion({ isDefault: false })])).toBeNull();
   });
 });
 

@@ -6,8 +6,28 @@
     "tagline": "Match your CV against real job offers and see exactly where you stand.",
     "description": "Job Hunt Crew reads a job posting and one of your CVs, then shows the matched skills, the gaps, and what to change before you apply.",
     "signIn": "Sign in",
+    "signInMethods": "Sign in with email, Google, or LinkedIn.",
+    "nav": {
+      "how": "How it works",
+      "features": "Features",
+      "faq": "FAQ"
+    },
     "hero": {
-      "eyebrow": "CV-to-offer matching"
+      "eyebrow": "CV-to-offer matching",
+      "preview": {
+        "title": "Dashboard",
+        "period": "Last 30 days",
+        "scoreAvg": "Average",
+        "best": "Best",
+        "analyses": "Analyses",
+        "cv": "CVs",
+        "row1Title": "Senior Data Engineer",
+        "row1Company": "Payflow",
+        "row2Title": "Backend Engineer (Go)",
+        "row2Company": "Kessel",
+        "row3Title": "Platform Data Lead",
+        "row3Company": "Novable"
+      }
     },
     "howItWorks": {
       "heading": "How it works",
@@ -34,6 +54,7 @@
       "trendBody": "Every analysis is kept, with a match-score trend so you can see your search improving."
     },
     "preview": {
+      "eyebrow": "Preview",
       "heading": "A dashboard built around your search",
       "body": "Your average and best match score, recent analyses, and a score trend — all in one place once you sign in.",
       "caption": "Preview of the signed-in dashboard"
@@ -58,14 +79,21 @@
       "modelQ": "What AI model does the analysis use?",
       "modelA": "A large language model reads the offer and your CV to produce the match. It does not rewrite your CV file for you."
     },
+    "finalCta": {
+      "heading": "Ready to measure your fit?"
+    },
     "footer": {
       "tagline": "Match your CV against real job offers.",
+      "productHeading": "Product",
+      "resourcesHeading": "Resources",
       "legalHeading": "Legal",
+      "preferencesHeading": "Preferences",
       "copyright": "Job Hunt Crew"
     },
     "placeholders": {
       "dailyCap": "daily analysis limit: number to be confirmed",
-      "legalLinks": "Legal links (privacy, terms) to be added"
+      "legalLinks": "Legal links (privacy, terms) to be added",
+      "resourceLinks": "Guide and status links to be added"
     }
   },
   "signIn": {
@@ -113,8 +141,11 @@
       "heading": "Your numbers",
       "averageScore": "Average match score",
       "bestScore": "Best match score",
+      "bestScoreOffer": "{title} — {company}",
       "analysisCount": "Analyses run",
-      "cvVersionCount": "CV versions"
+      "analysesThisWeek": "{count} this week",
+      "cvVersionCount": "CV versions",
+      "defaultCvLabel": "“{label}” default"
     },
     "onboarding": {
       "heading": "Get started in three steps",
@@ -128,14 +159,19 @@
     "quickActions": {
       "heading": "Quick actions",
       "analyseOne": "Analyse one offer",
+      "analyseOneHint": "A URL, a CV, a result.",
       "analyseSeveral": "Analyse several offers",
-      "importCv": "Import a CV"
+      "analyseSeveralHint": "A site, some filters, a batch.",
+      "importCv": "Import a CV",
+      "importCvHint": "PDF, DOCX, Markdown, text."
     },
     "trend": {
-      "heading": "Match score trend"
+      "heading": "Match score trend",
+      "caption": "Moving average over {count} analyses — from {min} to {max}."
     },
     "recent": {
-      "heading": "Recent analyses"
+      "heading": "Recent analyses",
+      "viewAll": "View all"
     },
     "matches": {
       "heading": "{count, plural, one {# new match from your agents} other {# new matches from your agents}}",
@@ -613,11 +649,13 @@
       "none": "None.",
       "matchScore": "Match score",
       "gaugeLabel": "Match score {score} out of 100",
+      "outOf100": "/ 100",
       "band": {
         "strong": "Strong",
         "partial": "Partial",
         "weak": "Weak"
       },
+      "bandLegend": "≥ 75 — strong · 45–74 — partial · < 45 — weak",
       "matchedSkills": "Matched skills",
       "missingSkills": "Missing skills",
       "evidenceLabel": "Evidence",

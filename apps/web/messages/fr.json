@@ -6,8 +6,28 @@
     "tagline": "Comparez votre CV à de vraies offres d'emploi et sachez exactement où vous en êtes.",
     "description": "Job Hunt Crew lit une offre d'emploi et l'un de vos CV, puis affiche les compétences qui correspondent, les manques et ce qu'il faut changer avant de postuler.",
     "signIn": "Se connecter",
+    "signInMethods": "Connexion par e-mail, Google ou LinkedIn.",
+    "nav": {
+      "how": "Comment ça marche",
+      "features": "Fonctionnalités",
+      "faq": "FAQ"
+    },
     "hero": {
-      "eyebrow": "Correspondance CV / offre"
+      "eyebrow": "Correspondance CV / offre",
+      "preview": {
+        "title": "Dashboard",
+        "period": "30 derniers jours",
+        "scoreAvg": "Score moyen",
+        "best": "Meilleur",
+        "analyses": "Analyses",
+        "cv": "CV",
+        "row1Title": "Senior Data Engineer",
+        "row1Company": "Payflow",
+        "row2Title": "Backend Engineer (Go)",
+        "row2Company": "Kessel",
+        "row3Title": "Plateforme Data Lead",
+        "row3Company": "Novable"
+      }
     },
     "howItWorks": {
       "heading": "Comment ça marche",
@@ -34,6 +54,7 @@
       "trendBody": "Chaque analyse est conservée, avec une courbe du score de correspondance pour voir vos candidatures s'améliorer."
     },
     "preview": {
+      "eyebrow": "Aperçu",
       "heading": "Un tableau de bord pensé pour votre recherche",
       "body": "Votre score de correspondance moyen et votre meilleur score, vos analyses récentes et une courbe de progression — le tout au même endroit une fois connecté.",
       "caption": "Aperçu du tableau de bord après connexion"
@@ -58,14 +79,21 @@
       "modelQ": "Quel modèle d'IA réalise l'analyse ?",
       "modelA": "Un grand modèle de langage lit l'offre et votre CV pour produire la correspondance. Il ne réécrit pas votre fichier de CV à votre place."
     },
+    "finalCta": {
+      "heading": "Prêt à mesurer votre fit ?"
+    },
     "footer": {
       "tagline": "Comparez votre CV à de vraies offres d'emploi.",
-      "legalHeading": "Mentions légales",
+      "productHeading": "Produit",
+      "resourcesHeading": "Ressources",
+      "legalHeading": "Légal",
+      "preferencesHeading": "Préférences",
       "copyright": "Job Hunt Crew"
     },
     "placeholders": {
       "dailyCap": "limite d'analyses quotidienne : nombre à confirmer",
-      "legalLinks": "Liens légaux (confidentialité, conditions) à ajouter"
+      "legalLinks": "Liens légaux (confidentialité, conditions) à ajouter",
+      "resourceLinks": "Liens vers le guide et le statut à ajouter"
     }
   },
   "signIn": {
@@ -113,8 +141,11 @@
       "heading": "Vos chiffres",
       "averageScore": "Score de correspondance moyen",
       "bestScore": "Meilleur score de correspondance",
+      "bestScoreOffer": "{title} — {company}",
       "analysisCount": "Analyses réalisées",
-      "cvVersionCount": "Versions de CV"
+      "analysesThisWeek": "{count} cette semaine",
+      "cvVersionCount": "Versions de CV",
+      "defaultCvLabel": "« {label} » par défaut"
     },
     "onboarding": {
       "heading": "Démarrez en trois étapes",
@@ -128,14 +159,19 @@
     "quickActions": {
       "heading": "Actions rapides",
       "analyseOne": "Analyser une offre",
+      "analyseOneHint": "Une URL, un CV, un résultat.",
       "analyseSeveral": "Analyser plusieurs offres",
-      "importCv": "Importer un CV"
+      "analyseSeveralHint": "Un site, des filtres, un lot.",
+      "importCv": "Importer un CV",
+      "importCvHint": "PDF, DOCX, Markdown, texte."
     },
     "trend": {
-      "heading": "Évolution du score de correspondance"
+      "heading": "Évolution du score de correspondance",
+      "caption": "Moyenne mobile sur {count} analyses — de {min} à {max}."
     },
     "recent": {
-      "heading": "Analyses récentes"
+      "heading": "Analyses récentes",
+      "viewAll": "Voir tout"
     },
     "matches": {
       "heading": "{count, plural, one {# nouveau résultat de vos agents} other {# nouveaux résultats de vos agents}}",
@@ -613,11 +649,13 @@
       "none": "Aucune.",
       "matchScore": "Score de correspondance",
       "gaugeLabel": "Score de correspondance {score} sur 100",
+      "outOf100": "/ 100",
       "band": {
         "strong": "Fort",
         "partial": "Partiel",
         "weak": "Faible"
       },
+      "bandLegend": "≥ 75 — fort · 45–74 — partiel · < 45 — faible",
       "matchedSkills": "Compétences correspondantes",
       "missingSkills": "Compétences manquantes",
       "evidenceLabel": "Preuve",

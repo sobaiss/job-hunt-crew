@@ -143,14 +143,17 @@ describe("Dashboard", () => {
     expect(recent.getByText("Backend Engineer")).toBeInTheDocument();
     expect(recent.getByText("Acme Inc · Paris")).toBeInTheDocument();
 
+    // Each quick action's accessible name now includes its hint line (e.g.
+    // "Analyse one offer A URL, a CV, a result."), so these match on the
+    // leading title rather than the full string.
     expect(
-      screen.getByRole("link", { name: "Analyse one offer" }),
+      screen.getByRole("link", { name: /^Analyse one offer/ }),
     ).toHaveAttribute("href", "/analyses/new");
     expect(
-      screen.getByRole("link", { name: "Analyse several offers" }),
+      screen.getByRole("link", { name: /^Analyse several offers/ }),
     ).toHaveAttribute("href", "/analyses/new/several");
     expect(
-      screen.getByRole("link", { name: "Import a CV" }),
+      screen.getByRole("link", { name: /^Import a CV/ }),
     ).toHaveAttribute("href", "/cv-versions");
   });
 
