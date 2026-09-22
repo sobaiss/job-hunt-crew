@@ -1,3 +1,5 @@
+import { CircleCheck, CircleX, Send, Undo2, type LucideIcon } from "lucide-react";
+
 import type { ApplicationStatus } from "@/hooks/use-applications";
 import type { AnalysisSummary } from "@/hooks/use-analyses";
 
@@ -73,6 +75,22 @@ export function trackingStatusBadgeVariant(
   if (status === "REJECTED" || status === "WITHDRAWN") return "destructive";
   if (status === "TO_APPLY") return "secondary";
   return "warning";
+}
+
+/** The icon a "move to this status" button carries, alongside
+ *  `trackingStatusBadgeVariant`'s colour — shared so the same transition looks
+ *  the same in the Quick view and in the Analyses bulk bar (DESIGN.md,
+ *  "Buttons"). `TO_APPLY` is here for completeness; no button offers it. */
+const TRACKING_STATUS_ICONS: Record<TrackingStatus, LucideIcon> = {
+  TO_APPLY: Send,
+  IN_PROGRESS: Send,
+  REJECTED: CircleX,
+  ACCEPTED: CircleCheck,
+  WITHDRAWN: Undo2,
+};
+
+export function trackingStatusIcon(status: TrackingStatus): LucideIcon {
+  return TRACKING_STATUS_ICONS[status];
 }
 
 /** The Tracking-status transitions the Quick view's action buttons offer

@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { Check, FileText, LayoutGrid, Link2 } from "lucide-react";
+import { ArrowRight, Check, FileText, LayoutGrid, Link2 } from "lucide-react";
 import {
   Line,
   LineChart,
@@ -236,7 +236,10 @@ export function Dashboard() {
               <p className="text-sm text-muted">{t("matches.subtitle")}</p>
             </div>
             <Button asChild>
-              <Link href="/scouts">{t("matches.cta")}</Link>
+              <Link href="/scouts">
+                {t("matches.cta")}
+                <ArrowRight aria-hidden="true" />
+              </Link>
             </Button>
           </CardContent>
         </Card>

@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell } from "lucide-react";
+import { Bell, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { useQuotas, useMarkQuotaAlertRead, type QuotaKindName } from "@/hooks/use-quotas";
@@ -74,10 +74,11 @@ export function QuotaAlertsFeed() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-auto flex-none px-1.5 py-0.5 text-xs"
+                    className="h-auto flex-none gap-1 px-1.5 py-0.5 text-xs [&_svg]:size-3"
                     disabled={markRead.isPending}
                     onClick={() => markRead.mutate(alert.id)}
                   >
+                    <X aria-hidden="true" />
                     {t("dismiss")}
                   </Button>
                 </li>

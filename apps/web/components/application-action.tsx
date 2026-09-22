@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useTranslations } from "next-intl";
+import { Check, LoaderCircle, SquareArrowOutUpRight } from "lucide-react";
 
 import { useAnalysisGeneratedDocuments } from "@/hooks/use-generated-documents";
 import { useMarkAsApplied } from "@/hooks/use-applications";
@@ -65,6 +66,13 @@ export function ApplicationAction({
           onClick={apply}
           disabled={!bothDocumentsReady || markAsApplied.isPending}
         >
+          {markAsApplied.isPending ? (
+            <LoaderCircle className="animate-spin" aria-hidden="true" />
+          ) : (
+            // Applying opens the posting in a new tab before it records
+            // anything, so the icon promises the jump, not a save.
+            <SquareArrowOutUpRight aria-hidden="true" />
+          )}
           {t("apply")}
         </Button>
         <Button
@@ -74,6 +82,7 @@ export function ApplicationAction({
           onClick={() => markAsApplied.mutate(analysisId)}
           disabled={markAsApplied.isPending}
         >
+          <Check aria-hidden="true" />
           {t("markApplied")}
         </Button>
       </div>

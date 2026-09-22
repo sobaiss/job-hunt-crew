@@ -3,6 +3,7 @@
 import { Suspense, useMemo, useRef } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { ChevronLeft, ChevronRight, RotateCw, Sparkles } from "lucide-react";
 
 import {
   useAdminAnalyses,
@@ -105,6 +106,7 @@ function AnalysisRowActions({ row }: { row: AdminAnalysisRow }) {
         disabled={retry.isPending}
         onClick={() => retry.mutate(row.id)}
       >
+        <RotateCw aria-hidden="true" />
         {t("retryAction")}
       </Button>
       <Button
@@ -114,6 +116,7 @@ function AnalysisRowActions({ row }: { row: AdminAnalysisRow }) {
         disabled={generateDocuments.isPending || row.status !== "COMPLETED"}
         onClick={() => generateDocuments.mutate(row.id)}
       >
+        <Sparkles aria-hidden="true" />
         {t("generateDocumentsAction")}
       </Button>
     </div>
@@ -328,6 +331,7 @@ function AnalysesTable() {
                 disabled={state.page <= 1}
                 onClick={() => updateState({ page: state.page - 1 })}
               >
+                <ChevronLeft aria-hidden="true" />
                 {t("pagination.previous")}
               </Button>
               <Button
@@ -338,6 +342,7 @@ function AnalysesTable() {
                 onClick={() => updateState({ page: state.page + 1 })}
               >
                 {t("pagination.next")}
+                <ChevronRight aria-hidden="true" />
               </Button>
             </div>
           </div>

@@ -6,7 +6,16 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useTranslations } from "next-intl";
-import { FileText, Pencil, RefreshCw, Star, Trash2, Upload } from "lucide-react";
+import {
+  FileText,
+  LoaderCircle,
+  Pencil,
+  RefreshCw,
+  Star,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
 import type { UseMutationResult } from "@tanstack/react-query";
 
 import {
@@ -221,15 +230,21 @@ function CvReplaceForm({
 
       <div className="flex items-center gap-3">
         <Button type="submit" size="sm" disabled={disabled || replace.isPending}>
+          {replace.isPending ? (
+            <LoaderCircle className="animate-spin" aria-hidden="true" />
+          ) : (
+            <Upload aria-hidden="true" />
+          )}
           {replace.isPending ? t("list.replacing") : t("list.replaceSubmit")}
         </Button>
         <Button
           type="button"
           size="sm"
-          variant="outline"
+          variant="ghost"
           disabled={disabled}
           onClick={onCancel}
         >
+          <X aria-hidden="true" />
           {t("list.cancelReplace")}
         </Button>
       </div>
@@ -419,8 +434,8 @@ export function CvVersionPanel({
                 <Button
                   type="button"
                   size="sm"
-                  variant="ghost"
-                  className="ml-auto text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  variant="destructive-ghost"
+                  className="ml-auto"
                   disabled={deleting}
                   onClick={() => setIsConfirmingDelete(true)}
                 >
@@ -505,15 +520,21 @@ export function CvVersionPanel({
                       })
                     }
                   >
+                    {deleting ? (
+                      <LoaderCircle className="animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Trash2 aria-hidden="true" />
+                    )}
                     {deleting ? t("list.deleting") : t("edit.confirmAction")}
                   </Button>
                   <Button
                     type="button"
                     size="sm"
-                    variant="outline"
+                    variant="ghost"
                     disabled={deleting}
                     onClick={() => setIsConfirmingDelete(false)}
                   >
+                    <X aria-hidden="true" />
                     {t("edit.cancelAction")}
                   </Button>
                 </div>

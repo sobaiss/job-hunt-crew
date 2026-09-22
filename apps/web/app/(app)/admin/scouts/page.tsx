@@ -3,6 +3,14 @@
 import { Suspense, useMemo, useRef } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
+import {
+  Archive,
+  ChevronLeft,
+  ChevronRight,
+  LoaderCircle,
+  Pause,
+  Play,
+} from "lucide-react";
 
 import {
   useAdminArchiveScout,
@@ -83,6 +91,11 @@ function ScoutRowActions({ row }: { row: AdminScoutRow }) {
       <div className="flex flex-wrap gap-2">
         {row.status === "ACTIVE" && (
           <Button type="button" size="sm" disabled={run.isPending} onClick={() => run.mutate(row.id)}>
+            {run.isPending ? (
+              <LoaderCircle className="animate-spin" aria-hidden="true" />
+            ) : (
+              <Play aria-hidden="true" />
+            )}
             {run.isPending ? tRuns("running") : tRuns("runNow")}
           </Button>
         )}
@@ -94,6 +107,7 @@ function ScoutRowActions({ row }: { row: AdminScoutRow }) {
             disabled={pause.isPending}
             onClick={() => pause.mutate(row.id)}
           >
+            <Pause aria-hidden="true" />
             {t("actions.pause")}
           </Button>
         )}
@@ -105,16 +119,20 @@ function ScoutRowActions({ row }: { row: AdminScoutRow }) {
             disabled={resume.isPending}
             onClick={() => resume.mutate(row.id)}
           >
+            <Play aria-hidden="true" />
             {t("actions.resume")}
           </Button>
         )}
+        {/* Quiet, like the Scout panel's own Archive — it ends the Scout's
+            working life and shouldn't sit level with Run and Pause. */}
         <Button
           type="button"
-          variant="outline"
+          variant="ghost"
           size="sm"
           disabled={archive.isPending}
           onClick={() => archive.mutate(row.id)}
         >
+          <Archive aria-hidden="true" />
           {t("actions.archive")}
         </Button>
       </div>
@@ -325,6 +343,7 @@ function ScoutsTable() {
                 disabled={state.page <= 1}
                 onClick={() => updateState({ page: state.page - 1 })}
               >
+                <ChevronLeft aria-hidden="true" />
                 {t("pagination.previous")}
               </Button>
               <Button
@@ -335,6 +354,7 @@ function ScoutsTable() {
                 onClick={() => updateState({ page: state.page + 1 })}
               >
                 {t("pagination.next")}
+                <ChevronRight aria-hidden="true" />
               </Button>
             </div>
           </div>

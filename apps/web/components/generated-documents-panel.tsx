@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
+import { Download, LoaderCircle, RefreshCw, RotateCw, Sparkles } from "lucide-react";
 
 import {
   useAnalysisGeneratedDocuments,
@@ -118,6 +119,11 @@ function DocumentCard({
               disabled={regenerate.isPending}
               className="w-fit"
             >
+              {regenerate.isPending ? (
+                <LoaderCircle className="animate-spin" aria-hidden="true" />
+              ) : (
+                <RotateCw aria-hidden="true" />
+              )}
               {t("retry")}
             </Button>
           </>
@@ -133,13 +139,15 @@ function DocumentCard({
                     onChange={onFormatChange}
                     label={t("formatLabel", { title })}
                   />
-                  <a
-                    href={`/api/generated-documents/${id}/download?format=${format}`}
-                    download
-                    className="w-fit text-sm font-medium text-primary underline underline-offset-2"
-                  >
-                    {t("download")}
-                  </a>
+                  <Button asChild variant="outline" size="sm">
+                    <a
+                      href={`/api/generated-documents/${id}/download?format=${format}`}
+                      download
+                    >
+                      <Download aria-hidden="true" />
+                      {t("download")}
+                    </a>
+                  </Button>
                 </div>
                 <Button
                   variant="outline"
@@ -151,6 +159,10 @@ function DocumentCard({
                   }
                   disabled={regenerate.isPending}
                 >
+                  <RefreshCw
+                    aria-hidden="true"
+                    className={regenerate.isPending ? "animate-spin" : undefined}
+                  />
                   {t("regenerate")}
                 </Button>
               </div>
@@ -210,9 +222,11 @@ export function GeneratedDocumentsPanel({ analysisId }: { analysisId: string }) 
 
       {!documents && <InlineQuotaBanner kinds={["documentsDaily"]} />}
 
+      {/* Accented, because with no documents yet this is the page's live
+          primary action — "Postuler" above is disabled until both are READY,
+          and this button is gone by the time it isn't. */}
       {!documents && (
         <Button
-          variant="outline"
           size="sm"
           onClick={() =>
             create.mutate(undefined, {
@@ -222,6 +236,11 @@ export function GeneratedDocumentsPanel({ analysisId }: { analysisId: string }) 
           disabled={create.isPending}
           className="w-fit"
         >
+          {create.isPending ? (
+            <LoaderCircle className="animate-spin" aria-hidden="true" />
+          ) : (
+            <Sparkles aria-hidden="true" />
+          )}
           {t("generate")}
         </Button>
       )}
@@ -235,6 +254,7 @@ export function GeneratedDocumentsPanel({ analysisId }: { analysisId: string }) 
         <>
           {bothReady && (
             <Button variant="outline" size="sm" onClick={downloadBoth} className="w-fit">
+              <Download aria-hidden="true" />
               {t("downloadBoth")}
             </Button>
           )}

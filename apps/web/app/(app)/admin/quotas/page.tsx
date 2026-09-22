@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
+import { LoaderCircle, Pencil, Save, X } from "lucide-react";
 
 import { useAdminPlanDefaults, useSetPlanDefaults, type AdminPlanDefault } from "@/hooks/use-admin";
 import { useEnumLabel } from "@/lib/enum-labels";
@@ -92,9 +93,15 @@ function PlanEditForm({ plan, limits, onClose }: { plan: string; limits: LimitsB
             )
           }
         >
+          {setDefaults.isPending ? (
+            <LoaderCircle className="animate-spin" aria-hidden="true" />
+          ) : (
+            <Save aria-hidden="true" />
+          )}
           {t("saveAction")}
         </Button>
-        <Button variant="outline" onClick={onClose}>
+        <Button variant="ghost" onClick={onClose}>
+          <X aria-hidden="true" />
           {t("cancelAction")}
         </Button>
       </SheetFooter>
@@ -171,6 +178,7 @@ export default function AdminQuotasPage() {
               {visiblePlans.map((plan) => (
                 <TableCell key={plan}>
                   <Button size="sm" variant="outline" onClick={() => setEditingPlan(plan)}>
+                    <Pencil aria-hidden="true" />
                     {t("modifyAction")}
                   </Button>
                 </TableCell>

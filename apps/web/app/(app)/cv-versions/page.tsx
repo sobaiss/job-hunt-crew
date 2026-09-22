@@ -3,7 +3,7 @@
 import { Fragment, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Star, Upload } from "lucide-react";
 
 import {
   useCvVersions,
@@ -149,7 +149,8 @@ export default function CvVersionsPage() {
       onClick={() => list.refetch()}
     >
       <RefreshCw
-        className={list.isFetching ? "size-4 animate-spin" : "size-4"}
+        aria-hidden="true"
+        className={list.isFetching ? "animate-spin" : undefined}
       />
       {t("list.refresh")}
     </Button>
@@ -190,7 +191,10 @@ export default function CvVersionsPage() {
           />
           {refreshButton}
           <Button asChild size="sm">
-            <Link href="/cv-versions/new">{t("list.importCv")}</Link>
+            <Link href="/cv-versions/new">
+              <Upload aria-hidden="true" />
+              {t("list.importCv")}
+            </Link>
           </Button>
         </div>
       </div>
@@ -377,6 +381,10 @@ export default function CvVersionsPage() {
                             onClick={() => convert.mutate(cv.id)}
                             disabled={busy}
                           >
+                            <RefreshCw
+                              aria-hidden="true"
+                              className={busy ? "animate-spin" : undefined}
+                            />
                             {busy
                               ? t("list.converting")
                               : cv.conversionStatus === "CONVERTED"
@@ -394,6 +402,7 @@ export default function CvVersionsPage() {
                                 setDefault.variables === cv.id
                               }
                             >
+                              <Star aria-hidden="true" />
                               {setDefault.isPending &&
                               setDefault.variables === cv.id
                                 ? t("list.settingDefault")
