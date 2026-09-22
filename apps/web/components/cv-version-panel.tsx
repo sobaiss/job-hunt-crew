@@ -6,6 +6,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useTranslations } from "next-intl";
+import { FileText, Pencil, RefreshCw, Star, Trash2, Upload } from "lucide-react";
 import type { UseMutationResult } from "@tanstack/react-query";
 
 import {
@@ -20,6 +21,7 @@ import {
 } from "@/hooks/use-cv-versions";
 import { conversionBadgeVariant, formatFileSize } from "@/lib/cv-versions-display";
 import { CvMarkdownContent } from "@/components/cv-markdown-content";
+import { CvPaper, CV_PANEL_COLUMN_CLASS } from "@/components/cv-paper";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -31,6 +33,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { cn } from "@/lib/utils";
 
 // The right-hand slide-over opened from a CV-versions table row (issue #81),
 // mirroring the `Sheet`-based pattern `AnalysisQuickView` already uses. Shows
@@ -39,9 +42,13 @@ import {
 // Reconvertir/Définir par défaut/Remplacer (issue #82) using the same
 // mutations already wired at the page level, plus a Modifier entry point
 // (issue #187) linking to the edit page (#186) for a non-superseded,
-// CONVERTED CV version. The properties (file, size, dates, status) live in a
-// "Refonte"-style card — same bordered-card-plus-uppercase-micro-label look
-// `AnalysisResultView` uses — and the rendition itself renders as the same
+// CONVERTED CV version. It reads top-down as identity (the label and the
+// Conversion's status), then what can be done about it, then the details,
+// then the CV itself: the actions come before the properties because the
+// panel is opened to act, not to read a grid. The properties live in a
+// "Refonte"-style card: the file as itself, then the dates and the default
+// state under the same uppercase micro-labels `AnalysisResultView` uses —
+// and the rendition itself renders as the same
 // real HTML document the edit page shows, via the shared `CvMarkdownContent`,
 // instead of a wall of raw Markdown text.
 
@@ -98,9 +105,9 @@ function CvContentPreview({ id }: { id: string }) {
             <p className="text-xs text-muted">
               {t("list.markdownRedactionNote")}
             </p>
-            <div className="max-h-[36rem] overflow-y-auto rounded-md border border-border bg-white p-8 text-sm text-foreground shadow-sm">
+            <CvPaper className="max-h-[36rem] overflow-y-auto">
               <CvMarkdownContent content={markdown.data.markdownContent} />
-            </div>
+            </CvPaper>
           </>
         ) : (
           <p className="text-sm text-muted">{t("list.markdownEmpty")}</p>
@@ -309,7 +316,7 @@ export function CvVersionPanel({
   return (
     <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetContent
-        className="w-full gap-6 overflow-y-auto sm:max-w-6xl"
+        className={cn("w-full gap-6 overflow-y-auto", CV_PANEL_COLUMN_CLASS)}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           returnFocusRef.current?.focus();
@@ -323,29 +330,135 @@ export function CvVersionPanel({
 
         {cv && (
           <>
-            <SheetHeader className="pr-8">
-              <SheetTitle>{cv.label}</SheetTitle>
+            <SheetHeader className="gap-2 pr-8">
+              <SheetTitle className="text-xl">{cv.label}</SheetTitle>
+              <Badge
+                variant={conversionBadgeVariant(cv.conversionStatus)}
+                className="w-fit"
+              >
+                {conversionStatusLabel(cv.conversionStatus)}
+              </Badge>
             </SheetHeader>
 
+            {cv.conversionStatus === "FAILED" && (
+              <p
+                role="alert"
+                className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+              >
+                {t("list.conversionFailed")}
+                {cv.conversionError ? ` ${cv.conversionError}` : ""}
+              </p>
+            )}
+
+            {/* Editing the CV is the one action worth leading with, so it
+                carries the accent on its own; the rest stay quiet outlines and
+                Delete sits apart, at the far end, coloured as what it is. */}
+            <div className="flex flex-wrap items-center gap-2">
+              {!cv.supersededById &&
+                cv.conversionStatus === "CONVERTED" &&
+                (busy || deleting ? (
+                  <Button type="button" size="sm" disabled>
+                    <Pencil aria-hidden="true" />
+                    {t("edit.modify")}
+                  </Button>
+                ) : (
+                  <Button asChild size="sm">
+                    <Link href={`/cv-versions/${cv.id}/edit`}>
+                      <Pencil aria-hidden="true" />
+                      {t("edit.modify")}
+                    </Link>
+                  </Button>
+                ))}
+              {!cv.isDefault && !cv.supersededById && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setDefault.mutate(cv.id)}
+                  disabled={
+                    deleting ||
+                    (setDefault.isPending && setDefault.variables === cv.id)
+                  }
+                >
+                  <Star aria-hidden="true" />
+                  {setDefault.isPending && setDefault.variables === cv.id
+                    ? t("list.settingDefault")
+                    : t("list.setDefault")}
+                </Button>
+              )}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => convert.mutate(cv.id)}
+                disabled={busy || deleting}
+              >
+                <RefreshCw
+                  aria-hidden="true"
+                  className={busy ? "animate-spin" : undefined}
+                />
+                {busy
+                  ? t("list.converting")
+                  : cv.conversionStatus === "CONVERTED"
+                    ? t("list.reconvert")
+                    : t("list.convert")}
+              </Button>
+              {!isReplacing && !cv.supersededById && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={deleting}
+                  onClick={() => setIsReplacing(true)}
+                >
+                  <Upload aria-hidden="true" />
+                  {t("list.replace")}
+                </Button>
+              )}
+              {!cv.supersededById && !isConfirmingDelete && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="ml-auto text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  disabled={deleting}
+                  onClick={() => setIsConfirmingDelete(true)}
+                >
+                  <Trash2 aria-hidden="true" />
+                  {t("list.delete")}
+                </Button>
+              )}
+            </div>
+
+            {/* The file leads, as the object it is — an icon, its name, its
+                weight underneath — rather than as the first of five equal
+                cells. That leaves exactly three facts to label, which is the
+                three columns the grid has, so no ragged last row. */}
             <Card>
-              <CardContent>
-                <dl className="grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-3">
-                  <PropertyItem label={t("list.columns.file")}>
-                    {cv.fileName} · {cv.fileType}
-                  </PropertyItem>
-                  <PropertyItem label={t("list.columns.size")}>
-                    {formatFileSize(cv.fileSizeBytes)}
-                  </PropertyItem>
+              <CardContent className="flex flex-col gap-5">
+                <div className="flex items-center gap-3">
+                  <span
+                    aria-hidden="true"
+                    className="flex size-10 flex-none items-center justify-center rounded-md border border-border bg-panel text-muted"
+                  >
+                    <FileText className="size-5" />
+                  </span>
+                  <div className="flex min-w-0 flex-col gap-0.5">
+                    <span className="truncate text-sm font-medium">
+                      {cv.fileName} · {cv.fileType}
+                    </span>
+                    <span className="text-xs text-muted">
+                      {formatFileSize(cv.fileSizeBytes)}
+                    </span>
+                  </div>
+                </div>
+
+                <dl className="grid grid-cols-2 gap-4 border-t border-border pt-5 sm:grid-cols-3">
                   <PropertyItem label={t("list.columns.uploaded")}>
                     {new Date(cv.createdAt).toLocaleDateString()}
                   </PropertyItem>
                   <PropertyItem label={t("panel.updated")}>
                     {new Date(cv.updatedAt).toLocaleDateString()}
-                  </PropertyItem>
-                  <PropertyItem label={t("list.columns.status")}>
-                    <Badge variant={conversionBadgeVariant(cv.conversionStatus)}>
-                      {conversionStatusLabel(cv.conversionStatus)}
-                    </Badge>
                   </PropertyItem>
                   <PropertyItem label={t("list.columns.default")}>
                     {cv.isDefault ? (
@@ -361,83 +474,6 @@ export function CvVersionPanel({
                 </dl>
               </CardContent>
             </Card>
-
-            {cv.conversionStatus === "FAILED" && (
-              <p
-                role="alert"
-                className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"
-              >
-                {t("list.conversionFailed")}
-                {cv.conversionError ? ` ${cv.conversionError}` : ""}
-              </p>
-            )}
-
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => convert.mutate(cv.id)}
-                disabled={busy || deleting}
-              >
-                {busy
-                  ? t("list.converting")
-                  : cv.conversionStatus === "CONVERTED"
-                    ? t("list.reconvert")
-                    : t("list.convert")}
-              </Button>
-              {!cv.isDefault && !cv.supersededById && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setDefault.mutate(cv.id)}
-                  disabled={
-                    deleting ||
-                    (setDefault.isPending && setDefault.variables === cv.id)
-                  }
-                >
-                  {setDefault.isPending && setDefault.variables === cv.id
-                    ? t("list.settingDefault")
-                    : t("list.setDefault")}
-                </Button>
-              )}
-              {!isReplacing && !cv.supersededById && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={deleting}
-                  onClick={() => setIsReplacing(true)}
-                >
-                  {t("list.replace")}
-                </Button>
-              )}
-              {!cv.supersededById &&
-                cv.conversionStatus === "CONVERTED" &&
-                (busy || deleting ? (
-                  <Button type="button" size="sm" variant="outline" disabled>
-                    {t("edit.modify")}
-                  </Button>
-                ) : (
-                  <Button asChild size="sm" variant="outline">
-                    <Link href={`/cv-versions/${cv.id}/edit`}>
-                      {t("edit.modify")}
-                    </Link>
-                  </Button>
-                ))}
-              {!cv.supersededById && !isConfirmingDelete && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={deleting}
-                  onClick={() => setIsConfirmingDelete(true)}
-                >
-                  {t("list.delete")}
-                </Button>
-              )}
-            </div>
 
             {isConfirmingDelete && (
               <div

@@ -32,6 +32,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CvMarkdownContent } from "@/components/cv-markdown-content";
+import { CvPaper, CV_PAGE_COLUMN_CLASS } from "@/components/cv-paper";
 import { cn } from "@/lib/utils";
 
 // The Import screen (issue #194, apps/web/CONTEXT.md → Import): the whole act
@@ -71,10 +72,6 @@ function fileProblem(
   if (file.size > MAX_CV_SIZE_BYTES) return t("form.fileTooLarge");
   return null;
 }
-
-/** The white "paper" frame the CV panel already renders a CV in. */
-const PAPER_CLASS =
-  "rounded-md border border-border bg-white p-8 text-sm text-foreground shadow-sm";
 
 function ImportSteps({ converting }: { converting: boolean }) {
   const t = useTranslations("cvVersions.import");
@@ -370,9 +367,9 @@ function ImportProgress({
         </p>
         <ImportedActions cvVersionId={cvVersionId} />
         <p className="text-xs text-muted">{t("list.markdownRedactionNote")}</p>
-        <div className={PAPER_CLASS}>
+        <CvPaper>
           <CvMarkdownContent content={conversion.data?.markdownContent ?? ""} />
-        </div>
+        </CvPaper>
       </div>
     );
   }
@@ -399,10 +396,10 @@ function ImportProgress({
         </CardContent>
       </Card>
       {inConversionStep && (
-        <div
+        <CvPaper
           role="img"
           aria-label={t("import.skeletonLabel")}
-          className={cn(PAPER_CLASS, "flex flex-col gap-3")}
+          className="flex flex-col gap-3"
         >
           <Skeleton className="h-6 w-1/2" />
           <Skeleton className="h-4 w-1/3" />
@@ -411,7 +408,7 @@ function ImportProgress({
           <Skeleton className="h-4 w-5/6" />
           <Skeleton className="mt-4 h-4 w-full" />
           <Skeleton className="h-4 w-2/3" />
-        </div>
+        </CvPaper>
       )}
     </div>
   );
@@ -641,7 +638,9 @@ export default function NewCvVersionPage() {
     resumeId !== null || create.isPending || cvVersionId !== null;
 
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-8">
+    <main
+      className={cn("mx-auto flex w-full flex-col gap-6 p-8", CV_PAGE_COLUMN_CLASS)}
+    >
       <div className="flex items-center justify-between gap-4">
         <h1 className="font-serif text-2xl font-semibold">
           {t("form.heading")}

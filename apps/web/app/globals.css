@@ -5,10 +5,13 @@
    media query — so the palette can be user-overridden. */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* claude.ai-flavoured palette: warm "paper" light, warm near-black dark, one
-   coral accent shared by both. Values are approximate targets, not a contract. */
+/* claude.ai-flavoured palette: white page / warm "paper" panel in light mode,
+   warm near-black dark, one coral accent shared by both. Values are
+   approximate targets, not a contract. Sidebar (and other panel surfaces)
+   use --panel; everything else — Topbar, <main> content — uses --background,
+   which is why the two read as distinct surfaces in light mode. */
 :root {
-  --background: #faf9f5;
+  --background: #ffffff;
   --panel: #f0eee6;
   --foreground: #1f1e1d;
   --muted: #6b6a63;
