@@ -7,7 +7,12 @@ import { AppShell } from "@/components/app-shell";
 import LandingRoute from "@/app/(public)/page";
 
 const { redirect } = vi.hoisted(() => ({ redirect: vi.fn() }));
-vi.mock("next/navigation", () => ({ redirect }));
+// `redirect` backs the auth-gate tests below; `useRouter` is needed too now
+// that the header's LocaleSwitch (rendered as part of LandingPage) calls it.
+vi.mock("next/navigation", () => ({
+  redirect,
+  useRouter: () => ({ refresh: vi.fn() }),
+}));
 
 const { auth } = vi.hoisted(() => ({ auth: vi.fn() }));
 vi.mock("@/auth", () => ({ auth }));

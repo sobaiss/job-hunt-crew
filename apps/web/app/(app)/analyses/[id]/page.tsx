@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useTranslations } from "next-intl";
+import { ExternalLink, GitCompare } from "lucide-react";
 
 import {
   useAnalysis,
@@ -13,10 +14,12 @@ import {
 } from "@/hooks/use-analyses";
 import { useCvVersions } from "@/hooks/use-cv-versions";
 import { useEnumLabel } from "@/lib/enum-labels";
+import { analysisBadgeVariant } from "@/components/analysis-row";
 import { AnalysisResultView } from "@/components/analysis-result";
 import { ApplicationAction } from "@/components/application-action";
 import { CvVersionPicker } from "@/components/cv-version-picker";
 import { GeneratedDocumentsPanel } from "@/components/generated-documents-panel";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -46,7 +49,7 @@ export default function AnalysisDetailPage() {
 
   if (isPending) {
     return (
-      <main className="mx-auto w-full max-w-2xl p-8">
+      <main className="mx-auto w-full max-w-6xl p-8">
         <div
           role="status"
           aria-label={t("detail.loading")}
@@ -61,7 +64,7 @@ export default function AnalysisDetailPage() {
 
   if (isError || !analysis) {
     return (
-      <main className="mx-auto w-full max-w-2xl p-8">
+      <main className="mx-auto w-full max-w-6xl p-8">
         <p role="alert" className="text-sm text-destructive">
           {t("detail.loadError")}
         </p>
@@ -72,25 +75,43 @@ export default function AnalysisDetailPage() {
   const isTerminal = TERMINAL_ANALYSIS_STATUSES.has(analysis.status);
 
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-col gap-8 p-8">
-      <div className="flex flex-col gap-1">
-        <h1 className="font-serif text-2xl font-semibold">
-          {analysis.jobOffer.title ?? t("jobOfferFallback")}
-        </h1>
-        <p className="text-sm text-muted">
-          {analysis.jobOffer.company ?? "—"} ·{" "}
-          {analysis.jobOffer.location ?? "—"}
-        </p>
-        <p className="text-sm text-muted">
-          {t("vsCv", { label: analysis.cvVersion.label })} ·{" "}
-          {statusLabel(analysis.status)}
-        </p>
-        <Link
-          href={`/analyses/compare/${analysis.jobOffer.id}`}
-          className="text-sm text-accent hover:underline"
-        >
-          {t("compareLink")}
-        </Link>
+    <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-8">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex flex-col gap-1">
+          <h1 className="font-serif text-2xl font-semibold sm:text-[1.75rem]">
+            {analysis.jobOffer.title ?? t("jobOfferFallback")}
+          </h1>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm text-muted">
+            <p>
+              {analysis.jobOffer.company ?? "—"} ·{" "}
+              {analysis.jobOffer.location ?? "—"}
+            </p>
+            <span aria-hidden="true">·</span>
+            <span>{t("vsCv", { label: analysis.cvVersion.label })}</span>
+            <Badge variant={analysisBadgeVariant(analysis.status)}>
+              {statusLabel(analysis.status)}
+            </Badge>
+          </div>
+        </div>
+        <div className="flex flex-none flex-wrap items-center gap-2">
+          <Button asChild variant="outline" size="sm">
+            <a
+              href={analysis.jobOffer.sourceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <ExternalLink aria-hidden="true" />
+              {t("quickView.viewOffer")}
+            </a>
+          </Button>
+          <Link
+            href={`/analyses/compare/${analysis.jobOffer.id}`}
+            className="inline-flex items-center gap-1.5 text-sm text-accent hover:underline"
+          >
+            <GitCompare className="size-3.5" aria-hidden="true" />
+            {t("compareLink")}
+          </Link>
+        </div>
       </div>
 
       {isFailed && (

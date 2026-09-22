@@ -21,10 +21,15 @@ const PILL_CLASS: Record<MatchScoreBand, string> = {
 // centred number and the pill scale — the SVG is drawn in a fixed viewBox and
 // tracks its container.
 const SIZE_CLASS = {
-  md: { box: "size-36", score: "text-4xl", pill: "px-3 py-1 text-sm", gap: "gap-3" },
+  md: {
+    box: "size-44",
+    score: "text-5xl font-serif",
+    pill: "px-3 py-1 text-sm",
+    gap: "gap-3.5",
+  },
   sm: {
     box: "size-16",
-    score: "text-lg",
+    score: "text-lg font-sans",
     pill: "px-2 py-0.5 text-xs",
     gap: "gap-1.5",
   },
@@ -36,9 +41,14 @@ const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 export function MatchScoreGauge({
   score,
   size = "md",
+  legend = false,
 }: {
   score: number;
   size?: "sm" | "md";
+  /** Shows the score-band threshold caption below the pill — the hero gauge
+   *  on the Analysis detail page and its Quick view (spec's "Refonte" style
+   *  pass); the compact table/header uses of this gauge leave it off. */
+  legend?: boolean;
 }) {
   const t = useTranslations("analyses.detail");
   const { band, colorVar } = matchScoreBand(score);
@@ -75,8 +85,13 @@ export function MatchScoreGauge({
             strokeDashoffset={dashOffset}
           />
         </svg>
-        <div className="absolute inset-0 flex items-center justify-center">
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
           <span className={cn("font-bold tabular-nums", s.score)}>{score}</span>
+          {size === "md" && (
+            <span className="text-xs font-medium text-muted">
+              {t("outOf100")}
+            </span>
+          )}
         </div>
       </div>
       <span
@@ -88,6 +103,9 @@ export function MatchScoreGauge({
       >
         {t(`band.${band}`)}
       </span>
+      {legend && (
+        <p className="text-center text-xs text-muted">{t("bandLegend")}</p>
+      )}
     </div>
   );
 }
