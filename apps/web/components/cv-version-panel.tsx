@@ -1,6 +1,6 @@
 "use client";
 
-import { type RefObject, useState } from "react";
+import { type ReactNode, type RefObject, useState } from "react";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -19,8 +19,10 @@ import {
   type CvVersion,
 } from "@/hooks/use-cv-versions";
 import { conversionBadgeVariant, formatFileSize } from "@/lib/cv-versions-display";
+import { CvMarkdownContent } from "@/components/cv-markdown-content";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -37,42 +39,71 @@ import {
 // Reconvertir/Définir par défaut/Remplacer (issue #82) using the same
 // mutations already wired at the page level, plus a Modifier entry point
 // (issue #187) linking to the edit page (#186) for a non-superseded,
-// CONVERTED CV version.
+// CONVERTED CV version. The properties (file, size, dates, status) live in a
+// "Refonte"-style card — same bordered-card-plus-uppercase-micro-label look
+// `AnalysisResultView` uses — and the rendition itself renders as the same
+// real HTML document the edit page shows, via the shared `CvMarkdownContent`,
+// instead of a wall of raw Markdown text.
 
 /**
- * Read-only Markdown rendition of one CV version. Only mounted while the
- * panel is open, so `markdownContent` is never fetched for a row that isn't
- * being inspected.
+ * One property's label/value pair inside the metadata card, styled to match
+ * the uppercase micro-labels used elsewhere in the app's "Refonte" cards
+ * (e.g. `AnalysisResultView`'s `SectionLabel`).
  */
-function CvMarkdownPreview({ id }: { id: string }) {
+function PropertyItem({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <dt className="text-xs font-semibold tracking-[0.06em] text-muted uppercase">
+        {label}
+      </dt>
+      <dd className="text-sm">{children}</dd>
+    </div>
+  );
+}
+
+/**
+ * Read-only rendition of one CV version, rendered as a real HTML document —
+ * the same `CvMarkdownContent` the edit page uses — inside a "paper" card.
+ * Only mounted while the panel is open, so `markdownContent` is never
+ * fetched for a row that isn't being inspected.
+ */
+function CvContentPreview({ id }: { id: string }) {
   const t = useTranslations("cvVersions");
   const markdown = useCvVersionMarkdown(id, true);
 
   return (
-    <div className="border-t pt-3">
-      <h3 className="text-sm font-medium">{t("list.markdownHeading")}</h3>
+    <div className="flex flex-col gap-3 border-t border-border pt-5">
+      <h3 className="text-xs font-semibold tracking-[0.06em] text-muted uppercase">
+        {t("list.markdownHeading")}
+      </h3>
       {markdown.isPending && (
-        <p role="status" className="mt-2 text-sm text-muted">
+        <p role="status" className="text-sm text-muted">
           {t("list.markdownLoading")}
         </p>
       )}
       {markdown.isError && (
-        <p role="alert" className="mt-2 text-sm text-destructive">
+        <p role="alert" className="text-sm text-destructive">
           {t("list.markdownError")}
         </p>
       )}
       {markdown.data &&
         (markdown.data.markdownContent ? (
           <>
-            <p className="mt-2 text-xs text-muted">
+            <p className="text-xs text-muted">
               {t("list.markdownRedactionNote")}
             </p>
-            <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap rounded bg-muted/30 p-3 text-xs">
-              {markdown.data.markdownContent}
-            </pre>
+            <div className="max-h-[36rem] overflow-y-auto rounded-md border border-border bg-white p-8 text-sm text-foreground shadow-sm">
+              <CvMarkdownContent content={markdown.data.markdownContent} />
+            </div>
           </>
         ) : (
-          <p className="mt-2 text-sm text-muted">{t("list.markdownEmpty")}</p>
+          <p className="text-sm text-muted">{t("list.markdownEmpty")}</p>
         ))}
     </div>
   );
@@ -142,7 +173,7 @@ function CvReplaceForm({
 
   return (
     <form
-      className="flex flex-col gap-4 border-t pt-3"
+      className="flex flex-col gap-4 border-t border-border pt-5"
       onSubmit={onSubmit}
       noValidate
     >
@@ -292,43 +323,50 @@ export function CvVersionPanel({
 
         {cv && (
           <>
-            <SheetHeader>
+            <SheetHeader className="pr-8">
               <SheetTitle>{cv.label}</SheetTitle>
             </SheetHeader>
 
-            <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
-              <dt className="text-muted">{t("list.columns.file")}</dt>
-              <dd>
-                {cv.fileName} · {cv.fileType}
-              </dd>
-              <dt className="text-muted">{t("list.columns.size")}</dt>
-              <dd>{formatFileSize(cv.fileSizeBytes)}</dd>
-              <dt className="text-muted">{t("list.columns.uploaded")}</dt>
-              <dd>{new Date(cv.createdAt).toLocaleDateString()}</dd>
-              <dt className="text-muted">{t("panel.updated")}</dt>
-              <dd>{new Date(cv.updatedAt).toLocaleDateString()}</dd>
-              <dt className="text-muted">{t("list.columns.status")}</dt>
-              <dd>
-                <Badge variant={conversionBadgeVariant(cv.conversionStatus)}>
-                  {conversionStatusLabel(cv.conversionStatus)}
-                </Badge>
-              </dd>
-              <dt className="text-muted">{t("list.columns.default")}</dt>
-              <dd>
-                {cv.isDefault ? (
-                  <Badge variant="outline">{t("list.default")}</Badge>
-                ) : cv.supersededById ? (
-                  <span className="text-xs text-muted">
-                    {t("list.replacedBy", { label: replacedByLabel ?? "" })}
-                  </span>
-                ) : (
-                  "—"
-                )}
-              </dd>
-            </dl>
+            <Card>
+              <CardContent>
+                <dl className="grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-3">
+                  <PropertyItem label={t("list.columns.file")}>
+                    {cv.fileName} · {cv.fileType}
+                  </PropertyItem>
+                  <PropertyItem label={t("list.columns.size")}>
+                    {formatFileSize(cv.fileSizeBytes)}
+                  </PropertyItem>
+                  <PropertyItem label={t("list.columns.uploaded")}>
+                    {new Date(cv.createdAt).toLocaleDateString()}
+                  </PropertyItem>
+                  <PropertyItem label={t("panel.updated")}>
+                    {new Date(cv.updatedAt).toLocaleDateString()}
+                  </PropertyItem>
+                  <PropertyItem label={t("list.columns.status")}>
+                    <Badge variant={conversionBadgeVariant(cv.conversionStatus)}>
+                      {conversionStatusLabel(cv.conversionStatus)}
+                    </Badge>
+                  </PropertyItem>
+                  <PropertyItem label={t("list.columns.default")}>
+                    {cv.isDefault ? (
+                      <Badge variant="outline">{t("list.default")}</Badge>
+                    ) : cv.supersededById ? (
+                      <span className="text-xs text-muted">
+                        {t("list.replacedBy", { label: replacedByLabel ?? "" })}
+                      </span>
+                    ) : (
+                      "—"
+                    )}
+                  </PropertyItem>
+                </dl>
+              </CardContent>
+            </Card>
 
             {cv.conversionStatus === "FAILED" && (
-              <p role="alert" className="text-sm text-destructive">
+              <p
+                role="alert"
+                className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+              >
                 {t("list.conversionFailed")}
                 {cv.conversionError ? ` ${cv.conversionError}` : ""}
               </p>
@@ -404,7 +442,7 @@ export function CvVersionPanel({
             {isConfirmingDelete && (
               <div
                 role="alert"
-                className="flex flex-col gap-3 border-t pt-3 sm:flex-row sm:items-center sm:justify-between"
+                className="flex flex-col gap-3 rounded-md border border-destructive/30 bg-destructive/5 p-4 sm:flex-row sm:items-center sm:justify-between"
               >
                 <span className="text-sm text-muted">
                   {chainLength > 1
@@ -465,7 +503,7 @@ export function CvVersionPanel({
               />
             )}
 
-            <CvMarkdownPreview id={cv.id} />
+            <CvContentPreview id={cv.id} />
           </>
         )}
       </SheetContent>
