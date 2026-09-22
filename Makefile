@@ -1,4 +1,4 @@
-.PHONY: up down migrate seed clean-analyses clean-analyses-scout clean-analyses-failed worker worker-once
+.PHONY: up down web-up web-down migrate seed clean-analyses clean-analyses-scout clean-analyses-failed worker worker-once
 
 # Start local infrastructure (Postgres, MinIO, ElasticMQ, Step Functions
 # Local, api, worker). The `migrate` service applies pending Prisma
@@ -8,6 +8,18 @@ up:
 
 down:
 	docker compose down
+
+# Run apps/web itself in Docker — the alternative to `pnpm dev` (see
+# apps/web/docker-compose.yml and docs/adr/0026). Foreground, not `-d`:
+# unlike `up` above, this is meant to feel like `pnpm dev` — logs stream
+# here, Ctrl-C stops it. Requires `make up` (or `pnpm dev`'s own
+# prerequisite, the infra stack) already running. Mutually exclusive with
+# `pnpm dev` — both bind host port 3000.
+web-up:
+	docker compose -f apps/web/docker-compose.yml up
+
+web-down:
+	docker compose -f apps/web/docker-compose.yml down
 
 # Re-run migrations against the running compose Postgres without a full
 # `docker compose up` (e.g. after pulling new migrations).

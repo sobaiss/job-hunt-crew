@@ -1,0 +1,8 @@
+# apps/web's Docker dev mode is a standalone compose file, not a service in the root docker-compose.yml
+
+We added a second way to run `apps/web` locally — `apps/web/Dockerfile` + `apps/web/docker-compose.yml`, launched via `make web-up` — as a hot-reloading alternative to `pnpm dev` for anyone without Node/pnpm on the host. It deliberately stays out of the root `docker-compose.yml` rather than joining it as a new service: it reaches the existing `api` container through its host-published port (`http://host.docker.internal:8000`), exactly as `pnpm dev` does today, rather than the docker-network hostname (`http://api:8000`) that stack's own network would resolve. `node_modules` is baked into the image at build time rather than living on a named volume; source directories are bind-mounted individually for hot reload, so a dependency change (not a source edit) needs `docker compose -f apps/web/docker-compose.yml up --build`.
+
+## Considered options
+
+- **Joining the root `docker-compose.yml` as a new `web` service** — would reuse the network already wired for `api`/`worker`, and keep everything in one compose file. Rejected: it would make `API_BASE_URL` mean something different depending on which of `web`'s own two run modes was active (the docker-network hostname if `web` joined that stack, the host-published port otherwise), instead of both modes reaching `api` identically.
+- **`node_modules` on a named Docker volume** (the standard Node-in-Docker dev pattern, avoiding an image rebuild for most dependency changes) — rejected: the rebuild trigger is the same either way (a `package.json`/lockfile change), so the volume adds a moving part without buying anything here.
