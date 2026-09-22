@@ -209,6 +209,7 @@
   "admin": {
     "title": "Administration",
     "dashboard": {
+      "description": "Les chiffres de la plateforme au jour le jour, et qui s'inscrit.",
       "loading": "Chargement…",
       "loadError": "Impossible de charger les statistiques globales.",
       "periodLabel": "Période",
@@ -221,13 +222,16 @@
       "totalUsers": "Total utilisateurs",
       "usersOverLimitCount": "Utilisateurs à/au-dessus d'une limite",
       "analysesRequestedToday": "Analyses aujourd'hui",
-      "analysesRequestedThisMonth": "Analyses ce mois-ci",
+      "analysesMonthSub": "{count} ce mois-ci",
       "documentsCreatedToday": "Documents aujourd'hui",
       "activeScoutsTotal": "Agents actifs",
       "blockedUsersCount": "Utilisateurs bloqués",
       "newSignupsTitle": "Nouvelles inscriptions",
       "newSignupsEmpty": "Aucune inscription sur cette période.",
-      "usersByPlanTitle": "Utilisateurs par forfait"
+      "newSignupsTotal": "{count} sur la période",
+      "usersByPlanTitle": "Utilisateurs par forfait",
+      "usersByPlanEmpty": "Aucun utilisateur pour l'instant.",
+      "attentionTitle": "Points d'attention"
     },
     "userPanel": {
       "title": "Utilisateur {userId}",
@@ -299,7 +303,6 @@
     "users": {
       "title": "Utilisateurs",
       "table": {
-        "title": "Utilisateurs",
         "loading": "Chargement…",
         "loadError": "Impossible de charger la liste des utilisateurs.",
         "empty": "Aucun utilisateur pour le moment.",
@@ -450,7 +453,6 @@
       }
     },
     "nav": {
-      "label": "Sections d'administration",
       "dashboard": "Tableau de bord",
       "users": "Utilisateurs",
       "planDefaults": "Quotas",

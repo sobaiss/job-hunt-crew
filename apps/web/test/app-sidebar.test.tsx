@@ -73,53 +73,88 @@ describe("AppSidebar", () => {
     );
   });
 
-  it("shows an Admin entry linking into the Admin area to an Administrator", () => {
+  it("lists every Admin section in an Administrator's nav", () => {
     renderWithProviders(<AppSidebar />, { session: ADMIN_SESSION });
 
-    expect(screen.getByRole("link", { name: "Admin" })).toHaveAttribute(
-      "href",
-      "/admin",
+    const nav = within(screen.getByRole("navigation"));
+    const hrefs = Object.fromEntries(
+      nav.getAllByRole("link").map((link) => [link.textContent, link.getAttribute("href")]),
     );
+    expect(hrefs).toEqual({
+      Dashboard: "/admin",
+      Users: "/admin/users",
+      Quotas: "/admin/quotas",
+      Analyses: "/admin/analyses",
+      Scouts: "/admin/scouts",
+      "CV versions": "/admin/cv-versions",
+      "LLM providers": "/admin/llm-providers",
+      Settings: "/settings",
+    });
   });
 
-  it("marks the Admin entry active on a nested Admin route", () => {
+  it("marks the Admin section of the current route active, and only that one", () => {
     pathname = "/admin/scouts";
     renderWithProviders(<AppSidebar />, { session: ADMIN_SESSION });
 
-    expect(screen.getByRole("link", { name: "Admin" })).toHaveAttribute(
+    const nav = within(screen.getByRole("navigation"));
+    expect(nav.getByRole("link", { name: "Scouts" })).toHaveAttribute(
       "aria-current",
       "page",
     );
+    // /admin prefixes every other section, so its own row only matches exactly.
+    expect(nav.getByRole("link", { name: "Dashboard" })).not.toHaveAttribute(
+      "aria-current",
+    );
   });
 
-  it("hides the Admin entry from a non-Administrator", () => {
+  it("marks the Admin dashboard active on an exact /admin match", () => {
+    pathname = "/admin";
+    renderWithProviders(<AppSidebar />, { session: ADMIN_SESSION });
+
+    const nav = within(screen.getByRole("navigation"));
+    expect(nav.getByRole("link", { name: "Dashboard" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(nav.getByRole("link", { name: "Users" })).not.toHaveAttribute(
+      "aria-current",
+    );
+  });
+
+  it("hides the Admin sections from a non-Administrator", () => {
     renderWithProviders(<AppSidebar />, {
       session: { ...SESSION, user: { ...SESSION.user, role: "EXTERNAL" } },
     });
 
-    expect(screen.queryByRole("link", { name: "Admin" })).not.toBeInTheDocument();
+    const nav = within(screen.getByRole("navigation"));
+    const hrefs = nav.getAllByRole("link").map((link) => link.getAttribute("href"));
+    expect(hrefs.some((href) => href?.startsWith("/admin"))).toBe(false);
   });
 
-  it("hides the Admin entry when the session carries no role", () => {
+  it("hides the Admin sections when the session carries no role", () => {
     renderWithProviders(<AppSidebar />, { session: SESSION });
 
-    expect(screen.queryByRole("link", { name: "Admin" })).not.toBeInTheDocument();
+    const nav = within(screen.getByRole("navigation"));
+    const hrefs = nav.getAllByRole("link").map((link) => link.getAttribute("href"));
+    expect(hrefs.some((href) => href?.startsWith("/admin"))).toBe(false);
   });
 
-  it("hides the per-Candidate nav rows from an Administrator, keeping Settings", () => {
+  it("hides the per-Candidate routes from an Administrator, keeping Settings", () => {
     renderWithProviders(<AppSidebar />, { session: ADMIN_SESSION });
 
-    expect(screen.queryByRole("link", { name: "Dashboard" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Analyses" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Agents" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Applications" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "CV versions" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Quotas" })).not.toBeInTheDocument();
-
-    expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute(
-      "href",
-      "/settings",
-    );
+    const nav = within(screen.getByRole("navigation"));
+    const hrefs = nav.getAllByRole("link").map((link) => link.getAttribute("href"));
+    for (const candidateRoute of [
+      "/",
+      "/analyses",
+      "/scouts",
+      "/applications",
+      "/cv-versions",
+      "/quotas",
+    ]) {
+      expect(hrefs).not.toContain(candidateRoute);
+    }
+    expect(hrefs).toContain("/settings");
   });
 
   it("hides the New analysis primary action from an Administrator", () => {
@@ -219,6 +254,24 @@ describe("AppTopbar", () => {
     renderWithProviders(<AppTopbar />, { session: SESSION });
 
     expect(screen.getByRole("heading", { name: "Analyses" })).toBeInTheDocument();
+  });
+
+  it("names the current Admin section for an Administrator", () => {
+    pathname = "/admin/cv-versions";
+    renderWithProviders(<AppTopbar />, { session: ADMIN_SESSION });
+
+    expect(
+      screen.getByRole("heading", { name: "CV versions" }),
+    ).toBeInTheDocument();
+  });
+
+  it("never names an Admin route for a non-Administrator", () => {
+    pathname = "/admin/users";
+    renderWithProviders(<AppTopbar />, { session: SESSION });
+
+    expect(
+      screen.getByRole("heading", { name: "Job Hunt Crew" }),
+    ).toBeInTheDocument();
   });
 
   it("opens the navigation drawer from the Topbar and closes it on Escape", async () => {

@@ -127,7 +127,7 @@
     "cvVersions": "CV versions",
     "quotas": "Quotas",
     "settings": "Settings",
-    "admin": "Admin",
+    "admin": "Administration",
     "newAnalysis": "New analysis",
     "openMenu": "Open menu",
     "collapseSidebar": "Collapse sidebar",
@@ -207,8 +207,9 @@
     }
   },
   "admin": {
-    "title": "Admin",
+    "title": "Administration",
     "dashboard": {
+      "description": "Platform-wide figures for today, and who is signing up.",
       "loading": "Loading…",
       "loadError": "Couldn't load global stats.",
       "periodLabel": "Period",
@@ -221,13 +222,16 @@
       "totalUsers": "Total users",
       "usersOverLimitCount": "Users at/over a limit",
       "analysesRequestedToday": "Analyses today",
-      "analysesRequestedThisMonth": "Analyses this month",
+      "analysesMonthSub": "{count} this month",
       "documentsCreatedToday": "Documents today",
       "activeScoutsTotal": "Active Scouts",
       "blockedUsersCount": "Blocked users",
       "newSignupsTitle": "New signups",
       "newSignupsEmpty": "No signups in this period.",
-      "usersByPlanTitle": "Users by Plan"
+      "newSignupsTotal": "{count} over the period",
+      "usersByPlanTitle": "Users by Plan",
+      "usersByPlanEmpty": "No users yet.",
+      "attentionTitle": "Needs attention"
     },
     "userPanel": {
       "title": "User {userId}",
@@ -299,7 +303,6 @@
     "users": {
       "title": "Users",
       "table": {
-        "title": "Users",
         "loading": "Loading…",
         "loadError": "Couldn't load the user list.",
         "empty": "No Users yet.",
@@ -450,7 +453,6 @@
       }
     },
     "nav": {
-      "label": "Admin sections",
       "dashboard": "Dashboard",
       "users": "Users",
       "planDefaults": "Quotas",
