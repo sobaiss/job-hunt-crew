@@ -323,13 +323,31 @@ pnpm --filter @job-hunt-crew/prisma exec prisma migrate deploy
 
 ### 5. Run the app
 
+Two interchangeable ways to run `apps/web` — pick one, not both (both bind
+`http://localhost:3000`):
+
 ```bash
 pnpm dev              # apps/web on http://localhost:3000 (via Turborepo)
 ```
 
-`services/api` is already running inside Docker on `http://localhost:8000`
-(`/docs` and `/openapi.json` are reachable in dev without the internal
-secret).
+```bash
+make web-up           # same app, in Docker instead — no local Node/pnpm needed
+# or: docker compose -f apps/web/docker-compose.yml up
+```
+
+`make web-up` builds `apps/web/Dockerfile` and runs `next dev` inside the
+container, with `app/`, `components/`, `lib/`, and the rest of the source
+bind-mounted for the same hot reload `pnpm dev` gives you. It reuses
+`apps/web/.env`, only overriding `API_BASE_URL` to reach the host's `api`
+container via `host.docker.internal`. It stays outside the root
+`docker-compose.yml` on purpose — see
+[`docs/adr/0026-web-docker-dev-mode-standalone.md`](docs/adr/0026-web-docker-dev-mode-standalone.md).
+A dependency change (not a source edit) needs a rebuild: `docker compose -f
+apps/web/docker-compose.yml up --build`. Stop it with `make web-down`.
+
+Either way, `services/api` is already running inside Docker on
+`http://localhost:8000` (`/docs` and `/openapi.json` are reachable in dev
+without the internal secret).
 
 The compose `worker` drains all three pipeline queues:
 

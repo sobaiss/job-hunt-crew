@@ -1,0 +1,55 @@
+# Standalone alternative to `pnpm dev` for apps/web — deliberately NOT a
+# service in the root docker-compose.yml (see
+# docs/adr/0026-web-docker-dev-mode-standalone.md). Assumes the existing
+# infra stack is already running (`docker compose up` / `make up` at the
+# repo root — postgres, minio, elasticmq, api, worker); this only runs `web`
+# itself, reaching `api` the same way `pnpm dev` does — its host-published
+# port — via `host.docker.internal` since this container isn't on that
+# stack's network.
+#
+# Usage: `make web-up` / `make web-down` (see ../../Makefile), or directly:
+#   docker compose -f apps/web/docker-compose.yml up
+#   docker compose -f apps/web/docker-compose.yml down
+#
+# Mutually exclusive with `pnpm dev` — both bind host port 3000.
+services:
+  web:
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "3000:3000"
+    env_file:
+      - ./.env
+    environment:
+      # Overrides apps/web/.env's `API_BASE_URL=http://localhost:8000`:
+      # `localhost` inside this container is the container itself, not the
+      # host machine where the `api` container actually publishes its port.
+      API_BASE_URL: http://host.docker.internal:8000
+    extra_hosts:
+      # host.docker.internal resolves natively on Docker Desktop (macOS/
+      # Windows); this makes it resolve on Linux too, matching the root
+      # docker-compose.yml's `stepfunctions-local` service.
+      - "host.docker.internal:host-gateway"
+    # Bind-mounted individually, not as one `.:/app/apps/web` mount, so the
+    # image's own node_modules (installed for Linux; the host may well be
+    # macOS/Windows, and Next's SWC binary is platform-specific) is never
+    # shadowed by the host's. Anything not listed here — most importantly
+    # package.json/node_modules — only updates on a rebuild:
+    #   docker compose -f apps/web/docker-compose.yml up --build
+    volumes:
+      - ./app:/app/apps/web/app
+      - ./components:/app/apps/web/components
+      - ./hooks:/app/apps/web/hooks
+      - ./i18n:/app/apps/web/i18n
+      - ./lib:/app/apps/web/lib
+      - ./messages:/app/apps/web/messages
+      - ./public:/app/apps/web/public
+      - ./design:/app/apps/web/design
+      - ./types:/app/apps/web/types
+      - ./auth.ts:/app/apps/web/auth.ts
+      - ./next.config.ts:/app/apps/web/next.config.ts
+      - ./proxy.ts:/app/apps/web/proxy.ts
+      - ./tsconfig.json:/app/apps/web/tsconfig.json
+      - ./postcss.config.mjs:/app/apps/web/postcss.config.mjs
+      - ./components.json:/app/apps/web/components.json
