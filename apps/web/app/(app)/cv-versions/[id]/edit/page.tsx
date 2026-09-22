@@ -90,7 +90,7 @@ export default function CvVersionEditPage() {
 
   if (list.isPending) {
     return (
-      <main className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-8">
+      <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-4 p-8">
         <Skeleton className="h-8 w-1/2" />
         <Skeleton className="h-64 w-full" />
       </main>
@@ -99,7 +99,7 @@ export default function CvVersionEditPage() {
 
   if (!eligible) {
     return (
-      <main className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-8">
+      <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-4 p-8">
         <p role="alert" className="text-sm text-destructive">
           {t("edit.notEligible")}
         </p>
@@ -108,39 +108,39 @@ export default function CvVersionEditPage() {
   }
 
   return (
-    <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-8">
-      <div className="flex flex-col gap-1">
-        <Link href="/cv-versions" className="text-sm text-accent underline">
-          {t("edit.back")}
-        </Link>
-        <h1 className="font-serif text-2xl font-semibold">{cv.label}</h1>
+    <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 p-8">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-1">
+          <Link href="/cv-versions" className="text-sm text-accent underline">
+            {t("edit.back")}
+          </Link>
+          <h1 className="font-serif text-2xl font-semibold">{cv.label}</h1>
+        </div>
+        {!isEditing && (
+          <Button type="button" onClick={startEditing} disabled={!markdown.data}>
+            {t("edit.modify")}
+          </Button>
+        )}
       </div>
 
       {!isEditing && (
-        <>
-          <div className="rounded-md border border-border bg-white p-6 text-sm text-foreground">
-            {markdown.isPending && (
-              <p role="status" className="text-sm text-muted">
-                {t("list.markdownLoading")}
-              </p>
-            )}
-            {markdown.isError && (
-              <p role="alert" className="text-sm text-destructive">
-                {t("list.markdownError")}
-              </p>
-            )}
-            {markdown.data && (
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
-                {markdown.data.markdownContent ?? ""}
-              </ReactMarkdown>
-            )}
-          </div>
-          <div>
-            <Button type="button" onClick={startEditing} disabled={!markdown.data}>
-              {t("edit.modify")}
-            </Button>
-          </div>
-        </>
+        <div className="rounded-md border border-border bg-white p-12 text-sm text-foreground">
+          {markdown.isPending && (
+            <p role="status" className="text-sm text-muted">
+              {t("list.markdownLoading")}
+            </p>
+          )}
+          {markdown.isError && (
+            <p role="alert" className="text-sm text-destructive">
+              {t("list.markdownError")}
+            </p>
+          )}
+          {markdown.data && (
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
+              {markdown.data.markdownContent ?? ""}
+            </ReactMarkdown>
+          )}
+        </div>
       )}
 
       {isEditing && (
@@ -150,8 +150,8 @@ export default function CvVersionEditPage() {
             aria-label={t("edit.textareaLabel")}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
-            rows={20}
-            className="font-mono"
+            rows={36}
+            className="min-h-[32rem] font-mono text-base"
           />
 
           {!confirming && (
