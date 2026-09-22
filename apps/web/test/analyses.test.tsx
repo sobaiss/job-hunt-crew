@@ -2123,7 +2123,7 @@ describe("AnalysisDetailPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("re-runs a FAILED analysis and links to the new one", async () => {
+  it("re-runs a FAILED analysis with one click and links to the new one, for a non-external Role (issue #183)", async () => {
     const user = userEvent.setup();
     server.use(
       http.get("/api/analyses/a1", () =>
@@ -2140,14 +2140,212 @@ describe("AnalysisDetailPage", () => {
       ),
     );
 
-    renderWithProviders(<AnalysisDetailPage />);
+    renderWithProviders(<AnalysisDetailPage />, { session: INTERNAL_SESSION });
 
     await user.click(await screen.findByRole("button", { name: "Run it again" }));
+
+    expect(screen.queryByLabelText("CV version")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Confirm" }),
+    ).not.toBeInTheDocument();
 
     const link = await screen.findByRole("link", {
       name: /a new analysis has started/i,
     });
     expect(link).toHaveAttribute("href", "/analyses/a2");
+  });
+
+  it("opens a confirm step with the quota warning instead of firing immediately, for an external candidate (issue #183)", async () => {
+    const user = userEvent.setup();
+    let createCalls = 0;
+    server.use(
+      http.get("/api/analyses/a1", () =>
+        HttpResponse.json({
+          analysis: detail({
+            status: "FAILED",
+            resultJSON: null,
+            errorMessage: "LLM timed out",
+            cvVersionId: "cv1",
+          }),
+        }),
+      ),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cvVersion({ id: "cv1" })] }),
+      ),
+      http.post("/api/analyses", () => {
+        createCalls += 1;
+        return HttpResponse.json({ analysisId: "a2" });
+      }),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />, { session: EXTERNAL_SESSION });
+
+    await user.click(await screen.findByRole("button", { name: "Run it again" }));
+
+    expect(
+      await screen.findByText(/This will use one of your daily analyses/),
+    ).toBeInTheDocument();
+    expect(createCalls).toBe(0);
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(
+      screen.queryByText(/This will use one of your daily analyses/),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run it again" })).toBeInTheDocument();
+    expect(createCalls).toBe(0);
+  });
+
+  it("preselects the Analysis's own CVVersion in the relaunch CV picker for an external candidate when it is still CONVERTED (issue #183)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses/a1", () =>
+        HttpResponse.json({
+          analysis: detail({ status: "FAILED", resultJSON: null, cvVersionId: "cv1" }),
+        }),
+      ),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: [
+            cvVersion({ id: "cv1", label: "Grad CV" }),
+            cvVersion({ id: "cv2", label: "Senior CV", isDefault: true }),
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />, { session: EXTERNAL_SESSION });
+
+    await user.click(await screen.findByRole("button", { name: "Run it again" }));
+
+    const picker = (await screen.findByLabelText("CV version")) as HTMLSelectElement;
+    await waitFor(() => expect(picker.value).toBe("cv1"));
+  });
+
+  it("falls back to the candidate's default CONVERTED CV in the relaunch picker when the Analysis's own CV was superseded (issue #183)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses/a1", () =>
+        HttpResponse.json({
+          analysis: detail({ status: "FAILED", resultJSON: null, cvVersionId: "cv1" }),
+        }),
+      ),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: [
+            cvVersion({ id: "cv1", label: "Grad CV", supersededById: "cv3" }),
+            cvVersion({ id: "cv2", label: "Senior CV", isDefault: true }),
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />, { session: EXTERNAL_SESSION });
+
+    await user.click(await screen.findByRole("button", { name: "Run it again" }));
+
+    const picker = (await screen.findByLabelText("CV version")) as HTMLSelectElement;
+    await waitFor(() => expect(picker.value).toBe("cv2"));
+  });
+
+  it("disables the relaunch confirm and shows the manage-CVs link for an external candidate with no CONVERTED CV (issue #183)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses/a1", () =>
+        HttpResponse.json({
+          analysis: detail({ status: "FAILED", resultJSON: null, cvVersionId: "cv1" }),
+        }),
+      ),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: [cvVersion({ id: "cv1", conversionStatus: "FAILED" })],
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />, { session: EXTERNAL_SESSION });
+
+    await user.click(await screen.findByRole("button", { name: "Run it again" }));
+
+    await screen.findByText("None of your CV versions have been converted yet.");
+    expect(screen.getByRole("link", { name: "Import a CV" })).toHaveAttribute(
+      "href",
+      "/cv-versions",
+    );
+    expect(screen.getByRole("button", { name: "Confirm" })).toBeDisabled();
+  });
+
+  it("relaunches with the CV chosen in the picker, and keeps that choice selected if the request fails, for an external candidate (issue #183)", async () => {
+    const user = userEvent.setup();
+    let createBody: unknown = null;
+    server.use(
+      http.get("/api/analyses/a1", () =>
+        HttpResponse.json({
+          analysis: detail({ status: "FAILED", resultJSON: null, cvVersionId: "cv1" }),
+        }),
+      ),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: [
+            cvVersion({ id: "cv1", label: "Grad CV" }),
+            cvVersion({ id: "cv2", label: "Senior CV", isDefault: true }),
+          ],
+        }),
+      ),
+      http.post("/api/analyses", async ({ request }) => {
+        createBody = await request.json();
+        return HttpResponse.json({ error: "boom" }, { status: 500 });
+      }),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />, { session: EXTERNAL_SESSION });
+
+    await user.click(await screen.findByRole("button", { name: "Run it again" }));
+
+    const picker = (await screen.findByLabelText("CV version")) as HTMLSelectElement;
+    await waitFor(() => expect(picker.value).toBe("cv1"));
+    await user.selectOptions(picker, "cv2");
+
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+
+    expect(
+      await screen.findByText("We couldn't start a new analysis. Please try again."),
+    ).toBeInTheDocument();
+    expect(createBody).toEqual({ jobOfferId: "job1", cvVersionId: "cv2" });
+    expect(picker.value).toBe("cv2");
+  });
+
+  it("relaunches with the confirmed CV for an external candidate and links to the new analysis on success (issue #183)", async () => {
+    const user = userEvent.setup();
+    let createBody: unknown = null;
+    server.use(
+      http.get("/api/analyses/a1", () =>
+        HttpResponse.json({
+          analysis: detail({ status: "FAILED", resultJSON: null, cvVersionId: "cv1" }),
+        }),
+      ),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cvVersion({ id: "cv1" })] }),
+      ),
+      http.post("/api/analyses", async ({ request }) => {
+        createBody = await request.json();
+        return HttpResponse.json({ analysisId: "a2" });
+      }),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />, { session: EXTERNAL_SESSION });
+
+    await user.click(await screen.findByRole("button", { name: "Run it again" }));
+    const picker = (await screen.findByLabelText("CV version")) as HTMLSelectElement;
+    await waitFor(() => expect(picker.value).toBe("cv1"));
+
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+
+    const link = await screen.findByRole("link", {
+      name: /a new analysis has started/i,
+    });
+    expect(link).toHaveAttribute("href", "/analyses/a2");
+    expect(createBody).toEqual({ jobOfferId: "job1", cvVersionId: "cv1" });
   });
 
   it("polls while non-terminal and stops once the analysis is terminal", async () => {

@@ -1,7 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { useTranslations } from "next-intl";
 
 import {
@@ -9,9 +11,11 @@ import {
   useCreateAnalysis,
   TERMINAL_ANALYSIS_STATUSES,
 } from "@/hooks/use-analyses";
+import { useCvVersions } from "@/hooks/use-cv-versions";
 import { useEnumLabel } from "@/lib/enum-labels";
 import { AnalysisResultView } from "@/components/analysis-result";
 import { ApplicationAction } from "@/components/application-action";
+import { CvVersionPicker } from "@/components/cv-version-picker";
 import { GeneratedDocumentsPanel } from "@/components/generated-documents-panel";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -22,6 +26,23 @@ export default function AnalysisDetailPage() {
   const statusLabel = useEnumLabel("analysisStatus");
   const { data: analysis, isPending, isError } = useAnalysis(params.id);
   const rerun = useCreateAnalysis();
+  const [relaunchConfirming, setRelaunchConfirming] = useState(false);
+  const [relaunchCvVersionId, setRelaunchCvVersionId] = useState("");
+
+  // Only an `external` candidate gets the confirm-with-CV-picker step
+  // (issue #183, mirroring the Quick view's #181); every other Role keeps
+  // the page's original one-click retry, unchanged. A session with no Role
+  // defaults to the lowest privilege, same convention as `lib/internal-api.ts`.
+  const { data: session } = useSession();
+  const isExternal = (session?.user?.role ?? "EXTERNAL") === "EXTERNAL";
+
+  const isFailed = analysis?.status === "FAILED";
+
+  // Fetched as soon as the page can offer a relaunch, so the choice is
+  // ready by the time the candidate opens the confirmation.
+  const { data: cvVersions } = useCvVersions({
+    enabled: isExternal && isFailed,
+  });
 
   if (isPending) {
     return (
@@ -48,7 +69,6 @@ export default function AnalysisDetailPage() {
     );
   }
 
-  const isFailed = analysis.status === "FAILED";
   const isTerminal = TERMINAL_ANALYSIS_STATUSES.has(analysis.status);
 
   return (
@@ -87,16 +107,71 @@ export default function AnalysisDetailPage() {
             >
               {t("detail.retryStarted")}
             </Link>
+          ) : isExternal && relaunchConfirming ? (
+            <div className="flex flex-col items-start gap-2">
+              <div className="w-full max-w-xs">
+                <CvVersionPicker
+                  id="detail-relaunch-cv"
+                  value={relaunchCvVersionId}
+                  onChange={setRelaunchCvVersionId}
+                />
+              </div>
+              <p className="text-sm text-muted">{t("quickView.relaunchConfirm")}</p>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={rerun.isPending || !relaunchCvVersionId}
+                  onClick={() =>
+                    rerun.mutate({
+                      jobOfferId: analysis.jobOffer.id,
+                      cvVersionId: relaunchCvVersionId,
+                    })
+                  }
+                >
+                  {t("bulk.generateConfirmAction")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={rerun.isPending}
+                  onClick={() => {
+                    setRelaunchConfirming(false);
+                    setRelaunchCvVersionId("");
+                  }}
+                >
+                  {t("bulk.cancel")}
+                </Button>
+              </div>
+            </div>
           ) : (
             <Button
               variant="outline"
               size="sm"
-              onClick={() =>
+              onClick={() => {
+                if (isExternal) {
+                  // Preselect the Analysis's own CVVersion when it is still a
+                  // valid choice (non-superseded, CONVERTED); otherwise leave
+                  // it blank for `CvVersionPicker`'s own fallback (the
+                  // candidate's default CONVERTED CV).
+                  const ownCv = cvVersions?.find(
+                    (cv) => cv.id === analysis.cvVersionId,
+                  );
+                  const ownCvValid =
+                    ownCv &&
+                    ownCv.supersededById === null &&
+                    ownCv.conversionStatus === "CONVERTED";
+                  setRelaunchCvVersionId(ownCvValid ? ownCv.id : "");
+                  setRelaunchConfirming(true);
+                  return;
+                }
                 rerun.mutate({
                   jobOfferId: analysis.jobOffer.id,
                   cvVersionId: analysis.cvVersionId,
-                })
-              }
+                });
+              }}
               disabled={rerun.isPending}
             >
               {t("detail.retry")}
