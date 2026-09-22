@@ -997,6 +997,19 @@
     "panel": {
       "updated": "Mise à jour",
       "loading": "Chargement…"
+    },
+    "edit": {
+      "back": "Retour aux versions de CV",
+      "notEligible": "Cette version de CV n'est pas disponible pour modification.",
+      "modify": "Modifier",
+      "instructions": "Vous modifiez le Markdown brut de ce CV. L'enregistrement prend effet immédiatement et ne peut pas être annulé.",
+      "textareaLabel": "Contenu du CV (Markdown)",
+      "save": "Enregistrer",
+      "cancel": "Annuler",
+      "saveConfirm": "Enregistrer cette modification ? Cette action ne peut pas être annulée.",
+      "confirmAction": "Confirmer",
+      "cancelAction": "Annuler",
+      "saveError": "Impossible d'enregistrer vos modifications. Veuillez réessayer."
     }
   },
   "ingestion": {

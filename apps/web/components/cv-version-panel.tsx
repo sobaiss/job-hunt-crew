@@ -1,6 +1,7 @@
 "use client";
 
 import { type RefObject, useState } from "react";
+import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -34,7 +35,9 @@ import {
 // the CVVersion's Markdown rendition (fetched only while open, via the same
 // on-demand `useCvVersionMarkdown` query) plus its full info, and exposes
 // Reconvertir/Définir par défaut/Remplacer (issue #82) using the same
-// mutations already wired at the page level.
+// mutations already wired at the page level, plus a Modifier entry point
+// (issue #187) linking to the edit page (#186) for a non-superseded,
+// CONVERTED CV version.
 
 /**
  * Read-only Markdown rendition of one CV version. Only mounted while the
@@ -334,6 +337,19 @@ export function CvVersionPanel({
                   {t("list.replace")}
                 </Button>
               )}
+              {!cv.supersededById &&
+                cv.conversionStatus === "CONVERTED" &&
+                (busy ? (
+                  <Button type="button" size="sm" variant="outline" disabled>
+                    {t("edit.modify")}
+                  </Button>
+                ) : (
+                  <Button asChild size="sm" variant="outline">
+                    <Link href={`/cv-versions/${cv.id}/edit`}>
+                      {t("edit.modify")}
+                    </Link>
+                  </Button>
+                ))}
             </div>
 
             {isReplacing && (
