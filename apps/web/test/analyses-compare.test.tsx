@@ -28,6 +28,7 @@ function analysis(overrides: Record<string, unknown> = {}) {
     matchScore: 87,
     requestedAt: "2026-08-01T00:00:00.000Z",
     jobOffer: { id: "job1", title: "Backend Engineer", company: "Acme Inc" },
+    cvVersionId: "cv1",
     cvVersion: { label: "Grad CV" },
     resultJSON: RESULT,
     errorMessage: null,
@@ -41,8 +42,8 @@ describe("CompareAnalysesPage", () => {
       http.get("/api/analyses", () =>
         HttpResponse.json({
           analyses: [
-            analysis({ id: "a1", cvVersion: { label: "Grad CV" } }),
-            analysis({ id: "a2", cvVersion: { label: "Senior CV" } }),
+            analysis({ id: "a1", cvVersionId: "cv1", cvVersion: { label: "Grad CV" } }),
+            analysis({ id: "a2", cvVersionId: "cv2", cvVersion: { label: "Senior CV" } }),
           ],
         }),
       ),
@@ -70,9 +71,10 @@ describe("CompareAnalysesPage", () => {
       http.get("/api/analyses", () =>
         HttpResponse.json({
           analyses: [
-            analysis({ id: "a1", cvVersion: { label: "Grad CV" } }),
+            analysis({ id: "a1", cvVersionId: "cv1", cvVersion: { label: "Grad CV" } }),
             analysis({
               id: "a2",
+              cvVersionId: "cv2",
               cvVersion: { label: "Junior CV" },
               resultJSON: { ...RESULT, match_score: 40 },
             }),
@@ -142,8 +144,8 @@ describe("CompareAnalysesPage", () => {
       http.get("/api/analyses", () =>
         HttpResponse.json({
           analyses: [
-            analysis({ id: "a1", cvVersion: { label: "Grad CV" } }),
-            analysis({ id: "a2", cvVersion: { label: "Senior CV" } }),
+            analysis({ id: "a1", cvVersionId: "cv1", cvVersion: { label: "Grad CV" } }),
+            analysis({ id: "a2", cvVersionId: "cv2", cvVersion: { label: "Senior CV" } }),
           ],
         }),
       ),
@@ -152,6 +154,27 @@ describe("CompareAnalysesPage", () => {
     renderWithProviders(<CompareAnalysesPage />);
 
     await screen.findByText("Grad CV");
+    expect(
+      screen.queryByText(/only one cv version has been analysed/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("gives two distinct CVVersions their own column even when they share a label", async () => {
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            analysis({ id: "a1", cvVersionId: "cv1", cvVersion: { label: "CV" } }),
+            analysis({ id: "a2", cvVersionId: "cv2", cvVersion: { label: "CV" } }),
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<CompareAnalysesPage />);
+
+    expect(await screen.findByRole("table")).toBeInTheDocument();
+    expect(screen.getAllByText("CV")).toHaveLength(2);
     expect(
       screen.queryByText(/only one cv version has been analysed/i),
     ).not.toBeInTheDocument();

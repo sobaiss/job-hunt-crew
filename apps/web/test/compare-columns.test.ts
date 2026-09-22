@@ -35,8 +35,8 @@ function analysis(over: Partial<AnalysisDetail> = {}): AnalysisDetail {
 describe("compareColumns", () => {
   it("returns one column per distinct CV version, in first-seen order", () => {
     const cols = compareColumns([
-      analysis({ id: "a1", cvVersion: { label: "Grad CV" } }),
-      analysis({ id: "a2", cvVersion: { label: "Senior CV" } }),
+      analysis({ id: "a1", cvVersionId: "cv1", cvVersion: { label: "Grad CV" } }),
+      analysis({ id: "a2", cvVersionId: "cv2", cvVersion: { label: "Senior CV" } }),
     ]);
 
     expect(cols.map((c) => c.cvVersion.label)).toEqual(["Grad CV", "Senior CV"]);
@@ -63,5 +63,14 @@ describe("compareColumns", () => {
   it("passes a single analysis through unchanged", () => {
     const only = analysis({ id: "solo" });
     expect(compareColumns([only])).toEqual([only]);
+  });
+
+  it("gives two distinct CVVersions their own column even when they share a label", () => {
+    const cols = compareColumns([
+      analysis({ id: "a1", cvVersionId: "cv1", cvVersion: { label: "CV" } }),
+      analysis({ id: "a2", cvVersionId: "cv2", cvVersion: { label: "CV" } }),
+    ]);
+
+    expect(cols.map((c) => c.id)).toEqual(["a1", "a2"]);
   });
 });
