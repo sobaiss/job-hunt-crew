@@ -60,22 +60,25 @@ Base CV, Sites, Last run, Relevant finds; Archived Scouts hidden by default
 behind a "show archived" toggle, mirroring CV versions' superseded filter)
 and a create/edit form.
 Clicking a table row opens the Scout panel, which is the only place a
-Scout's config, run history, patterns, and Finds are shown — there is no
-separate detail page (docs/adr/0007).
+Scout's config, run history, and Finds are shown — there is no separate
+detail page (docs/adr/0007).
 _Avoid_: Scouts (fine in prose for the entity itself; "Agents" is
 specifically the nav label and route area a candidate sees), Scout detail
 page (retired — see Scout panel)
 
 **Scout panel**:
 The right-hand slide-over opened by clicking a Scouts-table row (~1152px on
-desktop, full-width on mobile) — Configuration, Statistiques, Historique des
-exécutions, Patterns, and Finds, plus Run now / Pause / Resume / Archive /
-Edit. Absorbs everything the former `/scouts/[id]` detail page showed, that
-route now being gone (docs/adr/0007, superseding docs/adr/0006's Quick-view
-shape). Reachable directly via `/scouts?open=<id>`, which `/scouts` reads
-once on mount to open the named Scout's panel before clearing the param —
-the target of the Edit-Scout page's back-link, the create/edit form's
-post-edit redirect, and an Application's "view Scout" back-link.
+desktop, full-width on mobile): a sticky header carrying the label, status,
+and every action (Run now / Pause / Resume / Edit / Archive), then
+Configuration paired with Statistiques, then Résultats pertinents, then
+Historique des exécutions — each a `PanelSection`. Absorbs everything the
+former `/scouts/[id]` detail page showed, that route now being gone
+(docs/adr/0007, superseding docs/adr/0006's Quick-view shape), minus the
+"Patterns across your matches" panel and the "found — low fit" list, both
+since dropped. Reachable directly via `/scouts?open=<id>`, which `/scouts`
+reads once on mount to open the named Scout's panel before clearing the
+param — the target of the Edit-Scout page's back-link, the create/edit
+form's post-edit redirect, and an Application's "view Scout" back-link.
 _Avoid_: Side bar / slide bar (same trap as the CV panel's entry above —
 reads as the left-nav Sidebar or a mistranslation of "slide-over"), Quick
 view (that's the Analyses-list one — lighter, and still links out to its own

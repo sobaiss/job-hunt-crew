@@ -193,11 +193,12 @@ export function useRunScout(scoutId: string) {
 // --- Relevant finds (issue #56, Scout slice 4) ---
 // Completed Analyses this Scout has produced, split by matchScore against
 // Scout.matchThreshold into relevant finds and "found — low fit". Each row
-// is the same shape `useAnalysis` returns, so the Scout detail page opens
-// the identical gap report a manual analysis shows.
+// is the same shape `useAnalysis` returns, so the Scout panel opens the
+// identical gap report a manual analysis shows.
 
 export type ScoutFinds = {
   relevantFinds: AnalysisDetail[];
+  /** Still returned by the endpoint; the Scout panel no longer shows it. */
   lowFitFinds: AnalysisDetail[];
 };
 
@@ -209,43 +210,18 @@ export function useScoutFinds(scoutId: string) {
   });
 }
 
-// --- Stats and patterns (issue #60, Scout slice 8) ---
+// --- Stats (issue #60, Scout slice 8) ---
 // The same stats header shown on the Applications view, scoped to this
-// Scout's own offers/finds/documents/applications, plus the "patterns
-// across your matches" panel ranking required-and-missing skills.
+// Scout's own offers/finds/documents/applications. The "patterns across your
+// matches" panel that shipped alongside it is gone from the Scout panel, and
+// with it `useScoutPatterns` and its BFF route; services/api still exposes
+// `/v1/scouts/{id}/patterns`, now with no web caller.
 
 /** This Scout's stats — same shape as `useApplicationStats`, scoped to it. */
 export function useScoutStats(scoutId: string) {
   return useQuery({
     queryKey: [...SCOUTS_KEY, scoutId, "stats"] as const,
     queryFn: () => bff.get<ApplicationStats>(`/scouts/${scoutId}/stats`),
-    enabled: Boolean(scoutId),
-  });
-}
-
-export type SkillPattern = {
-  skill: string;
-  count: number;
-};
-
-export type WeaknessPattern = {
-  weakness: string;
-  count: number;
-};
-
-export type ScoutPatterns = {
-  patterns: SkillPattern[];
-  weaknesses: WeaknessPattern[];
-};
-
-/** Skills most often required by this Scout's relevant finds and missing
- * from the base CV (ranked by frequency among `required`-importance gaps),
- * plus recurring weaknesses (ranked by exact-text frequency — free text has
- * no importance field to filter on). */
-export function useScoutPatterns(scoutId: string) {
-  return useQuery({
-    queryKey: [...SCOUTS_KEY, scoutId, "patterns"] as const,
-    queryFn: () => bff.get<ScoutPatterns>(`/scouts/${scoutId}/patterns`),
     enabled: Boolean(scoutId),
   });
 }
