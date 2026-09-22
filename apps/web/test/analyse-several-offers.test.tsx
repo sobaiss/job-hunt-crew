@@ -130,8 +130,9 @@ function stubApi(options: StubOptions = {}) {
 }
 
 async function submit(user: ReturnType<typeof userEvent.setup>) {
-  await waitFor(() =>
-    expect(screen.getByLabelText("CV version")).toHaveValue("cv-default"),
+  await user.selectOptions(
+    await screen.findByLabelText("CV version"),
+    "cv-default",
   );
   await user.selectOptions(screen.getByLabelText("Job site"), "site-ft");
   await user.click(
@@ -232,14 +233,26 @@ describe("AnalyseSeveralOffersPage", () => {
     ).toBeInTheDocument();
   });
 
+  it("does not preselect the default CV — submit stays disabled until one is chosen", async () => {
+    stubApi();
+    renderWithProviders(<AnalyseSeveralOffersPage />);
+
+    const select = await screen.findByLabelText("CV version");
+    expect(select).toHaveValue("");
+    expect(
+      screen.getByRole("button", { name: "Analyse these offers" }),
+    ).toBeDisabled();
+  });
+
   it("submits a SITE_SEARCH job carrying the CV, filters and maxOffers", async () => {
     let body: Record<string, unknown> | null = null;
     stubApi({ onCreate: (b) => (body = b) });
     const user = userEvent.setup();
     renderWithProviders(<AnalyseSeveralOffersPage />);
 
-    await waitFor(() =>
-      expect(screen.getByLabelText("CV version")).toHaveValue("cv-default"),
+    await user.selectOptions(
+      await screen.findByLabelText("CV version"),
+      "cv-default",
     );
     await user.selectOptions(screen.getByLabelText("Job site"), "site-ft");
     await user.type(screen.getByLabelText("Keywords"), "backend");

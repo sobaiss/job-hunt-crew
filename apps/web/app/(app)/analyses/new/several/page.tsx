@@ -198,6 +198,7 @@ export default function AnalyseSeveralOffersPage() {
                     id="several-cv"
                     value={cvVersionId}
                     onChange={setCvVersionId}
+                    autoSelectDefault={false}
                   />
 
                   <Button

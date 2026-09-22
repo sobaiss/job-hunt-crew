@@ -349,7 +349,7 @@ export default function AnalyseOneOfferPage() {
                   id="offer-cv"
                   value={cvVersionId}
                   onChange={setCvVersionId}
-                  allowImport
+                  autoSelectDefault={false}
                 />
 
                 <Button
