@@ -88,6 +88,7 @@ function CvMarkdownPreview({ id }: { id: string }) {
 function CvReplaceForm({
   cv,
   replace,
+  disabled,
   onReplaced,
   onCancel,
 }: {
@@ -97,6 +98,10 @@ function CvReplaceForm({
     Error,
     { id: string; label: string; file: File }
   >;
+  /** Forces both buttons off regardless of `replace`'s own state — set while
+   *  a delete is in flight, so every control in the panel goes quiet at once
+   *  rather than just the ones the delete itself touches. */
+  disabled: boolean;
   onReplaced: (oldId: string, newId: string) => void;
   onCancel: () => void;
 }) {
@@ -177,10 +182,16 @@ function CvReplaceForm({
       </div>
 
       <div className="flex items-center gap-3">
-        <Button type="submit" size="sm" disabled={replace.isPending}>
+        <Button type="submit" size="sm" disabled={disabled || replace.isPending}>
           {replace.isPending ? t("list.replacing") : t("list.replaceSubmit")}
         </Button>
-        <Button type="button" size="sm" variant="outline" onClick={onCancel}>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={disabled}
+          onClick={onCancel}
+        >
           {t("list.cancelReplace")}
         </Button>
       </div>
@@ -197,6 +208,7 @@ function CvReplaceForm({
 export function CvVersionPanel({
   cv,
   replacedByLabel,
+  chainLength,
   open,
   onOpenChange,
   returnFocusRef,
@@ -204,10 +216,16 @@ export function CvVersionPanel({
   convert,
   setDefault,
   replace,
+  deleteCv,
   onReplaced,
+  onDeleted,
 }: {
   cv: CvVersion | null;
   replacedByLabel: string | null;
+  /** How many CVVersion rows make up this CV (docs/adr/0027) — itself plus
+   *  every earlier, now-superseded version. Deleting removes all of them at
+   *  once, so the confirmation names this count. */
+  chainLength: number;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** The row that opened this panel — focused again on close, since Radix's
@@ -222,12 +240,27 @@ export function CvVersionPanel({
     Error,
     { id: string; label: string; file: File }
   >;
+  deleteCv: UseMutationResult<void, Error, string>;
   /** Called after a successful Replace with (oldId, newId) — the page uses
    *  oldId for the Scout-warning banner and switches the panel to newId. */
   onReplaced: (oldId: string, newId: string) => void;
+  /** Called after a successful delete, once the panel has already closed
+   *  itself the same way its own close button would — the page's job is
+   *  just to refetch the list, the same "Actualiser" already does. */
+  onDeleted: () => void;
 }) {
   const t = useTranslations("cvVersions");
   const [isReplacing, setIsReplacing] = useState(false);
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+
+  // While the delete request is in flight, every other action in the panel
+  // goes quiet too — there's no row left to act on the moment it succeeds,
+  // and nothing here is worth racing against a delete that's about to
+  // remove this whole CV out from under it. Kept separate from `busy` below:
+  // it should disable the Convert/Reconvert button same as a real
+  // Conversion would, but must not relabel it "Converting…" — nothing is
+  // converting.
+  const deleting = deleteCv.isPending;
 
   const busy =
     cv !== null &&
@@ -235,7 +268,10 @@ export function CvVersionPanel({
       (convert.isPending && convert.variables === cv.id));
 
   const handleOpenChange = (nextOpen: boolean) => {
-    if (!nextOpen) setIsReplacing(false);
+    if (!nextOpen) {
+      setIsReplacing(false);
+      setIsConfirmingDelete(false);
+    }
     onOpenChange(nextOpen);
   };
 
@@ -304,7 +340,7 @@ export function CvVersionPanel({
                 size="sm"
                 variant="outline"
                 onClick={() => convert.mutate(cv.id)}
-                disabled={busy}
+                disabled={busy || deleting}
               >
                 {busy
                   ? t("list.converting")
@@ -319,7 +355,8 @@ export function CvVersionPanel({
                   variant="outline"
                   onClick={() => setDefault.mutate(cv.id)}
                   disabled={
-                    setDefault.isPending && setDefault.variables === cv.id
+                    deleting ||
+                    (setDefault.isPending && setDefault.variables === cv.id)
                   }
                 >
                   {setDefault.isPending && setDefault.variables === cv.id
@@ -332,6 +369,7 @@ export function CvVersionPanel({
                   type="button"
                   size="sm"
                   variant="outline"
+                  disabled={deleting}
                   onClick={() => setIsReplacing(true)}
                 >
                   {t("list.replace")}
@@ -339,7 +377,7 @@ export function CvVersionPanel({
               )}
               {!cv.supersededById &&
                 cv.conversionStatus === "CONVERTED" &&
-                (busy ? (
+                (busy || deleting ? (
                   <Button type="button" size="sm" variant="outline" disabled>
                     {t("edit.modify")}
                   </Button>
@@ -350,12 +388,75 @@ export function CvVersionPanel({
                     </Link>
                   </Button>
                 ))}
+              {!cv.supersededById && !isConfirmingDelete && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={deleting}
+                  onClick={() => setIsConfirmingDelete(true)}
+                >
+                  {t("list.delete")}
+                </Button>
+              )}
             </div>
+
+            {isConfirmingDelete && (
+              <div
+                role="alert"
+                className="flex flex-col gap-3 border-t pt-3 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <span className="text-sm text-muted">
+                  {chainLength > 1
+                    ? t("list.deleteConfirmChain", { count: chainLength - 1 })
+                    : t("list.deleteConfirmSingle")}
+                </span>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="destructive"
+                    disabled={deleting}
+                    onClick={() =>
+                      deleteCv.mutate(cv.id, {
+                        // Closes the same way its own close button would
+                        // (resetting isReplacing/isConfirmingDelete too),
+                        // rather than lingering on a row that no longer
+                        // exists; the page then refetches the list, the
+                        // same action "Actualiser" already performs.
+                        onSuccess: () => {
+                          handleOpenChange(false);
+                          onDeleted();
+                        },
+                      })
+                    }
+                  >
+                    {deleting ? t("list.deleting") : t("edit.confirmAction")}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={deleting}
+                    onClick={() => setIsConfirmingDelete(false)}
+                  >
+                    {t("edit.cancelAction")}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {deleteCv.isError && (
+              <p role="alert" className="text-sm text-destructive">
+                {t("list.deleteError")}
+              </p>
+            )}
 
             {isReplacing && (
               <CvReplaceForm
                 cv={cv}
                 replace={replace}
+                disabled={deleting}
                 onReplaced={(oldId, newId) => {
                   setIsReplacing(false);
                   onReplaced(oldId, newId);

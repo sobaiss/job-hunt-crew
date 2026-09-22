@@ -235,7 +235,7 @@ describe("CvVersionsPage — list", () => {
     await waitFor(() => expect(patchBody).toEqual({ isDefault: true }));
   });
 
-  it("hides Set as default, Replace, and Modifier (but keeps Reconvert) in the panel for a superseded CV", async () => {
+  it("hides Set as default, Replace, Modifier, and Delete (but keeps Reconvert) in the panel for a superseded CV", async () => {
     server.use(
       http.get("/api/cv-versions", () =>
         HttpResponse.json({
@@ -264,6 +264,7 @@ describe("CvVersionsPage — list", () => {
     ).toBeNull();
     expect(panel.queryByRole("button", { name: "Replace" })).toBeNull();
     expect(panel.queryByRole("link", { name: "Modifier" })).toBeNull();
+    expect(panel.queryByRole("button", { name: "Delete" })).toBeNull();
     expect(panel.getByText("Replaced by New CV")).toBeInTheDocument();
   });
 
@@ -925,5 +926,182 @@ describe("CvVersionsPage — replace (from the panel, issue #82)", () => {
       expect(within(screen.getByRole("dialog")).getByText("Updated CV")).toBeInTheDocument(),
     );
     expect(screen.queryByRole("alert", { name: /still used/i })).toBeNull();
+  });
+});
+
+describe("CvVersionsPage — delete (docs/adr/0027)", () => {
+  it("asks for confirmation naming just this CV when it has no earlier versions", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cvVersion()] }),
+      ),
+      http.get("/api/cv-versions/cv1/markdown", () =>
+        HttpResponse.json({ markdownContent: null, conversionStatus: "CONVERTED" }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await user.click(await screen.findByText("Grad CV"));
+    const panel = within(await screen.findByRole("dialog"));
+    await user.click(panel.getByRole("button", { name: "Delete" }));
+
+    expect(
+      await panel.findByText(
+        "This CV will be permanently deleted. This can't be undone.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("names the number of earlier versions in the confirmation for a CV with a supersede chain", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: [
+            cvVersion({ id: "cv1", label: "Old CV", supersededById: "cv2" }),
+            cvVersion({ id: "cv2", label: "New CV" }),
+          ],
+        }),
+      ),
+      http.get("/api/cv-versions/cv2/markdown", () =>
+        HttpResponse.json({ markdownContent: null, conversionStatus: "CONVERTED" }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    // Opened from the current version — the chain also includes the
+    // superseded "Old CV" row, so deleting removes both (docs/adr/0027).
+    await user.click(await screen.findByText("New CV"));
+    const panel = within(await screen.findByRole("dialog"));
+    await user.click(panel.getByRole("button", { name: "Delete" }));
+
+    expect(
+      await panel.findByText(
+        "This CV and its 1 earlier version will be permanently deleted. This can't be undone.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("cancels the confirmation without calling the delete endpoint", async () => {
+    let deleteCalls = 0;
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cvVersion()] }),
+      ),
+      http.get("/api/cv-versions/cv1/markdown", () =>
+        HttpResponse.json({ markdownContent: null, conversionStatus: "CONVERTED" }),
+      ),
+      http.delete("/api/cv-versions/cv1", () => {
+        deleteCalls += 1;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await user.click(await screen.findByText("Grad CV"));
+    const panel = within(await screen.findByRole("dialog"));
+    await user.click(panel.getByRole("button", { name: "Delete" }));
+    await user.click(panel.getByRole("button", { name: "Cancel" }));
+
+    expect(panel.queryByText(/permanently deleted/)).toBeNull();
+    expect(panel.getByRole("button", { name: "Delete" })).toBeInTheDocument();
+    expect(deleteCalls).toBe(0);
+  });
+
+  it("deletes the CV via DELETE /api/cv-versions/:id on confirmation, closing the panel like its own close button and refetching the list like Actualiser", async () => {
+    let getCalls = 0;
+    server.use(
+      http.get("/api/cv-versions", () => {
+        getCalls += 1;
+        return HttpResponse.json({ cvVersions: getCalls > 1 ? [] : [cvVersion()] });
+      }),
+      http.get("/api/cv-versions/cv1/markdown", () =>
+        HttpResponse.json({ markdownContent: null, conversionStatus: "CONVERTED" }),
+      ),
+      http.delete("/api/cv-versions/cv1", () => new HttpResponse(null, { status: 204 })),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await user.click(await screen.findByText("Grad CV"));
+    const panel = within(await screen.findByRole("dialog"));
+    await user.click(panel.getByRole("button", { name: "Delete" }));
+    await user.click(panel.getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(getCalls).toBeGreaterThan(1));
+    expect(
+      await screen.findByText("No CV versions uploaded yet."),
+    ).toBeInTheDocument();
+  });
+
+  it("disables every other action in the panel while the delete request is pending", async () => {
+    let resolveDelete: () => void = () => {};
+    const deleteGate = new Promise<void>((resolve) => {
+      resolveDelete = resolve;
+    });
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cvVersion()] }),
+      ),
+      http.get("/api/cv-versions/cv1/markdown", () =>
+        HttpResponse.json({ markdownContent: null, conversionStatus: "CONVERTED" }),
+      ),
+      http.delete("/api/cv-versions/cv1", async () => {
+        await deleteGate;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await user.click(await screen.findByText("Grad CV"));
+    const panel = within(await screen.findByRole("dialog"));
+    await user.click(panel.getByRole("button", { name: "Delete" }));
+    await user.click(panel.getByRole("button", { name: "Confirm" }));
+
+    expect(panel.getByRole("button", { name: "Deleting…" })).toBeDisabled();
+    expect(panel.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    expect(panel.getByRole("button", { name: "Reconvert" })).toBeDisabled();
+    expect(
+      panel.getByRole("button", { name: "Set as default" }),
+    ).toBeDisabled();
+    expect(panel.getByRole("button", { name: "Replace" })).toBeDisabled();
+
+    resolveDelete();
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("shows a generic error and keeps the panel open when delete is rejected (e.g. a version was analysed)", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cvVersion()] }),
+      ),
+      http.get("/api/cv-versions/cv1/markdown", () =>
+        HttpResponse.json({ markdownContent: null, conversionStatus: "CONVERTED" }),
+      ),
+      http.delete("/api/cv-versions/cv1", () =>
+        HttpResponse.json(
+          { detail: "This CV is used by 1 Analysis(es). It cannot be deleted while those Analyses reference it." },
+          { status: 409 },
+        ),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await user.click(await screen.findByText("Grad CV"));
+    const panel = within(await screen.findByRole("dialog"));
+    await user.click(panel.getByRole("button", { name: "Delete" }));
+    await user.click(panel.getByRole("button", { name: "Confirm" }));
+
+    expect(
+      await panel.findByText(
+        "We couldn't delete that CV. It may still be in use — please try again.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 });

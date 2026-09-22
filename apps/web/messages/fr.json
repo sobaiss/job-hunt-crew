@@ -1016,7 +1016,12 @@
       "replaceSubmit": "Remplacer",
       "replacing": "Remplacement…",
       "replaceError": "Impossible de remplacer cette version de CV. Veuillez réessayer.",
-      "scoutWarningHeading": "Cette version de CV a été remplacée, mais ces agents l'utilisent encore :"
+      "scoutWarningHeading": "Cette version de CV a été remplacée, mais ces agents l'utilisent encore :",
+      "delete": "Supprimer",
+      "deleting": "Suppression…",
+      "deleteConfirmSingle": "Ce CV sera supprimé définitivement. Cette action est irréversible.",
+      "deleteConfirmChain": "Ce CV et {count, plural, one {sa # version précédente} other {ses # versions précédentes}} seront supprimés définitivement. Cette action est irréversible.",
+      "deleteError": "Impossible de supprimer ce CV. Il est peut-être encore utilisé — veuillez réessayer."
     },
     "panel": {
       "updated": "Mise à jour",

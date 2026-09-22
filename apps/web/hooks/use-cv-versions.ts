@@ -249,3 +249,20 @@ export function useSetDefaultCvVersion() {
     },
   });
 }
+
+/**
+ * Delete a CV — the whole supersede chain the given (current, non-
+ * superseded) CVVersion belongs to, not just that one row (docs/adr/0027).
+ * services/api rejects with a 409 if any version in the chain has been used
+ * in an Analysis, IngestionJob, Scout, Application, or GeneratedDocument.
+ */
+export function useDeleteCvVersion() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => bff.delete<void>(`/cv-versions/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: CV_VERSIONS_KEY });
+    },
+  });
+}

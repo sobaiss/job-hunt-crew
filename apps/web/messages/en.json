@@ -1016,7 +1016,12 @@
       "replaceSubmit": "Replace",
       "replacing": "Replacing…",
       "replaceError": "We couldn't replace that CV version. Please try again.",
-      "scoutWarningHeading": "This CV version was replaced, but these Scouts still use it:"
+      "scoutWarningHeading": "This CV version was replaced, but these Scouts still use it:",
+      "delete": "Delete",
+      "deleting": "Deleting…",
+      "deleteConfirmSingle": "This CV will be permanently deleted. This can't be undone.",
+      "deleteConfirmChain": "This CV and its {count, plural, one {# earlier version} other {# earlier versions}} will be permanently deleted. This can't be undone.",
+      "deleteError": "We couldn't delete that CV. It may still be in use — please try again."
     },
     "panel": {
       "updated": "Updated",
