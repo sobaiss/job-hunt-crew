@@ -203,6 +203,34 @@ export function useCvVersionMarkdown(id: string, enabled: boolean) {
   });
 }
 
+/** Conversion statuses after which nothing moves without a new convert. */
+export const TERMINAL_CV_CONVERSION_STATUSES: ReadonlySet<CvConversionStatus> =
+  new Set(["CONVERTED", "FAILED"]);
+
+/** How often the Import screen re-reads a CVVersion's Conversion. */
+export const CV_CONVERSION_POLL_INTERVAL_MS = 2000;
+
+/**
+ * The same rendition query as {@link useCvVersionMarkdown}, polled until the
+ * Conversion reaches a terminal status — the Import screen's progress source.
+ * The endpoint answers the status and the content together, so the success
+ * state renders from the last poll with no extra request. `id` is null until
+ * the Conversion has been started.
+ */
+export function useCvVersionConversion(id: string | null) {
+  return useQuery({
+    queryKey: ["cv-versions", id, "markdown"] as const,
+    queryFn: () => bff.get<CvVersionMarkdown>(`/cv-versions/${id}/markdown`),
+    enabled: id !== null,
+    refetchInterval: (query) => {
+      const status = query.state.data?.conversionStatus;
+      return status && TERMINAL_CV_CONVERSION_STATUSES.has(status)
+        ? false
+        : CV_CONVERSION_POLL_INTERVAL_MS;
+    },
+  });
+}
+
 /**
  * Save a candidate's hand-edit of a CV version's Markdown rendition in place
  * (issue #186, #185, docs/adr/0025) — mutates the same CVVersion row, no new
