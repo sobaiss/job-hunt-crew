@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import { useTranslations } from "next-intl";
 
 import { useAdminPlanDefaults, useSetPlanDefaults, type AdminPlanDefault } from "@/hooks/use-admin";
@@ -112,7 +111,6 @@ function PlanEditForm({ plan, limits, onClose }: { plan: string; limits: LimitsB
  */
 export default function AdminQuotasPage() {
   const t = useTranslations("admin.quotas");
-  const nav = useTranslations("admin");
   const quotaKindLabel = useEnumLabel("quotaKind");
   const { data, isPending, isError } = useAdminPlanDefaults();
   const [editingPlan, setEditingPlan] = useState<string | null>(null);
@@ -127,14 +125,6 @@ export default function AdminQuotasPage() {
         <div className="flex flex-col gap-1">
           <h1 className="font-serif text-2xl font-semibold">{t("title")}</h1>
           <p className="text-sm text-muted">{t("description")}</p>
-          <div className="flex gap-4 pt-1">
-            <Link href="/admin" className="text-sm font-medium underline">
-              {nav("title")}
-            </Link>
-            <Link href="/admin/users" className="text-sm font-medium underline">
-              {nav("users.title")}
-            </Link>
-          </div>
         </div>
         <ColumnVisibilityMenu
           columns={COLUMNS}

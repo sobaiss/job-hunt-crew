@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@/auth";
-import { AdminTabs } from "@/components/admin-tabs";
 
 // Gates the whole Admin area (issue #138): a signed-out visit redirects to
 // sign-in (proxy.ts's matcher already covers this at the cookie-presence
@@ -12,6 +11,10 @@ import { AdminTabs } from "@/components/admin-tabs";
 // than the retired `isAdmin` boolean (issue #156, docs/adr/0017):
 // `session.user.role` is checked here (not in proxy.ts), which deliberately
 // never decodes the JWT.
+//
+// The gate is all this layout does: the Admin area's seven sections are nav
+// rows in the App shell's Sidebar (`components/app-sidebar.tsx`'s
+// ADMIN_NAV_ITEMS), so there is no second menu inside the area to mount here.
 export default async function AdminLayout({ children }: { children: ReactNode }) {
   const session = await auth();
   if (!session?.user) {
@@ -23,12 +26,5 @@ export default async function AdminLayout({ children }: { children: ReactNode })
     return null;
   }
 
-  return (
-    <>
-      <div className="mx-auto w-full max-w-[1600px] px-8 pt-6">
-        <AdminTabs />
-      </div>
-      {children}
-    </>
-  );
+  return <>{children}</>;
 }

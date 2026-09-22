@@ -14,26 +14,29 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import {
-  NAV_ITEMS,
   SidebarContent,
   TopbarAccountMenu,
   isNavActive,
+  useNavGroups,
 } from "@/components/app-sidebar";
 import { QuotaAlertsFeed } from "@/components/quota-alerts-feed";
 
 /**
  * The page title shown in the Topbar. Resolved from the current route against
- * {@link NAV_ITEMS} (longest match wins, so a nested route like `/analyses/new`
- * shows its section title); routes outside the nav fall back to the app name.
+ * the signed-in role's own nav rows ({@link useNavGroups}, longest match wins,
+ * so a nested route like `/analyses/new` shows its section title); routes
+ * outside the nav fall back to the app name. Since the rows come from there,
+ * an Administrator gets the current Admin section named here — the Admin area
+ * navigates entirely from the Sidebar and has no tab strip of its own.
  */
 function usePageTitle(): string {
-  const t = useTranslations("nav");
   const tApp = useTranslations("app");
   const pathname = usePathname();
-  const match = [...NAV_ITEMS]
+  const match = useNavGroups()
+    .flatMap((group) => group.items)
     .filter(({ href }) => isNavActive(pathname, href))
     .sort((a, b) => b.href.length - a.href.length)[0];
-  return match ? t(match.key) : tApp("name");
+  return match ? match.label : tApp("name");
 }
 
 /**

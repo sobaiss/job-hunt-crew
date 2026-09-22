@@ -3,7 +3,7 @@ import { HttpResponse, http } from "msw";
 import userEvent from "@testing-library/user-event";
 import type { Session } from "next-auth";
 
-import { renderWithProviders, screen, waitFor, within } from "./test-utils";
+import { renderWithProviders, screen, waitFor } from "./test-utils";
 import { server } from "./msw/server";
 import AdminLayout from "@/app/(app)/admin/layout";
 import AdminPage from "@/app/(app)/admin/page";
@@ -74,47 +74,17 @@ describe("Admin layout gate", () => {
     expect(screen.getByTestId("child")).toBeInTheDocument();
   });
 
-  it("renders a tab strip linking all seven Admin screens", async () => {
+  // The Admin sections are rows in the App shell's Sidebar (see
+  // test/app-sidebar.test.tsx), so the area no longer stacks a menu of its own
+  // on top of that one — the layout is the gate and nothing else.
+  it("adds no navigation of its own around the Admin screens", async () => {
     auth.mockResolvedValue(ADMIN_SESSION);
 
-    const element = await AdminLayout({ children: <div /> });
+    const element = await AdminLayout({ children: <div data-testid="child" /> });
     renderWithProviders(element ?? <></>);
 
-    const tabs = within(screen.getByRole("navigation", { name: "Admin sections" }));
-    const hrefs = Object.fromEntries(
-      tabs.getAllByRole("link").map((link) => [link.textContent, link.getAttribute("href")]),
-    );
-    expect(hrefs).toEqual({
-      Dashboard: "/admin",
-      Users: "/admin/users",
-      Quotas: "/admin/quotas",
-      Analyses: "/admin/analyses",
-      Scouts: "/admin/scouts",
-      "CV versions": "/admin/cv-versions",
-      "LLM providers": "/admin/llm-providers",
-    });
-  });
-
-  it("indicates the current screen in the tab strip", async () => {
-    auth.mockResolvedValue(ADMIN_SESSION);
-    pathname = "/admin/scouts";
-
-    const element = await AdminLayout({ children: <div /> });
-    renderWithProviders(element ?? <></>);
-
-    const tabs = within(screen.getByRole("navigation", { name: "Admin sections" }));
-    expect(tabs.getByRole("link", { name: "Scouts" })).toHaveAttribute("aria-current", "page");
-    expect(tabs.getByRole("link", { name: "Dashboard" })).not.toHaveAttribute("aria-current");
-    expect(tabs.getByRole("link", { name: "Users" })).not.toHaveAttribute("aria-current");
-  });
-
-  it("does not render the tab strip for a non-Administrator", async () => {
-    auth.mockResolvedValue(STANDARD_SESSION);
-
-    const element = await AdminLayout({ children: <div /> });
-    renderWithProviders(element ?? <></>);
-
-    expect(screen.queryByRole("navigation", { name: "Admin sections" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
 });
 
@@ -150,6 +120,40 @@ describe("AdminPage", () => {
     expect(screen.getByText("Users by Plan")).toBeInTheDocument();
     expect(screen.getByText("FREE")).toBeInTheDocument();
     expect(screen.getByText("STANDARD")).toBeInTheDocument();
+    // analysesRequestedThisMonth rides along as the Analyses tile's caption.
+    expect(screen.getByText("40 this month")).toBeInTheDocument();
+  });
+
+  it("shows each Plan's share of the user base", async () => {
+    renderWithProviders(<AdminPage />, { session: ADMIN_SESSION });
+
+    // 2 of 3 on FREE, 1 of 3 on STANDARD.
+    expect(await screen.findByText("2 · 67%")).toBeInTheDocument();
+    expect(screen.getByText("1 · 33%")).toBeInTheDocument();
+  });
+
+  it("links each figure to the Admin section it comes from", async () => {
+    renderWithProviders(<AdminPage />, { session: ADMIN_SESSION });
+
+    expect(await screen.findByRole("link", { name: /Total users/ })).toHaveAttribute(
+      "href",
+      "/admin/users",
+    );
+    expect(screen.getByRole("link", { name: /Analyses today/ })).toHaveAttribute(
+      "href",
+      "/admin/analyses",
+    );
+    expect(screen.getByRole("link", { name: /Active Scouts/ })).toHaveAttribute(
+      "href",
+      "/admin/scouts",
+    );
+    expect(
+      screen.getByRole("link", { name: /Users at\/over a limit/ }),
+    ).toHaveAttribute("href", "/admin/quotas");
+    expect(screen.getByRole("link", { name: /Blocked users/ })).toHaveAttribute(
+      "href",
+      "/admin/users",
+    );
   });
 
   it("re-fetches stats with the selected period, filtering only the new-signups series server-side", async () => {

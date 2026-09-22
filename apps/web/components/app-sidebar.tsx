@@ -9,6 +9,7 @@ import {
   Bot,
   ChevronsUpDown,
   ClipboardList,
+  Cpu,
   FileText,
   Gauge,
   LayoutDashboard,
@@ -17,11 +18,12 @@ import {
   PanelLeftOpen,
   Plus,
   Settings,
-  ShieldCheck,
+  Users,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -109,18 +111,30 @@ export const NAV_ITEMS = [
   { href: "/settings", key: "settings", Icon: Settings },
 ] as const;
 
-// The single entry into the Admin area, rendered only for an Administrator
-// (issue #164). Kept out of NAV_ITEMS so the Topbar title lookup (which walks
-// NAV_ITEMS) never names an Admin route for a non-Administrator.
-const ADMIN_NAV_ITEM = { href: "/admin", key: "admin", Icon: ShieldCheck } as const;
+// The seven screens of the Admin area, in nav order — labels live under
+// `admin.nav`, not `nav`. An Administrator reaches each one straight from the
+// Sidebar (issue #164 originally stacked a tab strip inside the area on top of
+// the Sidebar; the sections moved up here so the area has one menu, not two),
+// so the Admin screens never render a nav of their own. Kept out of NAV_ITEMS
+// so the Topbar title lookup never names an Admin route for a
+// non-Administrator — see `useNavGroups`, which only hands these out to one.
+export const ADMIN_NAV_ITEMS = [
+  { href: "/admin", key: "dashboard", Icon: LayoutDashboard },
+  { href: "/admin/users", key: "users", Icon: Users },
+  { href: "/admin/quotas", key: "planDefaults", Icon: Gauge },
+  { href: "/admin/analyses", key: "analyses", Icon: ListChecks },
+  { href: "/admin/scouts", key: "scouts", Icon: Bot },
+  { href: "/admin/cv-versions", key: "cvVersions", Icon: FileText },
+  { href: "/admin/llm-providers", key: "llmProviders", Icon: Cpu },
+] as const;
 
 // An Administrator has no CV, Scout, Analysis, or Application of their own —
 // that data only exists per-Candidate — so these rows (and the Dashboard,
 // which summarizes it) are meaningless for that role and hidden from its
 // Sidebar. Dashboard/Analyses/Agents/CV versions/Quotas each have an
-// Admin-area equivalent reached via ADMIN_NAV_ITEM instead; Applications has
-// none, so that route is fully gone for an Administrator (404 on direct
-// visit, see app/(app)/applications/layout.tsx) rather than redirected.
+// Admin-area equivalent in ADMIN_NAV_ITEMS instead; Applications has none, so
+// that route is fully gone for an Administrator (404 on direct visit, see
+// app/(app)/applications/layout.tsx) rather than redirected.
 const ADMIN_HIDDEN_NAV_KEYS = new Set<(typeof NAV_ITEMS)[number]["key"]>([
   "dashboard",
   "analyses",
@@ -130,14 +144,66 @@ const ADMIN_HIDDEN_NAV_KEYS = new Set<(typeof NAV_ITEMS)[number]["key"]>([
   "applications",
 ]);
 
+// A route that is both an area's own screen and the prefix of every other
+// screen in it, so it can only match exactly — otherwise `/` would own every
+// route, and the Admin dashboard row would stay active across the whole Admin
+// area.
+const EXACT_MATCH_HREFS = new Set(["/", "/admin"]);
+
 /**
  * A nav item is active on an exact path match or when the current route is
- * nested under it. `"/"` is special-cased to an exact match only — otherwise
- * the Dashboard row would own every route.
+ * nested under it, bar the {@link EXACT_MATCH_HREFS} area roots.
  */
 export function isNavActive(pathname: string, href: string): boolean {
-  if (href === "/") return pathname === "/";
+  if (EXACT_MATCH_HREFS.has(href)) return pathname === href;
   return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+type NavItem = { href: string; label: string; Icon: typeof LayoutDashboard };
+/** One block of nav rows, under an optional heading and above a rule. */
+type NavGroup = { id: string; heading?: string; items: NavItem[] };
+
+/**
+ * The Sidebar's nav rows for the signed-in role, labels already resolved: a
+ * Candidate gets the one ungrouped block of {@link NAV_ITEMS}; an
+ * Administrator gets the Admin sections under an "Administration" heading,
+ * then Settings on its own — the per-Candidate rows being meaningless for
+ * that role (see {@link ADMIN_HIDDEN_NAV_KEYS}).
+ *
+ * Shared with the Topbar, which resolves the current page's title from the
+ * same list, so a route only ever gets a title where it also has a nav row.
+ */
+export function useNavGroups(): NavGroup[] {
+  const t = useTranslations("nav");
+  const tAdmin = useTranslations("admin.nav");
+  const { data: session } = useSession();
+
+  if (session?.user?.role !== "ADMINISTRATOR") {
+    return [
+      {
+        id: "main",
+        items: NAV_ITEMS.map(({ href, key, Icon }) => ({ href, label: t(key), Icon })),
+      },
+    ];
+  }
+
+  return [
+    {
+      id: "admin",
+      heading: t("admin"),
+      items: ADMIN_NAV_ITEMS.map(({ href, key, Icon }) => ({
+        href,
+        label: tAdmin(key),
+        Icon,
+      })),
+    },
+    {
+      id: "account",
+      items: NAV_ITEMS.filter((item) => !ADMIN_HIDDEN_NAV_KEYS.has(item.key)).map(
+        ({ href, key, Icon }) => ({ href, label: t(key), Icon }),
+      ),
+    },
+  ];
 }
 
 /** Two-letter monogram for the avatar fallback, from the name then the email. */
@@ -212,10 +278,13 @@ function SidebarBrand({
 }
 
 /**
- * The nav rows, with the current route flagged `aria-current`. When
- * `collapsed`, each row shows only its icon (the label stays in the DOM as
- * `sr-only` so the link's accessible name is unchanged) and gains a Tooltip
- * so the label is still reachable on hover or focus.
+ * The nav rows, grouped by {@link useNavGroups}, with the current route
+ * flagged `aria-current`. Each group after the first is set off by a rule,
+ * and carries its heading when there is room for one. When `collapsed`, a row
+ * shows only its icon (the label stays in the DOM as `sr-only` so the link's
+ * accessible name is unchanged) and gains a Tooltip so the label is still
+ * reachable on hover or focus; the headings go with the labels, the rules
+ * staying behind as the only grouping left.
  */
 function SidebarNav({
   onNavigate,
@@ -224,41 +293,42 @@ function SidebarNav({
   onNavigate?: () => void;
   collapsed?: boolean;
 }) {
-  const t = useTranslations("nav");
   const pathname = usePathname();
-  const { data: session } = useSession();
-  const items =
-    session?.user?.role === "ADMINISTRATOR"
-      ? [
-          ...NAV_ITEMS.filter((item) => !ADMIN_HIDDEN_NAV_KEYS.has(item.key)),
-          ADMIN_NAV_ITEM,
-        ]
-      : NAV_ITEMS;
+  const groups = useNavGroups();
   return (
-    <nav className="flex flex-col gap-0.5">
-      {items.map(({ href, key, Icon }) => {
-        const active = isNavActive(pathname, href);
-        const label = t(key);
-        return (
-          <MaybeTooltip key={href} active={!!collapsed} label={label}>
-            <Link
-              href={href}
-              onClick={onNavigate}
-              aria-current={active ? "page" : undefined}
-              className={cn(
-                "flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
-                collapsed && "justify-center",
-                active
-                  ? "bg-background font-medium text-foreground shadow-xs ring-1 ring-border"
-                  : "text-muted hover:bg-background/60 hover:text-foreground",
-              )}
-            >
-              <Icon className="size-4 flex-none" aria-hidden="true" />
-              <span className={cn(collapsed && "sr-only")}>{label}</span>
-            </Link>
-          </MaybeTooltip>
-        );
-      })}
+    <nav className="flex flex-col gap-1">
+      {groups.map(({ id, heading, items }, groupIndex) => (
+        <div key={id} className="flex flex-col gap-0.5">
+          {groupIndex > 0 && <Separator className="my-2" />}
+          {heading && !collapsed && (
+            <p className="px-3 pb-1 text-xs font-medium tracking-wide text-muted uppercase">
+              {heading}
+            </p>
+          )}
+          {items.map(({ href, label, Icon }) => {
+            const active = isNavActive(pathname, href);
+            return (
+              <MaybeTooltip key={href} active={!!collapsed} label={label}>
+                <Link
+                  href={href}
+                  onClick={onNavigate}
+                  aria-current={active ? "page" : undefined}
+                  className={cn(
+                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
+                    collapsed && "justify-center",
+                    active
+                      ? "bg-background font-medium text-foreground shadow-xs ring-1 ring-border"
+                      : "text-muted hover:bg-background/60 hover:text-foreground",
+                  )}
+                >
+                  <Icon className="size-4 flex-none" aria-hidden="true" />
+                  <span className={cn(collapsed && "sr-only")}>{label}</span>
+                </Link>
+              </MaybeTooltip>
+            );
+          })}
+        </div>
+      ))}
     </nav>
   );
 }

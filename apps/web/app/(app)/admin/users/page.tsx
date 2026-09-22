@@ -855,12 +855,10 @@ export default function AdminUsersPage() {
   return (
     <Suspense fallback={null}>
       <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 p-8">
+        {/* The table is the whole page, so it takes the page's own heading
+            rather than repeating it as a section title of its own. */}
         <h1 className="font-serif text-2xl font-semibold">{t("title")}</h1>
-
-        <section className="flex flex-col gap-2">
-          <h2 className="text-sm font-semibold">{t("table.title")}</h2>
-          <UsersTable />
-        </section>
+        <UsersTable />
       </main>
     </Suspense>
   );
