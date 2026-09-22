@@ -11,9 +11,11 @@ import {
   useSaveCvVersionMarkdown,
 } from "@/hooks/use-cv-versions";
 import { CvMarkdownContent } from "@/components/cv-markdown-content";
+import { CvPaper, CV_PAGE_COLUMN_CLASS } from "@/components/cv-paper";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 
 // Issue #186: a CV-version-scoped page to read a CVVersion's Markdown
 // rendition as a real formatted document and, from there, hand-edit and save
@@ -67,7 +69,9 @@ export default function CvVersionEditPage() {
 
   if (list.isPending) {
     return (
-      <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-4 p-8">
+      <main
+        className={cn("mx-auto flex w-full flex-col gap-4 p-8", CV_PAGE_COLUMN_CLASS)}
+      >
         <Skeleton className="h-8 w-1/2" />
         <Skeleton className="h-64 w-full" />
       </main>
@@ -76,7 +80,9 @@ export default function CvVersionEditPage() {
 
   if (!eligible) {
     return (
-      <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-4 p-8">
+      <main
+        className={cn("mx-auto flex w-full flex-col gap-4 p-8", CV_PAGE_COLUMN_CLASS)}
+      >
         <p role="alert" className="text-sm text-destructive">
           {t("edit.notEligible")}
         </p>
@@ -85,7 +91,9 @@ export default function CvVersionEditPage() {
   }
 
   return (
-    <main className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 p-8">
+    <main
+      className={cn("mx-auto flex w-full flex-col gap-6 p-8", CV_PAGE_COLUMN_CLASS)}
+    >
       <div className="flex items-start justify-between gap-4">
         <div className="flex flex-col gap-1">
           <Link href="/cv-versions" className="text-sm text-accent underline">
@@ -101,7 +109,7 @@ export default function CvVersionEditPage() {
       </div>
 
       {!isEditing && (
-        <div className="rounded-md border border-border bg-white p-12 text-sm text-foreground">
+        <CvPaper>
           {markdown.isPending && (
             <p role="status" className="text-sm text-muted">
               {t("list.markdownLoading")}
@@ -115,7 +123,7 @@ export default function CvVersionEditPage() {
           {markdown.data && (
             <CvMarkdownContent content={markdown.data.markdownContent ?? ""} />
           )}
-        </div>
+        </CvPaper>
       )}
 
       {isEditing && (

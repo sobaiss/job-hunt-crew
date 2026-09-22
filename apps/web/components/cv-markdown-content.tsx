@@ -8,8 +8,9 @@ import type { Components } from "react-markdown";
 // rendered as a real formatted document — real headings, lists and tables —
 // rather than a wall of `#`/`-` characters. Extracted so the CV-versions edit
 // page's read-only view and the CV panel's preview render a CV's content the
-// same way instead of drifting apart; callers own the surrounding "page"
-// chrome (border, background, scroll).
+// same way instead of drifting apart. This styles the document's insides
+// only: the sheet around it — its A4 width, margins, border and background —
+// is `CvPaper`, and a caller that needs a scroll box adds it there.
 
 const CV_MARKDOWN_COMPONENTS: Components = {
   h1: ({ ...props }) => <h1 className="text-xl font-semibold" {...props} />,
