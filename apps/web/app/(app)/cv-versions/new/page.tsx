@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, type ChangeEvent } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -16,6 +17,7 @@ import {
   useCvVersions,
   useReplaceCvVersion,
   useSetDefaultCvVersion,
+  apiErrorCode,
   apiErrorDetail,
   discardCvVersion,
   firstFile,
@@ -41,7 +43,28 @@ import { cn } from "@/lib/utils";
 // is no usable file, so the offer is to retry the upload and the half-created
 // row is discarded on close; converting it failed means the file is stored
 // and the row is legitimate, so the offer is to retry the Conversion or
-// replace the file, and nothing is deleted. Resume and wait caps are #196.
+// replace the file, and nothing is deleted.
+// Time passing (issue #196): the CVVersion id is in the URL from the moment
+// the row exists, so a reload resumes the same Import from the row's status;
+// and a Conversion that never ends stops being polled after 3 minutes.
+
+/** The query parameter carrying the CVVersion an Import follows. */
+const RESUME_PARAM = "cvVersionId";
+
+/** A Conversion running this long gets a soft line; nothing fails. */
+const SLOW_CONVERSION_MS = 45 * 1000;
+/** A Conversion running this long stops being polled. */
+const CONVERSION_WAIT_CAP_MS = 3 * 60 * 1000;
+
+/** Why a CV file cannot be imported, before any request; null if it can. */
+function fileProblem(
+  file: File,
+  t: ReturnType<typeof useTranslations<"cvVersions">>,
+): string | null {
+  if (!(file.type in ACCEPTED_CV_CONTENT_TYPES)) return t("form.fileType");
+  if (file.size > MAX_CV_SIZE_BYTES) return t("form.fileTooLarge");
+  return null;
+}
 
 /** The white "paper" frame the CV panel already renders a CV in. */
 const PAPER_CLASS =
@@ -140,22 +163,61 @@ function ImportFailure({
   );
 }
 
-/** Storing the CV failed: say which of the three causes, offer a retry. */
+/**
+ * Storing the CV failed: say which of the three causes, offer a retry. A
+ * resumed Import has lost the file with the reload, so its retry
+ * (`onRetryWithFile`) asks for the file again instead.
+ */
 function StoringFailed({
   error,
   retrying,
+  fileError,
   onRetry,
+  onRetryWithFile,
 }: {
   error: CvStoreError;
   retrying: boolean;
+  fileError: string | null;
   onRetry: () => void;
+  onRetryWithFile: ((file: File) => void) | null;
 }) {
   const t = useTranslations("cvVersions.import");
+
+  function onFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = firstFile(event.target.files);
+    event.target.value = "";
+    if (file) onRetryWithFile?.(file);
+  }
+
   return (
     <ImportFailure message={t(`failure.${error.reason}`)} detail={error.detail}>
-      <Button type="button" disabled={retrying} onClick={onRetry}>
-        {t("retryImport")}
-      </Button>
+      {onRetryWithFile ? (
+        <label
+          className={cn(
+            buttonVariants(),
+            "cursor-pointer",
+            retrying && "pointer-events-none opacity-50",
+          )}
+        >
+          {t("retryImport")}
+          <input
+            type="file"
+            className="sr-only"
+            accept={CV_FILE_ACCEPT}
+            disabled={retrying}
+            onChange={onFileChange}
+          />
+        </label>
+      ) : (
+        <Button type="button" disabled={retrying} onClick={onRetry}>
+          {t("retryImport")}
+        </Button>
+      )}
+      {fileError && (
+        <p role="alert" className="w-full text-sm text-destructive">
+          {fileError}
+        </p>
+      )}
     </ImportFailure>
   );
 }
@@ -216,7 +278,45 @@ function ConversionFailed({
   );
 }
 
-/** Progress, then the imported CV, for one CVVersion whose bytes are stored. */
+type WaitPhase = "waiting" | "slow" | "stalled";
+
+/**
+ * How long the Conversion step has been waiting: `slow` after 45 s, then
+ * `stalled` after 3 minutes, which is when polling stops. `keepWaiting`
+ * starts the clock over. Only counts while `active`.
+ */
+function useConversionWait(active: boolean) {
+  const [round, setRound] = useState(0);
+  const [reached, setReached] = useState<{ round: number; phase: WaitPhase }>(
+    { round: 0, phase: "waiting" },
+  );
+
+  useEffect(() => {
+    if (!active) return;
+    const slow = setTimeout(
+      () => setReached({ round, phase: "slow" }),
+      SLOW_CONVERSION_MS,
+    );
+    const stalled = setTimeout(
+      () => setReached({ round, phase: "stalled" }),
+      CONVERSION_WAIT_CAP_MS,
+    );
+    return () => {
+      clearTimeout(slow);
+      clearTimeout(stalled);
+    };
+  }, [active, round]);
+
+  const phase: WaitPhase =
+    active && reached.round === round ? reached.phase : "waiting";
+  return { phase, keepWaiting: () => setRound((r) => r + 1) };
+}
+
+/**
+ * Progress, then the imported CV, for one CVVersion whose bytes are stored.
+ * Mounted once per Conversion attempt (the parent keys it), so the wait caps
+ * count from that attempt.
+ */
 function ImportProgress({
   cvVersionId,
   converting,
@@ -230,8 +330,19 @@ function ImportProgress({
   failureActions: Omit<React.ComponentProps<typeof ConversionFailed>, "detail">;
 }) {
   const t = useTranslations("cvVersions");
-  const conversion = useCvVersionConversion(converting ? cvVersionId : null);
+  // Terminal states render ahead of the wait lines, so the clock only needs
+  // to know whether the Conversion step has started.
+  const wait = useConversionWait(converting);
+  const stalled = wait.phase === "stalled";
+  const conversion = useCvVersionConversion(converting ? cvVersionId : null, {
+    paused: stalled,
+  });
   const status = conversion.data?.conversionStatus;
+
+  function keepWaiting() {
+    wait.keepWaiting();
+    void conversion.refetch();
+  }
 
   if (convertError || status === "FAILED") {
     const detail = convertError
@@ -264,8 +375,19 @@ function ImportProgress({
     <div className="flex flex-col gap-4">
       <Card>
         <CardContent className="py-6">
-          <div role="status">
+          <div role="status" className="flex flex-col gap-4">
             <ImportSteps converting={inConversionStep} />
+            {wait.phase === "slow" && (
+              <p className="text-sm text-muted">{t("import.slow")}</p>
+            )}
+            {stalled && (
+              <div className="flex flex-col items-start gap-3">
+                <p className="text-sm">{t("import.background")}</p>
+                <Button type="button" variant="outline" onClick={keepWaiting}>
+                  {t("import.keepWaiting")}
+                </Button>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -291,18 +413,33 @@ function ImportProgress({
 export default function NewCvVersionPage() {
   const t = useTranslations("cvVersions");
   const queryClient = useQueryClient();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const create = useCreateCvVersion();
   const convert = useConvertCvVersion();
   // The Import screen follows the Conversion itself, see ConversionFailed.
   const replaceFile = useReplaceCvVersion({ startConversion: false });
+  // The CVVersion a reload left in the URL, resolved once against the list.
+  const [resumeId, setResumeId] = useState(() =>
+    searchParams.get(RESUME_PARAM),
+  );
+  const cvVersions = useCvVersions({ enabled: resumeId !== null });
   // Set once the bytes are stored: the CVVersion this Import follows.
   const [cvVersionId, setCvVersionId] = useState<string | null>(null);
-  // What was submitted, kept for a retry or a replace.
-  const [submitted, setSubmitted] = useState<{
-    label: string;
-    file: File;
-  } | null>(null);
+  // Set once convert was accepted (or, on a resume, is known to be running).
+  const [following, setFollowing] = useState(false);
+  // One per Conversion attempt, so the wait caps count from each attempt.
+  const [attempt, setAttempt] = useState(0);
+  // What was submitted, kept for a retry or a replace. A resumed Import only
+  // has the label: the file went with the reload.
+  const [label, setLabel] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  // A resumed row whose upload never finished (FILE_NOT_UPLOADED).
+  const [unfinishedUpload, setUnfinishedUpload] = useState<CvStoreError | null>(
+    null,
+  );
   const [replaceError, setReplaceError] = useState<string | null>(null);
+  const [retryFileError, setRetryFileError] = useState<string | null>(null);
 
   const schema = z.object({
     label: z.string().trim().min(1, t("form.labelRequired")),
@@ -328,19 +465,92 @@ export default function NewCvVersionPage() {
     defaultValues: { label: "" },
   });
 
+  /** A reload resumes this Import; replacing keeps a single history entry. */
+  function followInUrl(id: string | null) {
+    router.replace(
+      id ? `/cv-versions/new?${RESUME_PARAM}=${id}` : "/cv-versions/new",
+    );
+  }
+
   /** The file first, the Conversion second (docs/adr/0028). */
   function startConversion(id: string) {
     // A retry must not read the previous attempt's terminal status.
     queryClient.removeQueries({ queryKey: ["cv-versions", id, "markdown"] });
-    convert.mutate(id);
+    setFollowing(false);
+    setAttempt((n) => n + 1);
+    convert.mutate(id, { onSuccess: () => setFollowing(true) });
   }
+
+  // Resume: look the CVVersion up once, then pick up from its status. An
+  // unknown, foreign (absent from this user's list) or superseded one falls
+  // back to a blank form. Resolved while rendering; the effect below only
+  // does what reaches outside (the URL, the convert request).
+  const [resumed, setResumed] = useState<{
+    id: string | null;
+    pending: boolean;
+  } | null>(null);
+  if (resumeId !== null && !cvVersions.isPending) {
+    const row = cvVersions.data?.find((cv) => cv.id === resumeId);
+    const usable = row && row.supersededById === null ? row : null;
+    setResumeId(null);
+    setResumed({
+      id: usable?.id ?? null,
+      pending: usable?.conversionStatus === "PENDING",
+    });
+    if (usable) {
+      setLabel(usable.label);
+      setCvVersionId(usable.id);
+      setFollowing(usable.conversionStatus !== "PENDING");
+    }
+  }
+
+  // StrictMode re-runs effects; the resume's convert must go out once.
+  const resumeSent = useRef(false);
+  useEffect(() => {
+    if (resumed === null || resumeSent.current) return;
+    resumeSent.current = true;
+    if (resumed.id === null) {
+      followInUrl(null);
+      return;
+    }
+    if (!resumed.pending) return;
+    const id = resumed.id;
+    // PENDING after a reload: either the Conversion is queued, or the reload
+    // aborted the PUT and nothing will ever advance the row. Convert tells
+    // the two apart (the #193 guard); anything but FILE_NOT_UPLOADED means
+    // there is a Conversion to follow.
+    convert.mutate(id, {
+      onSettled: (_data, error) => {
+        if (apiErrorCode(error) === "FILE_NOT_UPLOADED") {
+          setUnfinishedUpload(
+            new CvStoreError("upload", null, {
+              cvVersionId: id,
+              fileKey: "",
+              uploadUrl: "",
+              // Its upload URL went with the reload: always expired.
+              createdAt: 0,
+            }),
+          );
+        } else {
+          convert.reset();
+          setFollowing(true);
+        }
+      },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once, on resolution
+  }, [resumed]);
 
   function store(
     values: { label: string; file: File },
     previous: CvStoreError["created"] = null,
   ) {
+    setUnfinishedUpload(null);
     create.mutate(
-      { ...values, previous },
+      {
+        ...values,
+        previous,
+        onCreated: (created) => followInUrl(created.cvVersionId),
+      },
       {
         onSuccess: (created) => {
           setCvVersionId(created.cvVersionId);
@@ -351,35 +561,41 @@ export default function NewCvVersionPage() {
   }
 
   const onSubmit = handleSubmit((values) => {
-    const file = firstFile(values.file);
-    if (!file) return;
-    const next = { label: values.label.trim(), file };
-    setSubmitted(next);
-    store(next);
+    const chosen = firstFile(values.file);
+    if (!chosen) return;
+    const trimmed = values.label.trim();
+    setLabel(trimmed);
+    setFile(chosen);
+    store({ label: trimmed, file: chosen });
   });
 
-  const storeError = create.error instanceof CvStoreError ? create.error : null;
+  const storeError =
+    unfinishedUpload ??
+    (create.error instanceof CvStoreError ? create.error : null);
 
   function retryStore() {
-    if (submitted) store(submitted, storeError?.created);
+    if (file) store({ label, file }, storeError?.created);
   }
 
-  function replaceConvertedFile(file: File) {
-    if (!cvVersionId || !submitted) return;
-    if (!(file.type in ACCEPTED_CV_CONTENT_TYPES)) {
-      setReplaceError(t("form.fileType"));
-      return;
-    }
-    if (file.size > MAX_CV_SIZE_BYTES) {
-      setReplaceError(t("form.fileTooLarge"));
-      return;
-    }
-    setReplaceError(null);
+  function retryStoreWithFile(chosen: File) {
+    const problem = fileProblem(chosen, t);
+    setRetryFileError(problem);
+    if (problem) return;
+    setFile(chosen);
+    store({ label, file: chosen }, storeError?.created);
+  }
+
+  function replaceConvertedFile(chosen: File) {
+    if (!cvVersionId) return;
+    const problem = fileProblem(chosen, t);
+    setReplaceError(problem);
+    if (problem) return;
     replaceFile.mutate(
-      { id: cvVersionId, label: submitted.label, file },
+      { id: cvVersionId, label, file: chosen },
       {
         onSuccess: (created) => {
           setCvVersionId(created.cvVersionId);
+          followInUrl(created.cvVersionId);
           startConversion(created.cvVersionId);
         },
         onError: () => setReplaceError(t("import.failure.upload")),
@@ -394,7 +610,8 @@ export default function NewCvVersionPage() {
     if (storeError?.created) discardCvVersion(storeError.created.cvVersionId);
   }
 
-  const importing = create.isPending || cvVersionId !== null;
+  const importing =
+    resumeId !== null || create.isPending || cvVersionId !== null;
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-8">
@@ -413,12 +630,15 @@ export default function NewCvVersionPage() {
         <StoringFailed
           error={storeError}
           retrying={create.isPending}
+          fileError={retryFileError}
           onRetry={retryStore}
+          onRetryWithFile={file ? null : retryStoreWithFile}
         />
       ) : importing ? (
         <ImportProgress
+          key={`${cvVersionId}:${attempt}`}
           cvVersionId={cvVersionId}
-          converting={convert.isSuccess}
+          converting={following}
           convertError={convert.error}
           failureActions={{
             busy: convert.isPending || replaceFile.isPending,

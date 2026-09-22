@@ -991,7 +991,10 @@
       "retryImport": "Retry the import",
       "retryConversion": "Retry the conversion",
       "replaceFile": "Replace the file",
-      "replacing": "Replacing…"
+      "replacing": "Replacing…",
+      "slow": "This is taking longer than usual.",
+      "background": "The conversion is continuing in the background. You'll find it in your CV versions.",
+      "keepWaiting": "Keep waiting"
     },
     "list": {
       "heading": "Your CV versions",

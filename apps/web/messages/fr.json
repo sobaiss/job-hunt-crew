@@ -991,7 +991,10 @@
       "retryImport": "Réessayer l'import",
       "retryConversion": "Relancer la conversion",
       "replaceFile": "Remplacer le fichier",
-      "replacing": "Remplacement…"
+      "replacing": "Remplacement…",
+      "slow": "Cela prend plus de temps que d'habitude.",
+      "background": "La conversion se poursuit en arrière-plan. Vous la retrouverez dans vos versions de CV.",
+      "keepWaiting": "Continuer d'attendre"
     },
     "list": {
       "heading": "Vos versions de CV",

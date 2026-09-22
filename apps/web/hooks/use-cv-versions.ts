@@ -150,6 +150,17 @@ async function putCvFile(uploadUrl: string, file: File): Promise<void> {
   }
 }
 
+/** The `detail.code` services/api put on an error response, if any. */
+export function apiErrorCode(error: unknown): string | null {
+  if (!(error instanceof BffError)) return null;
+  const body = error.body;
+  if (typeof body !== "object" || body === null) return null;
+  const { detail } = body as { detail?: unknown };
+  if (typeof detail !== "object" || detail === null) return null;
+  const { code } = detail as { code?: unknown };
+  return typeof code === "string" ? code : null;
+}
+
 /**
  * Delete a CVVersion that has no file behind it, best-effort: a failure is
  * swallowed, never surfaced (issue #195). Only the Import screen's explicit
@@ -176,10 +187,13 @@ export function useCreateCvVersion() {
       label,
       file,
       previous,
+      onCreated,
     }: {
       label: string;
       file: File;
       previous?: CreatedCvVersion | null;
+      /** Called once the row exists, before its bytes are sent. */
+      onCreated?: (created: CreatedCvVersion) => void;
     }): Promise<CreatedCvVersion> => {
       let created: CreatedCvVersion;
       if (previous && Date.now() - previous.createdAt < CV_UPLOAD_URL_TTL_MS) {
@@ -207,6 +221,7 @@ export function useCreateCvVersion() {
         }
       }
 
+      onCreated?.(created);
       try {
         await putCvFile(created.uploadUrl, file);
       } catch {
@@ -310,14 +325,19 @@ export const CV_CONVERSION_POLL_INTERVAL_MS = 2000;
  * Conversion reaches a terminal status — the Import screen's progress source.
  * The endpoint answers the status and the content together, so the success
  * state renders from the last poll with no extra request. `id` is null until
- * the Conversion has been started.
+ * the Conversion has been started; `paused` stops the polling without
+ * dropping what was last read (the Import screen's 3-minute cap, issue #196).
  */
-export function useCvVersionConversion(id: string | null) {
+export function useCvVersionConversion(
+  id: string | null,
+  { paused = false }: { paused?: boolean } = {},
+) {
   return useQuery({
     queryKey: ["cv-versions", id, "markdown"] as const,
     queryFn: () => bff.get<CvVersionMarkdown>(`/cv-versions/${id}/markdown`),
     enabled: id !== null,
     refetchInterval: (query) => {
+      if (paused) return false;
       const status = query.state.data?.conversionStatus;
       return status && TERMINAL_CV_CONVERSION_STATUSES.has(status)
         ? false

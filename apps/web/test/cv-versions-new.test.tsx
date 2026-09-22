@@ -4,12 +4,20 @@ import userEvent from "@testing-library/user-event";
 
 import { renderWithProviders, screen, waitFor } from "./test-utils";
 import { server } from "./msw/server";
+import { __getUrl, __setUrl } from "./next-navigation-mock";
 import NewCvVersionPage from "@/app/(app)/cv-versions/new/page";
 
-const { replace } = vi.hoisted(() => ({ replace: vi.fn() }));
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace }),
-}));
+vi.mock("next/navigation", async () => {
+  const mock = await vi.importActual<typeof import("./next-navigation-mock")>(
+    "./next-navigation-mock",
+  );
+  return mock;
+});
+
+const NEW_URL = "/cv-versions/new";
+
+beforeEach(() => __setUrl(NEW_URL));
+afterEach(() => __setUrl("/"));
 
 const UPLOAD_URL = "https://uploads.example.test/put";
 
@@ -22,8 +30,6 @@ function pdf(name = "cv.pdf", { size }: { size?: number } = {}) {
 }
 
 describe("NewCvVersionPage — Import form", () => {
-  beforeEach(() => replace.mockClear());
-
   it("shows inline validation when submitting with no label and no file", async () => {
     const user = userEvent.setup();
     renderWithProviders(<NewCvVersionPage />);
@@ -36,7 +42,7 @@ describe("NewCvVersionPage — Import form", () => {
     expect(
       screen.getByText("Choose a PDF, DOCX, Markdown, or plain-text file."),
     ).toBeInTheDocument();
-    expect(replace).not.toHaveBeenCalled();
+    expect(__getUrl()).toBe(NEW_URL);
   });
 
   it("rejects an unsupported file type with a type message", async () => {
@@ -55,7 +61,7 @@ describe("NewCvVersionPage — Import form", () => {
         "Only PDF, DOCX, Markdown, and plain-text files are supported.",
       ),
     ).toBeInTheDocument();
-    expect(replace).not.toHaveBeenCalled();
+    expect(__getUrl()).toBe(NEW_URL);
   });
 
   it("accepts a Markdown file", async () => {
@@ -101,7 +107,7 @@ describe("NewCvVersionPage — Import form", () => {
     expect(
       await screen.findByText("That file is larger than the 10 MB limit."),
     ).toBeInTheDocument();
-    expect(replace).not.toHaveBeenCalled();
+    expect(__getUrl()).toBe(NEW_URL);
   });
 });
 
@@ -184,7 +190,6 @@ function closeLink() {
 
 describe("NewCvVersionPage — the Import in place", () => {
   beforeEach(() => {
-    replace.mockClear();
     vi.useFakeTimers({ shouldAdvanceTime: true });
   });
   afterEach(() => vi.useRealTimers());
@@ -227,7 +232,8 @@ describe("NewCvVersionPage — the Import in place", () => {
       screen.getByText(/Identifying information .* was removed/),
     ).toBeInTheDocument();
     expect(closeLink()).toHaveAttribute("href", "/cv-versions");
-    expect(replace).not.toHaveBeenCalled();
+    // A reload resumes this Import rather than dropping back to the form.
+    expect(__getUrl()).toBe(`${NEW_URL}?cvVersionId=cv9`);
 
     // Polling stops on a terminal status.
     const pollsAtTerminal = polls();
@@ -282,7 +288,6 @@ function user() {
 
 describe("NewCvVersionPage — storing the CV failed", () => {
   beforeEach(() => {
-    replace.mockClear();
     vi.useFakeTimers({ shouldAdvanceTime: true });
   });
   afterEach(() => vi.useRealTimers());
@@ -327,6 +332,8 @@ describe("NewCvVersionPage — storing the CV failed", () => {
     expect(
       await screen.findByText("Your CV could not be sent."),
     ).toBeInTheDocument();
+    // The id is in the URL from the moment the row exists, before the PUT.
+    expect(__getUrl()).toBe(`${NEW_URL}?cvVersionId=cv9`);
     await user().click(
       screen.getByRole("button", { name: "Retry the import" }),
     );
@@ -406,7 +413,6 @@ describe("NewCvVersionPage — storing the CV failed", () => {
 
 describe("NewCvVersionPage — converting the CV failed", () => {
   beforeEach(() => {
-    replace.mockClear();
     vi.useFakeTimers({ shouldAdvanceTime: true });
   });
   afterEach(() => vi.useRealTimers());
@@ -550,5 +556,276 @@ describe("NewCvVersionPage — converting the CV failed", () => {
       "href",
       "/cv-versions/cv10/edit",
     );
+    expect(__getUrl()).toBe(`${NEW_URL}?cvVersionId=cv10`);
+  });
+});
+
+/** One row of the CV versions list, for a resumed Import to look up. */
+function listRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "cv9",
+    label: "Fintech CV",
+    fileName: "fintech.pdf",
+    fileType: "PDF",
+    fileSizeBytes: 8,
+    isDefault: false,
+    conversionStatus: "CONVERTING",
+    conversionError: null,
+    supersededById: null,
+    createdAt: "2026-09-22T10:00:00Z",
+    updatedAt: "2026-09-22T10:00:00Z",
+    ...overrides,
+  };
+}
+
+/** A reload of the Import screen on `?cvVersionId=cv9`, row in `status`. */
+function resumeHandlers(
+  status: ConversionStatus,
+  { polled = [status] }: { polled?: ConversionStatus[] } = {},
+) {
+  const events: string[] = [];
+  let polls = 0;
+  server.use(
+    http.get("/api/cv-versions", () =>
+      HttpResponse.json({
+        cvVersions: [listRow({ conversionStatus: status })],
+      }),
+    ),
+    http.get("/api/cv-versions/cv9/markdown", () => {
+      const current = polled[Math.min(polls, polled.length - 1)];
+      polls += 1;
+      events.push(`poll ${current}`);
+      return HttpResponse.json({
+        conversionStatus: current,
+        markdownContent: current === "CONVERTED" ? "# Resumed CV" : null,
+        conversionError: null,
+      });
+    }),
+    http.post("/api/cv-versions/cv9/convert", () => {
+      events.push("convert");
+      return HttpResponse.json({ conversionStatus: "PENDING" });
+    }),
+  );
+  return { events, polls: () => polls };
+}
+
+describe("NewCvVersionPage — resuming after a reload", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    __setUrl(`${NEW_URL}?cvVersionId=cv9`);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("picks the polling back up on a converting CVVersion", async () => {
+    const { events } = resumeHandlers("CONVERTING", {
+      polled: ["CONVERTING", "CONVERTED"],
+    });
+    renderWithProviders(<NewCvVersionPage />);
+
+    expect(
+      await screen.findByLabelText("Converting your CV"),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Label")).toBeNull();
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(
+      await screen.findByRole("heading", { name: "Resumed CV" }),
+    ).toBeInTheDocument();
+    expect(events).not.toContain("convert");
+  });
+
+  it("shows the success state directly on a converted CVVersion", async () => {
+    const { events } = resumeHandlers("CONVERTED");
+    renderWithProviders(<NewCvVersionPage />);
+
+    expect(
+      await screen.findByText("CV imported and converted"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Resumed CV" }),
+    ).toBeInTheDocument();
+    expect(events).not.toContain("convert");
+  });
+
+  it("calls convert on a pending CVVersion, then polls", async () => {
+    const { events } = resumeHandlers("PENDING", {
+      polled: ["PENDING", "CONVERTED"],
+    });
+    renderWithProviders(<NewCvVersionPage />);
+
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(
+      await screen.findByText("CV imported and converted"),
+    ).toBeInTheDocument();
+    expect(events[0]).toBe("convert");
+  });
+
+  it("keeps polling when convert answers the Conversion is already running", async () => {
+    resumeHandlers("PENDING", { polled: ["CONVERTING", "CONVERTED"] });
+    server.use(
+      http.post("/api/cv-versions/cv9/convert", () =>
+        HttpResponse.json(
+          { detail: { code: "CONVERSION_RUNNING", message: "running" } },
+          { status: 409 },
+        ),
+      ),
+    );
+    renderWithProviders(<NewCvVersionPage />);
+
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(
+      await screen.findByText("CV imported and converted"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Your CV's conversion failed.")).toBeNull();
+  });
+
+  it("reads FILE_NOT_UPLOADED as an upload that never finished, and retries with a new file", async () => {
+    const { events } = resumeHandlers("PENDING");
+    let deleted: string | null = null;
+    let createBody: Record<string, unknown> | null = null;
+    server.use(
+      http.post("/api/cv-versions/cv9/convert", () =>
+        HttpResponse.json(
+          { detail: { code: "FILE_NOT_UPLOADED", message: "not uploaded" } },
+          { status: 409 },
+        ),
+      ),
+      http.delete("/api/cv-versions/:id", ({ params }) => {
+        deleted = params.id as string;
+        return new HttpResponse(null, { status: 204 });
+      }),
+      http.post("/api/cv-versions", async ({ request }) => {
+        createBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json(
+          { cvVersionId: "cv11", fileKey: "k", uploadUrl: UPLOAD_URL },
+          { status: 201 },
+        );
+      }),
+      http.put(UPLOAD_URL, () => new HttpResponse(null, { status: 200 })),
+      http.post("/api/cv-versions/cv11/convert", () =>
+        HttpResponse.json({ conversionStatus: "PENDING" }),
+      ),
+      http.get("/api/cv-versions/cv11/markdown", () =>
+        HttpResponse.json({
+          conversionStatus: "CONVERTED",
+          markdownContent: "# Retried CV",
+          conversionError: null,
+        }),
+      ),
+    );
+    renderWithProviders(<NewCvVersionPage />);
+
+    expect(
+      await screen.findByText("Your CV could not be sent."),
+    ).toBeInTheDocument();
+    expect(events.some((e) => e.startsWith("poll"))).toBe(false);
+
+    // The reload lost the file: the retry asks for it again.
+    await user().upload(
+      screen.getByLabelText("Retry the import"),
+      pdf("fintech.pdf"),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Retried CV" }),
+    ).toBeInTheDocument();
+    expect(deleted).toBe("cv9");
+    expect(createBody).toMatchObject({
+      label: "Fintech CV",
+      fileName: "fintech.pdf",
+    });
+    expect(__getUrl()).toBe(`${NEW_URL}?cvVersionId=cv11`);
+  });
+
+  it("deletes the never-uploaded CVVersion when the candidate closes", async () => {
+    resumeHandlers("PENDING");
+    let deleted: string | null = null;
+    server.use(
+      http.post("/api/cv-versions/cv9/convert", () =>
+        HttpResponse.json(
+          { detail: { code: "FILE_NOT_UPLOADED", message: "not uploaded" } },
+          { status: 409 },
+        ),
+      ),
+      http.delete("/api/cv-versions/:id", ({ params }) => {
+        deleted = params.id as string;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    renderWithProviders(<NewCvVersionPage />);
+    await screen.findByText("Your CV could not be sent.");
+
+    await user().click(closeLink());
+
+    await vi.waitFor(() => expect(deleted).toBe("cv9"));
+  });
+
+  it("falls back to a blank form on an unknown CVVersion", async () => {
+    resumeHandlers("CONVERTING");
+    __setUrl(`${NEW_URL}?cvVersionId=nope`);
+    renderWithProviders(<NewCvVersionPage />);
+
+    expect(await screen.findByLabelText("Label")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(__getUrl()).toBe(NEW_URL);
+  });
+
+  it("falls back to a blank form on a superseded CVVersion", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: [listRow({ supersededById: "cv10" })],
+        }),
+      ),
+    );
+    renderWithProviders(<NewCvVersionPage />);
+
+    expect(await screen.findByLabelText("Label")).toBeInTheDocument();
+    expect(__getUrl()).toBe(NEW_URL);
+  });
+});
+
+describe("NewCvVersionPage — wait caps", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    __setUrl(`${NEW_URL}?cvVersionId=cv9`);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("adds a soft line after 45 seconds, without failing", async () => {
+    resumeHandlers("CONVERTING");
+    renderWithProviders(<NewCvVersionPage />);
+    await screen.findByLabelText("Converting your CV");
+
+    await vi.advanceTimersByTimeAsync(44_000);
+    expect(screen.queryByText("This is taking longer than usual.")).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(
+      screen.getByText("This is taking longer than usual."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("stops polling after 3 minutes, and keep-waiting restarts it", async () => {
+    const { polls } = resumeHandlers("CONVERTING");
+    renderWithProviders(<NewCvVersionPage />);
+    await screen.findByLabelText("Converting your CV");
+
+    await vi.advanceTimersByTimeAsync(3 * 60 * 1000);
+    expect(
+      await screen.findByText(/The conversion is continuing in the background/),
+    ).toBeInTheDocument();
+
+    const pollsAtCap = polls();
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(polls()).toBe(pollsAtCap);
+
+    await user().click(screen.getByRole("button", { name: "Keep waiting" }));
+    expect(
+      screen.queryByText(/The conversion is continuing in the background/),
+    ).toBeNull();
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(polls()).toBeGreaterThan(pollsAtCap);
   });
 });
