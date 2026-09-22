@@ -56,6 +56,12 @@ const SLOW_CONVERSION_MS = 45 * 1000;
 /** A Conversion running this long stops being polled. */
 const CONVERSION_WAIT_CAP_MS = 3 * 60 * 1000;
 
+/** A file's name minus its extension: the label a chosen file suggests. */
+function labelFromFileName(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(0, dot) : name;
+}
+
 /** Why a CV file cannot be imported, before any request; null if it can. */
 function fileProblem(
   file: File,
@@ -287,9 +293,10 @@ type WaitPhase = "waiting" | "slow" | "stalled";
  */
 function useConversionWait(active: boolean) {
   const [round, setRound] = useState(0);
-  const [reached, setReached] = useState<{ round: number; phase: WaitPhase }>(
-    { round: 0, phase: "waiting" },
-  );
+  const [reached, setReached] = useState<{ round: number; phase: WaitPhase }>({
+    round: 0,
+    phase: "waiting",
+  });
 
   useEffect(() => {
     if (!active) return;
@@ -459,10 +466,30 @@ export default function NewCvVersionPage() {
   const {
     register,
     handleSubmit,
-    formState: { errors },
+    getValues,
+    setValue,
+    formState: { errors, isSubmitted },
   } = useForm<z.infer<typeof schema>>({
     resolver: zodResolver(schema),
     defaultValues: { label: "" },
+  });
+
+  // The file is the intention, the label a convenience: choosing a file
+  // fills the label from its name, but never over text the candidate typed.
+  const [labelTyped, setLabelTyped] = useState(false);
+  const labelField = register("label", {
+    onChange: () => setLabelTyped(true),
+  });
+  const fileField = register("file", {
+    onChange: (event: ChangeEvent<HTMLInputElement>) => {
+      const chosen = firstFile(event.target.files);
+      if (!chosen) return;
+      if (labelTyped && getValues("label").trim() !== "") return;
+      setLabelTyped(false);
+      setValue("label", labelFromFileName(chosen.name), {
+        shouldValidate: isSubmitted,
+      });
+    },
   });
 
   /** A reload resumes this Import; replacing keeps a single history entry. */
@@ -656,22 +683,6 @@ export default function NewCvVersionPage() {
               noValidate
             >
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="cv-label">{t("form.labelLabel")}</Label>
-                <Input
-                  id="cv-label"
-                  type="text"
-                  placeholder={t("form.labelPlaceholder")}
-                  aria-invalid={errors.label ? true : undefined}
-                  {...register("label")}
-                />
-                {errors.label && (
-                  <p role="alert" className="text-sm text-destructive">
-                    {errors.label.message}
-                  </p>
-                )}
-              </div>
-
-              <div className="flex flex-col gap-1.5">
                 <Label htmlFor="cv-file">{t("form.fileLabel")}</Label>
                 <Input
                   id="cv-file"
@@ -679,7 +690,7 @@ export default function NewCvVersionPage() {
                   accept={CV_FILE_ACCEPT}
                   aria-invalid={errors.file ? true : undefined}
                   aria-describedby="cv-file-hint"
-                  {...register("file")}
+                  {...fileField}
                 />
                 <p id="cv-file-hint" className="text-xs text-muted">
                   {t("form.fileHint")}
@@ -687,6 +698,22 @@ export default function NewCvVersionPage() {
                 {errors.file && (
                   <p role="alert" className="text-sm text-destructive">
                     {errors.file.message as string}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="cv-label">{t("form.labelLabel")}</Label>
+                <Input
+                  id="cv-label"
+                  type="text"
+                  placeholder={t("form.labelPlaceholder")}
+                  aria-invalid={errors.label ? true : undefined}
+                  {...labelField}
+                />
+                {errors.label && (
+                  <p role="alert" className="text-sm text-destructive">
+                    {errors.label.message}
                   </p>
                 )}
               </div>

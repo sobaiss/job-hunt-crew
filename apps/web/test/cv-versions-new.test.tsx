@@ -30,6 +30,79 @@ function pdf(name = "cv.pdf", { size }: { size?: number } = {}) {
 }
 
 describe("NewCvVersionPage — Import form", () => {
+  it("asks for the file first, the label second", () => {
+    renderWithProviders(<NewCvVersionPage />);
+
+    const file = screen.getByLabelText("File");
+    const label = screen.getByLabelText("Label");
+    expect(
+      file.compareDocumentPosition(label) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("fills the label with the chosen file's name, minus its extension", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<NewCvVersionPage />);
+
+    await user.upload(screen.getByLabelText("File"), pdf("CV Fintech.v2.pdf"));
+
+    const label = screen.getByLabelText("Label");
+    expect(label).toHaveValue("CV Fintech.v2");
+    await user.type(label, " (FR)");
+    expect(label).toHaveValue("CV Fintech.v2 (FR)");
+  });
+
+  it("never overwrites a label the candidate typed, even when the file changes", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<NewCvVersionPage />);
+
+    await user.type(screen.getByLabelText("Label"), "My CV");
+    await user.upload(screen.getByLabelText("File"), pdf("fintech.pdf"));
+    expect(screen.getByLabelText("Label")).toHaveValue("My CV");
+
+    await user.upload(screen.getByLabelText("File"), pdf("other.pdf"));
+    expect(screen.getByLabelText("Label")).toHaveValue("My CV");
+  });
+
+  it("re-fills an untouched label when the file changes, but not an edited one", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<NewCvVersionPage />);
+    const label = screen.getByLabelText("Label");
+
+    await user.upload(screen.getByLabelText("File"), pdf("fintech.pdf"));
+    await user.upload(screen.getByLabelText("File"), pdf("startup.pdf"));
+    expect(label).toHaveValue("startup");
+
+    await user.type(label, " CV");
+    await user.upload(screen.getByLabelText("File"), pdf("other.pdf"));
+    expect(label).toHaveValue("startup CV");
+  });
+
+  it("fills a label the candidate emptied", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<NewCvVersionPage />);
+    const label = screen.getByLabelText("Label");
+
+    await user.type(label, "Draft");
+    await user.clear(label);
+    await user.upload(screen.getByLabelText("File"), pdf("fintech.pdf"));
+    expect(label).toHaveValue("fintech");
+  });
+
+  it("still requires the label when the pre-filled one is cleared", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<NewCvVersionPage />);
+
+    await user.upload(screen.getByLabelText("File"), pdf("fintech.pdf"));
+    await user.clear(screen.getByLabelText("Label"));
+    await user.click(screen.getByRole("button", { name: "Import" }));
+
+    expect(
+      await screen.findByText("Give this CV version a label."),
+    ).toBeInTheDocument();
+    expect(__getUrl()).toBe(NEW_URL);
+  });
+
   it("shows inline validation when submitting with no label and no file", async () => {
     const user = userEvent.setup();
     renderWithProviders(<NewCvVersionPage />);
@@ -49,7 +122,6 @@ describe("NewCvVersionPage — Import form", () => {
     const user = userEvent.setup();
     renderWithProviders(<NewCvVersionPage />);
 
-    await user.type(screen.getByLabelText("Label"), "My CV");
     await user.upload(
       screen.getByLabelText("File"),
       new File(["hi"], "notes.pdf", { type: "application/rtf" }),
@@ -79,7 +151,6 @@ describe("NewCvVersionPage — Import form", () => {
     const user = userEvent.setup();
     renderWithProviders(<NewCvVersionPage />);
 
-    await user.type(screen.getByLabelText("Label"), "Markdown CV");
     await user.upload(
       screen.getByLabelText("File"),
       new File(["# CV"], "cv.md", { type: "text/markdown" }),
@@ -88,6 +159,7 @@ describe("NewCvVersionPage — Import form", () => {
 
     await waitFor(() => expect(createBody).not.toBeNull());
     expect(createBody).toMatchObject({
+      label: "cv",
       fileName: "cv.md",
       contentType: "text/markdown",
     });
@@ -97,7 +169,6 @@ describe("NewCvVersionPage — Import form", () => {
     const user = userEvent.setup();
     renderWithProviders(<NewCvVersionPage />);
 
-    await user.type(screen.getByLabelText("Label"), "My CV");
     await user.upload(
       screen.getByLabelText("File"),
       pdf("big.pdf", { size: 11 * 1024 * 1024 }),
@@ -179,8 +250,9 @@ async function submitImport() {
   const user = userEvent.setup({
     advanceTimers: vi.advanceTimersByTime.bind(vi),
   });
-  await user.type(screen.getByLabelText("Label"), "Fintech CV");
   await user.upload(screen.getByLabelText("File"), pdf("fintech.pdf"));
+  await user.clear(screen.getByLabelText("Label"));
+  await user.type(screen.getByLabelText("Label"), "Fintech CV");
   await user.click(screen.getByRole("button", { name: "Import" }));
 }
 
