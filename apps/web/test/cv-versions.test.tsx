@@ -235,7 +235,7 @@ describe("CvVersionsPage — list", () => {
     await waitFor(() => expect(patchBody).toEqual({ isDefault: true }));
   });
 
-  it("hides Set as default and Replace (but keeps Reconvert) in the panel for a superseded CV", async () => {
+  it("hides Set as default, Replace, and Modifier (but keeps Reconvert) in the panel for a superseded CV", async () => {
     server.use(
       http.get("/api/cv-versions", () =>
         HttpResponse.json({
@@ -263,7 +263,75 @@ describe("CvVersionsPage — list", () => {
       panel.queryByRole("button", { name: "Set as default" }),
     ).toBeNull();
     expect(panel.queryByRole("button", { name: "Replace" })).toBeNull();
+    expect(panel.queryByRole("link", { name: "Modifier" })).toBeNull();
     expect(panel.getByText("Replaced by New CV")).toBeInTheDocument();
+  });
+
+  it("shows a Modifier link in the panel to the edit page for an eligible CV version", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cvVersion()] }),
+      ),
+      http.get("/api/cv-versions/cv1/markdown", () =>
+        HttpResponse.json({ markdownContent: null, conversionStatus: "CONVERTED" }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await user.click(await screen.findByText("Grad CV"));
+    const panel = within(await screen.findByRole("dialog"));
+
+    expect(panel.getByRole("link", { name: "Modifier" })).toHaveAttribute(
+      "href",
+      "/cv-versions/cv1/edit",
+    );
+  });
+
+  it("hides Modifier in the panel for a CV version that hasn't finished converting", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({
+          cvVersions: [cvVersion({ conversionStatus: "PENDING" })],
+        }),
+      ),
+      http.get("/api/cv-versions/cv1/markdown", () =>
+        HttpResponse.json({ markdownContent: null, conversionStatus: "PENDING" }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await user.click(await screen.findByText("Grad CV"));
+    const panel = within(await screen.findByRole("dialog"));
+
+    expect(panel.queryByRole("link", { name: "Modifier" })).toBeNull();
+  });
+
+  it("disables Modifier in the panel while a Reconvert is in flight, mirroring Reconvert's own busy state (issue #187)", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cvVersion()] }),
+      ),
+      http.get("/api/cv-versions/cv1/markdown", () =>
+        HttpResponse.json({ markdownContent: null, conversionStatus: "CONVERTED" }),
+      ),
+      http.post("/api/cv-versions/cv1/convert", async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        return HttpResponse.json({ conversionStatus: "PENDING" }, { status: 202 });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<CvVersionsPage />);
+
+    await user.click(await screen.findByText("Grad CV"));
+    const panel = within(await screen.findByRole("dialog"));
+    expect(panel.getByRole("link", { name: "Modifier" })).toBeInTheDocument();
+
+    await user.click(panel.getByRole("button", { name: "Reconvert" }));
+
+    expect(panel.queryByRole("link", { name: "Modifier" })).toBeNull();
+    expect(panel.getByRole("button", { name: "Modifier" })).toBeDisabled();
   });
 
   it("triggers a Conversion via POST /api/cv-versions/:id/convert", async () => {
