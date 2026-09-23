@@ -89,6 +89,12 @@ function detail(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/** Every filter but Search and Status is folded away behind "More filters",
+ *  so a test that drives one of them opens the panel first. */
+async function openMoreFilters(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: /More filters/ }));
+}
+
 describe("AnalysesDashboardPage", () => {
   beforeEach(() => {
     __setUrl("/analyses");
@@ -469,6 +475,7 @@ describe("AnalysesDashboardPage", () => {
     renderWithProviders(<AnalysesDashboardPage />);
     await screen.findByText("Early Offer");
 
+    await openMoreFilters(user);
     await user.type(screen.getByLabelText("Requested from"), "2026-08-01");
     expect(screen.queryByText("Early Offer")).not.toBeInTheDocument();
     expect(screen.getByText("Late Offer")).toBeInTheDocument();
@@ -639,6 +646,7 @@ describe("AnalysesDashboardPage", () => {
     expect(screen.queryByText("Backend Engineer")).not.toBeInTheDocument();
     expect(screen.getByText("Frontend Developer")).toBeInTheDocument();
 
+    await openMoreFilters(user);
     await user.selectOptions(screen.getByLabelText("CV version"), "Grad CV");
     expect(screen.queryByText("Frontend Developer")).not.toBeInTheDocument();
     expect(screen.getByText("No analyses match your filters.")).toBeInTheDocument();
@@ -696,6 +704,8 @@ describe("AnalysesDashboardPage", () => {
 
     renderWithProviders(<AnalysesDashboardPage />);
     expect(await screen.findByText("Backend Engineer")).toBeInTheDocument();
+
+    await openMoreFilters(user);
 
     // Platform options include a correctly-translated HelloWork label, not a
     // raw enum value.
@@ -773,6 +783,103 @@ describe("AnalysesDashboardPage", () => {
       const url = new URL(__getUrl(), "http://localhost");
       expect(url.searchParams.has("platform")).toBe(false);
     });
+  });
+
+  it("keeps Search and Status above the table and folds the other filters behind a toggle", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({ analyses: [summary()] }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Backend Engineer");
+
+    expect(screen.getByLabelText("Search")).toBeInTheDocument();
+    expect(screen.getByLabelText("Status")).toBeInTheDocument();
+    for (const label of [
+      "Requested from",
+      "Requested to",
+      "CV version",
+      "Platform",
+      "Location",
+    ]) {
+      expect(screen.queryByLabelText(label)).not.toBeInTheDocument();
+    }
+
+    const toggle = screen.getByRole("button", { name: "More filters" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    for (const label of [
+      "Requested from",
+      "Requested to",
+      "CV version",
+      "Platform",
+      "Location",
+    ]) {
+      expect(screen.getByLabelText(label)).toBeInTheDocument();
+    }
+
+    await user.click(toggle);
+    expect(screen.queryByLabelText("Platform")).not.toBeInTheDocument();
+  });
+
+  it("opens the folded filters, and counts them on the toggle, when the URL already carries some", async () => {
+    __setUrl("/analyses?platform=LINKEDIN&location=lyon");
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({ analyses: [summary()] }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByLabelText("Search");
+
+    expect(screen.getByLabelText("Platform")).toHaveValue("LINKEDIN");
+    expect(
+      screen.getByRole("button", { name: "More filters (2)" }),
+    ).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("clears the visible and the folded filters together (one 'Clear filters')", async () => {
+    const user = userEvent.setup();
+    __setUrl("/analyses?q=backend&platform=LINKEDIN");
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            summary({
+              id: "s1",
+              jobOffer: { ...summary().jobOffer, id: "j1", title: "Backend Engineer" },
+            }),
+            summary({
+              id: "s2",
+              jobOffer: { ...summary().jobOffer, id: "j2", title: "Frontend Developer" },
+            }),
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByLabelText("Search");
+    expect(screen.queryByText("Frontend Developer")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+
+    expect(await screen.findByText("Frontend Developer")).toBeInTheDocument();
+    expect(screen.getByText("Backend Engineer")).toBeInTheDocument();
+    expect(screen.getByLabelText("Search")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "More filters" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Clear filters" }),
+    ).not.toBeInTheDocument();
+    const url = new URL(__getUrl(), "http://localhost");
+    expect(url.searchParams.has("q")).toBe(false);
+    expect(url.searchParams.has("platform")).toBe(false);
   });
 
   it("sorts by a column when its header is clicked, toggling direction on a repeat click", async () => {
@@ -1413,12 +1520,26 @@ describe("AnalysesDashboardPage", () => {
     expect(quickView.getByText(/Add a k8s project/)).toBeInTheDocument();
     expect(quickView.getByText("To apply")).toBeInTheDocument();
 
+    const fullAnalysisLink = quickView.getByRole("link", {
+      name: "View full analysis",
+    });
+    const compareLink = quickView.getByRole("link", {
+      name: "Compare with other CVs",
+    });
+    expect(fullAnalysisLink).toHaveAttribute("href", "/analyses/a1");
+    expect(compareLink).toHaveAttribute("href", "/analyses/compare/job1");
+
+    // Both lead the sheet now, in the same action row as "View job offer" —
+    // ahead of the result breakdown rather than a scroll below it.
+    expect(compareLink.parentElement).toBe(fullAnalysisLink.parentElement);
     expect(
-      quickView.getByRole("link", { name: "View full analysis" }),
-    ).toHaveAttribute("href", "/analyses/a1");
+      quickView.getByRole("link", { name: "View job offer" }).parentElement,
+    ).toBe(fullAnalysisLink.parentElement);
     expect(
-      quickView.getByRole("link", { name: "Compare with other CVs" }),
-    ).toHaveAttribute("href", "/analyses/compare/job1");
+      fullAnalysisLink.compareDocumentPosition(
+        quickView.getByText("Strong product engineer, light on platform work."),
+      ) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("shows the offer's location in the Quick view, falling back to a placeholder for company and location when missing (issue #116)", async () => {

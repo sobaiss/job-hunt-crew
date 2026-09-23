@@ -5,9 +5,11 @@ import {
   DEFAULT_ANALYSES_FILTERS,
   DEFAULT_ANALYSES_SORT,
   JOB_OFFER_SOURCE_SITES,
+  activeAdvancedFilterCount,
   analysesTableStateToParams,
   cvLabelsOf,
   filterAnalyses,
+  hasActiveFilters,
   pageCount,
   paginate,
   parseAnalysesTableState,
@@ -194,6 +196,41 @@ describe("filterAnalyses", () => {
         requestedAtTo: "2026-07-15",
       }).map((a) => a.id),
     ).toEqual(["early", "mid"]);
+  });
+});
+
+describe("active filter counts", () => {
+  it("counts only the filters folded away behind 'Plus de filtres'", () => {
+    expect(activeAdvancedFilterCount(DEFAULT_ANALYSES_FILTERS)).toBe(0);
+    // Search and status stay visible above the table, so neither counts.
+    expect(
+      activeAdvancedFilterCount({
+        ...DEFAULT_ANALYSES_FILTERS,
+        search: "backend",
+        status: "IN_PROGRESS",
+      }),
+    ).toBe(0);
+    expect(
+      activeAdvancedFilterCount({
+        ...DEFAULT_ANALYSES_FILTERS,
+        platform: "LINKEDIN",
+        location: "lyon",
+        requestedAtFrom: "2026-08-01",
+      }),
+    ).toBe(3);
+  });
+
+  it("reports any filter at all as active, visible or folded away", () => {
+    expect(hasActiveFilters(DEFAULT_ANALYSES_FILTERS)).toBe(false);
+    expect(
+      hasActiveFilters({ ...DEFAULT_ANALYSES_FILTERS, search: "backend" }),
+    ).toBe(true);
+    expect(
+      hasActiveFilters({ ...DEFAULT_ANALYSES_FILTERS, status: "IN_PROGRESS" }),
+    ).toBe(true);
+    expect(
+      hasActiveFilters({ ...DEFAULT_ANALYSES_FILTERS, cvLabel: "Grad CV" }),
+    ).toBe(true);
   });
 });
 

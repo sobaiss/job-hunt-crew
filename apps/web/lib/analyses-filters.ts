@@ -56,6 +56,36 @@ export const DEFAULT_ANALYSES_FILTERS: AnalysesFilterState = {
   requestedAtTo: "",
 };
 
+/** The filters the Analyses table folds away behind its "Plus de filtres"
+ *  toggle — everything but the search box and the status select, which are
+ *  the two that earn their permanent place above the table. */
+export const ADVANCED_ANALYSES_FILTERS = [
+  "requestedAtFrom",
+  "requestedAtTo",
+  "cvLabel",
+  "platform",
+  "location",
+] as const satisfies readonly (keyof AnalysesFilterState)[];
+
+/** How many of the folded-away filters are set to something other than their
+ *  "no filter" default. The toggle shows this count so a filter restored from
+ *  the URL is never invisibly narrowing the table from inside a closed panel. */
+export function activeAdvancedFilterCount(state: AnalysesFilterState): number {
+  return ADVANCED_ANALYSES_FILTERS.filter(
+    (key) => state[key] !== DEFAULT_ANALYSES_FILTERS[key],
+  ).length;
+}
+
+/** Any filter at all is set — drives the "Effacer les filtres" reset, which
+ *  covers the visible two as well as the folded-away ones. */
+export function hasActiveFilters(state: AnalysesFilterState): boolean {
+  return (
+    state.search !== DEFAULT_ANALYSES_FILTERS.search ||
+    state.status !== DEFAULT_ANALYSES_FILTERS.status ||
+    activeAdvancedFilterCount(state) > 0
+  );
+}
+
 /** Distinct CVVersion labels present in the list, in first-seen order. */
 export function cvLabelsOf(analyses: AnalysisSummary[]): string[] {
   const seen = new Set<string>();
