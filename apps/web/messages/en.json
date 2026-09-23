@@ -791,7 +791,10 @@
     "contractTypeLabel": "Contract type",
     "remoteLabel": "Remote policy",
     "remoteAny": "Any",
-    "experienceLevelLabel": "Experience level"
+    "experienceLevelLabel": "Experience level",
+    "supportHeading": "Some of your filters will not be applied as asked:",
+    "supportUnsupported": "{site} will not apply: {filters}",
+    "supportApproximated": "{site} only approximates: {filters}"
   },
   "scouts": {
     "title": "Agents",

@@ -79,6 +79,11 @@ export default function AnalyseSeveralOffersPage() {
   const watchedMaxOffers = useWatch({ control, name: "maxOffers" });
   const plannedOffers = clampOffers(watchedMaxOffers);
 
+  const watchedSiteConfigId = useWatch({ control, name: "siteConfigId" });
+  const selectedSites = (sites.data ?? []).filter(
+    (site) => site.id === watchedSiteConfigId,
+  );
+
   const onSubmit = handleSubmit((values) => {
     if (!cvVersionId) return;
     const maxOffers = clampOffers(values.maxOffers);
@@ -168,6 +173,7 @@ export default function AnalyseSeveralOffersPage() {
                     idPrefix="several"
                     values={filters}
                     onChange={setFilters}
+                    sites={selectedSites}
                   />
 
                   <div className="flex flex-col gap-1.5">

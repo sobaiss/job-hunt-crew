@@ -6,8 +6,9 @@ SEARCH_BASE = "https://www.hellowork.com/fr-fr/emploi/recherche.html"
 
 
 def build(site_config: SiteConfig, filters: dict[str, str]) -> SearchRequest:
-    # `postedWithin` and `remote` are not sent: HelloWork's vocabulary for
-    # those facets differs from the canonical values (#213).
+    # `postedWithin` and `remote` are not sent, and declared UNSUPPORTED in
+    # `py_db.filter_support`: HelloWork's vocabulary for those facets differs
+    # from the canonical values (#213).
     return SearchRequest(
         html_search_url(
             SEARCH_BASE,

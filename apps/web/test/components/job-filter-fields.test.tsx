@@ -26,7 +26,7 @@ function Harness({ onChange }: { onChange?: (v: JobFilterValues) => void }) {
 }
 
 describe("JobFilterFields", () => {
-  it("renders the six job-search filter fields", async () => {
+  it("renders the five job-search filter fields, experience level hidden", async () => {
     renderWithProviders(<Harness />);
 
     expect(await screen.findByLabelText("Keywords")).toBeInTheDocument();
@@ -34,7 +34,9 @@ describe("JobFilterFields", () => {
     expect(screen.getByLabelText("Posted within")).toBeInTheDocument();
     expect(screen.getByLabelText("Contract type")).toBeInTheDocument();
     expect(screen.getByLabelText("Remote policy")).toBeInTheDocument();
-    expect(screen.getByLabelText("Experience level")).toBeInTheDocument();
+    // No site honours it, so it is hidden rather than warned about
+    // (docs/adr/0030); its key stays in the values.
+    expect(screen.queryByLabelText("Experience level")).not.toBeInTheDocument();
   });
 
   it("reports every edit back through onChange", async () => {

@@ -669,6 +669,43 @@ describe("ScoutsPage — list", () => {
   });
 });
 
+function support(level: string) {
+  return { level, reason: "Recorded reason." };
+}
+
+const SUPPORT_SITE_CONFIGS = [
+  {
+    id: "site-ft",
+    siteKey: "FRANCE_TRAVAIL",
+    displayName: "France Travail",
+    integrationType: "OFFICIAL_API",
+    antiBotRiskLevel: "LOW",
+    filterSupport: {
+      keywords: support("SUPPORTED"),
+      location: support("UNSUPPORTED"),
+      postedWithin: support("SUPPORTED"),
+      contractType: support("SUPPORTED"),
+      remote: support("UNSUPPORTED"),
+      experienceLevel: support("UNSUPPORTED"),
+    },
+  },
+  {
+    id: "site-hw",
+    siteKey: "HELLOWORK",
+    displayName: "HelloWork",
+    integrationType: "HTML_SCRAPE",
+    antiBotRiskLevel: "LOW",
+    filterSupport: {
+      keywords: support("SUPPORTED"),
+      location: support("SUPPORTED"),
+      postedWithin: support("UNSUPPORTED"),
+      contractType: support("SUPPORTED"),
+      remote: support("UNSUPPORTED"),
+      experienceLevel: support("UNSUPPORTED"),
+    },
+  },
+];
+
 describe("NewScoutPage — create form", () => {
   it("pre-checks France Travail and defaults the threshold to 70", async () => {
     server.use(
@@ -804,7 +841,7 @@ describe("NewScoutPage — create form", () => {
     });
   });
 
-  it("submits the shared job-search filters (contract type, remote, experience level)", async () => {
+  it("submits the shared job-search filters (contract type, remote)", async () => {
     const received: unknown[] = [];
     server.use(
       http.get("/api/cv-versions", () =>
@@ -822,7 +859,6 @@ describe("NewScoutPage — create form", () => {
     await user.selectOptions(screen.getByLabelText("CV version"), "cv-default");
     await user.type(screen.getByLabelText("Contract type"), "CDI");
     await user.selectOptions(screen.getByLabelText("Remote policy"), "remote");
-    await user.type(screen.getByLabelText("Experience level"), "senior");
     await user.click(screen.getByRole("button", { name: "Create Scout" }));
 
     await waitFor(() => expect(received).toHaveLength(1));
@@ -830,10 +866,56 @@ describe("NewScoutPage — create form", () => {
       filters: {
         contractType: "CDI",
         remote: "remote",
-        experienceLevel: "senior",
         postedWithin: "7d",
       },
     });
+  });
+
+  it("has no experience level field, since no site honours it (docs/adr/0030)", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+    );
+    renderWithProviders(<NewScoutPage />);
+
+    await screen.findByLabelText("Keywords");
+    expect(screen.queryByLabelText("Experience level")).not.toBeInTheDocument();
+  });
+
+  it("tells the candidate, per selected site, which filled filters it will not honour", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+      http.get("/api/site-configs", () =>
+        HttpResponse.json({ siteConfigs: SUPPORT_SITE_CONFIGS }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<NewScoutPage />);
+
+    // France Travail alone honours the default 7-day window: no warning.
+    await screen.findByLabelText("Keywords");
+    await screen.findByRole("checkbox", { name: "HelloWork" });
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("checkbox", { name: "HelloWork" }));
+    const note = await screen.findByRole("note");
+    expect(note).toHaveTextContent(
+      "HelloWork will not apply: Posted within",
+    );
+    expect(note).not.toHaveTextContent("France Travail");
+
+    // A filled filter the site does honour is not listed.
+    await user.type(screen.getByLabelText("Keywords"), "python");
+    expect(note).not.toHaveTextContent("Keywords");
+
+    await user.selectOptions(screen.getByLabelText("Remote policy"), "remote");
+    expect(note).toHaveTextContent(
+      "HelloWork will not apply: Posted within, Remote policy",
+    );
+    expect(note).toHaveTextContent("France Travail will not apply: Remote policy");
   });
 
   it("shows an error when the server rejects the create (e.g. Scout cap)", async () => {

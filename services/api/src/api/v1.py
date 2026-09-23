@@ -35,6 +35,7 @@ from py_db.models import (
     User,
 )
 from py_db.application_stats import compute_application_stats, stats_window_since
+from py_db.filter_support import filter_support_for
 from py_db.quota import (
     analyses_requested_this_month,
     analyses_requested_today,
@@ -97,6 +98,11 @@ async def require_user_id(
     return x_user_id
 
 
+class FilterSupportResponse(BaseModel):
+    level: Literal["SUPPORTED", "APPROXIMATED", "UNSUPPORTED"]
+    reason: str
+
+
 class SiteConfigResponse(BaseModel):
     id: str
     siteKey: str
@@ -112,6 +118,9 @@ class SiteConfigResponse(BaseModel):
     antiBotRiskLevel: str
     enabled: bool
     notes: str | None
+    # Keyed by Search filter key (docs/adr/0030). Declared in
+    # py_db.filter_support, not stored on the row.
+    filterSupport: dict[str, FilterSupportResponse]
     createdAt: datetime
     updatedAt: datetime
 
@@ -149,6 +158,10 @@ async def list_site_configs(
                 antiBotRiskLevel=row.antiBotRiskLevel.value,
                 enabled=row.enabled,
                 notes=row.notes,
+                filterSupport={
+                    key: FilterSupportResponse(level=support.level.value, reason=support.reason)
+                    for key, support in filter_support_for(row.siteKey).items()
+                },
                 createdAt=row.createdAt,
                 updatedAt=row.updatedAt,
             )

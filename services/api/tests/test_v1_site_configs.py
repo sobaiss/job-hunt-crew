@@ -56,6 +56,33 @@ def test_list_site_configs_returns_seeded_enabled_sites():
         assert key in france_travail
 
 
+def test_each_site_carries_its_filter_support_declarations():
+    # docs/adr/0030: declared in py-db, served here so the Scout and
+    # "Analyse several offers" forms can warn before a run.
+    with TestClient(app) as client:
+        response = client.get("/v1/site-configs", headers=HEADERS)
+    site_configs = {row["siteKey"]: row for row in response.json()["siteConfigs"]}
+
+    for row in site_configs.values():
+        assert set(row["filterSupport"]) == {
+            "keywords",
+            "location",
+            "postedWithin",
+            "contractType",
+            "remote",
+            "experienceLevel",
+        }
+        for support in row["filterSupport"].values():
+            assert support["level"] in {"SUPPORTED", "APPROXIMATED", "UNSUPPORTED"}
+            assert support["reason"]
+
+    france_travail = site_configs["FRANCE_TRAVAIL"]["filterSupport"]
+    assert france_travail["remote"]["level"] == "UNSUPPORTED"
+    assert france_travail["postedWithin"]["level"] == "SUPPORTED"
+    assert site_configs["HELLOWORK"]["filterSupport"]["postedWithin"]["level"] == "UNSUPPORTED"
+    assert site_configs["ADZUNA"]["filterSupport"]["remote"]["level"] == "APPROXIMATED"
+
+
 def test_list_site_configs_requires_internal_secret():
     client = TestClient(app)
     response = client.get("/v1/site-configs")

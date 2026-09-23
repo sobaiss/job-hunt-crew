@@ -7,14 +7,13 @@ from .request import SearchRequest, filter_value
 
 SEARCH_PATH = "/offres/search"
 
-# Search filter key -> "Offres d'emploi v2" parameter. `commune` only accepts
-# INSEE commune codes (#215) and `travailATemps` is not an API parameter at
-# all (#210); both are kept until those tickets fix them.
+# Search filter key -> "Offres d'emploi v2" parameter. `location` is not sent:
+# the API takes INSEE codes, never a label, and 400s the whole search on a
+# label (#215). `remote` has no parameter at all — the API has no telework
+# criterion. Both are declared UNSUPPORTED in `py_db.filter_support`.
 _PARAMS = {
     "keywords": "motsCles",
-    "location": "commune",
     "contractType": "typeContrat",
-    "remote": "travailATemps",
 }
 
 # The API layer hands `postedWithin` down as a relative token (POSTED_WITHIN_VALUES

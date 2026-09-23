@@ -108,12 +108,15 @@ const siteConfigs = [
     displayName: "France Travail",
     baseUrl: "https://www.francetravail.fr",
     searchUrlTemplate: null,
+    // Search is built by the France Travail Site adapter (docs/adr/0029),
+    // which reads only `id` from here. `location → commune` and
+    // `remote → travailATemps` are gone: the first fed a label to a
+    // commune-code parameter, the second named no API parameter at all
+    // (#210, py_db.filter_support).
     filterParamMapping: {
       keywords: "motsCles",
-      location: "commune",
       postedWithin: "minCreationDate",
       contractType: "typeContrat",
-      remote: "travailATemps",
       id: "id",
     },
     listItemSelector: null,

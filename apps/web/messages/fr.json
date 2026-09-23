@@ -791,7 +791,10 @@
     "contractTypeLabel": "Type de contrat",
     "remoteLabel": "Politique de télétravail",
     "remoteAny": "Indifférent",
-    "experienceLevelLabel": "Niveau d'expérience"
+    "experienceLevelLabel": "Niveau d'expérience",
+    "supportHeading": "Certains de vos filtres ne seront pas appliqués tels quels :",
+    "supportUnsupported": "{site} n'appliquera pas : {filters}",
+    "supportApproximated": "{site} ne fait qu'approcher : {filters}"
   },
   "scouts": {
     "title": "Agents",

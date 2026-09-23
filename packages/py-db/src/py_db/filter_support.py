@@ -1,0 +1,184 @@
+"""FilterSupport (docs/adr/0030): how faithfully each site honours each
+Search filter key, declared per (site, filter) pair with the reason why.
+
+Declared here, in code beside nothing but the enum it keys on, because both
+services/api (which serves it in `GET /site-configs`) and services/ingestion
+(whose Site adapters it describes) already depend on py-db and on nothing of
+each other's. services/ingestion's `test_filter_support.py` fails when a
+declaration disagrees with what the site is actually sent.
+
+Declarations state today's truth, not the intended end state: a pair that a
+later ticket will fix is UNSUPPORTED until that ticket lands, and its reason
+says so — so nobody "fixes" a deliberate UNSUPPORTED back into a broken
+mapping.
+
+Hand-written (not sqlacodegen output), like `section_type.py`.
+"""
+
+from dataclasses import dataclass
+from enum import Enum
+
+from .models import Siteconfigsitekey
+
+
+class FilterSupportLevel(str, Enum):
+    # The candidate gets what they asked for, whether the site filtered it
+    # or this pipeline did so afterwards.
+    SUPPORTED = "SUPPORTED"
+    # The site shifts relevance or filters on a neighbouring concept, so
+    # results outside the filter still come back.
+    APPROXIMATED = "APPROXIMATED"
+    # The filter cannot be expressed and is not applied.
+    UNSUPPORTED = "UNSUPPORTED"
+
+
+@dataclass(frozen=True)
+class FilterSupport:
+    level: FilterSupportLevel
+    reason: str
+
+
+SEARCH_FILTER_KEYS = (
+    "keywords",
+    "location",
+    "postedWithin",
+    "contractType",
+    "remote",
+    "experienceLevel",
+)
+
+_S = FilterSupportLevel.SUPPORTED
+_A = FilterSupportLevel.APPROXIMATED
+_U = FilterSupportLevel.UNSUPPORTED
+
+_EXPERIENCE_LEVEL_NOWHERE = (
+    "No site in scope is sent an experience level, so the field is hidden "
+    "from the form; its key stays so restoring it needs no migration."
+)
+
+_WTTJ_STALE = (
+    "WTTJ's search is stale: every search renders its jobs landing page and "
+    "discovers no offer, so no filter reaches a result (see its SiteConfig "
+    "notes)."
+)
+
+FILTER_SUPPORT: dict[Siteconfigsitekey, dict[str, FilterSupport]] = {
+    Siteconfigsitekey.FRANCE_TRAVAIL: {
+        "keywords": FilterSupport(_S, "Sent as `motsCles`."),
+        "location": FilterSupport(
+            _U,
+            "The API takes INSEE region and department codes, never a label, "
+            "and rejects a label with a 400 that failed the whole search; not "
+            "sent until Location resolution exists (#215).",
+        ),
+        "postedWithin": FilterSupport(
+            _S,
+            "Sent as an absolute `minCreationDate`/`maxCreationDate` window; "
+            "honoured by `make verify-sites`.",
+        ),
+        "contractType": FilterSupport(
+            _S,
+            "Sent as `typeContrat`, whose codes are the canonical ones; "
+            "honoured by `make verify-sites`.",
+        ),
+        "remote": FilterSupport(
+            _U,
+            "The Offres d'emploi v2 API has no telework criterion. The "
+            "`travailATemps` it used to be sent is not a parameter and was "
+            "silently ignored.",
+        ),
+        "experienceLevel": FilterSupport(
+            _U,
+            "The API has an experience parameter, deliberately left unmapped. "
+            + _EXPERIENCE_LEVEL_NOWHERE,
+        ),
+    },
+    Siteconfigsitekey.HELLOWORK: {
+        "keywords": FilterSupport(_S, "Sent as `k`."),
+        "location": FilterSupport(
+            _S, "Sent as `l`, a plain label; honoured by `make verify-sites`."
+        ),
+        "postedWithin": FilterSupport(
+            _U,
+            "Not sent: HelloWork's freshness facet `d` has its own values "
+            "(h/d/w/m) and no 14-day one (#213).",
+        ),
+        "contractType": FilterSupport(
+            _S, "Sent as `c`; honoured by `make verify-sites`."
+        ),
+        "remote": FilterSupport(
+            _U,
+            "Not sent: HelloWork's telework facet `t` has four values of its "
+            "own (#213).",
+        ),
+        "experienceLevel": FilterSupport(_U, _EXPERIENCE_LEVEL_NOWHERE),
+    },
+    Siteconfigsitekey.LINKEDIN: {
+        "keywords": FilterSupport(_S, "Sent as `keywords`."),
+        "location": FilterSupport(
+            _S, "Sent as `location`; honoured by `make verify-sites`."
+        ),
+        "postedWithin": FilterSupport(
+            _U,
+            "Not sent: `f_TPR` wants a seconds count (`r604800`) and ignored "
+            "the canonical token it used to be sent (#212).",
+        ),
+        "contractType": FilterSupport(
+            _U,
+            "Not sent: `f_JT` classifies by working time, not contract "
+            "duration, and showed no effect on the guest search page the "
+            "pipeline scrapes (#214).",
+        ),
+        "remote": FilterSupport(
+            _U,
+            "Not sent: `f_WT` showed no effect on the guest search page the "
+            "pipeline scrapes, even in its own numeric values (#212).",
+        ),
+        "experienceLevel": FilterSupport(_U, _EXPERIENCE_LEVEL_NOWHERE),
+    },
+    Siteconfigsitekey.WTTJ: {key: FilterSupport(_U, _WTTJ_STALE) for key in SEARCH_FILTER_KEYS},
+    Siteconfigsitekey.ADZUNA: {
+        "keywords": FilterSupport(_S, "Sent as `what`."),
+        "location": FilterSupport(_S, "Sent as `where`, a free-text place."),
+        "postedWithin": FilterSupport(
+            _S, "Sent as `max_days_old`, and applied again to the offers returned."
+        ),
+        "contractType": FilterSupport(
+            _A,
+            "Adzuna has boolean contract facets, not a list: CDI becomes "
+            "`permanent`, CDD, INTERIM and FREELANCE share one `contract` "
+            "facet, and any other value is not applied.",
+        ),
+        "remote": FilterSupport(
+            _A,
+            "Adzuna has no telework facet: `remote` is added to the search "
+            "terms, which shifts relevance without excluding anything; onsite "
+            "and hybrid are not applied.",
+        ),
+        "experienceLevel": FilterSupport(_U, _EXPERIENCE_LEVEL_NOWHERE),
+    },
+    Siteconfigsitekey.REMOTIVE: {
+        "keywords": FilterSupport(_S, "Sent as `search`."),
+        "location": FilterSupport(
+            _U, "Remotive has no location parameter: every listing is remote."
+        ),
+        "postedWithin": FilterSupport(
+            _S,
+            "Remotive has no date parameter; the window is applied to the "
+            "offers it returns.",
+        ),
+        "contractType": FilterSupport(_U, "Remotive has no contract parameter."),
+        "remote": FilterSupport(
+            _U,
+            "Remotive has no telework parameter: every offer is fully remote, "
+            "whatever was asked.",
+        ),
+        "experienceLevel": FilterSupport(_U, _EXPERIENCE_LEVEL_NOWHERE),
+    },
+}
+
+
+def filter_support_for(site_key: Siteconfigsitekey) -> dict[str, FilterSupport]:
+    """A site's declarations, keyed by Search filter key. Empty for a site
+    with none (the disabled ones, which no candidate can pick)."""
+    return FILTER_SUPPORT.get(site_key, {})

@@ -167,6 +167,38 @@ describe("AnalyseSeveralOffersPage", () => {
     ).toBeInTheDocument();
   });
 
+  it("warns which filled filters the chosen site will not honour, and hides experience level", async () => {
+    stubApi({
+      siteConfigs: [
+        site(),
+        site({
+          id: "site-adzuna",
+          siteKey: "ADZUNA",
+          displayName: "Adzuna",
+          filterSupport: {
+            keywords: { level: "SUPPORTED", reason: "r" },
+            location: { level: "SUPPORTED", reason: "r" },
+            postedWithin: { level: "SUPPORTED", reason: "r" },
+            contractType: { level: "APPROXIMATED", reason: "r" },
+            remote: { level: "APPROXIMATED", reason: "r" },
+            experienceLevel: { level: "UNSUPPORTED", reason: "r" },
+          },
+        }),
+      ],
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<AnalyseSeveralOffersPage />);
+
+    await user.selectOptions(await screen.findByLabelText("Job site"), "site-adzuna");
+    expect(screen.queryByLabelText("Experience level")).not.toBeInTheDocument();
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("Remote policy"), "remote");
+    expect(await screen.findByRole("note")).toHaveTextContent(
+      "Adzuna only approximates: Remote policy",
+    );
+  });
+
   it("bounds the offer-count field to 1..25", async () => {
     stubApi();
     renderWithProviders(<AnalyseSeveralOffersPage />);

@@ -13,6 +13,7 @@ import {
   DEFAULT_POSTED_WITHIN,
   type Scout,
 } from "@/hooks/use-scouts";
+import { useSiteConfigs } from "@/hooks/use-site-configs";
 import { CvVersionPicker } from "@/components/cv-version-picker";
 import { InlineQuotaBanner } from "@/components/inline-quota-banner";
 import {
@@ -62,6 +63,13 @@ export function ScoutForm({ scout }: { scout?: Scout }) {
       ...EMPTY_JOB_FILTERS,
       postedWithin: DEFAULT_POSTED_WITHIN,
     }),
+  );
+
+  // Only read for FilterSupport: the checkboxes stay on SCOUT_SITE_KEYS, and
+  // a key with no enabled SiteConfig simply carries no warning.
+  const siteConfigs = useSiteConfigs();
+  const selectedSites = (siteConfigs.data ?? []).filter((site) =>
+    siteKeys.includes(site.siteKey),
   );
 
   const [labelError, setLabelError] = useState<string | null>(null);
@@ -178,6 +186,7 @@ export function ScoutForm({ scout }: { scout?: Scout }) {
             idPrefix="scout"
             values={filters}
             onChange={setFilters}
+            sites={selectedSites}
           />
 
           <Button

@@ -1,11 +1,11 @@
 """Site adapters (docs/adr/0029): given a Search filter, the exact query each
 site receives.
 
-These pin today's queries on purpose, including the mappings already known
-to be wrong (France Travail's `commune`/`travailATemps`, LinkedIn's raw
-`f_TPR` token, HelloWork dropping `postedWithin`/`remote`) — #208 is a
-prefactor at constant behaviour, and each later ticket changes one of these
-expectations deliberately.
+These pin today's queries on purpose. A filter a site cannot honour yet is
+not sent (France Travail's `location` and `remote`, LinkedIn's `f_TPR`/
+`f_JT`/`f_WT`, HelloWork's `postedWithin`/`remote`) and is declared
+UNSUPPORTED in `py_db.filter_support` (#210); each later ticket changes one
+of these expectations deliberately.
 
 The SiteConfigs are skeletons, not the seeded rows: the adapter, not the
 row, carries the site's search knowledge.
@@ -66,12 +66,12 @@ def _france_travail() -> SiteConfig:
 # --- LinkedIn --------------------------------------------------------------
 
 
-def test_linkedin_passes_every_filter_through_as_today():
+def test_linkedin_sends_keywords_and_location_and_leaves_the_rest_empty():
     request = build_search_request(_skeleton(Siteconfigsitekey.LINKEDIN), ALL_FILTERS)
 
     assert request.url == (
         "https://fr.linkedin.com/jobs/search?keywords=software%20engineer"
-        "&location=Paris&f_TPR=7d&f_JT=CDI&f_WT=remote"
+        "&location=Paris&f_TPR=&f_JT=&f_WT="
     )
 
 
@@ -132,7 +132,7 @@ def test_france_travail_maps_filters_onto_the_search_endpoint():
 
     assert request.url == (
         f"{FRANCE_TRAVAIL_API}/offres/search?motsCles=software+engineer"
-        "&commune=Paris&typeContrat=CDI&travailATemps=remote"
+        "&typeContrat=CDI"
     )
 
 

@@ -9,6 +9,7 @@ import {
   type Remote,
   type SiteSearchFilters,
 } from "@/hooks/use-ingestion-jobs";
+import type { SiteConfig } from "@/hooks/use-site-configs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
@@ -73,14 +74,83 @@ export function jobFiltersFrom(
   };
 }
 
+// The filters a candidate can fill in, in form order, with their label key.
+// `experienceLevel` is absent: no site honours it, so it is hidden rather than
+// shown under a warning that never varies (docs/adr/0030). Its key stays in
+// JobFilterValues so restoring it needs no migration.
+const SHOWN_FILTERS = [
+  ["keywords", "keywordsLabel"],
+  ["location", "locationLabel"],
+  ["postedWithin", "postedWithinLabel"],
+  ["contractType", "contractTypeLabel"],
+  ["remote", "remoteLabel"],
+] as const;
+
+function isFilled(values: JobFilterValues, key: keyof JobFilterValues) {
+  if (key === "postedWithin") return values.postedWithin !== "any";
+  return values[key].trim() !== "";
+}
+
+/**
+ * Per selected site, the filled filters it will not honour as asked — the
+ * FilterSupport statement shown before a run (docs/adr/0030). Renders nothing
+ * when every filled filter is SUPPORTED on every site.
+ */
+function FilterSupportNotice({
+  sites,
+  values,
+}: {
+  sites: SiteConfig[];
+  values: JobFilterValues;
+}) {
+  const t = useTranslations("jobFilters");
+
+  const lines = sites.flatMap((site) => {
+    const byLevel = (level: "UNSUPPORTED" | "APPROXIMATED") =>
+      SHOWN_FILTERS.filter(
+        ([key]) =>
+          isFilled(values, key) && site.filterSupport?.[key]?.level === level,
+      ).map(([, labelKey]) => t(labelKey));
+    const line = (
+      message: "supportUnsupported" | "supportApproximated",
+      filters: string[],
+    ) =>
+      filters.length
+        ? [t(message, { site: site.displayName, filters: filters.join(", ") })]
+        : [];
+    return [
+      ...line("supportUnsupported", byLevel("UNSUPPORTED")),
+      ...line("supportApproximated", byLevel("APPROXIMATED")),
+    ];
+  });
+
+  if (lines.length === 0) return null;
+  return (
+    <div
+      role="note"
+      className="flex flex-col gap-1 rounded-md border border-border bg-muted/10 p-3 text-sm"
+    >
+      <p className="font-medium">{t("supportHeading")}</p>
+      <ul className="list-disc pl-5">
+        {lines.map((line) => (
+          <li key={line}>{line}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export function JobFilterFields({
   idPrefix,
   values,
   onChange,
+  sites = [],
 }: {
   idPrefix: string;
   values: JobFilterValues;
   onChange: (next: JobFilterValues) => void;
+  /** The selected sites, whose FilterSupport the fields warn about. */
+  sites?: SiteConfig[];
 }) {
   const t = useTranslations("jobFilters");
   const tIng = useTranslations("ingestion");
@@ -163,17 +233,7 @@ export function JobFilterFields({
         </select>
       </div>
 
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor={fieldId("experience-level")}>
-          {t("experienceLevelLabel")}
-        </Label>
-        <Input
-          id={fieldId("experience-level")}
-          type="text"
-          value={values.experienceLevel}
-          onChange={(e) => set("experienceLevel", e.target.value)}
-        />
-      </div>
+      <FilterSupportNotice sites={sites} values={values} />
     </>
   );
 }

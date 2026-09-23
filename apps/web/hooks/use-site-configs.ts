@@ -13,10 +13,22 @@ export type IntegrationType = "OFFICIAL_API" | "SCRAPING";
 export type AntiBotRiskLevel = "LOW" | "MEDIUM" | "HIGH";
 
 /**
- * The fields the "Analyse several offers" form needs from a SiteConfig row.
- * `/v1/site-configs` returns more (selectors, base URL, …); the form picks a
- * site by id, shows its `displayName`, and annotates each option with a
- * reliability hint derived from `integrationType` + `antiBotRiskLevel`.
+ * How faithfully one site honours one Search filter key (docs/adr/0030):
+ * `SUPPORTED` — the candidate gets what they asked for; `APPROXIMATED` —
+ * results outside the filter still come back; `UNSUPPORTED` — not applied.
+ * Declared in services' py-db, not stored on the SiteConfig row.
+ */
+export type FilterSupportLevel = "SUPPORTED" | "APPROXIMATED" | "UNSUPPORTED";
+
+export type FilterSupport = { level: FilterSupportLevel; reason: string };
+
+/**
+ * The fields the "Analyse several offers" and Scout forms need from a
+ * SiteConfig row. `/v1/site-configs` returns more (selectors, base URL, …);
+ * the forms pick a site by id or key, show its `displayName`, annotate each
+ * option with a reliability hint derived from `integrationType` +
+ * `antiBotRiskLevel`, and warn from `filterSupport` (keyed by Search filter
+ * key) which filled filters it will not honour.
  */
 export type SiteConfig = {
   id: string;
@@ -24,6 +36,7 @@ export type SiteConfig = {
   displayName: string;
   integrationType: IntegrationType;
   antiBotRiskLevel: AntiBotRiskLevel;
+  filterSupport?: Partial<Record<string, FilterSupport>>;
 };
 
 /**
