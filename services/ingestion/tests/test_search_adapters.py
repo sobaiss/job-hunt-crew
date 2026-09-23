@@ -2,8 +2,8 @@
 site receives.
 
 These pin today's queries on purpose. A filter a site cannot honour yet is
-not sent (France Travail's `location` and `remote`, LinkedIn's `f_TPR`/
-`f_JT`/`f_WT`) and is declared
+not sent (France Travail's `location` and `remote`, LinkedIn's `f_JT`/
+`f_WT`) and is declared
 UNSUPPORTED in `py_db.filter_support` (#210); each later ticket changes one
 of these expectations deliberately.
 
@@ -66,12 +66,12 @@ def _france_travail() -> SiteConfig:
 # --- LinkedIn --------------------------------------------------------------
 
 
-def test_linkedin_sends_keywords_and_location_and_leaves_the_rest_empty():
+def test_linkedin_sends_keywords_location_and_freshness_and_leaves_the_rest_empty():
     request = build_search_request(_skeleton(Siteconfigsitekey.LINKEDIN), ALL_FILTERS)
 
     assert request.url == (
         "https://fr.linkedin.com/jobs/search?keywords=software%20engineer"
-        "&location=Paris&f_TPR=&f_JT=&f_WT="
+        "&location=Paris&f_TPR=r604800&f_JT=&f_WT="
     )
 
 
@@ -85,6 +85,29 @@ def test_linkedin_keeps_empty_params_for_unset_filters():
     assert request.url == (
         "https://fr.linkedin.com/jobs/search?keywords=python"
         "&location=&f_TPR=&f_JT=&f_WT="
+    )
+
+
+@pytest.mark.parametrize(
+    ("posted_within", "freshness"),
+    [
+        ("24h", "r86400"),
+        ("7d", "r604800"),
+        ("14d", "r1209600"),
+        ("30d", "r2592000"),
+        # "any" is no window at all: `f_TPR` stays empty.
+        ("any", ""),
+    ],
+)
+def test_linkedin_sends_freshness_as_a_seconds_count(posted_within, freshness):
+    request = build_search_request(
+        _skeleton(Siteconfigsitekey.LINKEDIN),
+        {"keywords": "python", "postedWithin": posted_within},
+    )
+
+    assert request.url == (
+        "https://fr.linkedin.com/jobs/search?keywords=python"
+        f"&location=&f_TPR={freshness}&f_JT=&f_WT="
     )
 
 

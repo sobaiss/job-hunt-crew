@@ -230,10 +230,10 @@ SITES = [
         # offers, so a search big enough to be capped is the lesser evil: two
         # equal caps are settled by comparing the offers listed.
         baseline={"keywords": "django", "location": "France"},
-        raw_probes=[
-            *_raw("f_TPR", "r86400", "r604800", "r2592000"),
-            *_raw("f_WT", "1", "2", "3"),
-        ],
+        # `f_TPR` is now sent by the adapter, so the canonical probes cover
+        # it (#212). `f_WT` is kept: it is not sent, and this is how to tell
+        # whether LinkedIn ever starts honouring it on the guest page.
+        raw_probes=[*_raw("f_WT", "1", "2", "3")],
     ),
 ]
 

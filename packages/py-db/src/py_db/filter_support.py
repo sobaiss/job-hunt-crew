@@ -139,9 +139,10 @@ FILTER_SUPPORT: dict[Siteconfigsitekey, dict[str, FilterSupport]] = {
             _S, "Sent as `location`; honoured by `make verify-sites`."
         ),
         "postedWithin": FilterSupport(
-            _U,
-            "Not sent: `f_TPR` wants a seconds count (`r604800`) and ignored "
-            "the canonical token it used to be sent (#212).",
+            _S,
+            "Sent as freshness `f_TPR`, a seconds count behind `r` (7d -> "
+            "`r604800`); honoured for all four windows by `make verify-sites`. "
+            "It ignored the canonical token it used to be sent.",
         ),
         "contractType": FilterSupport(
             _U,
@@ -152,7 +153,9 @@ FILTER_SUPPORT: dict[Siteconfigsitekey, dict[str, FilterSupport]] = {
         "remote": FilterSupport(
             _U,
             "Not sent: `f_WT` showed no effect on the guest search page the "
-            "pipeline scrapes, even in its own numeric values (#212).",
+            "pipeline scrapes, in any of its values 1/2/3, on two runs of "
+            "`make verify-sites` and on an uncapped hand check (#212). Its "
+            "filter bar exposes no workplace type.",
         ),
         "experienceLevel": FilterSupport(_U, _EXPERIENCE_LEVEL_NOWHERE),
     },

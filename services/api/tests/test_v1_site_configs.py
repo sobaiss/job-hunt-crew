@@ -81,6 +81,9 @@ def test_each_site_carries_its_filter_support_declarations():
     assert france_travail["postedWithin"]["level"] == "SUPPORTED"
     assert france_travail["postedWithin"]["derogations"] == {}
     assert site_configs["ADZUNA"]["filterSupport"]["remote"]["level"] == "APPROXIMATED"
+    linkedin = site_configs["LINKEDIN"]["filterSupport"]
+    assert linkedin["postedWithin"]["level"] == "SUPPORTED"
+    assert linkedin["remote"]["level"] == "UNSUPPORTED"
 
     # A per-value derogation reaches the browser naming its substitute.
     hellowork_posted_within = site_configs["HELLOWORK"]["filterSupport"]["postedWithin"]

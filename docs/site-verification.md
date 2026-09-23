@@ -167,3 +167,29 @@ how the listing moved between two requests a second apart. Read the pair
 together: `d=m` is honoured, and the raw `d=m` row agreed (1034 -> 1027).
 `hybrid` sends `t=Partiel&t=Occasionnel`: 375, against 293 + 85 for the two
 values alone.
+
+## LinkedIn after #212 — 2026-09-23
+
+LinkedIn's adapter now sends freshness `f_TPR` as a seconds count
+(`r86400`, `r604800`, `r1209600`, `r2592000`). The raw `f_TPR` probes were
+dropped: the canonical ones now send the same values.
+
+```
+LINKEDIN         postedWithin=24h             honoured        1000+ -> 115
+LINKEDIN         postedWithin=7d              honoured        1000+ -> 416
+LINKEDIN         postedWithin=14d             honoured        1000+ -> 830
+LINKEDIN         postedWithin=30d             honoured        1000+ -> 803
+LINKEDIN         raw f_WT=1                   not honoured    1000+ -> 1000+ (both capped, same offers)
+LINKEDIN         raw f_WT=2                   not honoured    1000+ -> 1000+ (both capped, same offers)
+LINKEDIN         raw f_WT=3                   not honoured    1000+ -> 1000+ (both capped, same offers)
+```
+
+The 14d count (830) is above 30d's (803). The offer set rotates between
+requests, so this does not mean the window is inverted. What matters is that
+each window moved the count away from the cap.
+
+`f_WT` is still not honoured, so `remote` stays UNSUPPORTED on LinkedIn. A
+second hand check (`keywords=django&location=Lyon`, 174 results, uncapped)
+got 174 with the baseline's offers for `f_WT=1` and `2`. `f_WT=3` got 172
+once and then 174 with the baseline's offers again on a repeat, so that was
+rotation.
