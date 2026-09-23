@@ -1,4 +1,4 @@
-.PHONY: up down web-up web-down migrate seed clean-analyses clean-analyses-scout clean-analyses-failed worker worker-once test test-db
+.PHONY: up down web-up web-down migrate seed clean-analyses clean-analyses-scout clean-analyses-failed worker worker-once verify-sites test test-db
 
 # Start local infrastructure (Postgres, MinIO, ElasticMQ, Step Functions
 # Local, api, worker). The `migrate` service applies pending Prisma
@@ -117,6 +117,17 @@ worker:
 # Drain whatever is currently queued, then exit.
 worker-once:
 	$(WORKER_LOCAL_ENV) WORKER_RUN_ONCE=1 uv run --package ingestion python -m ingestion.local_worker
+
+# Ask the live sites, per site and per filter, whether each Search filter is
+# actually honoured — by rejection on an API source, by differential result
+# count everywhere (#209, docs/site-verification.md). Needs no local infra;
+# reads France Travail's credentials from .env. Deliberately NOT part of
+# `make test` or CI: a third party's rate limiting must never fail a build
+# that contains no fault. Its output is for a developer to read.
+# SITES=LINKEDIN (space-separated site keys) narrows it to some sites.
+verify-sites:
+	@set -a; [ -f .env ] && . ./.env; set +a; \
+	uv run --package ingestion python -m ingestion.site_verification $(SITES)
 
 # --- Tests -----------------------------------------------------------------
 #
