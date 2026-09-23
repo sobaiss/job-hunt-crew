@@ -209,3 +209,27 @@ FRANCE_TRAVAIL   raw departement=69           honoured        3287 -> 247
 
 Each canonical row matches its raw row, so the adapter sends exactly the
 code the raw probe proved.
+
+## HelloWork after #216 — 2026-09-24
+
+HelloWork's adapter now resolves `location` against `py_db.locations` and
+sends the table's label `l` together with the companion region URL its own
+search form submits in `l_autocomplete`:
+`http://www.rj.com/commun/localite/region/11`,
+`…/localite/departement/69`. HelloWork keys that URL on the same INSEE
+codes as France Travail, departments included (`departement/2A`,
+`departement/971`), so a department needs no derogation.
+
+```
+HELLOWORK        location=Ile-de-France       honoured        1027 -> 415
+HELLOWORK        location=Rhône               honoured        1027 -> 84
+```
+
+Established by hand, `keywords=developpeur` (17,711):
+- HelloWork resolves a label it recognises to the same URL itself, and the
+  count follows `l`: `l=Bretagne` gave 1,276 with or without
+  `l_autocomplete=…/region/53`, and still 1,276 with a mismatched
+  `…/region/11`. The companion is sent for parity with the site's own form.
+- An unrecognised label is matched as text and narrows the search:
+  `l=Lyonn` gave 18. That is why a value that resolves to nothing is not
+  sent, as on France Travail, and the search runs wider instead.

@@ -1,3 +1,4 @@
+from py_db.locations import resolve_location
 from py_db.models import SiteConfig
 
 from .request import SearchRequest, filter_value, html_search_url
@@ -18,11 +19,30 @@ _TELEWORK = {
     "remote": ("Complet",),
 }
 
+# HelloWork's own form submits a place as its label `l` plus this companion
+# region URL, keyed by the same INSEE kind and code as `py_db.locations`
+# (`region/11`, `departement/69`, `departement/2A`).
+_LOCALITY_URL = "http://www.rj.com/commun/localite/{kind}/{code}"
+
+
+def _location_params(text: str) -> list[tuple[str, str]]:
+    """The table's label and its companion URL, or an empty `l` for a value
+    that resolves to nothing: HelloWork matches an unknown label as text and
+    narrows to a handful of offers ("Lyonn": 18 of 17,711), so a typo is left
+    out and the search runs wider instead (#216)."""
+    location = resolve_location(text)
+    if location is None:
+        return [("l", "")]
+    return [
+        ("l", location.label),
+        ("l_autocomplete", _LOCALITY_URL.format(kind=location.kind, code=location.code)),
+    ]
+
 
 def build(site_config: SiteConfig, filters: dict[str, str]) -> SearchRequest:
     params = [
         ("k", filter_value(filters, "keywords")),
-        ("l", filter_value(filters, "location")),
+        *_location_params(filter_value(filters, "location")),
         ("c", filter_value(filters, "contractType")),
         ("ray", "20"),
         ("st", "relevance"),

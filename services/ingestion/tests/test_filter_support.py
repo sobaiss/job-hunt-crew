@@ -186,3 +186,27 @@ async def test_a_derogation_sends_its_substitute(site_key, filter_key, value, de
     assert as_asked == as_substituted
     if filter_key == "postedWithin":
         assert _POSTED_WITHIN_ORDER.index(derogation.substitute) > _POSTED_WITHIN_ORDER.index(value)
+
+
+@pytest.mark.parametrize(
+    "site_key",
+    [
+        site_key
+        for site_key in sorted(ENABLED_SITES - {Siteconfigsitekey.WTTJ})
+        if FILTER_SUPPORT[site_key]["location"].level is not FilterSupportLevel.UNSUPPORTED
+    ],
+)
+async def test_when_unresolved_matches_what_an_unresolved_location_sends(site_key):
+    # "Lyonn" is neither a region nor a department: a site declaring
+    # `when_unresolved` must send exactly what it sends with no location,
+    # and a site declaring none must still send the text as typed.
+    baseline = {"keywords": "developer"}
+    changed = await _site_receives(site_key, baseline | {"location": "Lyonn"}) != (
+        await _site_receives(site_key, baseline)
+    )
+
+    when_unresolved = FILTER_SUPPORT[site_key]["location"].when_unresolved
+    if when_unresolved is FilterSupportLevel.UNSUPPORTED:
+        assert not changed, f"{site_key.value} sends an unresolved location"
+    else:
+        assert changed, f"{site_key.value} drops an unresolved location undeclared"

@@ -84,6 +84,10 @@ def test_each_site_carries_its_filter_support_declarations():
     assert france_travail["location"]["level"] == "SUPPORTED"
     assert france_travail["location"]["whenUnresolved"] == "UNSUPPORTED"
     assert france_travail["keywords"]["whenUnresolved"] is None
+    # HelloWork too: an unknown label would narrow its search, not widen it (#216).
+    assert site_configs["HELLOWORK"]["filterSupport"]["location"]["whenUnresolved"] == (
+        "UNSUPPORTED"
+    )
     assert site_configs["LINKEDIN"]["filterSupport"]["location"]["whenUnresolved"] is None
     assert site_configs["ADZUNA"]["filterSupport"]["remote"]["level"] == "APPROXIMATED"
     linkedin = site_configs["LINKEDIN"]["filterSupport"]

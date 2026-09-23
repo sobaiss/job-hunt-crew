@@ -129,7 +129,40 @@ def test_hellowork_maps_every_filter_and_keeps_fixed_defaults():
 
     assert request.url == (
         "https://www.hellowork.com/fr-fr/emploi/recherche.html?k=software%20engineer"
-        "&l=Paris&c=CDI&ray=20&st=relevance&cod=all&msa=0&d=w&t=Complet"
+        "&l=Paris&l_autocomplete=http%3A%2F%2Fwww.rj.com%2Fcommun%2Flocalite%2Fdepartement%2F75"
+        "&c=CDI&ray=20&st=relevance&cod=all&msa=0&d=w&t=Complet"
+    )
+
+
+@pytest.mark.parametrize(
+    ("location", "sent"),
+    [
+        # The table's own label goes out, with the companion region URL
+        # HelloWork's own form submits beside it, carrying the INSEE code.
+        (
+            "ile de france",
+            "&l=%C3%8Ele-de-France"
+            "&l_autocomplete=http%3A%2F%2Fwww.rj.com%2Fcommun%2Flocalite%2Fregion%2F11",
+        ),
+        (
+            "rhone",
+            "&l=Rh%C3%B4ne"
+            "&l_autocomplete=http%3A%2F%2Fwww.rj.com%2Fcommun%2Flocalite%2Fdepartement%2F69",
+        ),
+        # HelloWork matches an unknown label as text and narrows to almost
+        # nothing, so a typo is left out: the search runs wider instead.
+        ("Lyonn", "&l="),
+    ],
+)
+def test_hellowork_sends_a_resolved_location_with_its_companion_region_url(location, sent):
+    request = build_search_request(
+        _skeleton(Siteconfigsitekey.HELLOWORK),
+        {"keywords": "python", "location": location},
+    )
+
+    assert request.url == (
+        "https://www.hellowork.com/fr-fr/emploi/recherche.html?k=python"
+        f"{sent}&c=&ray=20&st=relevance&cod=all&msa=0"
     )
 
 

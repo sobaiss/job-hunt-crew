@@ -118,7 +118,15 @@ FILTER_SUPPORT: dict[Siteconfigsitekey, dict[str, FilterSupport]] = {
     Siteconfigsitekey.HELLOWORK: {
         "keywords": FilterSupport(_S, "Sent as `k`."),
         "location": FilterSupport(
-            _S, "Sent as `l`, a plain label; honoured by `make verify-sites`."
+            _S,
+            "Resolved against py_db.locations and sent as the table's label "
+            "`l` plus the companion region URL `l_autocomplete` "
+            "(`…/localite/region/11`, `…/localite/departement/69`) that "
+            "HelloWork's own form submits; honoured by `make verify-sites`. "
+            "HelloWork matches an unknown label as text and narrows to a "
+            "handful of offers, so a value that resolves to nothing is not "
+            "sent and the search runs wider instead (#216).",
+            when_unresolved=_U,
         ),
         "postedWithin": FilterSupport(
             _S,
