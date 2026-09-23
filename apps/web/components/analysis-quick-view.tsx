@@ -5,7 +5,15 @@ import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useTranslations } from "next-intl";
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, ExternalLink, LoaderCircle, RotateCw, X } from "lucide-react";
+import {
+  ArrowRight,
+  Check,
+  ExternalLink,
+  GitCompare,
+  LoaderCircle,
+  RotateCw,
+  X,
+} from "lucide-react";
 
 import {
   TERMINAL_ANALYSIS_STATUSES,
@@ -117,38 +125,53 @@ export function AnalysisQuickView({
               <SheetTitle>
                 {analysis.jobOffer.title ?? t("jobOfferFallback")}
               </SheetTitle>
-              <p className="text-sm text-muted">
-                {analysis.jobOffer.company ?? "—"} ·{" "}
-                {analysis.jobOffer.location ?? "—"}
-              </p>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm text-muted">
+                <p>
+                  {analysis.jobOffer.company ?? "—"} ·{" "}
+                  {analysis.jobOffer.location ?? "—"}
+                </p>
+                {tracking !== null ? (
+                  <Badge variant={trackingStatusBadgeVariant(tracking)}>
+                    {trackingStatusLabel(tracking)}
+                  </Badge>
+                ) : (
+                  <Badge variant={analysisBadgeVariant(analysis.status)}>
+                    {pipelineStatusLabel(analysis.status)}
+                  </Badge>
+                )}
+              </div>
             </SheetHeader>
 
-            <Button asChild variant="outline" size="sm" className="w-fit">
-              <a
-                href={analysis.jobOffer.sourceUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <ExternalLink aria-hidden="true" />
-                {t("quickView.viewOffer")}
-              </a>
-            </Button>
-
-            {tracking !== null ? (
-              <Badge
-                variant={trackingStatusBadgeVariant(tracking)}
-                className="self-start"
-              >
-                {trackingStatusLabel(tracking)}
-              </Badge>
-            ) : (
-              <Badge
-                variant={analysisBadgeVariant(analysis.status)}
-                className="self-start"
-              >
-                {pipelineStatusLabel(analysis.status)}
-              </Badge>
-            )}
+            {/* The two ways on from this Quick view used to be bare accent
+                links pinned below the result breakdown, a scroll away from
+                the offer they belong to. They lead the sheet now, in one row
+                with "Voir l'offre" — same row the detail page gives its own
+                header actions. "Voir l'analyse complète" is the row's one
+                `default`: it is where the Quick view is a preview of. */}
+            <div className="flex flex-wrap items-center gap-2 border-b border-border pb-4">
+              <Button asChild size="sm">
+                <Link href={`/analyses/${analysis.id}`}>
+                  {t("quickView.viewFullAnalysis")}
+                  <ArrowRight aria-hidden="true" />
+                </Link>
+              </Button>
+              <Button asChild variant="outline" size="sm">
+                <Link href={`/analyses/compare/${analysis.jobOffer.id}`}>
+                  <GitCompare aria-hidden="true" />
+                  {t("compareLink")}
+                </Link>
+              </Button>
+              <Button asChild variant="outline" size="sm">
+                <a
+                  href={analysis.jobOffer.sourceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <ExternalLink aria-hidden="true" />
+                  {t("quickView.viewOffer")}
+                </a>
+              </Button>
+            </div>
 
             {tracking !== null && (
               <div className="flex flex-col gap-2">
@@ -305,21 +328,6 @@ export function AnalysisQuickView({
             {analysis.status === "COMPLETED" && (
               <GeneratedDocumentsPanel analysisId={analysis.id} />
             )}
-
-            <div className="mt-auto flex flex-col gap-2 border-t border-border pt-4">
-              <Link
-                href={`/analyses/${analysis.id}`}
-                className="text-sm font-medium text-accent hover:underline"
-              >
-                {t("quickView.viewFullAnalysis")}
-              </Link>
-              <Link
-                href={`/analyses/compare/${analysis.jobOffer.id}`}
-                className="text-sm font-medium text-accent hover:underline"
-              >
-                {t("compareLink")}
-              </Link>
-            </div>
           </>
         )}
       </SheetContent>

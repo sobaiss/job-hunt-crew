@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   ExternalLink,
@@ -14,6 +15,7 @@ import {
   LoaderCircle,
   RefreshCw,
   RotateCw,
+  SlidersHorizontal,
   Sparkles,
   X,
 } from "lucide-react";
@@ -38,10 +40,13 @@ import { ColumnVisibilityMenu } from "@/components/column-visibility-menu";
 import type { ColumnConfig } from "@/lib/column-visibility";
 import {
   ANALYSES_PAGE_SIZES,
+  DEFAULT_ANALYSES_FILTERS,
   JOB_OFFER_SOURCE_SITES,
+  activeAdvancedFilterCount,
   analysesTableStateToParams,
   cvLabelsOf,
   filterAnalyses,
+  hasActiveFilters,
   pageCount,
   paginate,
   parseAnalysesTableState,
@@ -170,6 +175,14 @@ function AnalysesTable() {
     COLUMN_VISIBILITY_STORAGE_KEY,
     COLUMNS,
   );
+
+  // Seven filters side by side pushed the table below the fold, so only the
+  // search box and the status select stay out; the rest fold into a panel
+  // under "Plus de filtres". It starts open when the URL already carries one
+  // of the folded-away filters, so a shared or refreshed link shows what is
+  // narrowing the table rather than hiding it behind a closed panel.
+  const advancedFilterCount = activeAdvancedFilterCount(state);
+  const [filtersOpen, setFiltersOpen] = useState(() => advancedFilterCount > 0);
 
   const cvLabels = useMemo(
     () => (analyses ? cvLabelsOf(analyses) : []),
@@ -420,111 +433,155 @@ function AnalysesTable() {
       )}
 
       {hasAnalyses && (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="analyses-search">{t("controls.searchLabel")}</Label>
-            <Input
-              id="analyses-search"
-              type="search"
-              placeholder={t("controls.searchPlaceholder")}
-              value={state.search}
-              onChange={(event) =>
-                updateState({ search: event.target.value })
-              }
-            />
+        <div className="flex flex-col gap-3 rounded-md border border-border bg-panel/40 p-3">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+            <div className="flex flex-col gap-1.5 lg:flex-1">
+              <Label htmlFor="analyses-search">{t("controls.searchLabel")}</Label>
+              <Input
+                id="analyses-search"
+                type="search"
+                placeholder={t("controls.searchPlaceholder")}
+                value={state.search}
+                onChange={(event) =>
+                  updateState({ search: event.target.value })
+                }
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5 lg:w-56">
+              <Label htmlFor="analyses-status">{t("controls.statusLabel")}</Label>
+              <select
+                id="analyses-status"
+                className={SELECT_CLASS}
+                value={state.status}
+                onChange={(event) =>
+                  updateState({
+                    status: event.target.value as AnalysesTableState["status"],
+                  })
+                }
+              >
+                <option value="all">{t("controls.statusAll")}</option>
+                {ANALYSES_STATUS_FILTERS.map((status) => (
+                  <option key={status} value={status}>
+                    {status === "FAILED" ? pipelineStatusLabel(status) : trackingStatusLabel(status)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                aria-expanded={filtersOpen}
+                aria-controls="analyses-advanced-filters"
+                onClick={() => setFiltersOpen((open) => !open)}
+              >
+                <SlidersHorizontal aria-hidden="true" />
+                {advancedFilterCount > 0
+                  ? t("controls.moreFiltersActive", { count: advancedFilterCount })
+                  : t("controls.moreFilters")}
+                <ChevronDown
+                  aria-hidden="true"
+                  className={
+                    filtersOpen
+                      ? "rotate-180 transition-transform"
+                      : "transition-transform"
+                  }
+                />
+              </Button>
+              {hasActiveFilters(state) && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => updateState(DEFAULT_ANALYSES_FILTERS)}
+                >
+                  <X aria-hidden="true" />
+                  {t("controls.clearFilters")}
+                </Button>
+              )}
+            </div>
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="analyses-status">{t("controls.statusLabel")}</Label>
-            <select
-              id="analyses-status"
-              className={SELECT_CLASS}
-              value={state.status}
-              onChange={(event) =>
-                updateState({
-                  status: event.target.value as AnalysesTableState["status"],
-                })
-              }
+          {filtersOpen && (
+            <div
+              id="analyses-advanced-filters"
+              className="grid gap-3 border-t border-border pt-3 sm:grid-cols-2 lg:grid-cols-3"
             >
-              <option value="all">{t("controls.statusAll")}</option>
-              {ANALYSES_STATUS_FILTERS.map((status) => (
-                <option key={status} value={status}>
-                  {status === "FAILED" ? pipelineStatusLabel(status) : trackingStatusLabel(status)}
-                </option>
-              ))}
-            </select>
-          </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="analyses-requested-from">{t("controls.requestedAtFromLabel")}</Label>
+                <Input
+                  id="analyses-requested-from"
+                  type="date"
+                  value={state.requestedAtFrom}
+                  onChange={(event) => updateState({ requestedAtFrom: event.target.value })}
+                />
+              </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="analyses-requested-from">{t("controls.requestedAtFromLabel")}</Label>
-            <Input
-              id="analyses-requested-from"
-              type="date"
-              value={state.requestedAtFrom}
-              onChange={(event) => updateState({ requestedAtFrom: event.target.value })}
-            />
-          </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="analyses-requested-to">{t("controls.requestedAtToLabel")}</Label>
+                <Input
+                  id="analyses-requested-to"
+                  type="date"
+                  value={state.requestedAtTo}
+                  onChange={(event) => updateState({ requestedAtTo: event.target.value })}
+                />
+              </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="analyses-requested-to">{t("controls.requestedAtToLabel")}</Label>
-            <Input
-              id="analyses-requested-to"
-              type="date"
-              value={state.requestedAtTo}
-              onChange={(event) => updateState({ requestedAtTo: event.target.value })}
-            />
-          </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="analyses-cv">{t("controls.cvLabel")}</Label>
+                <select
+                  id="analyses-cv"
+                  className={SELECT_CLASS}
+                  value={state.cvLabel}
+                  onChange={(event) => updateState({ cvLabel: event.target.value })}
+                >
+                  <option value="all">{t("controls.cvAll")}</option>
+                  {cvLabels.map((label) => (
+                    <option key={label} value={label}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="analyses-cv">{t("controls.cvLabel")}</Label>
-            <select
-              id="analyses-cv"
-              className={SELECT_CLASS}
-              value={state.cvLabel}
-              onChange={(event) => updateState({ cvLabel: event.target.value })}
-            >
-              <option value="all">{t("controls.cvAll")}</option>
-              {cvLabels.map((label) => (
-                <option key={label} value={label}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="analyses-platform">{t("controls.platformLabel")}</Label>
+                <select
+                  id="analyses-platform"
+                  className={SELECT_CLASS}
+                  value={state.platform}
+                  onChange={(event) =>
+                    updateState({
+                      platform: event.target.value as AnalysesTableState["platform"],
+                    })
+                  }
+                >
+                  <option value="all">{t("controls.platformAll")}</option>
+                  {JOB_OFFER_SOURCE_SITES.map((site) => (
+                    <option key={site} value={site}>
+                      {sourceSiteLabel(site)}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="analyses-platform">{t("controls.platformLabel")}</Label>
-            <select
-              id="analyses-platform"
-              className={SELECT_CLASS}
-              value={state.platform}
-              onChange={(event) =>
-                updateState({
-                  platform: event.target.value as AnalysesTableState["platform"],
-                })
-              }
-            >
-              <option value="all">{t("controls.platformAll")}</option>
-              {JOB_OFFER_SOURCE_SITES.map((site) => (
-                <option key={site} value={site}>
-                  {sourceSiteLabel(site)}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="analyses-location">{t("controls.locationLabel")}</Label>
-            <Input
-              id="analyses-location"
-              type="search"
-              placeholder={t("controls.locationPlaceholder")}
-              value={state.location}
-              onChange={(event) =>
-                updateState({ location: event.target.value })
-              }
-            />
-          </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="analyses-location">{t("controls.locationLabel")}</Label>
+                <Input
+                  id="analyses-location"
+                  type="search"
+                  placeholder={t("controls.locationPlaceholder")}
+                  value={state.location}
+                  onChange={(event) =>
+                    updateState({ location: event.target.value })
+                  }
+                />
+              </div>
+            </div>
+          )}
         </div>
       )}
 

@@ -613,6 +613,9 @@
       "locationPlaceholder": "City or region",
       "requestedAtFromLabel": "Requested from",
       "requestedAtToLabel": "Requested to",
+      "moreFilters": "More filters",
+      "moreFiltersActive": "More filters ({count})",
+      "clearFilters": "Clear filters",
       "columnsLabel": "Columns",
       "columnsReset": "Reset"
     },
