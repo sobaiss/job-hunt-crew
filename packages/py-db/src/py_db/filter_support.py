@@ -52,6 +52,10 @@ class FilterSupport:
     reason: str
     # Keyed by canonical value; empty on most pairs.
     derogations: Mapping[str, Derogation] = field(default_factory=dict)
+    # For a `location` the site only takes as a resolved code: the level a
+    # value `py_db.locations` cannot resolve falls to, for that one search.
+    # None where the site takes the text as typed.
+    when_unresolved: FilterSupportLevel | None = None
 
 
 SEARCH_FILTER_KEYS = (
@@ -82,10 +86,12 @@ FILTER_SUPPORT: dict[Siteconfigsitekey, dict[str, FilterSupport]] = {
     Siteconfigsitekey.FRANCE_TRAVAIL: {
         "keywords": FilterSupport(_S, "Sent as `motsCles`."),
         "location": FilterSupport(
-            _U,
-            "The API takes INSEE region and department codes, never a label, "
-            "and rejects a label with a 400 that failed the whole search; not "
-            "sent until Location resolution exists (#215).",
+            _S,
+            "Resolved against py_db.locations and sent as an INSEE `region` "
+            "or `departement` code; the API rejects a label with a 400. A "
+            "value that resolves to nothing is not sent, so the search runs "
+            "wider instead of failing (#215).",
+            when_unresolved=_U,
         ),
         "postedWithin": FilterSupport(
             _S,

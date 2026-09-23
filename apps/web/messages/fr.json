@@ -795,7 +795,8 @@
     "supportHeading": "Certains de vos filtres ne seront pas appliqués tels quels :",
     "supportUnsupported": "{site} n'appliquera pas : {filters}",
     "supportApproximated": "{site} ne fait qu'approcher : {filters}",
-    "supportSubstituted": "{site} applique {filter} : {substitute} au lieu de {value}"
+    "supportSubstituted": "{site} applique {filter} : {substitute} au lieu de {value}",
+    "supportUnresolved": "{site} n'appliquera pas {filter} : « {value} » n'est ni une région ni un département français"
   },
   "scouts": {
     "title": "Agents",

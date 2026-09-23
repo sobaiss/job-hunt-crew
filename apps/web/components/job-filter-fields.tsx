@@ -9,6 +9,7 @@ import {
   type Remote,
   type SiteSearchFilters,
 } from "@/hooks/use-ingestion-jobs";
+import { useLocationResolution } from "@/hooks/use-location-resolution";
 import type { SiteConfig } from "@/hooks/use-site-configs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -98,6 +99,7 @@ function isFilled(values: JobFilterValues, key: keyof JobFilterValues) {
  * FilterSupport statement shown before a run (docs/adr/0030). A value the
  * site treats differently from the rest of its filter (a derogation) is
  * judged on its own, and names the substitute applied when there is one.
+ * A location a site only takes resolved is judged by whether it resolves.
  * Renders nothing when every filled filter is SUPPORTED on every site.
  * Also shown on a saved Scout's panel, so a Scout nobody reopens still says
  * which of its filters are not honoured (issue #211).
@@ -112,6 +114,13 @@ export function FilterSupportNotice({
   const t = useTranslations("jobFilters");
   const tIng = useTranslations("ingestion");
 
+  // Asked only when some site needs the location resolved (#215).
+  const resolution = useLocationResolution(
+    values.location,
+    sites.some((site) => site.filterSupport?.location?.whenUnresolved),
+  );
+  const unresolved = resolution === null;
+
   // The select filters' values have labels; free text is shown as typed.
   const valueLabel = (key: ShownFilter, value: string) =>
     key === "postedWithin" || key === "remote"
@@ -123,15 +132,20 @@ export function FilterSupportNotice({
       ([key, labelKey]) => {
         const support = site.filterSupport?.[key];
         const derogation = support?.derogations?.[values[key]];
-        return { key, label: t(labelKey), support, derogation };
+        // A location the site cannot resolve takes the level it falls to.
+        const unresolvedLevel =
+          key === "location" && unresolved ? support?.whenUnresolved : null;
+        const level = unresolvedLevel ?? (derogation ?? support)?.level;
+        return { key, label: t(labelKey), level, derogation, unresolvedLevel };
       },
     );
     const byLevel = (level: "UNSUPPORTED" | "APPROXIMATED") =>
       filled
         .filter(
-          ({ support, derogation }) =>
-            !derogation?.substitute &&
-            (derogation ?? support)?.level === level,
+          (filter) =>
+            filter.unresolvedLevel !== "UNSUPPORTED" &&
+            !filter.derogation?.substitute &&
+            filter.level === level,
         )
         .map(({ label }) => label);
     const line = (
@@ -153,7 +167,20 @@ export function FilterSupportNotice({
           ]
         : [],
     );
+    const notResolved = filled.flatMap(({ label, unresolvedLevel }) =>
+      // Worded on its own, so the candidate sees which text was not read.
+      unresolvedLevel === "UNSUPPORTED"
+        ? [
+            t("supportUnresolved", {
+              site: site.displayName,
+              filter: label,
+              value: values.location.trim(),
+            }),
+          ]
+        : [],
+    );
     return [
+      ...notResolved,
       ...line("supportUnsupported", byLevel("UNSUPPORTED")),
       ...line("supportApproximated", byLevel("APPROXIMATED")),
       ...substituted,

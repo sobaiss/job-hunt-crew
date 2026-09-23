@@ -175,7 +175,7 @@ CANONICAL_PROBES = [
     *_canonical("postedWithin", "24h", "7d", "14d", "30d"),
     *_canonical("remote", "onsite", "hybrid", "remote"),
     *_canonical("contractType", "CDI"),
-    *_canonical("location", "Ile-de-France"),
+    *_canonical("location", "Ile-de-France", "Rhône"),
     *_canonical("experienceLevel", "senior"),
 ]
 

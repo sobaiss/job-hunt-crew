@@ -2,7 +2,7 @@
 site receives.
 
 These pin today's queries on purpose. A filter a site cannot honour yet is
-not sent (France Travail's `location` and `remote`, LinkedIn's `f_JT`/
+not sent (France Travail's `remote`, LinkedIn's `f_JT`/
 `f_WT`) and is declared
 UNSUPPORTED in `py_db.filter_support` (#210); each later ticket changes one
 of these expectations deliberately.
@@ -200,8 +200,33 @@ def test_france_travail_maps_filters_onto_the_search_endpoint():
 
     assert request.url == (
         f"{FRANCE_TRAVAIL_API}/offres/search?motsCles=software+engineer"
-        "&typeContrat=CDI"
+        "&typeContrat=CDI&departement=75"
     )
+
+
+def test_france_travail_sends_a_resolved_region_as_its_insee_code():
+    request = build_search_request(
+        _france_travail(), {"keywords": "python", "location": "ile de france"}
+    )
+
+    assert request.params == {"motsCles": "python", "region": "11"}
+
+
+def test_france_travail_sends_a_resolved_department_as_its_insee_code():
+    request = build_search_request(
+        _france_travail(), {"keywords": "python", "location": "Haute-Garonne"}
+    )
+
+    assert request.params == {"motsCles": "python", "departement": "31"}
+
+
+def test_france_travail_leaves_an_unresolved_location_out():
+    # A typo widens the search instead of failing it; `commune` is never sent.
+    request = build_search_request(
+        _france_travail(), {"keywords": "python", "location": "Lyonn"}
+    )
+
+    assert request.params == {"motsCles": "python"}
 
 
 def test_france_travail_is_a_base_plus_parameters():

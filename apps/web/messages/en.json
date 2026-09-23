@@ -795,7 +795,8 @@
     "supportHeading": "Some of your filters will not be applied as asked:",
     "supportUnsupported": "{site} will not apply: {filters}",
     "supportApproximated": "{site} only approximates: {filters}",
-    "supportSubstituted": "{site} applies {filter} as {substitute} instead of {value}"
+    "supportSubstituted": "{site} applies {filter} as {substitute} instead of {value}",
+    "supportUnresolved": "{site} will not apply {filter}: “{value}” is not a French region or department"
   },
   "scouts": {
     "title": "Agents",

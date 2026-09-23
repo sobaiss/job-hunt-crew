@@ -80,6 +80,11 @@ def test_each_site_carries_its_filter_support_declarations():
     assert france_travail["remote"]["level"] == "UNSUPPORTED"
     assert france_travail["postedWithin"]["level"] == "SUPPORTED"
     assert france_travail["postedWithin"]["derogations"] == {}
+    # A location Location resolution cannot read is not applied (#215).
+    assert france_travail["location"]["level"] == "SUPPORTED"
+    assert france_travail["location"]["whenUnresolved"] == "UNSUPPORTED"
+    assert france_travail["keywords"]["whenUnresolved"] is None
+    assert site_configs["LINKEDIN"]["filterSupport"]["location"]["whenUnresolved"] is None
     assert site_configs["ADZUNA"]["filterSupport"]["remote"]["level"] == "APPROXIMATED"
     linkedin = site_configs["LINKEDIN"]["filterSupport"]
     assert linkedin["postedWithin"]["level"] == "SUPPORTED"

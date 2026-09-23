@@ -918,6 +918,49 @@ describe("NewScoutPage — create form", () => {
     expect(note).toHaveTextContent("France Travail will not apply: Remote policy");
   });
 
+  it("warns, before the run, that a location France Travail cannot resolve will not be applied", async () => {
+    const franceTravail = {
+      ...SUPPORT_SITE_CONFIGS[0],
+      filterSupport: {
+        ...SUPPORT_SITE_CONFIGS[0].filterSupport,
+        location: { ...support("SUPPORTED"), whenUnresolved: "UNSUPPORTED" },
+        remote: support("SUPPORTED"),
+      },
+    };
+    const asked: string[] = [];
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+      http.get("/api/site-configs", () =>
+        HttpResponse.json({ siteConfigs: [franceTravail] }),
+      ),
+      http.get("/api/locations/resolve", ({ request }) => {
+        const q = new URL(request.url).searchParams.get("q") ?? "";
+        asked.push(q);
+        return HttpResponse.json({
+          location:
+            q === "Rhône"
+              ? { kind: "departement", code: "69", label: "Rhône" }
+              : null,
+        });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<NewScoutPage />);
+
+    await screen.findByRole("checkbox", { name: "France Travail" });
+    await user.type(screen.getByLabelText("Location"), "Rhône");
+    await waitFor(() => expect(asked).toContain("Rhône"));
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText("Location"));
+    await user.type(screen.getByLabelText("Location"), "Lyonn");
+    expect(await screen.findByRole("note")).toHaveTextContent(
+      "France Travail will not apply Location: “Lyonn” is not a French region or department",
+    );
+  });
+
   it("names the substitute a site applies for a value it widens", async () => {
     const hellowork = {
       ...SUPPORT_SITE_CONFIGS[1],

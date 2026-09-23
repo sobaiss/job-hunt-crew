@@ -34,6 +34,12 @@ export type FilterSupport = {
   reason: string;
   /** Keyed by canonical value; empty on most pairs. */
   derogations?: Partial<Record<string, Derogation>>;
+  /**
+   * For a `location` the site only takes as a resolved region or department:
+   * the level a value Location resolution cannot read falls to. Null where
+   * the site takes the text as typed.
+   */
+  whenUnresolved?: FilterSupportLevel | null;
 };
 
 /**

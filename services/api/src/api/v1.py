@@ -36,6 +36,7 @@ from py_db.models import (
 )
 from py_db.application_stats import compute_application_stats, stats_window_since
 from py_db.filter_support import filter_support_for
+from py_db.locations import resolve_location
 from py_db.quota import (
     analyses_requested_this_month,
     analyses_requested_today,
@@ -108,6 +109,9 @@ class FilterSupportResponse(BaseModel):
     reason: str
     # Keyed by canonical value; empty on most pairs.
     derogations: dict[str, DerogationResponse]
+    # The level a location that Location resolution cannot read falls to on
+    # this site; null where the site takes the text as typed.
+    whenUnresolved: Literal["SUPPORTED", "APPROXIMATED", "UNSUPPORTED"] | None
 
 
 class SiteConfigResponse(BaseModel):
@@ -175,6 +179,9 @@ async def list_site_configs(
                             )
                             for value, derogation in support.derogations.items()
                         },
+                        whenUnresolved=(
+                            support.when_unresolved.value if support.when_unresolved else None
+                        ),
                     )
                     for key, support in filter_support_for(row.siteKey).items()
                 },
@@ -183,6 +190,29 @@ async def list_site_configs(
             )
             for row in rows
         ]
+    )
+
+
+class LocationResponse(BaseModel):
+    kind: Literal["region", "departement"]
+    code: str
+    label: str
+
+
+class ResolveLocationResponse(BaseModel):
+    location: LocationResponse | None
+
+
+@router.get("/locations/resolve", response_model=ResolveLocationResponse)
+async def resolve_location_endpoint(q: str = "") -> ResolveLocationResponse:
+    """Location resolution (#215) for the filter forms: the French region or
+    department `q` names, or null, so the candidate learns before a run that
+    a site needing a resolved location will not apply theirs."""
+    location = resolve_location(q)
+    return ResolveLocationResponse(
+        location=LocationResponse(kind=location.kind, code=location.code, label=location.label)
+        if location
+        else None
     )
 
 

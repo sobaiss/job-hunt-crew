@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
+from py_db.locations import resolve_location
 from py_db.models import SiteConfig
 
 from ..site_search import SiteSearchConfigError
@@ -7,10 +8,9 @@ from .request import SearchRequest, filter_value
 
 SEARCH_PATH = "/offres/search"
 
-# Search filter key -> "Offres d'emploi v2" parameter. `location` is not sent:
-# the API takes INSEE codes, never a label, and 400s the whole search on a
-# label (#215). `remote` has no parameter at all — the API has no telework
-# criterion. Both are declared UNSUPPORTED in `py_db.filter_support`.
+# Search filter key -> "Offres d'emploi v2" parameter. `location` is resolved
+# separately, below. `remote` has no parameter at all — the API has no
+# telework criterion — and is declared UNSUPPORTED in `py_db.filter_support`.
 _PARAMS = {
     "keywords": "motsCles",
     "contractType": "typeContrat",
@@ -53,4 +53,10 @@ def build(site_config: SiteConfig, filters: dict[str, str]) -> SearchRequest:
         if filters.get(key)
     }
     params |= _creation_date_window(filter_value(filters, "postedWithin"))
+    # The API takes an INSEE `region` or `departement` code, never a label: a
+    # label 400s the whole search. A location that resolves to nothing is left
+    # out, so a typo widens the search rather than failing it (#215).
+    location = resolve_location(filter_value(filters, "location"))
+    if location is not None:
+        params[location.kind] = location.code
     return SearchRequest(f"{site_config.apiBaseUrl}{SEARCH_PATH}", params)

@@ -193,3 +193,19 @@ second hand check (`keywords=django&location=Lyon`, 174 results, uncapped)
 got 174 with the baseline's offers for `f_WT=1` and `2`. `f_WT=3` got 172
 once and then 174 with the baseline's offers again on a repeat, so that was
 rotation.
+
+## France Travail after #215 — 2026-09-23
+
+France Travail's adapter now resolves `location` against `py_db.locations`
+(18 regions, 101 departments) and sends the INSEE code as `region` or
+`departement`. A value that resolves to nothing is not sent at all.
+
+```
+FRANCE_TRAVAIL   location=Ile-de-France       honoured        3287 -> 1311
+FRANCE_TRAVAIL   location=Rhône               honoured        3287 -> 247
+FRANCE_TRAVAIL   raw region=11                honoured        3287 -> 1311
+FRANCE_TRAVAIL   raw departement=69           honoured        3287 -> 247
+```
+
+Each canonical row matches its raw row, so the adapter sends exactly the
+code the raw probe proved.
