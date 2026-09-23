@@ -99,8 +99,10 @@ function isFilled(values: JobFilterValues, key: keyof JobFilterValues) {
  * site treats differently from the rest of its filter (a derogation) is
  * judged on its own, and names the substitute applied when there is one.
  * Renders nothing when every filled filter is SUPPORTED on every site.
+ * Also shown on a saved Scout's panel, so a Scout nobody reopens still says
+ * which of its filters are not honoured (issue #211).
  */
-function FilterSupportNotice({
+export function FilterSupportNotice({
   sites,
   values,
 }: {

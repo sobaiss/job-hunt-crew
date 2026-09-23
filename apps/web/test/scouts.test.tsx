@@ -1173,3 +1173,89 @@ describe("Scout panel — scoped stats (issue #60)", () => {
     expect(panel.getByText("40")).toBeInTheDocument();
   });
 });
+
+describe("Scout panel — FilterSupport (issue #211)", () => {
+  it("shows the saved Scout the same support statement the form shows, without touching the Scout", async () => {
+    const writes: string[] = [];
+    const hellowork = {
+      ...SUPPORT_SITE_CONFIGS[1],
+      filterSupport: {
+        ...SUPPORT_SITE_CONFIGS[1].filterSupport,
+        postedWithin: {
+          ...support("SUPPORTED"),
+          derogations: { "14d": { level: "APPROXIMATED", substitute: "30d" } },
+        },
+      },
+    };
+    server.use(
+      http.get("/api/scouts", () =>
+        HttpResponse.json({
+          scouts: [
+            scout({
+              targetSiteKeys: ["FRANCE_TRAVAIL", "HELLOWORK"],
+              filters: {
+                keywords: "python",
+                location: null,
+                postedWithin: "14d",
+                contractType: null,
+                remote: "remote",
+                experienceLevel: null,
+              },
+            }),
+          ],
+        }),
+      ),
+      http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
+      http.get("/api/site-configs", () =>
+        HttpResponse.json({ siteConfigs: [SUPPORT_SITE_CONFIGS[0], hellowork] }),
+      ),
+      http.all("/api/scouts/*", ({ request }) => {
+        if (request.method !== "GET") writes.push(request.method);
+        return undefined;
+      }),
+    );
+    const user = userEvent.setup();
+    const panel = await openPanel(user);
+
+    const note = await panel.findByRole("note");
+    expect(note).toHaveTextContent("France Travail will not apply: Remote policy");
+    expect(note).toHaveTextContent("HelloWork will not apply: Remote policy");
+    expect(note).toHaveTextContent(
+      "HelloWork applies Posted within as Last 30 days instead of Last 14 days",
+    );
+    expect(writes).toEqual([]);
+  });
+
+  it("shows no warning for a Scout whose every filter is honoured on every targeted site", async () => {
+    let siteConfigsRead = false;
+    server.use(
+      http.get("/api/scouts", () =>
+        HttpResponse.json({
+          scouts: [scout({ targetSiteKeys: ["FRANCE_TRAVAIL", "HELLOWORK"] })],
+        }),
+      ),
+      http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
+      http.get("/api/site-configs", () => {
+        siteConfigsRead = true;
+        return HttpResponse.json({
+          siteConfigs: [
+            SUPPORT_SITE_CONFIGS[0],
+            {
+              ...SUPPORT_SITE_CONFIGS[1],
+              filterSupport: {
+                ...SUPPORT_SITE_CONFIGS[1].filterSupport,
+                postedWithin: support("SUPPORTED"),
+              },
+            },
+          ],
+        });
+      }),
+    );
+    const user = userEvent.setup();
+    const panel = await openPanel(user);
+
+    expect(panel.getByText("Keywords: python")).toBeInTheDocument();
+    await waitFor(() => expect(siteConfigsRead).toBe(true));
+    expect(panel.queryByRole("note")).not.toBeInTheDocument();
+  });
+});

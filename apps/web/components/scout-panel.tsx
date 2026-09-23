@@ -21,8 +21,13 @@ import {
   type Scout,
   type ScoutStatus,
 } from "@/hooks/use-scouts";
+import { useSiteConfigs } from "@/hooks/use-site-configs";
 import { BffError } from "@/lib/bff-client";
 import { ApplicationStatsHeader } from "@/components/application-stats-header";
+import {
+  FilterSupportNotice,
+  jobFiltersFrom,
+} from "@/components/job-filter-fields";
 import { PanelSection } from "@/components/panel-section";
 import { ScoutRunHistory } from "@/components/scout-run-history";
 import { ScoutFinds } from "@/components/scout-finds";
@@ -127,6 +132,14 @@ export function ScoutPanel({
   const run = useRunScout(scout?.id ?? "");
   const update = useUpdateScout(scout?.id ?? "");
   const stats = useScoutStats(scout?.id ?? "");
+
+  // The same FilterSupport statement the Scout form shows, read from the
+  // stored filters and the targeted sites (issue #211). Nothing is written
+  // back: a key with no enabled SiteConfig simply carries no warning.
+  const siteConfigs = useSiteConfigs();
+  const targetedSites = (siteConfigs.data ?? []).filter((site) =>
+    scout?.targetSiteKeys.some((key) => key === site.siteKey),
+  );
 
   const activeFilters = scout
     ? Object.entries(scout.filters).filter(
@@ -304,6 +317,12 @@ export function ScoutPanel({
                         )}
                       </ConfigRow>
                     </dl>
+                    <div className="pb-4 empty:hidden">
+                      <FilterSupportNotice
+                        sites={targetedSites}
+                        values={jobFiltersFrom(scout.filters)}
+                      />
+                    </div>
                   </PanelSection>
 
                   <ApplicationStatsHeader
