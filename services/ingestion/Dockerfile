@@ -14,6 +14,12 @@ WORKDIR /app
 
 COPY . .
 
-RUN uv sync --frozen --package ingestion
+# `--extra browser` pulls in Playwright for ingestion.browser_fetch's
+# escalation tier (the one that clears WTTJ's AWS WAF JS challenge). The
+# extra is optional at the package level precisely so only this image pays
+# for it; `playwright install --with-deps chromium` adds the browser binary
+# and its system libraries, which python:3.11-slim doesn't ship.
+RUN uv sync --frozen --package ingestion --extra browser \
+    && uv run --package ingestion python -m playwright install --with-deps chromium
 
 CMD ["uv", "run", "--package", "ingestion", "python", "-m", "ingestion.local_worker"]

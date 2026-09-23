@@ -8,6 +8,17 @@ Turns a candidate's ingestion request into scraped, structured JobOffers, then s
 Fetching one JobOffer's raw HTML by its source URL and storing it in S3, ahead of extraction. Moves a JobOffer from pending to scraped, or to failed on fetch error.
 _Avoid_: Fetch — fetch is the HTTP call; scrape is the whole stage, including the S3 write and status transition.
 
+**Block**:
+An anti-bot interstitial served in place of the content — a JS challenge, a CAPTCHA wall, a sign-in wall, a rate-limit or a reputation denial. Classified by `blocking.detect_block`, which returns a `BlockKind` plus the one property the pipeline acts on: whether a headless browser could plausibly get past it. A block is never stored as a scrape, and always surfaces as a `BLOCKED_<KIND>:` `errorMessage`.
+_Avoid_: Selector drift — drift is the opposite diagnosis (real content, stale selectors), and the two used to be conflated in a single hedged error message.
+
+**Escalation ladder**:
+The three rungs `fetch.fetch_page` climbs for one URL: plain HTTP through the hardened shared client, then a headless browser (entered when the site is client-rendered or when the block is browser-solvable), then stop and report the reason. A CAPTCHA wall skips the browser rung entirely — escalating into it is latency with no chance of success.
+
+**API source**:
+A job source that returns structured offers over an official API instead of HTML (`SiteConfig.integrationType = OFFICIAL_API`). Skips scrape *and* extraction: offers go straight to `READY` with `structuredData` filled, so no LLM extraction call is spent and no anti-bot system is involved. France Travail keeps its own module for its OAuth2 flow and per-offer endpoint; every other source is an adapter in `api_sources.SOURCES` mapping that API's JSON onto a `NormalisedOffer`, over the shared lifecycle in `api_ingest.link_api_offers`.
+_Avoid_: Site adapter — a site adapter reads a SiteConfig's CSS selectors out of HTML; an API source never touches HTML.
+
 **Extraction** (JobOffer):
 Turning a JobOffer's raw scraped HTML into its structured data (title, company, location, postedAt, description, requirements, salary, contract type, remote policy, seniority) via the Analysis context's `JobOfferExtractionAgent`. A missing title means extraction failed — every other field may legitimately come back empty (docs/adr/0010).
 _Avoid_: Parsing — parsing is CVVersion's term, owned by the Analysis context.

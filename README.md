@@ -359,7 +359,42 @@ The compose `worker` drains all three pipeline queues:
   offers" (and "Analyse one offer" on an unknown URL) advance on their own.
   A `SITE_SEARCH` run against France Travail needs
   `FRANCE_TRAVAIL_CLIENT_ID` / `FRANCE_TRAVAIL_CLIENT_SECRET` in the host
-  env (passed through to the container).
+  env (passed through to the container); one against Adzuna needs
+  `ADZUNA_APP_ID` / `ADZUNA_APP_KEY` (free keys from
+  [developer.adzuna.com](https://developer.adzuna.com/)). Remotive and the
+  HTML-scraped sites need no credentials.
+
+### Job sources and anti-bot blocking
+
+Every fetch goes through `ingestion.fetch.fetch_page`, which climbs a
+three-rung ladder per URL: the hardened shared HTTP client (browser headers,
+per-host pacing, bounded retry with backoff) → a headless browser, when the
+site is client-rendered (`SiteConfig.requiresJsRendering`) or when the block
+it hit is one a browser can clear → stop, with a `BLOCKED_<KIND>:` reason.
+`ingestion.blocking` classifies interstitials and decides that middle step: a
+JS challenge is worth a browser, a CAPTCHA wall never is.
+
+Where the seeded sites stand, all verified live:
+
+| Source | Status |
+| --- | --- |
+| France Travail, Adzuna, Remotive | `OFFICIAL_API` — structured JSON, no scrape, **no extraction LLM call**, nothing to block |
+| LinkedIn | Works over plain HTTP; offer pages carry `JobPosting` JSON-LD. Watch for HTTP 999 on a datacenter IP |
+| HelloWork | Works over plain HTTP |
+| WTTJ | Browser tier reaches the site, but its search URL/selectors are stale — a site-adapter fix, not a blocking one |
+| Indeed, Glassdoor | **Disabled.** Cloudflare CAPTCHA wall that neither rung can clear; use Adzuna for comparable French coverage |
+
+The browser rung needs the optional extra (the `worker` image installs both):
+
+```bash
+uv sync --package ingestion --extra browser
+uv run --package ingestion python -m playwright install chromium
+```
+
+Tuning: `SCRAPER_MIN_DELAY_SECONDS` (default 1.0, minimum seconds between two
+requests to the same host), `SCRAPER_MAX_RETRIES` (default 3),
+`SCRAPER_USER_AGENT`, and `BROWSER_FETCH_ENABLED=0` to switch the browser rung
+off. The test suite sets the last two so no test launches a browser or paces.
 - `analysis-intake` → `WORKER_ANALYSIS_MODE=local`: the whole
   AnalysisWorkflow (EnsureCVConverted → EnsureOfferExtracted → the
   comparison crew → persist) in-process via `analysis.local_pipeline`, the
@@ -390,10 +425,44 @@ a subset with `WORKER_QUEUES=cv-conversion,analysis-intake`.
 pnpm lint
 pnpm typecheck
 
-# Python (run against the docker-compose Postgres/MinIO/ElasticMQ)
-uv run --package api pytest services/api/tests -q
-uv run --package ingestion pytest services/ingestion/tests -q
-uv run --package analysis pytest services/analysis/tests -q
+# Python — all four suites against a throwaway database (recommended)
+make test
+```
+
+`make test` drops, recreates, migrates and seeds a `jhc_test` database
+(~1.5s), runs the four suites against it, and pauses the compose `worker`
+for the duration.
+
+**Run it this way rather than calling pytest directly against the dev
+database.** The suites exercise repair/backfill tasks that scan the *whole*
+`JobOffer` table, and their fake `extract_fn` writes to every row it is
+handed. Against the dev database that is destructive — one run overwrote the
+titles of 10 real LinkedIn offers with the literal string `"Repaired Title"`.
+The tests now refuse to mutate rows they did not create
+(`_guarded_extract_fn`), but a throwaway database is the boundary that does
+not depend on every future test remembering to.
+
+The worker is paused because it drains the same ElasticMQ queues the tests
+assert on; left running, it consumes their messages first and the tests fail
+with an empty-inbox assertion that looks exactly like a real bug. S3 stays
+shared — tests key objects by uuid and clean up after themselves.
+
+**Known residual flakiness.** Each suite is green on its own (164 / 38 / 222 /
+450). Run back to back by `make test`, a single test occasionally fails, and a
+different one each time — seen so far in `test_workflow_e2e`,
+`test_v1_application_stats` and `test_v1_analyses`. They pass on a re-run.
+This is cross-suite contention over the resources that are still shared
+(ElasticMQ, MinIO, Step Functions Local), and it predates the throwaway
+database — that isolates Postgres only. Re-run the affected suite before
+treating such a failure as real.
+
+Individual suites, if you need one in isolation (same isolation, set the
+variable yourself):
+
+```bash
+make test-db
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/jhc_test?schema=public" \
+  uv run --package ingestion pytest services/ingestion/tests -q
 ```
 
 This is exactly what CI (`.github/workflows/ci.yml`) runs on every push/PR to

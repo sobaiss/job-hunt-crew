@@ -11,14 +11,12 @@ response.
 """
 
 import os
-import uuid
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode
 
 import httpx
 from py_db.models import (
     IngestionJob,
-    IngestionJobOffer,
     Ingestionjobstatus,
     JobOffer,
     Jobofferextractionstatus,
@@ -27,10 +25,9 @@ from py_db.models import (
 )
 from py_db.pipeline_events import record_pipeline_event
 from py_db.structured_logging import get_logger, log_stage_event
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .fanout import dedupe_and_cap_urls, update_ingestion_job_aggregate
+from .api_ingest import NormalisedOffer, link_api_offers
 from .site_search import build_search_url
 
 logger = get_logger(__name__)
@@ -172,19 +169,27 @@ def _offer_structured_data(offre: dict) -> dict:
     }
 
 
+def _normalised_fields(offre: dict) -> dict:
+    """France Travail's own JSON mapped onto `NormalisedOffer`'s fields (minus
+    `source_url`, which both callers compute separately)."""
+    return {
+        "title": offre.get("intitule"),
+        "company": (offre.get("entreprise") or {}).get("nom"),
+        "location": (offre.get("lieuTravail") or {}).get("libelle"),
+        "posted_at": _offer_posted_at(offre),
+        "structured_data": _offer_structured_data(offre),
+    }
+
+
 def _offer_job_offer_fields(offre: dict) -> dict:
     """The `JobOffer` columns the France Travail API fills directly. Both the
     SITE_SEARCH fan-out (`ingest_france_travail_offers`) and the SINGLE_URL
     fetch (`ingest_france_travail_single_offer`) set this exact same set, so an
     offer ingested either way lands identical.
     """
-    return {
-        "title": offre.get("intitule"),
-        "company": (offre.get("entreprise") or {}).get("nom"),
-        "location": (offre.get("lieuTravail") or {}).get("libelle"),
-        "postedAt": _offer_posted_at(offre),
-        "structuredData": _offer_structured_data(offre),
-    }
+    return NormalisedOffer(
+        source_url=_offer_source_url(offre), **_normalised_fields(offre)
+    ).job_offer_fields()
 
 
 async def search_offers(
@@ -295,47 +300,21 @@ async def ingest_france_travail_offers(
         await session.commit()
         return []
 
-    by_url: dict[str, dict] = {}
-    for offre in offers_raw:
-        by_url.setdefault(_offer_source_url(offre), offre)
-    retained_urls = dedupe_and_cap_urls(list(by_url.keys()), ingestion_job.maxOffers)
-
-    job_offers: list[JobOffer] = []
-    for url in retained_urls:
-        job_offer = await session.scalar(
-            select(JobOffer).where(JobOffer.sourceUrl == url)
+    # The JobOffer lifecycle below this line is shared with every other
+    # OFFICIAL_API source (`api_sources`), so it lives in `api_ingest`; what
+    # stays here is only France Travail's own JSON -> NormalisedOffer mapping.
+    offers = [
+        NormalisedOffer(
+            source_url=_offer_source_url(offre), **_normalised_fields(offre)
         )
-        if job_offer is None:
-            job_offer = JobOffer(
-                id=str(uuid.uuid4()),
-                sourceUrl=url,
-                sourceSite=Joboffersourcesite.FRANCE_TRAVAIL,
-                extractionStatus=Jobofferextractionstatus.READY,
-                updatedAt=_now(),
-                **_offer_job_offer_fields(by_url[url]),
-            )
-            session.add(job_offer)
-            await session.flush()
-        job_offers.append(job_offer)
-
-        existing_link = await session.scalar(
-            select(IngestionJobOffer).where(
-                IngestionJobOffer.ingestionJobId == ingestion_job.id,
-                IngestionJobOffer.jobOfferId == job_offer.id,
-            )
-        )
-        if existing_link is None:
-            session.add(
-                IngestionJobOffer(
-                    id=str(uuid.uuid4()),
-                    ingestionJobId=ingestion_job.id,
-                    jobOfferId=job_offer.id,
-                )
-            )
-
-    await session.commit()
-    await update_ingestion_job_aggregate(session, ingestion_job.id)
-    return job_offers
+        for offre in offers_raw
+    ]
+    return await link_api_offers(
+        session,
+        ingestion_job,
+        offers,
+        source_site=Joboffersourcesite.FRANCE_TRAVAIL,
+    )
 
 
 async def ingest_france_travail_single_offer(

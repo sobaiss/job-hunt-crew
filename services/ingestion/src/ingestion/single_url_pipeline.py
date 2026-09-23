@@ -65,6 +65,9 @@ _SITE_KEY_TO_SOURCE_SITE = {
     Siteconfigsitekey.FRANCE_TRAVAIL: Joboffersourcesite.FRANCE_TRAVAIL,
     Siteconfigsitekey.WTTJ: Joboffersourcesite.WTTJ,
     Siteconfigsitekey.GLASSDOOR: Joboffersourcesite.GLASSDOOR,
+    Siteconfigsitekey.HELLOWORK: Joboffersourcesite.HELLOWORK,
+    Siteconfigsitekey.ADZUNA: Joboffersourcesite.ADZUNA,
+    Siteconfigsitekey.REMOTIVE: Joboffersourcesite.REMOTIVE,
 }
 
 
@@ -202,9 +205,16 @@ async def run_single_url_ingestion(
 
     # OFFICIAL_API site (France Travail): the API returns structured data, so
     # fetch the offer directly and skip scrape + LLM extraction entirely.
+    #
+    # Scoped to France Travail specifically, not to OFFICIAL_API in general:
+    # the sources in `api_sources` are search-only (Adzuna and Remotive expose
+    # no per-offer endpoint), so a pasted URL from one of them takes the
+    # ordinary scrape path below — their offer pages are plain HTML with no
+    # anti-bot wall, which is the whole reason they're in the registry.
     if (
         site_config is not None
         and site_config.integrationType == Siteconfigintegrationtype.OFFICIAL_API
+        and site_config.siteKey == Siteconfigsitekey.FRANCE_TRAVAIL
     ):
         offer_id = extract_offer_id(site_config, url)
         if not offer_id:
@@ -240,6 +250,7 @@ async def run_single_url_ingestion(
             job_offer.id,
             http_client=http_client,
             ingestion_job_id=ingestion_job.id,
+            site_config=site_config,
         )
     except ScrapeError:
         await update_ingestion_job_aggregate(session, ingestion_job.id)

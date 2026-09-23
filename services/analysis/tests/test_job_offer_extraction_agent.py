@@ -19,7 +19,9 @@ from sqlalchemy import select
 
 from analysis.job_offer_extraction_agent import (
     MAX_ATTEMPTS,
+    MAX_CONTENT_CHARS,
     ExtractionError,
+    build_llm_input,
     extract_job_offer,
 )
 from analysis.llm_provider import LLMProvider
@@ -121,6 +123,10 @@ class StubLLMProvider(LLMProvider):
     def __init__(self, responses):
         self._responses = list(responses)
         self.calls = 0
+        # Every prompt this provider was handed. Without it a test can assert
+        # a successful extraction while the model is being fed a page's cookie
+        # banner — which is exactly how the truncation bug stayed invisible.
+        self.prompts: list[str] = []
 
     def generate(
         self,
@@ -132,6 +138,7 @@ class StubLLMProvider(LLMProvider):
         temperature: float | None = None,
     ) -> str:
         self.calls += 1
+        self.prompts.append(prompt)
         return self._responses[min(self.calls, len(self._responses)) - 1]
 
 
@@ -644,6 +651,18 @@ async def test_extract_job_offer_linkedin_regression_fixture():
             assert job_offer.postedAt == datetime(2026, 9, 8)
         # Real page has no JobPosting JSON-LD block; falls through to the LLM tier.
         assert provider.calls == 1
+        # ...and the LLM tier must actually be shown the job. The stub returns
+        # a canned answer whatever it receives, so without this the test passed
+        # just as happily when the prompt was 20k characters of LinkedIn's
+        # cookie banner — the bug that failed 3 of these offers in practice.
+        prompt = provider.prompts[0]
+        assert "Senior Backend Developer" in prompt
+        assert "papernest" in prompt
+        # Body-only content, deliberately: the title and company also appear in
+        # this page's <title>/og: tags, which the old truncated window happened
+        # to include, so asserting on those alone would not catch a regression
+        # back to it. "Join to apply for the" sits in the job block itself.
+        assert "Join to apply for the" in prompt
     finally:
         s3.delete_object(Bucket=S3_BUCKET, Key=raw_content_key)
         await _delete_pipeline_events(session_factory, job_offer_id)
@@ -704,3 +723,131 @@ async def test_extract_job_offer_wttj_regression_fixture():
                 await session.delete(job_offer)
                 await session.commit()
         await engine.dispose()
+
+
+# --- LLM-tier input construction (build_llm_input) --------------------------
+#
+# The LLM tier used to be handed `raw_html` with <script>/<style> stripped,
+# cut to the first 20k characters. On a real job page that prefix is <head>
+# metadata, cookie-consent markup and hidden accessibility strings: across the
+# 28 LinkedIn pages captured locally, exactly 1 had its <h1> inside that
+# window. The tests below pin the property that actually matters — the model
+# is shown the job — rather than only that extraction returned something.
+
+
+@pytest.mark.parametrize(
+    ("fixture_html", "expected_fragments"),
+    [
+        pytest.param(
+            LINKEDIN_SAMPLE_HTML,
+            ("Senior Backend Developer", "papernest"),
+            id="linkedin",
+        ),
+        pytest.param(
+            HELLOWORK_SAMPLE_HTML,
+            ("PL-SQL", "Proxiad"),
+            id="hellowork",
+        ),
+        pytest.param(
+            WTTJ_SAMPLE_HTML,
+            ("Développeur Full Stack", "TF1"),
+            id="wttj",
+        ),
+    ],
+)
+def test_build_llm_input_contains_the_job_for_every_site_fixture(
+    fixture_html, expected_fragments
+):
+    llm_input = build_llm_input(fixture_html)
+    for fragment in expected_fragments:
+        assert fragment in llm_input
+
+
+def test_build_llm_input_replaces_consent_boilerplate_with_the_job_block():
+    """The test that actually fails against the old implementation.
+
+    LinkedIn's first 20k characters were its cookie-consent notice; the job
+    block (location, recency, applicant count, description) began past it. A
+    weaker assertion on title/company would pass either way, because those
+    also appear in this page's <title> and og: tags — which is precisely why
+    the bug survived the existing per-site regression fixtures (#118).
+    """
+    llm_input = build_llm_input(LINKEDIN_SAMPLE_HTML)
+    assert "non-essential cookies" not in llm_input
+    assert "Join to apply for the" in llm_input
+    assert "Paris, Île-de-France, France" in llm_input
+
+
+def test_build_llm_input_is_a_fraction_of_the_raw_page():
+    """Visible content rather than markup: the point isn't only that the job
+    fits, it's that it fits with room to spare, so the cap stops truncating
+    real pages at all."""
+    llm_input = build_llm_input(LINKEDIN_SAMPLE_HTML)
+    assert len(LINKEDIN_SAMPLE_HTML) > 200_000
+    assert len(llm_input) < MAX_CONTENT_CHARS
+
+
+def test_build_llm_input_prefers_the_main_content_region():
+    html = """
+    <html><head><title>T</title></head><body>
+      <nav>NAVIGATION BOILERPLATE</nav>
+      <main><h1>Staff Engineer</h1><p>Own the platform.</p></main>
+      <footer>FOOTER BOILERPLATE</footer>
+    </body></html>
+    """
+    llm_input = build_llm_input(html)
+    assert "Staff Engineer" in llm_input
+    assert "Own the platform." in llm_input
+    assert "NAVIGATION BOILERPLATE" not in llm_input
+    assert "FOOTER BOILERPLATE" not in llm_input
+
+
+def test_build_llm_input_falls_back_to_body_without_main():
+    """WTTJ's fixture has no <main>; dropping to <body> is what keeps it
+    working rather than returning an empty prompt."""
+    html = "<html><body><h1>Staff Engineer</h1><p>Own the platform.</p></body></html>"
+    llm_input = build_llm_input(html)
+    assert "Staff Engineer" in llm_input
+    assert "Own the platform." in llm_input
+
+
+def test_build_llm_input_drops_scripts_styles_and_hidden_i18n_strings():
+    html = """
+    <html><head><title>T</title>
+      <style>.a{color:red}</style>
+      <script>var tracking = "SCRIPT PAYLOAD";</script>
+    </head><body><main>
+      <h1>Staff Engineer</h1>
+      <code id="i18n_aria_live" style="display:none"><!--"HIDDEN I18N STRING"--></code>
+    </main></body></html>
+    """
+    llm_input = build_llm_input(html)
+    assert "Staff Engineer" in llm_input
+    assert "SCRIPT PAYLOAD" not in llm_input
+    assert "color:red" not in llm_input
+    # LinkedIn ships its i18n catalogue inside HTML comments in hidden <code>
+    # elements; those were a large share of the old 20k window.
+    assert "HIDDEN I18N STRING" not in llm_input
+
+
+def test_build_llm_input_keeps_attribute_borne_metadata():
+    """`<time datetime>` and og: tags carry facts that exist nowhere in the
+    visible text — on a page with no JSON-LD the datetime attribute is often
+    the only machine-readable posting date."""
+    html = """
+    <html><head><title>Staff Engineer at Acme</title>
+      <meta property="og:title" content="Staff Engineer">
+    </head><body><main>
+      <h1>Staff Engineer</h1>
+      <time datetime="2026-09-07T18:24:11Z">il y a 2 semaines</time>
+    </main></body></html>
+    """
+    llm_input = build_llm_input(html)
+    assert "page-title: Staff Engineer at Acme" in llm_input
+    assert "og:title: Staff Engineer" in llm_input
+    assert "2026-09-07T18:24:11Z" in llm_input
+
+
+def test_build_llm_input_caps_at_max_content_chars():
+    html = "<html><body><main>" + ("word " * 20_000) + "</main></body></html>"
+    assert len(build_llm_input(html)) == MAX_CONTENT_CHARS

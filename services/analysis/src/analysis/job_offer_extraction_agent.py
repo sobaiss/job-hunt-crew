@@ -10,6 +10,7 @@ import json
 import re
 from datetime import UTC, datetime
 
+from bs4 import BeautifulSoup
 from py_db.models import JobOffer, Jobofferextractionstatus
 from py_db.pipeline_events import record_pipeline_event
 from py_db.structured_logging import get_logger, log_stage_event
@@ -31,14 +32,20 @@ logger = get_logger(__name__)
 STAGE = "extract"
 
 MAX_ATTEMPTS = 3
-MAX_HTML_CHARS = 20000
+MAX_CONTENT_CHARS = 20000
 
-_SCRIPT_OR_STYLE_RE = re.compile(
-    r"<(script|style)\b[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL
-)
+# Markup that never carries job content but dominates a real page's byte count.
+_NON_CONTENT_TAGS = ("script", "style", "noscript", "svg", "template", "iframe")
+
+# High-signal metadata that lives in attributes, which plain text extraction
+# would drop: `<time datetime>` is often the only machine-readable posting date
+# on a page with no JSON-LD.
+_META_PROPERTIES = ("og:title", "og:description", "og:site_name")
+_MAX_TIME_ELEMENTS = 3
 
 SYSTEM_PROMPT = (
-    "You extract structured data from the raw HTML of a job posting. "
+    "You extract structured data from a job posting. The input is the visible "
+    "text of the posting's page, preceded by a few page-metadata lines. "
     "Respond with ONLY a single JSON object, no markdown fences, no commentary, "
     "matching this shape: "
     '{"title": string|null, "company": string|null, "location": string|null, '
@@ -71,8 +78,61 @@ class ExtractionError(Exception):
 _RESPONSE_SCHEMA = JobOfferLLMExtraction.model_json_schema()
 
 
-def _strip_non_visible(html: str) -> str:
-    return _SCRIPT_OR_STYLE_RE.sub("", html)
+def _page_metadata_lines(soup: BeautifulSoup) -> list[str]:
+    """A handful of high-signal facts that live in attributes rather than in
+    visible text, so extracting text alone wouldn't carry them."""
+    lines: list[str] = []
+    if soup.title and soup.title.get_text(strip=True):
+        lines.append(f"page-title: {soup.title.get_text(strip=True)}")
+    for prop in _META_PROPERTIES:
+        tag = soup.find("meta", property=prop) or soup.find(
+            "meta", attrs={"name": prop}
+        )
+        content = (tag.get("content") or "").strip() if tag else ""
+        if content:
+            lines.append(f"{prop}: {content}")
+    for time_tag in soup.find_all("time", datetime=True)[:_MAX_TIME_ELEMENTS]:
+        label = time_tag.get_text(" ", strip=True)
+        lines.append(f"time: {time_tag['datetime']}{f' ({label})' if label else ''}")
+    return lines
+
+
+def build_llm_input(raw_html: str) -> str:
+    """The page's job content, as the LLM tier should see it.
+
+    This used to be `raw_html` with `<script>`/`<style>` removed, truncated to
+    the first 20k characters. On a real job page that window is almost entirely
+    `<head>` metadata, cookie-consent markup and hidden accessibility strings:
+    measured across the 28 LinkedIn pages in the local database, 26 had their
+    `<h1>` *beyond* the cutoff, so the model was asked to name a job whose
+    title, company, location and description it had never been shown. Every
+    extraction failure in that set was on a page with no JSON-LD to fall back
+    on; not one page that had JSON-LD failed. docs/adr/0010 flagged exactly
+    this cutoff when it moved the deterministic tier to search the untruncated
+    HTML, but the LLM fallback kept eating the same useless prefix.
+
+    So: take the content region (`<main>`, else `<body>`) as visible text,
+    prefixed by the few attribute-borne facts text extraction would lose. On
+    the same 28 pages this yields 11k-19k characters carrying the whole job
+    block, and 26 of them fit under the cap with no truncation at all. The
+    region still opens with some site navigation on sites whose `<main>`
+    wraps it (or that have no `<main>` at all) — that's accepted: the point
+    is that the job is now *present* and untruncated, not that it comes first.
+    """
+    soup = BeautifulSoup(raw_html, "html.parser")
+    metadata = _page_metadata_lines(soup)
+    for tag in soup(list(_NON_CONTENT_TAGS)):
+        tag.decompose()
+
+    # `<main>` is the content region on every site seeded so far; `<body>` is
+    # the honest fallback, and `soup` itself covers a fragment with neither.
+    region = soup.find("main") or soup.body or soup
+    text = region.get_text("\n", strip=True)
+    # Collapse the runs of blank lines that per-element extraction leaves
+    # behind — they cost tokens and carry nothing.
+    text = re.sub(r"\n{3,}", "\n\n", text)
+
+    return "\n".join([*metadata, "", text]).strip()[:MAX_CONTENT_CHARS]
 
 
 def _parse_posted_at(value: str | None) -> datetime | None:
@@ -186,7 +246,7 @@ async def extract_job_offer(
             # through to the LLM tier below, which fills it in and, per the
             # merge logic there, keeps these already-resolved fields as-is.
 
-    html = _strip_non_visible(raw_html)[:MAX_HTML_CHARS]
+    llm_input = build_llm_input(raw_html)
 
     async def _fail(message: str) -> None:
         job_offer.extractionStatus = Jobofferextractionstatus.FAILED
@@ -222,7 +282,7 @@ async def extract_job_offer(
         try:
             raw = provider.generate(
                 system=SYSTEM_PROMPT,
-                prompt=html,
+                prompt=llm_input,
                 response_schema=_RESPONSE_SCHEMA,
                 temperature=retry_temperature(attempt),
             )

@@ -1,4 +1,4 @@
-.PHONY: up down web-up web-down migrate seed clean-analyses clean-analyses-scout clean-analyses-failed worker worker-once
+.PHONY: up down web-up web-down migrate seed clean-analyses clean-analyses-scout clean-analyses-failed worker worker-once test test-db
 
 # Start local infrastructure (Postgres, MinIO, ElasticMQ, Step Functions
 # Local, api, worker). The `migrate` service applies pending Prisma
@@ -117,6 +117,47 @@ worker:
 # Drain whatever is currently queued, then exit.
 worker-once:
 	$(WORKER_LOCAL_ENV) WORKER_RUN_ONCE=1 uv run --package ingestion python -m ingestion.local_worker
+
+# --- Tests -----------------------------------------------------------------
+#
+# The Python suites talk to a real Postgres through `DATABASE_URL`, and the
+# repair/backfill tasks they exercise scan the WHOLE JobOffer table. Run
+# against the dev database, that is not hypothetical: a suite run once stamped
+# `title = "Repaired Title"` onto 10 real LinkedIn offers, via the fake
+# `extract_fn` in test_repair_missing_title_offers.py.
+#
+# Every conftest sets `DATABASE_URL` with `os.environ.setdefault`, and no test
+# hardcodes a Postgres URL, so pointing the suites at a throwaway database
+# needs no code change at all — just this variable. Creating and migrating it
+# takes ~1.5s, which is why it is done fresh on every run rather than kept
+# around to drift.
+TEST_DB_NAME = jhc_test
+TEST_DATABASE_URL = postgresql://postgres:postgres@localhost:5432/$(TEST_DB_NAME)?schema=public
+
+# Drop, recreate, migrate and seed the throwaway database. Seeding matters:
+# some API tests assert on the seeded SiteConfig rows.
+test-db:
+	docker compose exec -T postgres psql -U postgres -c "drop database if exists $(TEST_DB_NAME);"
+	docker compose exec -T postgres psql -U postgres -c "create database $(TEST_DB_NAME);"
+	DATABASE_URL="$(TEST_DATABASE_URL)" pnpm --filter @job-hunt-crew/prisma exec prisma migrate deploy
+	DATABASE_URL="$(TEST_DATABASE_URL)" pnpm --filter @job-hunt-crew/prisma exec prisma db seed
+
+# All four Python suites against that database.
+#
+# The compose `worker` is stopped for the duration and restarted afterwards:
+# it drains the same ElasticMQ queues the tests assert on, so a running worker
+# consumes their messages first and fails them with an empty-inbox assertion
+# that reads exactly like a real bug. Isolating the queues instead of the
+# worker would mean per-test queues in elasticmq.conf — worth doing, not done
+# here. S3 stays shared: tests key their objects by uuid and clean up (one
+# stray object in 359 measured), so it has not been worth isolating.
+test: test-db
+	docker compose stop worker
+	-DATABASE_URL="$(TEST_DATABASE_URL)" uv run --package ingestion pytest services/ingestion/tests -q
+	-DATABASE_URL="$(TEST_DATABASE_URL)" uv run --package scout pytest services/scout/tests -q
+	-DATABASE_URL="$(TEST_DATABASE_URL)" uv run --package analysis pytest services/analysis/tests -q
+	-DATABASE_URL="$(TEST_DATABASE_URL)" uv run --package api pytest services/api/tests -q
+	docker compose start worker
 
 update-secrets:
 	sbx secret set github --sandbox claude-job-hunt-crew -t "$(gh auth token)" -f

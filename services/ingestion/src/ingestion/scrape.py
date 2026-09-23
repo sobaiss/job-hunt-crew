@@ -1,11 +1,12 @@
 from datetime import UTC, datetime
 
 import httpx
-from py_db.models import JobOffer, Jobofferextractionstatus
+from py_db.models import JobOffer, Jobofferextractionstatus, SiteConfig
 from py_db.pipeline_events import record_pipeline_event
 from py_db.structured_logging import get_logger, log_stage_event
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .fetch import FetchError, fetch_page
 from .s3_client import S3_BUCKET, make_s3_client, raw_scrape_key
 
 logger = get_logger(__name__)
@@ -29,6 +30,7 @@ async def scrape_job_offer(
     *,
     http_client: httpx.AsyncClient | None = None,
     ingestion_job_id: str | None = None,
+    site_config: SiteConfig | None = None,
 ) -> JobOffer:
     """Generic single-URL scrape step (PRD 8.3 steps 2/4 fallback path, no
     SiteConfig adapter yet). Fetches JobOffer.sourceUrl, stores the raw HTML
@@ -37,6 +39,14 @@ async def scrape_job_offer(
     transitions to FAILED with errorMessage set instead. `ingestion_job_id`
     is optional context (a JobOffer may be scraped standalone, e.g. Mode 1)
     used only to tag the PipelineEvent/log rows this emits (M6-T3).
+
+    The fetch itself goes through `fetch.fetch_page`, so this step now gets
+    browser-like headers, per-host pacing, retry, and — crucially — refuses
+    to store an anti-bot interstitial as though it were the offer. A blocked
+    fetch fails the offer with the `BLOCKED_<KIND>:` reason rather than the
+    old generic "Failed to fetch"; `site_config` (when the caller has one)
+    additionally lets `fetch_page` start at the browser tier for a site whose
+    listing is client-rendered (`requiresJsRendering`).
     """
     job_offer = await session.get(JobOffer, job_offer_id)
     if job_offer is None:
@@ -61,37 +71,37 @@ async def scrape_job_offer(
     job_offer.updatedAt = _now()
     await session.commit()
 
-    owns_client = http_client is None
-    client = http_client or httpx.AsyncClient(follow_redirects=True, timeout=30.0)
     try:
-        try:
-            response = await client.get(job_offer.sourceUrl)
-            response.raise_for_status()
-            html = response.text
-        except httpx.HTTPError as exc:
-            job_offer.extractionStatus = Jobofferextractionstatus.FAILED
-            job_offer.errorMessage = f"Failed to fetch {job_offer.sourceUrl}: {exc}"
-            job_offer.updatedAt = _now()
-            await session.commit()
-            log_stage_event(
-                logger,
-                stage=STAGE,
-                status="FAILED",
-                job_offer_id=job_offer_id,
-                ingestion_job_id=ingestion_job_id,
-                message=job_offer.errorMessage,
-            )
-            await record_pipeline_event(
-                session,
-                stage=STAGE,
-                status="FAILED",
-                message=f"job_offer_id={job_offer_id}: {job_offer.errorMessage}",
-                ingestion_job_id=ingestion_job_id,
-            )
-            raise ScrapeError(job_offer.errorMessage) from exc
-    finally:
-        if owns_client:
-            await client.aclose()
+        html = await fetch_page(
+            job_offer.sourceUrl,
+            site_config=site_config,
+            http_client=http_client,
+        )
+    except FetchError as exc:
+        # A block already reads as a complete sentence ("BLOCKED_CAPTCHA: ...
+        # [url]"); only a transport/status failure needs the URL prefixed.
+        job_offer.extractionStatus = Jobofferextractionstatus.FAILED
+        job_offer.errorMessage = (
+            str(exc) if exc.blocked else f"Failed to fetch {job_offer.sourceUrl}: {exc}"
+        )
+        job_offer.updatedAt = _now()
+        await session.commit()
+        log_stage_event(
+            logger,
+            stage=STAGE,
+            status="FAILED",
+            job_offer_id=job_offer_id,
+            ingestion_job_id=ingestion_job_id,
+            message=job_offer.errorMessage,
+        )
+        await record_pipeline_event(
+            session,
+            stage=STAGE,
+            status="FAILED",
+            message=f"job_offer_id={job_offer_id}: {job_offer.errorMessage}",
+            ingestion_job_id=ingestion_job_id,
+        )
+        raise ScrapeError(job_offer.errorMessage) from exc
 
     key = raw_scrape_key(job_offer_id)
     s3 = make_s3_client()

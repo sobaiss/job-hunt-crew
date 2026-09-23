@@ -23,12 +23,20 @@ def test_list_site_configs_returns_seeded_enabled_sites():
     site_keys = {row["siteKey"] for row in site_configs}
     assert site_keys == {
         "LINKEDIN",
-        "INDEED",
         "FRANCE_TRAVAIL",
         "WTTJ",
-        "GLASSDOOR",
         "HELLOWORK",
+        # OFFICIAL_API sources seeded as the answer to the walled sites
+        # (PRD Section 14): structured responses, no anti-bot surface.
+        "ADZUNA",
+        "REMOTIVE",
     }
+    # INDEED and GLASSDOOR are seeded but disabled — both sit behind a
+    # Cloudflare CAPTCHA wall that neither a plain HTTP fetch nor the
+    # headless-browser tier can clear, so they are deliberately kept out of
+    # the site picker rather than offered and failing. See their seed notes.
+    assert "INDEED" not in site_keys
+    assert "GLASSDOOR" not in site_keys
     assert all(row["enabled"] is True for row in site_configs)
 
     display_names = [row["displayName"] for row in site_configs]
