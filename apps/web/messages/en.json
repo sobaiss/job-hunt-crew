@@ -794,7 +794,8 @@
     "experienceLevelLabel": "Experience level",
     "supportHeading": "Some of your filters will not be applied as asked:",
     "supportUnsupported": "{site} will not apply: {filters}",
-    "supportApproximated": "{site} only approximates: {filters}"
+    "supportApproximated": "{site} only approximates: {filters}",
+    "supportSubstituted": "{site} applies {filter} as {substitute} instead of {value}"
   },
   "scouts": {
     "title": "Agents",

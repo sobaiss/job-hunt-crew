@@ -86,6 +86,8 @@ const SHOWN_FILTERS = [
   ["remote", "remoteLabel"],
 ] as const;
 
+type ShownFilter = (typeof SHOWN_FILTERS)[number][0];
+
 function isFilled(values: JobFilterValues, key: keyof JobFilterValues) {
   if (key === "postedWithin") return values.postedWithin !== "any";
   return values[key].trim() !== "";
@@ -93,8 +95,10 @@ function isFilled(values: JobFilterValues, key: keyof JobFilterValues) {
 
 /**
  * Per selected site, the filled filters it will not honour as asked — the
- * FilterSupport statement shown before a run (docs/adr/0030). Renders nothing
- * when every filled filter is SUPPORTED on every site.
+ * FilterSupport statement shown before a run (docs/adr/0030). A value the
+ * site treats differently from the rest of its filter (a derogation) is
+ * judged on its own, and names the substitute applied when there is one.
+ * Renders nothing when every filled filter is SUPPORTED on every site.
  */
 function FilterSupportNotice({
   sites,
@@ -104,13 +108,30 @@ function FilterSupportNotice({
   values: JobFilterValues;
 }) {
   const t = useTranslations("jobFilters");
+  const tIng = useTranslations("ingestion");
+
+  // The select filters' values have labels; free text is shown as typed.
+  const valueLabel = (key: ShownFilter, value: string) =>
+    key === "postedWithin" || key === "remote"
+      ? tIng(`${key}.${value}` as Parameters<typeof tIng>[0])
+      : value;
 
   const lines = sites.flatMap((site) => {
+    const filled = SHOWN_FILTERS.filter(([key]) => isFilled(values, key)).map(
+      ([key, labelKey]) => {
+        const support = site.filterSupport?.[key];
+        const derogation = support?.derogations?.[values[key]];
+        return { key, label: t(labelKey), support, derogation };
+      },
+    );
     const byLevel = (level: "UNSUPPORTED" | "APPROXIMATED") =>
-      SHOWN_FILTERS.filter(
-        ([key]) =>
-          isFilled(values, key) && site.filterSupport?.[key]?.level === level,
-      ).map(([, labelKey]) => t(labelKey));
+      filled
+        .filter(
+          ({ support, derogation }) =>
+            !derogation?.substitute &&
+            (derogation ?? support)?.level === level,
+        )
+        .map(({ label }) => label);
     const line = (
       message: "supportUnsupported" | "supportApproximated",
       filters: string[],
@@ -118,9 +139,22 @@ function FilterSupportNotice({
       filters.length
         ? [t(message, { site: site.displayName, filters: filters.join(", ") })]
         : [];
+    const substituted = filled.flatMap(({ key, label, derogation }) =>
+      derogation?.substitute
+        ? [
+            t("supportSubstituted", {
+              site: site.displayName,
+              filter: label,
+              value: valueLabel(key, values[key]),
+              substitute: valueLabel(key, derogation.substitute),
+            }),
+          ]
+        : [],
+    );
     return [
       ...line("supportUnsupported", byLevel("UNSUPPORTED")),
       ...line("supportApproximated", byLevel("APPROXIMATED")),
+      ...substituted,
     ];
   });
 

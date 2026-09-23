@@ -79,8 +79,15 @@ def test_each_site_carries_its_filter_support_declarations():
     france_travail = site_configs["FRANCE_TRAVAIL"]["filterSupport"]
     assert france_travail["remote"]["level"] == "UNSUPPORTED"
     assert france_travail["postedWithin"]["level"] == "SUPPORTED"
-    assert site_configs["HELLOWORK"]["filterSupport"]["postedWithin"]["level"] == "UNSUPPORTED"
+    assert france_travail["postedWithin"]["derogations"] == {}
     assert site_configs["ADZUNA"]["filterSupport"]["remote"]["level"] == "APPROXIMATED"
+
+    # A per-value derogation reaches the browser naming its substitute.
+    hellowork_posted_within = site_configs["HELLOWORK"]["filterSupport"]["postedWithin"]
+    assert hellowork_posted_within["level"] == "SUPPORTED"
+    assert hellowork_posted_within["derogations"] == {
+        "14d": {"level": "APPROXIMATED", "substitute": "30d"}
+    }
 
 
 def test_list_site_configs_requires_internal_secret():

@@ -146,3 +146,24 @@ are also the values HelloWork's own search form submits.
   offer set unchanged. The guest page's own filter bar exposes `f_TPR`,
   `f_C`, `f_EA` and `f_AL`, and no workplace or job type. #212 assumes
   `remote` becomes SUPPORTED on LinkedIn. Re-check that before declaring it.
+
+## HelloWork after #213 — 2026-09-24
+
+HelloWork's adapter now sends freshness `d` and telework `t`:
+
+```
+HELLOWORK        postedWithin=24h             honoured        1034 -> 91
+HELLOWORK        postedWithin=7d              honoured        1034 -> 428
+HELLOWORK        postedWithin=14d             not honoured    1034 -> 1034
+HELLOWORK        postedWithin=30d             honoured        1034 -> 1027
+HELLOWORK        remote=onsite                honoured        1034 -> 271
+HELLOWORK        remote=hybrid                honoured        1034 -> 375
+HELLOWORK        remote=remote                honoured        1034 -> 8
+```
+
+`14d` and `30d` send the very same query (`d=m`, the derogation). The month
+covers nearly the whole listing, so the verdict for either one depends on
+how the listing moved between two requests a second apart. Read the pair
+together: `d=m` is honoured, and the raw `d=m` row agreed (1034 -> 1027).
+`hybrid` sends `t=Partiel&t=Occasionnel`: 375, against 293 + 85 for the two
+values alone.

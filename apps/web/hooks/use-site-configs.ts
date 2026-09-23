@@ -20,7 +20,21 @@ export type AntiBotRiskLevel = "LOW" | "MEDIUM" | "HIGH";
  */
 export type FilterSupportLevel = "SUPPORTED" | "APPROXIMATED" | "UNSUPPORTED";
 
-export type FilterSupport = { level: FilterSupportLevel; reason: string };
+/**
+ * One canonical value a site treats differently from the rest of its filter,
+ * with the canonical value it applies instead. A derogation only ever widens.
+ */
+export type Derogation = {
+  level: FilterSupportLevel;
+  substitute: string | null;
+};
+
+export type FilterSupport = {
+  level: FilterSupportLevel;
+  reason: string;
+  /** Keyed by canonical value; empty on most pairs. */
+  derogations?: Partial<Record<string, Derogation>>;
+};
 
 /**
  * The fields the "Analyse several offers" and Scout forms need from a

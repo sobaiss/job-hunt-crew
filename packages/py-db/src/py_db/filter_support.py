@@ -15,7 +15,8 @@ mapping.
 Hand-written (not sqlacodegen output), like `section_type.py`.
 """
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from enum import Enum
 
 from .models import Siteconfigsitekey
@@ -33,9 +34,24 @@ class FilterSupportLevel(str, Enum):
 
 
 @dataclass(frozen=True)
+class Derogation:
+    """How one canonical value is treated differently from the rest of its
+    pair. A derogation widens the filter, never narrows it: an offer outside
+    the filter arrives carrying what lets the candidate dismiss it, while an
+    offer never returned cannot be noticed.
+    """
+
+    level: FilterSupportLevel
+    # The canonical value the site is sent instead, named to the candidate.
+    substitute: str | None = None
+
+
+@dataclass(frozen=True)
 class FilterSupport:
     level: FilterSupportLevel
     reason: str
+    # Keyed by canonical value; empty on most pairs.
+    derogations: Mapping[str, Derogation] = field(default_factory=dict)
 
 
 SEARCH_FILTER_KEYS = (
@@ -99,17 +115,21 @@ FILTER_SUPPORT: dict[Siteconfigsitekey, dict[str, FilterSupport]] = {
             _S, "Sent as `l`, a plain label; honoured by `make verify-sites`."
         ),
         "postedWithin": FilterSupport(
-            _U,
-            "Not sent: HelloWork's freshness facet `d` has its own values "
-            "(h/d/w/m) and no 14-day one (#213).",
+            _S,
+            "Sent as freshness `d`: 24h -> `h`, 7d -> `w`, 30d -> `m`; "
+            "honoured by `make verify-sites`, except `m`, which covers nearly "
+            "the whole listing so its count barely moves. HelloWork has no "
+            "14-day value, so 14d widens to a month.",
+            derogations={"14d": Derogation(_A, substitute="30d")},
         ),
         "contractType": FilterSupport(
             _S, "Sent as `c`; honoured by `make verify-sites`."
         ),
         "remote": FilterSupport(
-            _U,
-            "Not sent: HelloWork's telework facet `t` has four values of its "
-            "own (#213).",
+            _S,
+            "Sent as telework `t`, repeatable: onsite -> `Pas_teletravail`, "
+            "hybrid -> `Partiel` and `Occasionnel`, remote -> `Complet`; "
+            "honoured by `make verify-sites`.",
         ),
         "experienceLevel": FilterSupport(_U, _EXPERIENCE_LEVEL_NOWHERE),
     },

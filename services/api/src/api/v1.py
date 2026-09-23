@@ -98,9 +98,16 @@ async def require_user_id(
     return x_user_id
 
 
+class DerogationResponse(BaseModel):
+    level: Literal["SUPPORTED", "APPROXIMATED", "UNSUPPORTED"]
+    substitute: str | None
+
+
 class FilterSupportResponse(BaseModel):
     level: Literal["SUPPORTED", "APPROXIMATED", "UNSUPPORTED"]
     reason: str
+    # Keyed by canonical value; empty on most pairs.
+    derogations: dict[str, DerogationResponse]
 
 
 class SiteConfigResponse(BaseModel):
@@ -159,7 +166,16 @@ async def list_site_configs(
                 enabled=row.enabled,
                 notes=row.notes,
                 filterSupport={
-                    key: FilterSupportResponse(level=support.level.value, reason=support.reason)
+                    key: FilterSupportResponse(
+                        level=support.level.value,
+                        reason=support.reason,
+                        derogations={
+                            value: DerogationResponse(
+                                level=derogation.level.value, substitute=derogation.substitute
+                            )
+                            for value, derogation in support.derogations.items()
+                        },
+                    )
                     for key, support in filter_support_for(row.siteKey).items()
                 },
                 createdAt=row.createdAt,

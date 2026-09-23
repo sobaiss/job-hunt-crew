@@ -918,6 +918,38 @@ describe("NewScoutPage — create form", () => {
     expect(note).toHaveTextContent("France Travail will not apply: Remote policy");
   });
 
+  it("names the substitute a site applies for a value it widens", async () => {
+    const hellowork = {
+      ...SUPPORT_SITE_CONFIGS[1],
+      filterSupport: {
+        ...SUPPORT_SITE_CONFIGS[1].filterSupport,
+        postedWithin: {
+          ...support("SUPPORTED"),
+          derogations: { "14d": { level: "APPROXIMATED", substitute: "30d" } },
+        },
+      },
+    };
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+      http.get("/api/site-configs", () =>
+        HttpResponse.json({ siteConfigs: [SUPPORT_SITE_CONFIGS[0], hellowork] }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<NewScoutPage />);
+
+    await user.click(await screen.findByRole("checkbox", { name: "HelloWork" }));
+    // 7 days is honoured as asked: no warning.
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("Posted within"), "14d");
+    expect(await screen.findByRole("note")).toHaveTextContent(
+      "HelloWork applies Posted within as Last 30 days instead of Last 14 days",
+    );
+  });
+
   it("shows an error when the server rejects the create (e.g. Scout cap)", async () => {
     server.use(
       http.get("/api/cv-versions", () =>

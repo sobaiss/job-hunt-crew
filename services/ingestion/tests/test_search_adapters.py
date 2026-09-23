@@ -3,7 +3,7 @@ site receives.
 
 These pin today's queries on purpose. A filter a site cannot honour yet is
 not sent (France Travail's `location` and `remote`, LinkedIn's `f_TPR`/
-`f_JT`/`f_WT`, HelloWork's `postedWithin`/`remote`) and is declared
+`f_JT`/`f_WT`) and is declared
 UNSUPPORTED in `py_db.filter_support` (#210); each later ticket changes one
 of these expectations deliberately.
 
@@ -101,12 +101,57 @@ def test_linkedin_ignores_the_row_template():
 # --- HelloWork -------------------------------------------------------------
 
 
-def test_hellowork_maps_keywords_location_and_contract_and_keeps_fixed_defaults():
+def test_hellowork_maps_every_filter_and_keeps_fixed_defaults():
     request = build_search_request(_skeleton(Siteconfigsitekey.HELLOWORK), ALL_FILTERS)
 
     assert request.url == (
         "https://www.hellowork.com/fr-fr/emploi/recherche.html?k=software%20engineer"
-        "&l=Paris&c=CDI&ray=20&st=relevance&cod=all&msa=0"
+        "&l=Paris&c=CDI&ray=20&st=relevance&cod=all&msa=0&d=w&t=Complet"
+    )
+
+
+@pytest.mark.parametrize(
+    ("posted_within", "freshness"),
+    [
+        ("24h", "&d=h"),
+        ("7d", "&d=w"),
+        # No 14-day value on HelloWork: widened to a month, never narrowed
+        # to a week (the derogation in `py_db.filter_support`).
+        ("14d", "&d=m"),
+        ("30d", "&d=m"),
+        ("any", ""),
+    ],
+)
+def test_hellowork_sends_its_own_freshness_value(posted_within, freshness):
+    request = build_search_request(
+        _skeleton(Siteconfigsitekey.HELLOWORK),
+        {"keywords": "python", "postedWithin": posted_within},
+    )
+
+    assert request.url == (
+        "https://www.hellowork.com/fr-fr/emploi/recherche.html?k=python&l="
+        f"&c=&ray=20&st=relevance&cod=all&msa=0{freshness}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("remote", "telework"),
+    [
+        ("onsite", "&t=Pas_teletravail"),
+        # HelloWork splits hybrid into two values; `t` repeats to carry both.
+        ("hybrid", "&t=Partiel&t=Occasionnel"),
+        ("remote", "&t=Complet"),
+    ],
+)
+def test_hellowork_sends_its_own_telework_values(remote, telework):
+    request = build_search_request(
+        _skeleton(Siteconfigsitekey.HELLOWORK),
+        {"keywords": "python", "remote": remote},
+    )
+
+    assert request.url == (
+        "https://www.hellowork.com/fr-fr/emploi/recherche.html?k=python&l="
+        f"&c=&ray=20&st=relevance&cod=all&msa=0{telework}"
     )
 
 

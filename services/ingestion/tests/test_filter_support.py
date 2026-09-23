@@ -152,3 +152,37 @@ async def test_declaration_matches_what_the_site_receives(site_key, filter_key):
         assert not changed, f"{site_key.value} sends {filter_key} yet declares it UNSUPPORTED"
     else:
         assert changed, f"{site_key.value} declares {filter_key} {level.value} yet sends nothing"
+
+
+def _derogations():
+    return [
+        (site_key, filter_key, value, derogation)
+        for site_key in sorted(ENABLED_SITES - {Siteconfigsitekey.WTTJ})
+        for filter_key, support in FILTER_SUPPORT[site_key].items()
+        for value, derogation in support.derogations.items()
+    ]
+
+
+def test_hellowork_widens_14_days_to_a_month():
+    derogation = FILTER_SUPPORT[Siteconfigsitekey.HELLOWORK]["postedWithin"].derogations["14d"]
+
+    assert derogation.level is FilterSupportLevel.APPROXIMATED
+    assert derogation.substitute == "30d"
+
+
+# Freshness windows, narrowest first: a derogation widens, never narrows.
+_POSTED_WITHIN_ORDER = ["24h", "7d", "14d", "30d", "any"]
+
+
+@pytest.mark.parametrize(("site_key", "filter_key", "value", "derogation"), _derogations())
+async def test_a_derogation_sends_its_substitute(site_key, filter_key, value, derogation):
+    # The substitute named to the candidate is what the site really receives.
+    assert derogation.substitute is not None
+    as_asked = await _site_receives(site_key, {"keywords": "developer", filter_key: value})
+    as_substituted = await _site_receives(
+        site_key, {"keywords": "developer", filter_key: derogation.substitute}
+    )
+
+    assert as_asked == as_substituted
+    if filter_key == "postedWithin":
+        assert _POSTED_WITHIN_ORDER.index(derogation.substitute) > _POSTED_WITHIN_ORDER.index(value)
