@@ -12,6 +12,13 @@ dependencies = [
     "beautifulsoup4>=4.12",
 ]
 
+[project.optional-dependencies]
+# The headless-browser escalation tier (ingestion.browser_fetch). Optional so
+# the Lambda handlers and the other services don't carry a ~400MB Chromium
+# they never launch; `browser_fetch` degrades to "tier unavailable" when it's
+# absent rather than failing. The worker image installs it.
+browser = ["playwright>=1.47"]
+
 [tool.uv.sources]
 py-db = { workspace = true }
 analysis = { workspace = true }

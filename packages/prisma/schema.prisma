@@ -309,6 +309,8 @@ enum JobOfferSourceSite {
   WTTJ
   GLASSDOOR
   HELLOWORK
+  ADZUNA
+  REMOTIVE
   OTHER
 }
 
@@ -411,6 +413,11 @@ enum SiteConfigSiteKey {
   WTTJ
   GLASSDOOR
   HELLOWORK
+  // OFFICIAL_API sources added as the documented answer to the sites whose
+  // anti-bot walls scraping can't clear (PRD Section 14). See
+  // services/ingestion/src/ingestion/api_sources.py.
+  ADZUNA
+  REMOTIVE
 }
 
 enum SiteConfigIntegrationType {

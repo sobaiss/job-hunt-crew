@@ -359,7 +359,42 @@ The compose `worker` drains all three pipeline queues:
   offers" (and "Analyse one offer" on an unknown URL) advance on their own.
   A `SITE_SEARCH` run against France Travail needs
   `FRANCE_TRAVAIL_CLIENT_ID` / `FRANCE_TRAVAIL_CLIENT_SECRET` in the host
-  env (passed through to the container).
+  env (passed through to the container); one against Adzuna needs
+  `ADZUNA_APP_ID` / `ADZUNA_APP_KEY` (free keys from
+  [developer.adzuna.com](https://developer.adzuna.com/)). Remotive and the
+  HTML-scraped sites need no credentials.
+
+### Job sources and anti-bot blocking
+
+Every fetch goes through `ingestion.fetch.fetch_page`, which climbs a
+three-rung ladder per URL: the hardened shared HTTP client (browser headers,
+per-host pacing, bounded retry with backoff) → a headless browser, when the
+site is client-rendered (`SiteConfig.requiresJsRendering`) or when the block
+it hit is one a browser can clear → stop, with a `BLOCKED_<KIND>:` reason.
+`ingestion.blocking` classifies interstitials and decides that middle step: a
+JS challenge is worth a browser, a CAPTCHA wall never is.
+
+Where the seeded sites stand, all verified live:
+
+| Source | Status |
+| --- | --- |
+| France Travail, Adzuna, Remotive | `OFFICIAL_API` — structured JSON, no scrape, **no extraction LLM call**, nothing to block |
+| LinkedIn | Works over plain HTTP; offer pages carry `JobPosting` JSON-LD. Watch for HTTP 999 on a datacenter IP |
+| HelloWork | Works over plain HTTP |
+| WTTJ | Browser tier reaches the site, but its search URL/selectors are stale — a site-adapter fix, not a blocking one |
+| Indeed, Glassdoor | **Disabled.** Cloudflare CAPTCHA wall that neither rung can clear; use Adzuna for comparable French coverage |
+
+The browser rung needs the optional extra (the `worker` image installs both):
+
+```bash
+uv sync --package ingestion --extra browser
+uv run --package ingestion python -m playwright install chromium
+```
+
+Tuning: `SCRAPER_MIN_DELAY_SECONDS` (default 1.0, minimum seconds between two
+requests to the same host), `SCRAPER_MAX_RETRIES` (default 3),
+`SCRAPER_USER_AGENT`, and `BROWSER_FETCH_ENABLED=0` to switch the browser rung
+off. The test suite sets the last two so no test launches a browser or paces.
 - `analysis-intake` → `WORKER_ANALYSIS_MODE=local`: the whole
   AnalysisWorkflow (EnsureCVConverted → EnsureOfferExtracted → the
   comparison crew → persist) in-process via `analysis.local_pipeline`, the

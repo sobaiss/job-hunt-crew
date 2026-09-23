@@ -15,8 +15,12 @@ const siteConfigs = [
     siteKey: "LINKEDIN",
     displayName: "LinkedIn",
     baseUrl: "https://www.linkedin.com",
+    // fr.linkedin.com, not www: LinkedIn locale-routes, and the French host is
+    // the one whose *offer* pages carry the JobPosting JSON-LD block that
+    // docs/adr/0010's deterministic tier reads instead of paying for an LLM
+    // call. www serves the same listing but links on to the same fr.* slugs.
     searchUrlTemplate:
-      "https://www.linkedin.com/jobs/search?keywords={keywords}&location={location}&f_TPR={postedWithin}&f_JT={contractType}&f_WT={remote}",
+      "https://fr.linkedin.com/jobs/search?keywords={keywords}&location={location}&f_TPR={postedWithin}&f_JT={contractType}&f_WT={remote}",
     filterParamMapping: {
       keywords: "keywords",
       location: "location",
@@ -29,18 +33,41 @@ const siteConfigs = [
     offerLinkSelector: "a.base-card__full-link",
     integrationType: "HTML_SCRAPE",
     apiBaseUrl: null,
-    requiresJsRendering: true,
+    // Measured false, not assumed: the unauthenticated guest listing is
+    // server-rendered. A live fetch of the exact URL this template builds
+    // (including the empty f_TPR/f_JT/f_WT params an unfiltered search
+    // produces) returned 200 with 59 `a.base-card__full-link` anchors inside
+    // `ul.jobs-search__results-list` — both selectors below still match. This
+    // was seeded `true` from the start and never verified; leaving it true now
+    // means `fetch.fetch_page` would launch Chromium for a page plain HTTP
+    // already reads correctly.
+    requiresJsRendering: false,
     antiBotRiskLevel: "HIGH",
     enabled: true,
     notes:
-      "Strong anti-bot measures; best-effort HTML scraping per PRD Section 14.",
+      "Guest (unauthenticated) job pages only. Verified reachable over plain " +
+      "HTTP with browser headers: listing 200 + 59 matching cards, and offer " +
+      "pages carry JobPosting JSON-LD. Two caveats: (1) LinkedIn answers HTTP " +
+      "999 on IP reputation / request volume — `blocking.detect_block` reports " +
+      "that as ACCESS_DENIED, and per-host pacing (SCRAPER_MIN_DELAY_SECONDS) " +
+      "is what keeps it away; a datacenter egress IP is far likelier to see it " +
+      "than a residential one. (2) Only the slug URL form " +
+      "(/jobs/view/<title>-at-<company>-<id>) serves the full page — the bare " +
+      "/jobs/view/<id> form serves an authwall with no JSON-LD, so discovery " +
+      "must keep the href the listing gives it rather than rebuild a URL from " +
+      "the id. robots.txt disallows /jobs-guest/ and /jobs?runSearch*; " +
+      "/jobs/search and /jobs/view are not disallowed. Best-effort per PRD " +
+      "Section 14; ToS review still required before production use.",
   },
   {
     siteKey: "INDEED",
     displayName: "Indeed",
     baseUrl: "https://www.indeed.com",
+    // fr.indeed.com: the previous www (US) host was also the wrong catalogue
+    // for a French candidate. Kept accurate so re-enabling is a one-field
+    // change if Indeed's posture ever changes or a partner feed is obtained.
     searchUrlTemplate:
-      "https://www.indeed.com/jobs?q={keywords}&l={location}&fromage={postedWithin}&jt={contractType}&remotejob={remote}",
+      "https://fr.indeed.com/jobs?q={keywords}&l={location}&fromage={postedWithin}&jt={contractType}&remotejob={remote}",
     filterParamMapping: {
       keywords: "q",
       location: "l",
@@ -54,10 +81,27 @@ const siteConfigs = [
     integrationType: "HTML_SCRAPE",
     apiBaseUrl: null,
     requiresJsRendering: false,
-    antiBotRiskLevel: "MEDIUM",
-    enabled: true,
+    antiBotRiskLevel: "HIGH",
+    // Disabled deliberately, not broken. Live check: fr.indeed.com/jobs
+    // returns HTTP 403 with "Security Check - Indeed.com" — a Cloudflare
+    // CAPTCHA wall — identically for the default python-httpx UA and for full
+    // browser headers, so the block is at the TLS-fingerprint / IP-reputation
+    // layer, not the header layer. Issue #118 separately confirmed a real
+    // headless browser also lands on that captcha, so the browser escalation
+    // tier cannot clear it either. Leaving it enabled only produced FAILED
+    // IngestionJobs (this database held exactly one, and zero Indeed
+    // JobOffers, ever). PRD Section 14's documented fallbacks are official
+    // APIs or a scraping-as-a-service provider; the former is now implemented
+    // (see the ADZUNA entry below), the latter remains an unexercised option.
+    enabled: false,
     notes:
-      "HTML scraping; best-effort per PRD Section 14, moderate anti-bot risk.",
+      "DISABLED — Cloudflare CAPTCHA wall (HTTP 403, 'Security Check'). Not a " +
+      "selector or header problem: browser headers get the same 403, and a " +
+      "headless browser hits the same interactive captcha (#118), so neither " +
+      "of this pipeline's tiers can clear it. Use the Adzuna source for " +
+      "comparable French coverage. Re-enabling requires either an Indeed " +
+      "publisher/partner feed or a commercial unblocking provider, plus the " +
+      "ToS review PRD Section 14 defers.",
   },
   {
     siteKey: "FRANCE_TRAVAIL",
@@ -103,7 +147,21 @@ const siteConfigs = [
     requiresJsRendering: true,
     antiBotRiskLevel: "MEDIUM",
     enabled: true,
-    notes: "HTML scraping; best-effort per PRD Section 14.",
+    notes:
+      "Client-rendered, so it goes through the headless-browser tier " +
+      "(ingestion.browser_fetch), which was verified to reach the site: the " +
+      "page renders (~600kB), the Didomi consent banner is dismissed, and " +
+      "blocking.detect_block reports no block — WTTJ's AWS WAF challenge is " +
+      "JS-only and the browser clears it (#118). BUT this search still " +
+      "discovers zero offers, and the cause is NOT anti-bot: the rendered " +
+      "page is WTTJ's jobs *landing* page (only the hero-search and nav " +
+      "data-testids are present, no results list). searchUrlTemplate and the " +
+      "two selectors below are both stale against WTTJ's current search " +
+      "implementation — ?query=&page=, /jobs/search?query=, and the " +
+      "refinementList form were all tried and all render the same landing " +
+      "page. Fixing this needs a fresh look at how WTTJ's search results are " +
+      "requested today (likely its Algolia-backed API), which is site-adapter " +
+      "work, not blocking work.",
   },
   {
     siteKey: "GLASSDOOR",
@@ -125,9 +183,15 @@ const siteConfigs = [
     apiBaseUrl: null,
     requiresJsRendering: true,
     antiBotRiskLevel: "HIGH",
-    enabled: true,
+    // Disabled for the same reason as Indeed: issue #118's live capture
+    // session hit Glassdoor's Cloudflare CAPTCHA challenge through a real
+    // headless browser, which is this pipeline's highest tier. Zero Glassdoor
+    // JobOffers have ever been ingested.
+    enabled: false,
     notes:
-      "Strong anti-bot measures; best-effort HTML scraping per PRD Section 14.",
+      "DISABLED — Cloudflare CAPTCHA challenge, confirmed unreachable even " +
+      "through a headless browser (#118). Same posture and same re-enabling " +
+      "conditions as INDEED.",
   },
   {
     siteKey: "HELLOWORK",
@@ -157,6 +221,72 @@ const siteConfigs = [
       "the first results page is unverified. Live scraping smoke test (#113) " +
       "confirmed listItemSelector/offerLinkSelector match hellowork.com's " +
       "current markup and a discovered offer page scrapes end-to-end; enabled.",
+  },
+  // --- OFFICIAL_API sources (PRD Section 14's documented alternative to
+  // scraping the walled sites). Structured responses, so these skip the
+  // scrape + LLM-extraction pipeline entirely, exactly as France Travail
+  // does. Adapters: services/ingestion/src/ingestion/api_sources.py
+  {
+    siteKey: "ADZUNA",
+    displayName: "Adzuna",
+    baseUrl: "https://www.adzuna.fr",
+    searchUrlTemplate: null,
+    // Mapped for documentation/admin display; the adapter builds Adzuna's
+    // query itself because its contract facets are four independent booleans
+    // rather than one parameter, which a flat template can't express.
+    filterParamMapping: {
+      keywords: "what",
+      location: "where",
+      postedWithin: "max_days_old",
+      contractType: "contract",
+      id: "id",
+    },
+    listItemSelector: null,
+    offerLinkSelector: null,
+    integrationType: "OFFICIAL_API",
+    // Country-scoped root, so switching catalogue is config rather than code.
+    apiBaseUrl: "https://api.adzuna.com/v1/api/jobs/fr",
+    requiresJsRendering: false,
+    antiBotRiskLevel: "LOW",
+    // Enabled but inert until credentials exist: the pipeline fails such a job
+    // with "enabled but not configured: set ADZUNA_APP_ID, ADZUNA_APP_KEY"
+    // rather than a confusing zero-result run.
+    enabled: true,
+    notes:
+      "Official aggregator API — the recommended replacement for the disabled " +
+      "INDEED entry: comparable French coverage, structured JSON (no scrape, " +
+      "no extraction LLM call), no anti-bot wall. Requires a free key pair " +
+      "(ADZUNA_APP_ID / ADZUNA_APP_KEY) from https://developer.adzuna.com/. " +
+      "Endpoint verified live: a keyless call returns a well-formed " +
+      "{'exception':'AUTH_FAIL'} JSON body, confirming path and params. " +
+      "Adzuna has no remote facet, so filters.remote='remote' is folded into " +
+      "the keyword query; onsite/hybrid narrow nothing.",
+  },
+  {
+    siteKey: "REMOTIVE",
+    displayName: "Remotive",
+    baseUrl: "https://remotive.com",
+    searchUrlTemplate: null,
+    filterParamMapping: {
+      keywords: "search",
+      id: "id",
+    },
+    listItemSelector: null,
+    offerLinkSelector: null,
+    integrationType: "OFFICIAL_API",
+    apiBaseUrl: "https://remotive.com/api/remote-jobs",
+    requiresJsRendering: false,
+    antiBotRiskLevel: "LOW",
+    enabled: true,
+    notes:
+      "Key-free official API, verified live (HTTP 200, structured JSON). " +
+      "Remote roles only — every offer is stored with remotePolicy='remote'. " +
+      "Its API response carries a legal notice requiring consumers to link " +
+      "back to the Remotive URL and credit Remotive as the source: this is " +
+      "satisfied by storing that URL as JobOffer.sourceUrl with " +
+      "sourceSite=REMOTIVE, so do not canonicalise a Remotive offer to the " +
+      "employer's own URL. The API has no location or date parameter; " +
+      "postedWithin is applied client-side and location is ignored.",
   },
 ];
 

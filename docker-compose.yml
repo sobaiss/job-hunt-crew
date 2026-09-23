@@ -262,6 +262,23 @@ services:
       # inject an empty string, which is *not* the same as unset).
       FRANCE_TRAVAIL_CLIENT_ID: ${FRANCE_TRAVAIL_CLIENT_ID:-}
       FRANCE_TRAVAIL_CLIENT_SECRET: ${FRANCE_TRAVAIL_CLIENT_SECRET:-}
+      # Adzuna — the OFFICIAL_API source seeded as the replacement for the
+      # disabled INDEED entry (free key pair from developer.adzuna.com). Unset
+      # means the site is enabled but inert: its IngestionJobs fail with
+      # "enabled but not configured", never a silent zero-result run. Remotive,
+      # the other new source, needs no credentials.
+      ADZUNA_APP_ID: ${ADZUNA_APP_ID:-}
+      ADZUNA_APP_KEY: ${ADZUNA_APP_KEY:-}
+      # Scrape politeness + the headless-browser escalation tier
+      # (ingestion.http_client / ingestion.browser_fetch). The defaults below
+      # are the shipped ones, restated here so they're visible and tunable:
+      # min seconds between two requests to the same host, and how many times
+      # a transient 429/5xx is retried with backoff.
+      SCRAPER_MIN_DELAY_SECONDS: ${SCRAPER_MIN_DELAY_SECONDS:-1.0}
+      SCRAPER_MAX_RETRIES: ${SCRAPER_MAX_RETRIES:-3}
+      # Set to 0 to switch the browser tier off entirely (WTTJ then reports
+      # its AWS WAF challenge as a block instead of rendering through it).
+      BROWSER_FETCH_ENABLED: ${BROWSER_FETCH_ENABLED:-1}
       # Same per-user daily Analysis cap create_analyses_for_ready_offers
       # enforces during a Scout/ingestion fan-out — kept equal to api's above
       # so the two never drift (py_db/quota.py is their shared source of truth).

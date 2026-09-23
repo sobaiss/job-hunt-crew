@@ -16,9 +16,17 @@ from py_db.models import (
     Ingestionjobstatus,
     SiteConfig,
     Siteconfigintegrationtype,
+    Siteconfigsitekey,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .api_ingest import link_api_offers
+from .api_sources import (
+    JobApiError,
+    filter_by_posted_within,
+    get_source,
+    missing_credentials,
+)
 from .fanout import link_and_process_offers
 from .france_travail import ingest_france_travail_offers
 from .listing import ListingFetchError, fetch_listing_pages
@@ -43,6 +51,68 @@ async def _fail(
     return ingestion_job
 
 
+async def _run_api_source_ingestion(
+    session: AsyncSession,
+    ingestion_job: IngestionJob,
+    site_config: SiteConfig,
+    filters: dict[str, str],
+    *,
+    http_client: httpx.AsyncClient | None = None,
+) -> None:
+    """The OFFICIAL_API path for every source in `api_sources.SOURCES` —
+    everything except France Travail, whose OAuth2 flow keeps its own module.
+
+    Holds the same step-5 failure contract as the HTML_SCRAPE path: a
+    missing credential or a failed call marks the IngestionJob FAILED with a
+    clear errorMessage, never a silent zero-result return.
+    """
+    source = get_source(site_config.siteKey)
+    if source is None:
+        await _fail(
+            session,
+            ingestion_job,
+            f"{site_config.siteKey.value} is configured as OFFICIAL_API but has no "
+            "adapter in ingestion.api_sources",
+        )
+        return
+
+    if missing := missing_credentials(site_config.siteKey):
+        await _fail(
+            session,
+            ingestion_job,
+            f"{site_config.siteKey.value} is enabled but not configured: set "
+            f"{', '.join(missing)}",
+        )
+        return
+
+    try:
+        offers = await source.search(
+            site_config,
+            filters,
+            http_client=http_client,
+            limit=ingestion_job.maxOffers,
+        )
+    except JobApiError as exc:
+        await _fail(session, ingestion_job, str(exc))
+        return
+
+    # Sources whose API has no date parameter (Remotive) get the window
+    # applied here instead; it's a no-op for one that already filtered.
+    offers = filter_by_posted_within(offers, filters.get("postedWithin"))
+
+    if not offers:
+        await _fail(
+            session,
+            ingestion_job,
+            f"No offers returned by {site_config.siteKey.value} for these filters",
+        )
+        return
+
+    await link_api_offers(
+        session, ingestion_job, offers, source_site=source.source_site
+    )
+
+
 async def run_site_search_ingestion(
     session: AsyncSession,
     ingestion_job: IngestionJob,
@@ -64,9 +134,14 @@ async def run_site_search_ingestion(
     or silently reporting zero results as success.
     """
     if site_config.integrationType == Siteconfigintegrationtype.OFFICIAL_API:
-        await ingest_france_travail_offers(
-            session, ingestion_job, site_config, filters, http_client=http_client
-        )
+        if site_config.siteKey == Siteconfigsitekey.FRANCE_TRAVAIL:
+            await ingest_france_travail_offers(
+                session, ingestion_job, site_config, filters, http_client=http_client
+            )
+        else:
+            await _run_api_source_ingestion(
+                session, ingestion_job, site_config, filters, http_client=http_client
+            )
         return await session.get(IngestionJob, ingestion_job.id)
 
     try:
@@ -79,13 +154,19 @@ async def run_site_search_ingestion(
         )
 
     try:
-        pages = await fetch_listing_pages(search_url, http_client=http_client)
-    except ListingFetchError as exc:
-        return await _fail(
-            session,
-            ingestion_job,
-            f"Failed to fetch listing for {site_config.siteKey}: {exc}",
+        pages = await fetch_listing_pages(
+            search_url, http_client=http_client, site_config=site_config
         )
+    except ListingFetchError as exc:
+        # A detected block already names the site's own mechanism ("BLOCKED_
+        # CAPTCHA: ...") — prefixing it with "Failed to fetch listing" would
+        # bury the one part of the message an operator acts on.
+        message = (
+            f"{site_config.siteKey.value}: {exc}"
+            if exc.detection is not None
+            else f"Failed to fetch listing for {site_config.siteKey}: {exc}"
+        )
+        return await _fail(session, ingestion_job, message)
 
     try:
         seen: set[str] = set()
@@ -105,11 +186,18 @@ async def run_site_search_ingestion(
         )
 
     if not urls:
+        # Reaching here now means something specific: the listing fetch
+        # succeeded *and* `blocking.detect_block` found no interstitial, so
+        # this is real page content the selectors didn't match — selector
+        # drift (PRD Section 14), not a block. The old message hedged between
+        # the two because the pipeline couldn't tell them apart.
         return await _fail(
             session,
             ingestion_job,
-            f"No offers found for {site_config.siteKey}; the site may be blocking requests "
-            "or its HTML structure may have changed",
+            f"No offers found for {site_config.siteKey.value}: the listing page was "
+            f"fetched successfully and is not an anti-bot page, so "
+            f"listItemSelector ({site_config.listItemSelector!r}) / offerLinkSelector "
+            f"({site_config.offerLinkSelector!r}) no longer match its markup",
         )
 
     await link_and_process_offers(

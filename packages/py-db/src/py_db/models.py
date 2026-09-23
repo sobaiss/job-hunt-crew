@@ -99,6 +99,8 @@ class Joboffersourcesite(str, enum.Enum):
     GLASSDOOR = 'GLASSDOOR'
     OTHER = 'OTHER'
     HELLOWORK = 'HELLOWORK'
+    ADZUNA = 'ADZUNA'
+    REMOTIVE = 'REMOTIVE'
 
 
 class Llmproviderkey(str, enum.Enum):
@@ -165,6 +167,8 @@ class Siteconfigsitekey(str, enum.Enum):
     WTTJ = 'WTTJ'
     GLASSDOOR = 'GLASSDOOR'
     HELLOWORK = 'HELLOWORK'
+    ADZUNA = 'ADZUNA'
+    REMOTIVE = 'REMOTIVE'
 
 
 class JobOffer(Base):

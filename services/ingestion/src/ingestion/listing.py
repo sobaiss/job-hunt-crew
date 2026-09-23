@@ -2,6 +2,10 @@ from urllib.parse import urljoin
 
 import httpx
 from bs4 import BeautifulSoup
+from py_db.models import SiteConfig
+
+from .fetch import FetchError, fetch_page
+from .http_client import make_http_client
 
 DEFAULT_MAX_PAGES = 3
 
@@ -13,7 +17,15 @@ LISTING_LINK_THRESHOLD = 6
 
 
 class ListingFetchError(Exception):
-    pass
+    """A listing page could not be retrieved. `detection` is set when the
+    cause was an identified anti-bot block, so `site_search_pipeline` can
+    report *why* the site refused rather than the ambiguous "no offers found;
+    the site may be blocking requests or its HTML structure may have
+    changed"."""
+
+    def __init__(self, message: str, *, detection=None):
+        super().__init__(message)
+        self.detection = detection
 
 
 def _find_next_page_url(html: str, page_url: str) -> str | None:
@@ -80,24 +92,40 @@ async def fetch_listing_pages(
     *,
     http_client: httpx.AsyncClient | None = None,
     max_pages: int = DEFAULT_MAX_PAGES,
+    site_config: SiteConfig | None = None,
 ) -> list[str]:
     """Fetches a listing/search-results page and follows its "next page"
     links, capped at `max_pages` fetches total (PRD 8.4 step 2: "pagination
     capped, default 3 pages"). Stops early if a page has no next-page link.
     Returns the fetched pages' raw HTML, in page order.
+
+    Each page goes through `fetch.fetch_page`, so a listing behind a
+    JS challenge or a client-rendered listing (`SiteConfig.
+    requiresJsRendering`) is rendered rather than parsed as an empty shell —
+    the difference between WTTJ discovering offers and reporting zero.
+
+    A block on the *first* page fails the whole fetch. A block on a later
+    page returns the pages gathered so far: partial pagination is a normal
+    outcome (PRD 8.4's cap already truncates), and failing a job that
+    successfully read 2 of 3 pages would throw away real results.
     """
     owns_client = http_client is None
-    client = http_client or httpx.AsyncClient(follow_redirects=True, timeout=30.0)
+    client = http_client or make_http_client()
     pages: list[str] = []
     try:
         page_url: str | None = start_url
         while page_url is not None and len(pages) < max_pages:
             try:
-                response = await client.get(page_url)
-                response.raise_for_status()
-            except httpx.HTTPError as exc:
-                raise ListingFetchError(f"Failed to fetch {page_url}: {exc}") from exc
-            html = response.text
+                html = await fetch_page(
+                    page_url, site_config=site_config, http_client=client
+                )
+            except FetchError as exc:
+                if pages:
+                    break
+                raise ListingFetchError(
+                    str(exc) if exc.blocked else f"Failed to fetch {page_url}: {exc}",
+                    detection=exc.detection,
+                ) from exc
             pages.append(html)
             page_url = _find_next_page_url(html, page_url)
     finally:

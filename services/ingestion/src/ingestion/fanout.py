@@ -129,6 +129,7 @@ async def process_job_offer(
     http_client: httpx.AsyncClient | None = None,
     llm_provider: LLMProvider | None = None,
     ingestion_job_id: str | None = None,
+    site_config: SiteConfig | None = None,
 ) -> JobOffer:
     """Runs the Mode 1 pipeline (M2-T2 scrape, M2-T4 extraction) for a single
     linked JobOffer. A no-op for an offer that's already reached a terminal
@@ -154,6 +155,7 @@ async def process_job_offer(
             job_offer.id,
             http_client=http_client,
             ingestion_job_id=ingestion_job_id,
+            site_config=site_config,
         )
     except ScrapeError:
         return await session.get(JobOffer, job_offer.id)
@@ -177,6 +179,7 @@ async def _scrape_step(
     *,
     http_client: httpx.AsyncClient | None = None,
     ingestion_job_id: str | None = None,
+    site_config: SiteConfig | None = None,
 ) -> JobOffer:
     """The scrape half of `process_job_offer`, split out so a Scout job's
     extraction ceiling (issue #55) can scrape every discovered offer before
@@ -192,6 +195,7 @@ async def _scrape_step(
             job_offer.id,
             http_client=http_client,
             ingestion_job_id=ingestion_job_id,
+            site_config=site_config,
         )
     except ScrapeError:
         return await session.get(JobOffer, job_offer.id)
@@ -238,6 +242,7 @@ async def _scrape_all_then_extract_within_ceiling(
     *,
     http_client: httpx.AsyncClient | None = None,
     llm_provider: LLMProvider | None = None,
+    site_config: SiteConfig | None = None,
 ) -> list[JobOffer]:
     """Scout extraction ceiling (issue #55 follow-up): scrapes every offer
     (PRD 8.4's "scrape all"), then ranks the ones freshly `SCRAPED` (not
@@ -254,6 +259,7 @@ async def _scrape_all_then_extract_within_ceiling(
             job_offer,
             http_client=http_client,
             ingestion_job_id=ingestion_job.id,
+            site_config=site_config,
         )
         for job_offer in job_offers
     ]
@@ -319,6 +325,15 @@ async def link_and_process_offers(
     original scrape-then-extract-every-offer behaviour byte-for-byte.
     """
     job_offers = await link_discovered_offers(session, ingestion_job, urls)
+    # Loaded once for the whole fan-out rather than per offer: every offer
+    # here came from the same site, and `fetch_page` only reads
+    # `requiresJsRendering` off it. `None` for a SINGLE_URL job with no
+    # matching site, which is exactly the "plain HTTP first" default.
+    site_config = (
+        await session.get(SiteConfig, ingestion_job.siteConfigId)
+        if ingestion_job.siteConfigId
+        else None
+    )
     if ingestion_job.scoutRunId and ingestion_job.cvVersionId:
         processed = await _scrape_all_then_extract_within_ceiling(
             session,
@@ -326,6 +341,7 @@ async def link_and_process_offers(
             job_offers,
             http_client=http_client,
             llm_provider=llm_provider,
+            site_config=site_config,
         )
     else:
         processed = [
@@ -335,6 +351,7 @@ async def link_and_process_offers(
                 http_client=http_client,
                 llm_provider=llm_provider,
                 ingestion_job_id=ingestion_job.id,
+                site_config=site_config,
             )
             for job_offer in job_offers
         ]
