@@ -62,7 +62,12 @@ def _s3_client():
     )
 
 
-LINKEDIN_LISTING_URL = "https://www.linkedin.com/jobs/search?keywords=python"
+# LinkedIn's Site adapter owns its search URL (docs/adr/0029), so this is
+# what `{"keywords": "python"}` produces whatever the row's template says.
+LINKEDIN_LISTING_URL = (
+    "https://fr.linkedin.com/jobs/search?keywords=python"
+    "&location=&f_TPR=&f_JT=&f_WT="
+)
 
 # 5 cards matching the LinkedIn selectors seeded in packages/prisma/prisma/seed.js
 # (mirrored the same way as test_site_adapters.py's fixtures).

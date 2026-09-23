@@ -31,7 +31,8 @@ from .fanout import link_and_process_offers
 from .france_travail import ingest_france_travail_offers
 from .listing import ListingFetchError, fetch_listing_pages
 from .site_adapters import SiteAdapterConfigError, extract_offer_urls_via_site_config
-from .site_search import SiteSearchConfigError, build_search_url
+from .search_adapters import build_search_request
+from .site_search import SiteSearchConfigError
 
 
 def _now() -> datetime:
@@ -124,7 +125,7 @@ async def run_site_search_ingestion(
 ) -> IngestionJob:
     """PRD Section 8.5 steps 3-5. For OFFICIAL_API sites (France Travail),
     delegates straight to `ingest_france_travail_offers` (M4-T4). For
-    HTML_SCRAPE sites, builds the search URL (M4-T3), fetches the listing
+    HTML_SCRAPE sites, builds the search URL (`search_adapters`), fetches the listing
     pages (M3-T1), extracts offer URLs via the site's selectors (M4-T5) and
     fans out into the Mode 1/2 pipeline (M3-T4/T5). Any failure along this
     path — a misconfigured SiteConfig, a blocked/failed fetch, or selectors
@@ -145,7 +146,7 @@ async def run_site_search_ingestion(
         return await session.get(IngestionJob, ingestion_job.id)
 
     try:
-        search_url = build_search_url(site_config, filters)
+        search_url = build_search_request(site_config, filters).url
     except SiteSearchConfigError as exc:
         return await _fail(
             session,

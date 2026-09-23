@@ -11,8 +11,7 @@ response.
 """
 
 import os
-from datetime import UTC, datetime, timedelta
-from urllib.parse import urlencode
+from datetime import UTC, datetime
 
 import httpx
 from py_db.models import (
@@ -28,13 +27,12 @@ from py_db.structured_logging import get_logger, log_stage_event
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .api_ingest import NormalisedOffer, link_api_offers
-from .site_search import build_search_url
+from .search_adapters import build_search_request
 
 logger = get_logger(__name__)
 
 TOKEN_URL = "https://entreprise.francetravail.fr/connexion/oauth2/access_token?realm=%2Fpartenaire"
 DEFAULT_SCOPE = "api_offresdemploiv2 o2dsoffre"
-SEARCH_PATH = "/offres/search"
 OFFER_PATH = "/offres"
 
 # The pipeline stage a SINGLE_URL France Travail fetch reports under: it stands
@@ -96,52 +94,6 @@ async def _get_access_token(client: httpx.AsyncClient) -> str:
     return token
 
 
-# The API layer hands the posted-since window down as a relative token --
-# "24h" / "7d" / "14d" / "30d" / "any" (POSTED_WITHIN_VALUES in
-# services/api/src/api/v1.py). France Travail's "Offres d'emploi v2" search
-# endpoint rejects that token with a 400: `minCreationDate` must be an absolute
-# ISO-8601 UTC instant, formatted exactly like "2022-10-23T08:15:42Z", and it
-# must be sent together with a matching `maxCreationDate`.
-_POSTED_WITHIN_DELTAS: dict[str, timedelta] = {
-    "24h": timedelta(hours=24),
-    "7d": timedelta(days=7),
-    "14d": timedelta(days=14),
-    "30d": timedelta(days=30),
-}
-_CREATION_DATE_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
-
-
-def _creation_date_window(
-    filters: dict[str, str],
-) -> tuple[dict[str, str], dict[str, str]]:
-    """Pull the relative `postedWithin` filter out of `filters` and resolve it
-    into the absolute `minCreationDate` / `maxCreationDate` pair France
-    Travail's search API expects.
-
-    Returns `(filters_without_posted_within, creation_date_params)`; the second
-    dict is empty for "any" or any unrecognised token (no date filter at all).
-    """
-    without_window = {
-        key: value for key, value in filters.items() if key != "postedWithin"
-    }
-    delta = _POSTED_WITHIN_DELTAS.get((filters.get("postedWithin") or "").strip())
-    if delta is None:
-        return without_window, {}
-    now = datetime.now(UTC)
-    return without_window, {
-        "minCreationDate": (now - delta).strftime(_CREATION_DATE_FORMAT),
-        "maxCreationDate": now.strftime(_CREATION_DATE_FORMAT),
-    }
-
-
-def _build_search_url(site_config: SiteConfig, filters: dict[str, str]) -> str:
-    filters, creation_date_params = _creation_date_window(filters)
-    base = build_search_url(site_config, filters)
-    root, _, query = base.partition("?")
-    query = "&".join(part for part in (query, urlencode(creation_date_params)) if part)
-    return f"{root}{SEARCH_PATH}?{query}" if query else f"{root}{SEARCH_PATH}"
-
-
 def _offer_source_url(offre: dict) -> str:
     url_origine = (offre.get("origineOffre") or {}).get("urlOrigine")
     if url_origine:
@@ -200,15 +152,14 @@ async def search_offers(
 ) -> list[dict]:
     """Authenticates via OAuth2 client-credentials and calls the France
     Travail "Offres d'emploi v2" search endpoint, returning the raw
-    `resultats` list from the response (PRD 8.5 step 3: "Backend builds the
-    target URL/API call from SiteConfig.searchUrlTemplate +
-    filterParamMapping ... France Travail uses its official public API").
+    `resultats` list from the response. The query itself is built by France
+    Travail's Site adapter (`search_adapters.france_travail`).
     """
     owns_client = http_client is None
     client = http_client or httpx.AsyncClient(timeout=30.0)
     try:
         token = await _get_access_token(client)
-        search_url = _build_search_url(site_config, filters)
+        search_url = build_search_request(site_config, filters).url
         try:
             response = await client.get(
                 search_url, headers={"Authorization": f"Bearer {token}"}

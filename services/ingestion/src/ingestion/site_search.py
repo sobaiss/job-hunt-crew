@@ -19,7 +19,10 @@ def build_search_url(site_config: SiteConfig, filters: dict[str, str]) -> str:
     """PRD Section 8.5 step 3: "Backend builds the target URL/API call from
     SiteConfig.searchUrlTemplate + filterParamMapping."
 
-    - OFFICIAL_API sites (France Travail): builds `apiBaseUrl` + a query
+    The fallback for sites with no Site adapter — reach it through
+    `search_adapters.build_search_request`, not directly (docs/adr/0029).
+
+    - OFFICIAL_API sites: builds `apiBaseUrl` + a query
       string from `filterParamMapping`, including only the filters actually
       supplied (no empty params for unset optional filters).
     - HTML_SCRAPE sites: fills `searchUrlTemplate`'s `{filterKey}` tokens
