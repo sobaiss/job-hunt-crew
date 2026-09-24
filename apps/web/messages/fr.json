@@ -839,6 +839,7 @@
         "id": "ID",
         "copyId": "Copier l'identifiant",
         "status": "Statut",
+        "runState": "Exécution",
         "baseCv": "CV de base",
         "sites": "Sites",
         "lastRun": "Dernière exécution",
@@ -849,6 +850,26 @@
       "ACTIVE": "Actif",
       "PAUSED": "En pause",
       "ARCHIVED": "Archivé"
+    },
+    "runState": {
+      "label": {
+        "IN_FLIGHT": "En cours",
+        "BLOCKED": "Bloqué",
+        "FAILED": "Échec",
+        "DEGRADED": "Dégradé",
+        "OK": "À jour"
+      },
+      "duration": {
+        "lessThanMinute": "moins d'une minute",
+        "minutes": "{minutes} min",
+        "hours": "{hours} h {minutes} min"
+      },
+      "explanation": {
+        "IN_FLIGHT": "Ce Scout recherche et analyse des offres en ce moment. Rien à faire : ses résultats pertinents apparaîtront au fil de l'eau.",
+        "BLOCKED": "Des analyses de ce Scout ont été interrompues et n'avancent plus. Ouvrez le Scout pour les relancer, sans rien décompter de votre quota.",
+        "FAILED": "La dernière exécution a échoué : ses sites ciblés étaient indisponibles, ou le traitement s'est arrêté en route. Vous n'avez rien à faire : le Scout se relancera à sa prochaine exécution, et si cela persiste, un administrateur doit intervenir.",
+        "DEGRADED": "La dernière exécution n'a abouti qu'en partie : certaines offres n'ont pas pu être traitées, d'où moins de résultats que d'habitude. Vous n'avez rien à faire : la prochaine exécution repartira de zéro."
+      }
     },
     "actions": {
       "pause": "Mettre en pause",

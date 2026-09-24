@@ -1,4 +1,4 @@
-import type { Scout } from "@/hooks/use-scouts";
+import type { Scout, ScoutRunState } from "@/hooks/use-scouts";
 
 // Pure, framework-free sort helper behind the Scouts table (#89), mirroring
 // `cv-versions-sort.ts`. Sorting is applied client-side to the list
@@ -8,6 +8,7 @@ export type ScoutsSortColumn =
   | "label"
   | "id"
   | "status"
+  | "runState"
   | "baseCv"
   | "sites"
   | "lastRun"
@@ -18,6 +19,22 @@ export type ScoutsSortDirection = "asc" | "desc";
 export type ScoutsSortState = {
   column: ScoutsSortColumn;
   direction: ScoutsSortDirection;
+};
+
+/**
+ * The Execution column's severity rank, worst first (#226). Deliberately not
+ * the precedence the API applies when several states hold at once (there,
+ * IN_FLIGHT wins): sorting asks "what needs attention", so trouble rises
+ * above live work. Coded explicitly rather than left to the labels, whose
+ * alphabetical order would break the day a badge is reworded.
+ */
+export const RUN_STATE_SEVERITY_RANK: Record<ScoutRunState, number> = {
+  BLOCKED: 0,
+  FAILED: 1,
+  DEGRADED: 2,
+  IN_FLIGHT: 3,
+  OK: 4,
+  NEVER_RUN: 5,
 };
 
 /** Most recently run first, per issue #89. */
@@ -38,6 +55,8 @@ function sortValue(
       return scout.id;
     case "status":
       return scout.status;
+    case "runState":
+      return RUN_STATE_SEVERITY_RANK[scout.runState];
     case "baseCv":
       return cvLabelById.get(scout.cvVersionId) ?? scout.cvVersionId;
     case "sites":

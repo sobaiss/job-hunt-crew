@@ -839,6 +839,7 @@
         "id": "ID",
         "copyId": "Copy id",
         "status": "Status",
+        "runState": "Execution",
         "baseCv": "Base CV",
         "sites": "Sites",
         "lastRun": "Last run",
@@ -849,6 +850,26 @@
       "ACTIVE": "Active",
       "PAUSED": "Paused",
       "ARCHIVED": "Archived"
+    },
+    "runState": {
+      "label": {
+        "IN_FLIGHT": "In progress",
+        "BLOCKED": "Blocked",
+        "FAILED": "Failed",
+        "DEGRADED": "Degraded",
+        "OK": "Up to date"
+      },
+      "duration": {
+        "lessThanMinute": "less than a minute",
+        "minutes": "{minutes} min",
+        "hours": "{hours} h {minutes} min"
+      },
+      "explanation": {
+        "IN_FLIGHT": "This Scout is searching and analysing offers right now. Nothing to do: its relevant finds will appear as they come in.",
+        "BLOCKED": "Some of this Scout's analyses were interrupted and are no longer moving. Open the Scout to relaunch them, at no cost to your quota.",
+        "FAILED": "The last run failed: its targeted sites were unavailable, or processing stopped partway. There is nothing you can do: the Scout will try again on its next run, and if this persists an Administrator needs to step in.",
+        "DEGRADED": "The last run only partly succeeded: some offers could not be processed, hence fewer finds than usual. There is nothing you can do: the next run starts afresh."
+      }
     },
     "actions": {
       "pause": "Pause",

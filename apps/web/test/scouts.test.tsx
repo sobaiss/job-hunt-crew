@@ -187,6 +187,7 @@ describe("ScoutsPage — list", () => {
     for (const name of [
       "Label",
       "Status",
+      "Execution",
       "Base CV",
       "Sites",
       "Last run",
@@ -200,6 +201,7 @@ describe("ScoutsPage — list", () => {
     for (const name of [
       "ID",
       "Status",
+      "Execution",
       "Base CV",
       "Sites",
       "Last run",
@@ -696,6 +698,225 @@ describe("ScoutsPage — list", () => {
       screen.getByRole("checkbox", { name: "Show archived Scouts" }),
     ).toBeChecked();
     expect(screen.getByText("Old Scout")).toBeInTheDocument();
+  });
+});
+
+describe("ScoutsPage — Execution column (issue #226)", () => {
+  const minutesAgo = (minutes: number) =>
+    new Date(Date.now() - minutes * 60_000).toISOString();
+
+  function renderList(scouts: Record<string, unknown>[]) {
+    server.use(
+      http.get("/api/scouts", () => HttpResponse.json({ scouts })),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+    );
+    renderWithProviders(<ScoutsPage />);
+  }
+
+  async function rowOf(label: string) {
+    const row = (await screen.findByText(label)).closest("tr");
+    expect(row).not.toBeNull();
+    return within(row as HTMLElement);
+  }
+
+  it("sits immediately after Status", async () => {
+    renderList([scout()]);
+    await screen.findByText("Senior Backend — Remote EU");
+
+    const headers = screen
+      .getAllByRole("columnheader")
+      .map((header) => header.textContent);
+    expect(headers.indexOf("Execution")).toBe(headers.indexOf("Status") + 1);
+  });
+
+  it("reads a working Scout as In progress, with how long it has been working", async () => {
+    renderList([
+      scout({ label: "Working", runState: "IN_FLIGHT", runStateSince: minutesAgo(12) }),
+      scout({
+        id: "scout-long",
+        label: "Long haul",
+        runState: "IN_FLIGHT",
+        runStateSince: minutesAgo(125),
+      }),
+    ]);
+
+    const working = await rowOf("Working");
+    expect(working.getByText("In progress")).toHaveAttribute("data-slot", "badge");
+    expect(working.getByText("12 min")).toBeInTheDocument();
+    expect((await rowOf("Long haul")).getByText("2 h 5 min")).toBeInTheDocument();
+  });
+
+  it("says a Scout working for under a minute has been at it less than a minute, not 0 min", async () => {
+    renderList([
+      scout({
+        runState: "IN_FLIGHT",
+        runStateSince: new Date(Date.now() - 20_000).toISOString(),
+      }),
+    ]);
+
+    const row = await rowOf("Senior Backend — Remote EU");
+    expect(row.getByText("less than a minute")).toBeInTheDocument();
+    expect(row.queryByText("0 min")).not.toBeInTheDocument();
+  });
+
+  it("renders Blocked, Failed and Degraded each as a badge", async () => {
+    renderList([
+      scout({
+        id: "b",
+        label: "Stranded",
+        runState: "BLOCKED",
+        runStateSince: minutesAgo(40),
+        blockedAnalysisIds: ["an-1"],
+      }),
+      scout({ id: "f", label: "Broken", runState: "FAILED", lastRunAt: minutesAgo(90) }),
+      scout({ id: "d", label: "Partial", runState: "DEGRADED", lastRunAt: minutesAgo(90) }),
+    ]);
+
+    expect((await rowOf("Stranded")).getByText("Blocked")).toHaveAttribute(
+      "data-slot",
+      "badge",
+    );
+    expect((await rowOf("Stranded")).getByText("40 min")).toBeInTheDocument();
+    expect((await rowOf("Broken")).getByText("Failed")).toHaveAttribute(
+      "data-slot",
+      "badge",
+    );
+    expect((await rowOf("Partial")).getByText("Degraded")).toHaveAttribute(
+      "data-slot",
+      "badge",
+    );
+  });
+
+  it("reads a healthy Scout as muted Up to date text, not a coloured badge", async () => {
+    renderList([scout({ runState: "OK", lastRunAt: minutesAgo(90) })]);
+
+    const upToDate = (await rowOf("Senior Backend — Remote EU")).getByText(
+      "Up to date",
+    );
+    expect(upToDate).not.toHaveAttribute("data-slot", "badge");
+    expect(upToDate).toHaveClass("text-muted");
+  });
+
+  it("shows a plain dash for a Scout that has never run", async () => {
+    renderList([scout({ runState: "NEVER_RUN", lastRunAt: null })]);
+
+    const row = await rowOf("Senior Backend — Remote EU");
+    expect(row.getByText("—")).toBeInTheDocument();
+    expect(row.getByText("Never run")).toBeInTheDocument();
+  });
+
+  it("explains each badge in a tooltip reachable by keyboard focus, saying when there is nothing to do", async () => {
+    renderList([
+      scout({
+        id: "b",
+        label: "Stranded",
+        runState: "BLOCKED",
+        runStateSince: minutesAgo(40),
+        blockedAnalysisIds: ["an-1"],
+      }),
+      scout({ id: "f", label: "Broken", runState: "FAILED", lastRunAt: minutesAgo(90) }),
+    ]);
+
+    const failed = (await rowOf("Broken")).getByText("Failed");
+    const failedTrigger = failed.closest("[tabindex='0']") as HTMLElement;
+    expect(failedTrigger).not.toBeNull();
+    failedTrigger.focus();
+    const failedTooltip = await screen.findByRole("tooltip");
+    expect(failedTooltip).toHaveTextContent(/nothing you can do/i);
+    expect(failedTooltip).toHaveTextContent(/administrator/i);
+    expect(failedTrigger).toHaveAttribute("aria-describedby");
+
+    const blockedTrigger = (await rowOf("Stranded"))
+      .getByText("Blocked")
+      .closest("[tabindex='0']") as HTMLElement;
+    blockedTrigger.focus();
+    await waitFor(() =>
+      expect(screen.getByRole("tooltip")).toHaveTextContent(/relaunch them/i),
+    );
+  });
+
+  it("sorts worst first on an explicit severity rank, not the labels' alphabetical order", async () => {
+    const user = userEvent.setup();
+    renderList([
+      scout({ id: "never", label: "S-never", runState: "NEVER_RUN" }),
+      scout({ id: "ok", label: "S-ok", runState: "OK", lastRunAt: minutesAgo(90) }),
+      scout({
+        id: "flight",
+        label: "S-flight",
+        runState: "IN_FLIGHT",
+        runStateSince: minutesAgo(3),
+        lastRunAt: minutesAgo(3),
+      }),
+      scout({ id: "degraded", label: "S-degraded", runState: "DEGRADED", lastRunAt: minutesAgo(90) }),
+      scout({ id: "failed", label: "S-failed", runState: "FAILED", lastRunAt: minutesAgo(90) }),
+      scout({
+        id: "blocked",
+        label: "S-blocked",
+        runState: "BLOCKED",
+        runStateSince: minutesAgo(40),
+        lastRunAt: minutesAgo(90),
+      }),
+    ]);
+    await screen.findByText("S-never");
+
+    await user.click(screen.getByRole("button", { name: "Execution" }));
+    const labels = () =>
+      screen
+        .getAllByRole("row")
+        .slice(1)
+        .map((row) => row.textContent?.match(/S-[a-z]+/)?.[0]);
+    expect(labels()).toEqual([
+      "S-blocked",
+      "S-failed",
+      "S-degraded",
+      "S-flight",
+      "S-ok",
+      "S-never",
+    ]);
+  });
+
+  it("can be hidden and restored through the Columns menu", async () => {
+    const user = userEvent.setup();
+    renderList([scout({ runState: "FAILED", lastRunAt: minutesAgo(90) })]);
+    await screen.findByText("Failed");
+
+    await user.click(screen.getByRole("button", { name: "Columns" }));
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "Execution" }));
+    await user.keyboard("{Escape}");
+    expect(
+      screen.queryByRole("columnheader", { name: "Execution" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Failed")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Columns" }));
+    await user.click(screen.getByRole("menuitem", { name: "Reset" }));
+    expect(
+      screen.getByRole("columnheader", { name: "Execution" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Failed")).toBeInTheDocument();
+  });
+
+  it("recomputes the duration when the list is refetched, with no ticking timer", async () => {
+    const user = userEvent.setup();
+    let since = minutesAgo(5);
+    server.use(
+      http.get("/api/scouts", () =>
+        HttpResponse.json({
+          scouts: [scout({ runState: "IN_FLIGHT", runStateSince: since })],
+        }),
+      ),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+    );
+    renderWithProviders(<ScoutsPage />);
+    expect(await screen.findByText("5 min")).toBeInTheDocument();
+
+    since = minutesAgo(9);
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(await screen.findByText("9 min")).toBeInTheDocument();
   });
 });
 
