@@ -1,8 +1,9 @@
 "use client";
 
-import { type ReactNode, type RefObject } from "react";
+import { useState, type ReactNode, type RefObject } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Archive,
   ChartColumn,
@@ -11,6 +12,7 @@ import {
   Pause,
   Pencil,
   Play,
+  RotateCcw,
   SlidersHorizontal,
 } from "lucide-react";
 
@@ -21,6 +23,7 @@ import {
   type Scout,
   type ScoutStatus,
 } from "@/hooks/use-scouts";
+import { useBulkRequeueAnalyses } from "@/hooks/use-analyses";
 import { useSiteConfigs } from "@/hooks/use-site-configs";
 import { BffError } from "@/lib/bff-client";
 import { ApplicationStatsHeader } from "@/components/application-stats-header";
@@ -31,6 +34,7 @@ import {
 import { PanelSection } from "@/components/panel-section";
 import { ScoutRunHistory } from "@/components/scout-run-history";
 import { ScoutFinds } from "@/components/scout-finds";
+import { ScoutRunStateBadge } from "@/components/scout-run-state-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -52,6 +56,13 @@ import {
 // set up next to how it's doing — then the payoff (Résultats pertinents)
 // full-width, and the audit trail (Historique) last. On a narrow viewport
 // the grid collapses and that order is exactly the reading priority.
+//
+// The header carries the Run state (#227, docs/adr/0033) beside the
+// lifecycle badge — both, never one instead of the other — and, while it is
+// BLOCKED, the Blocked-analyses repair. It deliberately carries no progress
+// fraction: the run counters belong to one run while the badge is scoped to
+// the Scout, so the two could visibly disagree. The live counters stay in the
+// run history below, which polls them.
 
 function statusVariant(
   status: ScoutStatus,
@@ -106,12 +117,16 @@ function PanelAlert({ children }: { children: ReactNode }) {
 export function ScoutPanel({
   scout,
   cvLabel,
+  now,
   open,
   onOpenChange,
   returnFocusRef,
 }: {
   scout: Scout | null;
   cvLabel: string;
+  /** When the Scout was fetched — the Run state's duration is judged against
+   *  it, exactly as the Scouts list's Execution column does. */
+  now: number;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** The row that opened this panel — focused again on close, since Radix's
@@ -124,6 +139,8 @@ export function ScoutPanel({
   const tSites = useTranslations("scouts.siteKeys");
   const tFilters = useTranslations("jobFilters");
   const tIngestion = useTranslations("ingestion");
+  const tRunState = useTranslations("scouts.runState");
+  const queryClient = useQueryClient();
 
   // Hooks are parameterized by scout id (mirroring the former ScoutDetailPage),
   // so an empty id while the panel is closed is harmless — no mutation fires
@@ -132,6 +149,37 @@ export function ScoutPanel({
   const run = useRunScout(scout?.id ?? "");
   const update = useUpdateScout(scout?.id ?? "");
   const stats = useScoutStats(scout?.id ?? "");
+
+  // The Blocked-analyses repair: the Analyses list's bulk requeue, fanned
+  // over the ids the server judged blocked. No new endpoint and no quota —
+  // the server re-checks its own stuck predicate per row, and Blocked is a
+  // strict subset of it, so only a stale screen can see a refusal. That
+  // count is kept per Scout so another panel never inherits it.
+  const requeue = useBulkRequeueAnalyses();
+  const [repairFailure, setRepairFailure] = useState<{
+    scoutId: string;
+    failed: number;
+    total: number;
+  } | null>(null);
+  const repair = () => {
+    if (!scout) return;
+    const ids = scout.blockedAnalysisIds;
+    setRepairFailure(null);
+    requeue.mutate(ids, {
+      onSuccess: ({ failedAnalysisIds }) => {
+        if (failedAnalysisIds.length > 0) {
+          setRepairFailure({
+            scoutId: scout.id,
+            failed: failedAnalysisIds.length,
+            total: ids.length,
+          });
+        }
+      },
+      // The state moves on once the rows are re-driven; don't wait for the
+      // next poll to take the button away.
+      onSettled: () => queryClient.invalidateQueries({ queryKey: ["scouts"] }),
+    });
+  };
 
   // The same FilterSupport statement the Scout form shows, read from the
   // stored filters and the targeted sites (issue #211). Nothing is written
@@ -194,14 +242,24 @@ export function ScoutPanel({
               {/* Stays put while the sections below scroll, so Run now / Pause /
                   Archive are always one click away however long the finds list
                   gets — the density cost docs/adr/0007 accepted. */}
-              <div className="sticky top-0 z-10 flex shrink-0 flex-col gap-4 border-b border-border bg-background px-6 py-5">
+              <div
+                data-slot="scout-panel-header"
+                className="sticky top-0 z-10 flex shrink-0 flex-col gap-4 border-b border-border bg-background px-6 py-5"
+              >
                 <SheetHeader className="gap-2 pr-10">
                   <SheetTitle className="font-serif text-xl font-semibold">
                     {scout.label}
                   </SheetTitle>
-                  <Badge variant={statusVariant(scout.status)} className="w-fit">
-                    {t(`status.${scout.status}`)}
-                  </Badge>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                    <Badge variant={statusVariant(scout.status)} className="w-fit">
+                      {t(`status.${scout.status}`)}
+                    </Badge>
+                    <ScoutRunStateBadge
+                      runState={scout.runState}
+                      runStateSince={scout.runStateSince}
+                      now={now}
+                    />
+                  </div>
                 </SheetHeader>
 
                 <div className="flex flex-wrap items-center gap-2">
@@ -244,6 +302,25 @@ export function ScoutPanel({
                       {t("actions.resume")}
                     </Button>
                   )}
+                  {scout.runState === "BLOCKED" &&
+                    scout.blockedAnalysisIds.length > 0 && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="shadow-xs"
+                        disabled={requeue.isPending}
+                        onClick={repair}
+                      >
+                        {requeue.isPending ? (
+                          <LoaderCircle className="animate-spin" aria-hidden />
+                        ) : (
+                          <RotateCcw aria-hidden />
+                        )}
+                        {tRunState("repair", {
+                          count: scout.blockedAnalysisIds.length,
+                        })}
+                      </Button>
+                    )}
                   <Button asChild variant="outline" className="shadow-xs">
                     <Link href={`/scouts/${scout.id}/edit`}>
                       <Pencil aria-hidden />
@@ -267,6 +344,14 @@ export function ScoutPanel({
                 {run.isError && <PanelAlert>{runErrorMessage}</PanelAlert>}
                 {update.isError && (
                   <PanelAlert>{t("actions.updateError")}</PanelAlert>
+                )}
+                {repairFailure && repairFailure.scoutId === scout.id && (
+                  <PanelAlert>
+                    {tRunState("repairPartialError", {
+                      failed: repairFailure.failed,
+                      total: repairFailure.total,
+                    })}
+                  </PanelAlert>
                 )}
               </div>
 

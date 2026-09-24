@@ -310,6 +310,7 @@ function ScoutsPageContent() {
       <ScoutPanel
         scout={panelScout}
         cvLabel={panelScout ? cvLabel(panelScout.cvVersionId) : ""}
+        now={dataUpdatedAt}
         open={panelId !== null}
         onOpenChange={(open) => {
           if (!open) setPanelId(null);

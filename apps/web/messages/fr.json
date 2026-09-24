@@ -869,7 +869,9 @@
         "BLOCKED": "Des analyses de ce Scout ont été interrompues et n'avancent plus. Ouvrez le Scout pour les relancer, sans rien décompter de votre quota.",
         "FAILED": "La dernière exécution a échoué : ses sites ciblés étaient indisponibles, ou le traitement s'est arrêté en route. Vous n'avez rien à faire : le Scout se relancera à sa prochaine exécution, et si cela persiste, un administrateur doit intervenir.",
         "DEGRADED": "La dernière exécution n'a abouti qu'en partie : certaines offres n'ont pas pu être traitées, d'où moins de résultats que d'habitude. Vous n'avez rien à faire : la prochaine exécution repartira de zéro."
-      }
+      },
+      "repair": "{count, plural, one {Relancer l'analyse bloquée} other {Relancer les # analyses bloquées}}",
+      "repairPartialError": "{failed} analyse(s) sur {total} n'ont pas pu être relancées : elles étaient finalement encore en cours."
     },
     "actions": {
       "pause": "Mettre en pause",

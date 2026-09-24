@@ -1507,6 +1507,237 @@ describe("Scout panel — Run now + run history", () => {
   });
 });
 
+/** A run-history row, for the panel blocks below. */
+function panelRun(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "run-1",
+    scoutId: "scout-1",
+    status: "COMPLETED",
+    sitesQueried: 2,
+    siteUnavailableCount: 0,
+    offersDiscovered: 0,
+    offersAnalysed: 0,
+    relevantCount: 0,
+    failedCount: 0,
+    alreadySeenCount: 0,
+    runLimitSkippedCount: 0,
+    capSkippedCount: 0,
+    errorMessage: null,
+    startedAt: "2026-09-11T00:00:00.000Z",
+    finishedAt: "2026-09-11T00:00:05.000Z",
+    createdAt: "2026-09-11T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("Scout panel — Run state and the Blocked-analyses repair (issue #227)", () => {
+  const minutesAgo = (minutes: number) =>
+    new Date(Date.now() - minutes * 60_000).toISOString();
+
+  function serve(
+    scoutOverrides: Record<string, unknown>,
+    scoutRuns: Record<string, unknown>[] = [],
+  ) {
+    server.use(
+      http.get("/api/scouts", () =>
+        HttpResponse.json({ scouts: [scout(scoutOverrides)] }),
+      ),
+      http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
+      http.get("/api/scouts/scout-1/runs", () => HttpResponse.json({ scoutRuns })),
+    );
+  }
+
+  /** The panel's sticky header: identity and every action, above the sections. */
+  async function openHeader(user: ReturnType<typeof userEvent.setup>) {
+    const panel = await openPanel(user);
+    const header = panel
+      .getByRole("heading", { name: "Senior Backend — Remote EU" })
+      .closest("[data-slot='scout-panel-header']");
+    expect(header).not.toBeNull();
+    return { panel, header: within(header as HTMLElement) };
+  }
+
+  it("shows the Run state badge and its duration beside the lifecycle badge", async () => {
+    serve({ runState: "IN_FLIGHT", runStateSince: minutesAgo(12) });
+    const user = userEvent.setup();
+    const { header } = await openHeader(user);
+
+    expect(header.getByText("Active")).toHaveAttribute("data-slot", "badge");
+    expect(header.getByText("In progress")).toHaveAttribute("data-slot", "badge");
+    expect(header.getByText("12 min")).toBeInTheDocument();
+  });
+
+  it("shows both facts for a paused Scout with work still in flight", async () => {
+    serve({ status: "PAUSED", runState: "IN_FLIGHT", runStateSince: minutesAgo(3) });
+    const user = userEvent.setup();
+    const { header } = await openHeader(user);
+
+    expect(header.getByText("Paused")).toBeInTheDocument();
+    expect(header.getByText("In progress")).toBeInTheDocument();
+  });
+
+  it("says a Scout is working right now even if its last run ended badly", async () => {
+    serve({ runState: "IN_FLIGHT", runStateSince: minutesAgo(2), lastRunAt: minutesAgo(90) }, [
+      { ...panelRun(), status: "FAILED", errorMessage: "All sites disabled" },
+    ]);
+    const user = userEvent.setup();
+    const { panel, header } = await openHeader(user);
+
+    expect(header.getByText("In progress")).toBeInTheDocument();
+    // The failed run is still the run history's own fact, down below.
+    expect(await panel.findByText("Failed")).toBeInTheDocument();
+    expect(header.queryByText("Failed")).toBeNull();
+  });
+
+  it("explains a Run state through a tooltip reachable from the keyboard", async () => {
+    serve({ runState: "FAILED", lastRunAt: minutesAgo(90) });
+    const user = userEvent.setup();
+    const { header } = await openHeader(user);
+
+    header.getByText("Failed").parentElement!.focus();
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+      /an Administrator needs to step in/,
+    );
+  });
+
+  it("offers the repair only while Blocked, naming the real count", async () => {
+    serve({
+      runState: "BLOCKED",
+      runStateSince: minutesAgo(40),
+      blockedAnalysisIds: ["an-1", "an-2", "an-3"],
+    });
+    const user = userEvent.setup();
+    const { header } = await openHeader(user);
+
+    expect(
+      header.getByRole("button", { name: "Relaunch the 3 blocked analyses" }),
+    ).toBeInTheDocument();
+  });
+
+  it.each(["IN_FLIGHT", "FAILED", "DEGRADED", "OK", "NEVER_RUN"])(
+    "offers no repair when the Run state is %s",
+    async (runState) => {
+      serve({ runState, runStateSince: runState === "IN_FLIGHT" ? minutesAgo(5) : null });
+      const user = userEvent.setup();
+      const { header } = await openHeader(user);
+
+      expect(header.queryByRole("button", { name: /blocked analys/i })).toBeNull();
+    },
+  );
+
+  it("re-drives every blocked Analysis with one requeue per id, and charges no quota", async () => {
+    const requeued: string[] = [];
+    let created = 0;
+    serve({
+      runState: "BLOCKED",
+      runStateSince: minutesAgo(40),
+      blockedAnalysisIds: ["an-1", "an-2"],
+    });
+    server.use(
+      http.post("/api/analyses/:id/requeue", ({ params }) => {
+        requeued.push(String(params.id));
+        return HttpResponse.json({ status: "PENDING" });
+      }),
+      http.post("/api/analyses", () => {
+        created += 1;
+        return HttpResponse.json({ analysisId: "new" }, { status: 201 });
+      }),
+    );
+    const user = userEvent.setup();
+    const { header } = await openHeader(user);
+
+    await user.click(
+      header.getByRole("button", { name: "Relaunch the 2 blocked analyses" }),
+    );
+
+    await waitFor(() => expect(requeued.sort()).toEqual(["an-1", "an-2"]));
+    expect(created).toBe(0);
+    expect(header.queryByRole("alert")).toBeNull();
+  });
+
+  it("refetches the Scout once the repair is done, so the badge moves on", async () => {
+    let requeued = false;
+    server.use(
+      http.get("/api/scouts", () =>
+        HttpResponse.json({
+          scouts: [
+            requeued
+              ? scout({ runState: "IN_FLIGHT", runStateSince: minutesAgo(0) })
+              : scout({
+                  runState: "BLOCKED",
+                  runStateSince: minutesAgo(40),
+                  blockedAnalysisIds: ["an-1"],
+                }),
+          ],
+        }),
+      ),
+      http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
+      http.get("/api/scouts/scout-1/runs", () => HttpResponse.json({ scoutRuns: [] })),
+      http.post("/api/analyses/an-1/requeue", () => {
+        requeued = true;
+        return HttpResponse.json({ status: "PENDING" });
+      }),
+    );
+    const user = userEvent.setup();
+    const { header } = await openHeader(user);
+
+    await user.click(
+      header.getByRole("button", { name: "Relaunch the 1 blocked analysis" }),
+    );
+
+    expect(await header.findByText("In progress")).toBeInTheDocument();
+    expect(header.queryByRole("button", { name: /blocked analys/i })).toBeNull();
+  });
+
+  it("says how many could not be relaunched when a stale screen offered a row that had moved on", async () => {
+    serve({
+      runState: "BLOCKED",
+      runStateSince: minutesAgo(40),
+      blockedAnalysisIds: ["an-1", "an-2"],
+    });
+    server.use(
+      http.post("/api/analyses/an-1/requeue", () =>
+        HttpResponse.json({ status: "PENDING" }),
+      ),
+      http.post("/api/analyses/an-2/requeue", () =>
+        HttpResponse.json({ error: "ANALYSIS_NOT_STUCK" }, { status: 409 }),
+      ),
+    );
+    const user = userEvent.setup();
+    const { header } = await openHeader(user);
+
+    await user.click(
+      header.getByRole("button", { name: "Relaunch the 2 blocked analyses" }),
+    );
+
+    expect(await header.findByRole("alert")).toHaveTextContent(
+      "1 of 2 analyses could not be relaunched: they were still being processed after all.",
+    );
+  });
+
+  it("shows no progress fraction in the header, while the run history keeps its live counters", async () => {
+    // Deliberate (docs/adr/0033): the counters belong to one run while the
+    // badge is scoped to the Scout, so a fraction up here could visibly
+    // disagree with the badge beside it. Do not add one back.
+    serve({ runState: "IN_FLIGHT", runStateSince: minutesAgo(8) }, [
+      { ...panelRun(), status: "COMPLETED", offersDiscovered: 10, offersAnalysed: 3 },
+    ]);
+    const user = userEvent.setup();
+    const { panel, header } = await openHeader(user);
+
+    expect(await panel.findByText("10 offers found")).toBeInTheDocument();
+    expect(panel.getByText("3 analysed")).toBeInTheDocument();
+
+    const headerText = header.getByText("In progress").closest(
+      "[data-slot='scout-panel-header']",
+    )!.textContent!;
+    expect(headerText).not.toMatch(/\d+\s*\/\s*\d+/);
+    expect(headerText).not.toMatch(/%/);
+    expect(headerText).not.toMatch(/analysed|offers found/);
+    expect(header.queryByRole("progressbar")).toBeNull();
+  });
+});
+
 describe("Scout panel — relevant finds (issue #56)", () => {
   function find(overrides: Record<string, unknown> = {}) {
     return {
