@@ -82,11 +82,19 @@ export function siteReliability(site: {
 
 const SITE_CONFIGS_KEY = ["site-configs"] as const;
 
-/** Enabled job sites, ordered by display name (ordering comes from services/api). */
-export function useSiteConfigs() {
+/**
+ * Enabled job sites, ordered by display name (ordering comes from services/api).
+ *
+ * `enabled` is for the callers that mount the hook before they can need it —
+ * the Scout panel is rendered by the Scouts page whether or not a row has been
+ * opened, and this catalogue only feeds the FilterSupport notice inside an
+ * open panel, so it shouldn't be fetched on a plain visit to `/scouts`.
+ */
+export function useSiteConfigs({ enabled = true }: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: SITE_CONFIGS_KEY,
     queryFn: () => bff.get<{ siteConfigs: SiteConfig[] }>("/site-configs"),
     select: (data) => data.siteConfigs,
+    enabled,
   });
 }

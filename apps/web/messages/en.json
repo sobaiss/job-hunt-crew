@@ -916,7 +916,8 @@
     "finds": {
       "loadError": "We couldn't load this Scout's finds. Please try again.",
       "relevantHeading": "Relevant finds",
-      "relevantEmpty": "No relevant finds yet."
+      "relevantEmpty": "No relevant finds yet.",
+      "showingRecent": "The {shown} most recent analyses out of {total}."
     },
     "siteKeys": {
       "FRANCE_TRAVAIL": "France Travail",

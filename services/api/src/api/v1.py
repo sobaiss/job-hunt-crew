@@ -46,7 +46,7 @@ from py_db.quota import (
 from py_db.quotas import active_scout_count, effective_quota, maybe_record_quota_alert
 from py_db.stuck_analysis import TERMINAL_ANALYSIS_STATUSES, is_analysis_stuck
 from pydantic import BaseModel
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -1946,6 +1946,15 @@ class ScoutFindsResponse(BaseModel):
     lowFitFinds: list[AnalysisResponse]
 
 
+# The Scout panel shows the newest relevant finds, not the whole history: a
+# Scout that has been running for weeks would otherwise ship hundreds of full
+# gap reports (each with its offer, CV version, document and application
+# eagerly loaded) into a slide-over that only ever reads the top of the list.
+# The true total stays on `Scout.relevantFindsCount`, which both the Scouts
+# table and the panel's own badge read.
+RELEVANT_FINDS_LIMIT = 10
+
+
 @router.get("/scouts/{scout_id}/finds", response_model=ScoutFindsResponse)
 async def list_scout_finds(
     scout_id: str,
@@ -1955,10 +1964,12 @@ async def list_scout_finds(
     """Completed Analyses this Scout has produced, split by
     `matchScore >= Scout.matchThreshold` into relevant finds and "found — low
     fit" (issue #56). Each row is the same `AnalysisResponse` shape a manual
-    analysis uses, so the web client opens the identical gap report."""
+    analysis uses, so the web client opens the identical gap report.
+    `relevantFinds` carries only the `RELEVANT_FINDS_LIMIT` most recent."""
     scout = await _owned_scout(session, scout_id, user_id)
-    rows = (
-        await session.scalars(
+
+    def _finds_query():
+        return (
             select(Analysis)
             .options(
                 selectinload(Analysis.JobOffer_),
@@ -1970,9 +1981,27 @@ async def list_scout_finds(
             .where(Analysis.scoutId == scout.id, Analysis.status == Analysisstatus.COMPLETED)
             .order_by(Analysis.completedAt.desc())
         )
+
+    # Split in SQL rather than in Python, so the limit above applies to the
+    # newest relevant rows instead of the newest rows overall. An unscored
+    # Analysis falls to low fit, matching `_relevant_finds_count`.
+    relevant = (
+        await session.scalars(
+            _finds_query()
+            .where(Analysis.matchScore >= scout.matchThreshold)
+            .limit(RELEVANT_FINDS_LIMIT)
+        )
     ).all()
-    relevant = [row for row in rows if (row.matchScore or 0) >= scout.matchThreshold]
-    low_fit = [row for row in rows if (row.matchScore or 0) < scout.matchThreshold]
+    low_fit = (
+        await session.scalars(
+            _finds_query().where(
+                or_(
+                    Analysis.matchScore.is_(None),
+                    Analysis.matchScore < scout.matchThreshold,
+                )
+            )
+        )
+    ).all()
     # Every row here is COMPLETED, so `stuck` is decided by `is_analysis_stuck`'s
     # terminal-status short-circuit.
     now = _now()

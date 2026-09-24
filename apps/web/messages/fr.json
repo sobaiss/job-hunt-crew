@@ -916,7 +916,8 @@
     "finds": {
       "loadError": "Impossible de charger les résultats de cet agent. Veuillez réessayer.",
       "relevantHeading": "Résultats pertinents",
-      "relevantEmpty": "Aucun résultat pertinent pour l'instant."
+      "relevantEmpty": "Aucun résultat pertinent pour l'instant.",
+      "showingRecent": "Les {shown} analyses les plus récentes sur {total}."
     },
     "siteKeys": {
       "FRANCE_TRAVAIL": "France Travail",

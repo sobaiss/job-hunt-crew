@@ -17,8 +17,20 @@ import { Skeleton } from "@/components/ui/skeleton";
  * Only the relevant ones: the "found — low fit" list the endpoint also
  * returns is no longer surfaced. Everything below the Scout's own threshold
  * is, by that Scout's definition, not what the candidate asked to be shown.
+ *
+ * And only the most recent of those: the endpoint caps the list at its ten
+ * newest, so a long-running Scout doesn't ship its whole history into the
+ * panel. `totalCount` is the Scout's real relevant-finds count (the same
+ * number the Scouts table shows), which is what the badge reads — the list
+ * says below itself when it is showing less than that.
  */
-export function ScoutFinds({ scoutId }: { scoutId: string }) {
+export function ScoutFinds({
+  scoutId,
+  totalCount,
+}: {
+  scoutId: string;
+  totalCount: number;
+}) {
   const t = useTranslations("scouts.finds");
   const { data, isPending, isError } = useScoutFinds(scoutId);
 
@@ -27,9 +39,9 @@ export function ScoutFinds({ scoutId }: { scoutId: string }) {
       icon={Sparkles}
       title={t("relevantHeading")}
       trailing={
-        data && data.relevantFinds.length > 0 ? (
+        totalCount > 0 ? (
           <Badge variant="muted" className="tabular-nums">
-            {data.relevantFinds.length}
+            {totalCount}
           </Badge>
         ) : null
       }
@@ -43,13 +55,23 @@ export function ScoutFinds({ scoutId }: { scoutId: string }) {
       ) : data.relevantFinds.length === 0 ? (
         <PanelEmptyState icon={Sparkles}>{t("relevantEmpty")}</PanelEmptyState>
       ) : (
-        <ul className="flex flex-col gap-3">
-          {data.relevantFinds.map((analysis) => (
-            <li key={analysis.id}>
-              <AnalysisRow analysis={analysis} />
-            </li>
-          ))}
-        </ul>
+        <>
+          <ul className="flex flex-col gap-3">
+            {data.relevantFinds.map((analysis) => (
+              <li key={analysis.id}>
+                <AnalysisRow analysis={analysis} />
+              </li>
+            ))}
+          </ul>
+          {totalCount > data.relevantFinds.length && (
+            <p className="pt-3 text-sm text-muted">
+              {t("showingRecent", {
+                shown: data.relevantFinds.length,
+                total: totalCount,
+              })}
+            </p>
+          )}
+        </>
       )}
     </PanelSection>
   );
