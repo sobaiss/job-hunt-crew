@@ -15,6 +15,15 @@ class SiteSearchConfigError(Exception):
     """Raised when a SiteConfig row is missing the field its integrationType requires."""
 
 
+def _template_text(value: object) -> str:
+    """A filter's value as the template path sends it: a list-valued filter
+    (`contractType`) as its values comma-separated, since this path cannot
+    translate values; unset as `""`."""
+    if isinstance(value, list):
+        return ",".join(str(entry) for entry in value)
+    return str(value or "")
+
+
 def build_search_url(site_config: SiteConfig, filters: dict[str, str]) -> str:
     """PRD Section 8.5 step 3: "Backend builds the target URL/API call from
     SiteConfig.searchUrlTemplate + filterParamMapping."
@@ -39,7 +48,7 @@ def build_search_url(site_config: SiteConfig, filters: dict[str, str]) -> str:
             )
         param_mapping = site_config.filterParamMapping or {}
         params = {
-            param_name: str(filters[filter_key])
+            param_name: _template_text(filters[filter_key])
             for filter_key, param_name in param_mapping.items()
             if filter_key != OFFER_ID_KEY and filters.get(filter_key)
         }
@@ -55,9 +64,7 @@ def build_search_url(site_config: SiteConfig, filters: dict[str, str]) -> str:
     # the API layer stores unset optional filters as an explicit `None`
     # (services/api's `_optional_string`), so `or ""` is needed to catch that
     # case too and avoid stringifying it into a literal "None" in the URL.
-    values = {
-        name: quote(str(filters.get(name) or ""), safe="") for name in field_names
-    }
+    values = {name: quote(_template_text(filters.get(name)), safe="") for name in field_names}
     return site_config.searchUrlTemplate.format(**values)
 
 

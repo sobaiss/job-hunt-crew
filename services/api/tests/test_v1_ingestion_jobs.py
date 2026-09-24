@@ -207,6 +207,20 @@ def test_create_ingestion_job_rejects_bad_filter_values(user_id, site_config_id)
         assert bad_remote.status_code == 400
         assert "filters.remote must be one of" in bad_remote.json()["detail"]
 
+        # A free-text contract type is no longer taken, nor a value off the list.
+        for contract_type in ("CDI", ["PERMANENT"], [1]):
+            bad_contract = client.post(
+                "/v1/ingestion-jobs",
+                headers=_headers(user_id),
+                json={
+                    "mode": "SITE_SEARCH",
+                    "siteConfigId": site_config_id,
+                    "filters": {"contractType": contract_type},
+                },
+            )
+            assert bad_contract.status_code == 400
+            assert "filters.contractType must be a list of" in bad_contract.json()["detail"]
+
 
 def test_create_ingestion_job_success_uses_configured_max_offers(
     monkeypatch, user_id, site_config_id, cv_version_id
@@ -224,7 +238,7 @@ def test_create_ingestion_job_success_uses_configured_max_offers(
                     "keywords": "python",
                     "location": "Paris",
                     "postedWithin": "7d",
-                    "contractType": "CDI",
+                    "contractType": ["CDI", "CDD", "CDI"],
                     "remote": "hybrid",
                     "experienceLevel": "senior",
                 },
@@ -242,7 +256,7 @@ def test_create_ingestion_job_success_uses_configured_max_offers(
         "keywords": "python",
         "location": "Paris",
         "postedWithin": "7d",
-        "contractType": "CDI",
+        "contractType": ["CDI", "CDD"],
         "remote": "hybrid",
         "experienceLevel": "senior",
     }

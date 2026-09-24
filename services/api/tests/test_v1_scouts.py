@@ -245,6 +245,40 @@ def test_create_scout_defaults_threshold_and_normalizes(user_id):
         assert scout["relevantFindsCount"] == 0
 
 
+def test_create_scout_stores_contract_types_as_a_list(user_id):
+    with TestClient(app) as client:
+        cv = _make_cv_version(client, user_id)
+        response = client.post(
+            "/v1/scouts",
+            headers=_headers(user_id),
+            json=_scout_payload(cv, filters={"contractType": ["CDD", "ALTERNANCE", "CDD"]}),
+        )
+        assert response.status_code == 201
+        assert response.json()["scout"]["filters"]["contractType"] == ["CDD", "ALTERNANCE"]
+
+        # An empty selection is no filter at all.
+        empty = client.post(
+            "/v1/scouts",
+            headers=_headers(user_id),
+            json=_scout_payload(cv, filters={"contractType": []}),
+        )
+        assert empty.status_code == 201
+        assert empty.json()["scout"]["filters"]["contractType"] is None
+
+
+def test_create_scout_rejects_bad_contract_types(user_id):
+    with TestClient(app) as client:
+        cv = _make_cv_version(client, user_id)
+        for contract_type in ("CDI", ["full_time"]):
+            response = client.post(
+                "/v1/scouts",
+                headers=_headers(user_id),
+                json=_scout_payload(cv, filters={"contractType": contract_type}),
+            )
+            assert response.status_code == 400
+            assert "filters.contractType must be a list of" in response.json()["detail"]
+
+
 def test_create_and_list_scopes_to_user(user_id):
     other = asyncio.run(_create_user())
     try:

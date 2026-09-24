@@ -55,15 +55,25 @@ export function isListingPageError(
  */
 export const POSTED_WITHIN_VALUES = ["24h", "7d", "14d", "30d", "any"] as const;
 export const REMOTE_VALUES = ["onsite", "hybrid", "remote"] as const;
+/** `contractType`'s canonical list (services/api validates it on write, #214). */
+export const CONTRACT_TYPE_VALUES = [
+  "CDI",
+  "CDD",
+  "INTERIM",
+  "STAGE",
+  "ALTERNANCE",
+  "FREELANCE",
+] as const;
 
 export type PostedWithin = (typeof POSTED_WITHIN_VALUES)[number];
 export type Remote = (typeof REMOTE_VALUES)[number];
+export type ContractType = (typeof CONTRACT_TYPE_VALUES)[number];
 
 export type SiteSearchFilters = {
   keywords?: string;
   location?: string;
   postedWithin?: PostedWithin;
-  contractType?: string;
+  contractType?: ContractType[];
   remote?: Remote;
   experienceLevel?: string;
 };

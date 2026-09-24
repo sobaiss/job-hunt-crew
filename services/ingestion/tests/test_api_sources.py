@@ -139,7 +139,7 @@ async def test_adzuna_translates_the_app_filter_vocabulary(monkeypatch):
                 "keywords": "python",
                 "location": "Paris",
                 "postedWithin": "7d",
-                "contractType": "cdi",
+                "contractType": ["CDI"],
                 "remote": "remote",
             },
             http_client=client,
@@ -150,6 +150,36 @@ async def test_adzuna_translates_the_app_filter_vocabulary(monkeypatch):
     # No remote facet exists in Adzuna's API, so it's folded into the query.
     assert params["what"] == "python remote"
     assert params["permanent"] == "1"
+
+
+@pytest.mark.asyncio
+@respx.mock
+@pytest.mark.parametrize(
+    ("contract_types", "sent"),
+    [
+        (["CDI"], {"permanent": "1"}),
+        (["CDD", "INTERIM", "FREELANCE"], {"contract": "1"}),
+        # Adzuna's facets combine as an AND, so a selection spanning both, or
+        # holding a value with no facet, sends none: wider, never narrower.
+        (["CDI", "CDD"], {}),
+        (["STAGE"], {}),
+        (["CDD", "ALTERNANCE"], {}),
+    ],
+)
+async def test_adzuna_sends_a_contract_facet_only_when_one_covers_the_selection(
+    monkeypatch, contract_types, sent
+):
+    monkeypatch.setenv("ADZUNA_APP_ID", "test-id")
+    monkeypatch.setenv("ADZUNA_APP_KEY", "test-key")
+    route = respx.get(f"{ADZUNA_BASE}/search/1").mock(
+        return_value=Response(200, json={"results": []})
+    )
+    config = _site_config(Siteconfigsitekey.ADZUNA, ADZUNA_BASE)
+    async with make_http_client() as client:
+        await search_adzuna(config, {"contractType": contract_types}, http_client=client)
+    params = dict(route.calls[0].request.url.params)
+    facets = {k: v for k, v in params.items() if k in ("permanent", "contract", "part_time", "full_time")}
+    assert facets == sent
 
 
 @pytest.mark.asyncio

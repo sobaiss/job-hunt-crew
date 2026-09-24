@@ -4,16 +4,30 @@ from py_db.locations import resolve_location
 from py_db.models import SiteConfig
 
 from ..site_search import SiteSearchConfigError
-from .request import SearchRequest, filter_value
+from .request import SearchRequest, filter_value, filter_values
 
 SEARCH_PATH = "/offres/search"
 
-# Search filter key -> "Offres d'emploi v2" parameter. `location` is resolved
-# separately, below. `remote` has no parameter at all — the API has no
-# telework criterion — and is declared UNSUPPORTED in `py_db.filter_support`.
+# Search filter key -> "Offres d'emploi v2" parameter. `location` and
+# `contractType` are translated separately, below. `remote` has no parameter
+# at all — the API has no telework criterion — and is declared UNSUPPORTED in
+# `py_db.filter_support`.
 _PARAMS = {
     "keywords": "motsCles",
-    "contractType": "typeContrat",
+}
+
+# Search filter `contractType` -> the API's (parameter, codes), read off its
+# `referentiel/typesContrats` and `referentiel/naturesContrats`. Alternance is
+# a nature of contract (E2 apprenticeship, FS professionalisation), not a
+# type; the API ORs `typeContrat` and `natureContrat` together, so a mixed
+# selection still widens as a multiple selection should. There is no
+# internship contract: STAGE has no entry.
+_CONTRACTS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "CDI": ("typeContrat", ("CDI",)),
+    "CDD": ("typeContrat", ("CDD",)),
+    "INTERIM": ("typeContrat", ("MIS",)),
+    "FREELANCE": ("typeContrat", ("LIB",)),
+    "ALTERNANCE": ("natureContrat", ("E2", "FS")),
 }
 
 # The API layer hands `postedWithin` down as a relative token (POSTED_WITHIN_VALUES
@@ -41,7 +55,21 @@ def _creation_date_window(posted_within: str) -> dict[str, str]:
     }
 
 
-def build(site_config: SiteConfig, filters: dict[str, str]) -> SearchRequest:
+def _contract_params(contract_types: list[str]) -> dict[str, str]:
+    """Each parameter's codes, comma-separated. A selection holding a value
+    with no code (STAGE) is left out whole — the derogation declared in
+    `py_db.filter_support`: sending the rest would narrow the search to
+    exclude what was asked, where leaving it out only widens it."""
+    if any(value not in _CONTRACTS for value in contract_types):
+        return {}
+    codes: dict[str, list[str]] = {}
+    for value in contract_types:
+        param, value_codes = _CONTRACTS[value]
+        codes.setdefault(param, []).extend(value_codes)
+    return {param: ",".join(value_codes) for param, value_codes in codes.items()}
+
+
+def build(site_config: SiteConfig, filters: dict) -> SearchRequest:
     # `apiBaseUrl` stays on the row: the single-offer fetch reads it too.
     if not site_config.apiBaseUrl:
         raise SiteSearchConfigError(
@@ -52,6 +80,7 @@ def build(site_config: SiteConfig, filters: dict[str, str]) -> SearchRequest:
         for key, param in _PARAMS.items()
         if filters.get(key)
     }
+    params |= _contract_params(filter_values(filters, "contractType"))
     params |= _creation_date_window(filter_value(filters, "postedWithin"))
     # The API takes an INSEE `region` or `departement` code, never a label: a
     # label 400s the whole search. A location that resolves to nothing is left

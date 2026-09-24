@@ -8,8 +8,10 @@ import type { ApplicationStats } from "@/hooks/use-applications";
 import {
   POSTED_WITHIN_VALUES,
   REMOTE_VALUES,
+  type ContractType,
   type PostedWithin,
   type Remote,
+  type SiteSearchFilters,
 } from "@/hooks/use-ingestion-jobs";
 
 // TanStack Query hooks for the "Agents" area (issue #53). Scouts are saved,
@@ -40,7 +42,7 @@ export type ScoutFilters = {
   keywords: string | null;
   location: string | null;
   postedWithin: PostedWithin | null;
-  contractType: string | null;
+  contractType: ContractType[] | null;
   remote: Remote | null;
   experienceLevel: string | null;
 };
@@ -67,7 +69,7 @@ export type CreateScoutInput = {
   cvVersionId: string;
   targetSiteKeys: string[];
   matchThreshold: number;
-  filters: Partial<Record<keyof ScoutFilters, string | undefined>>;
+  filters: SiteSearchFilters;
 };
 
 export type UpdateScoutInput = Partial<{
@@ -75,7 +77,7 @@ export type UpdateScoutInput = Partial<{
   cvVersionId: string;
   targetSiteKeys: string[];
   matchThreshold: number;
-  filters: Partial<Record<keyof ScoutFilters, string | undefined>>;
+  filters: SiteSearchFilters;
   status: ScoutStatus;
 }>;
 

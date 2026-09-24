@@ -1,7 +1,7 @@
 from py_db.locations import resolve_location
 from py_db.models import SiteConfig
 
-from .request import SearchRequest, filter_value, html_search_url
+from .request import SearchRequest, filter_value, filter_values, html_search_url
 
 SEARCH_BASE = "https://www.hellowork.com/fr-fr/emploi/recherche.html"
 
@@ -17,6 +17,18 @@ _TELEWORK = {
     "onsite": ("Pas_teletravail",),
     "hybrid": ("Partiel", "Occasionnel"),
     "remote": ("Complet",),
+}
+
+# Search filter `contractType` -> HelloWork contract `c`, repeatable (the
+# values its own search form submits). HelloWork has two facets for working
+# on one's own account, both sent for FREELANCE.
+_CONTRACTS = {
+    "CDI": ("CDI",),
+    "CDD": ("CDD",),
+    "INTERIM": ("Travail_temp",),
+    "STAGE": ("Stage",),
+    "ALTERNANCE": ("Alternance",),
+    "FREELANCE": ("Freelance", "Independant"),
 }
 
 # HelloWork's own form submits a place as its label `l` plus this companion
@@ -39,11 +51,18 @@ def _location_params(text: str) -> list[tuple[str, str]]:
     ]
 
 
-def build(site_config: SiteConfig, filters: dict[str, str]) -> SearchRequest:
+def _contract_params(contract_types: list[str]) -> list[tuple[str, str]]:
+    """One `c` per HelloWork value, or an empty `c` when none is chosen: the
+    shape the seeded template produced."""
+    values = [value for canonical in contract_types for value in _CONTRACTS.get(canonical, ())]
+    return [("c", value) for value in values] or [("c", "")]
+
+
+def build(site_config: SiteConfig, filters: dict) -> SearchRequest:
     params = [
         ("k", filter_value(filters, "keywords")),
         *_location_params(filter_value(filters, "location")),
-        ("c", filter_value(filters, "contractType")),
+        *_contract_params(filter_values(filters, "contractType")),
         ("ray", "20"),
         ("st", "relevance"),
         ("cod", "all"),

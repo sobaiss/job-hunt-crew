@@ -1101,6 +1101,14 @@
       "hybrid": "Hybride",
       "remote": "Télétravail"
     },
+    "contractType": {
+      "CDI": "CDI",
+      "CDD": "CDD",
+      "INTERIM": "Intérim",
+      "STAGE": "Stage",
+      "ALTERNANCE": "Alternance",
+      "FREELANCE": "Freelance / indépendant"
+    },
     "detail": {
       "heading": "Ingestion",
       "loading": "Chargement de cette ingestion",

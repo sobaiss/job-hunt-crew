@@ -67,6 +67,11 @@ SEARCH_FILTER_KEYS = (
     "experienceLevel",
 )
 
+# `contractType`'s canonical values: French contract codes, validated on
+# write and stored as a list (#214). Each Site adapter translates them into
+# its own codes.
+CONTRACT_TYPE_VALUES = ("CDI", "CDD", "INTERIM", "STAGE", "ALTERNANCE", "FREELANCE")
+
 _S = FilterSupportLevel.SUPPORTED
 _A = FilterSupportLevel.APPROXIMATED
 _U = FilterSupportLevel.UNSUPPORTED
@@ -100,8 +105,13 @@ FILTER_SUPPORT: dict[Siteconfigsitekey, dict[str, FilterSupport]] = {
         ),
         "contractType": FilterSupport(
             _S,
-            "Sent as `typeContrat`, whose codes are the canonical ones; "
-            "honoured by `make verify-sites`.",
+            "Sent as the API's own codes, comma-separated: CDI, CDD, INTERIM "
+            "-> `MIS` and FREELANCE -> `LIB` in `typeContrat`, ALTERNANCE -> "
+            "`E2,FS` (apprenticeship, professionalisation) in `natureContrat`, "
+            "which the API ORs with it; honoured by `make verify-sites`. The "
+            "API has no internship contract, so a selection holding STAGE is "
+            "not sent at all and the search runs wider (#214).",
+            derogations={"STAGE": Derogation(_U)},
         ),
         "remote": FilterSupport(
             _U,
@@ -137,7 +147,11 @@ FILTER_SUPPORT: dict[Siteconfigsitekey, dict[str, FilterSupport]] = {
             derogations={"14d": Derogation(_A, substitute="30d")},
         ),
         "contractType": FilterSupport(
-            _S, "Sent as `c`; honoured by `make verify-sites`."
+            _S,
+            "Sent as `c`, repeated per value: INTERIM -> `Travail_temp`, "
+            "STAGE -> `Stage`, ALTERNANCE -> `Alternance`, FREELANCE -> "
+            "`Freelance` and `Independant`, CDI and CDD as themselves; "
+            "honoured by `make verify-sites` (#214).",
         ),
         "remote": FilterSupport(
             _S,
@@ -160,9 +174,12 @@ FILTER_SUPPORT: dict[Siteconfigsitekey, dict[str, FilterSupport]] = {
         ),
         "contractType": FilterSupport(
             _U,
-            "Not sent: `f_JT` classifies by working time, not contract "
-            "duration, and showed no effect on the guest search page the "
-            "pipeline scrapes (#214).",
+            "Not sent: `f_JT` showed no effect on the guest search page the "
+            "pipeline scrapes, in `make verify-sites` and in a hand check "
+            "(django/Lyon, 171 offers, the same ones for F, C, T, I and F,C) "
+            "(#214). Even where honoured it classifies by working time and "
+            "engagement, not contract duration, so it could never tell a CDI "
+            "from a CDD: a part-time CDI exists.",
         ),
         "remote": FilterSupport(
             _U,
@@ -184,7 +201,8 @@ FILTER_SUPPORT: dict[Siteconfigsitekey, dict[str, FilterSupport]] = {
             _A,
             "Adzuna has boolean contract facets, not a list: CDI becomes "
             "`permanent`, CDD, INTERIM and FREELANCE share one `contract` "
-            "facet, and any other value is not applied.",
+            "facet. A selection spanning both facets, or holding STAGE or "
+            "ALTERNANCE, which have none, is not applied.",
         ),
         "remote": FilterSupport(
             _A,

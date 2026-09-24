@@ -159,12 +159,17 @@ class Probe:
 
     label: str
     filter_key: str | None = None
-    value: str | None = None
+    value: str | tuple[str, ...] | None = None
     raw: tuple[tuple[str, str], ...] = ()
 
 
 def _canonical(key: str, *values: str) -> list[Probe]:
     return [Probe(f"{key}={v}", filter_key=key, value=v) for v in values]
+
+
+def _canonical_lists(key: str, *selections: tuple[str, ...]) -> list[Probe]:
+    """Probes for a list-valued filter (`contractType`), one per selection."""
+    return [Probe(f"{key}={','.join(s)}", filter_key=key, value=s) for s in selections]
 
 
 def _raw(param: str, *values: str) -> list[Probe]:
@@ -174,7 +179,15 @@ def _raw(param: str, *values: str) -> list[Probe]:
 CANONICAL_PROBES = [
     *_canonical("postedWithin", "24h", "7d", "14d", "30d"),
     *_canonical("remote", "onsite", "hybrid", "remote"),
-    *_canonical("contractType", "CDI"),
+    *_canonical_lists(
+        "contractType",
+        ("CDI",),
+        ("CDI", "CDD"),
+        ("INTERIM",),
+        ("STAGE",),
+        ("ALTERNANCE",),
+        ("FREELANCE",),
+    ),
     *_canonical("location", "Ile-de-France", "Rhône"),
     *_canonical("experienceLevel", "senior"),
 ]
@@ -309,7 +322,8 @@ def _with_raw(request: SearchRequest, raw: tuple[tuple[str, str], ...]) -> Searc
 def _probe_request(site: SiteUnderTest, probe: Probe, baseline: SearchRequest) -> SearchRequest:
     if probe.raw:
         return _with_raw(baseline, probe.raw)
-    filters = {**site.baseline, probe.filter_key: probe.value}
+    value = list(probe.value) if isinstance(probe.value, tuple) else probe.value
+    filters = {**site.baseline, probe.filter_key: value}
     return build_search_request(site.site_config(), filters)
 
 

@@ -1101,6 +1101,14 @@
       "hybrid": "Hybrid",
       "remote": "Remote"
     },
+    "contractType": {
+      "CDI": "Permanent (CDI)",
+      "CDD": "Fixed-term (CDD)",
+      "INTERIM": "Temporary (intérim)",
+      "STAGE": "Internship",
+      "ALTERNANCE": "Work-study (alternance)",
+      "FREELANCE": "Freelance"
+    },
     "detail": {
       "heading": "Ingestion job",
       "loading": "Loading this ingestion job",

@@ -18,12 +18,17 @@ class SearchRequest:
         return f"{self.base}?{query}" if query else self.base
 
 
-def filter_value(filters: dict[str, str], key: str) -> str:
+def filter_value(filters: dict, key: str) -> str:
     """A filter's value as text, `""` when unset. The API stores an unset
     optional filter as an explicit `None`, which `filters.get`'s default
     alone would stringify into a literal "None".
     """
     return str(filters.get(key) or "")
+
+
+def filter_values(filters: dict, key: str) -> list[str]:
+    """A list-valued filter (`contractType`), `[]` when unset."""
+    return list(filters.get(key) or [])
 
 
 def html_search_url(base: str, params: list[tuple[str, str]]) -> str:

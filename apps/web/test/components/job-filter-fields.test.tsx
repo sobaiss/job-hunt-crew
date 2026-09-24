@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import userEvent from "@testing-library/user-event";
 
-import { renderWithProviders, screen } from "../test-utils";
+import { renderWithProviders, screen, within } from "../test-utils";
 import {
   JobFilterFields,
   EMPTY_JOB_FILTERS,
@@ -32,7 +32,13 @@ describe("JobFilterFields", () => {
     expect(await screen.findByLabelText("Keywords")).toBeInTheDocument();
     expect(screen.getByLabelText("Location")).toBeInTheDocument();
     expect(screen.getByLabelText("Posted within")).toBeInTheDocument();
-    expect(screen.getByLabelText("Contract type")).toBeInTheDocument();
+    // A multiple selection over the canonical list, not free text (#214).
+    const contracts = screen.getByRole("group", { name: "Contract type" });
+    expect(
+      within(contracts)
+        .getAllByRole("checkbox")
+        .map((box) => box.getAttribute("value")),
+    ).toEqual(["CDI", "CDD", "INTERIM", "STAGE", "ALTERNANCE", "FREELANCE"]);
     expect(screen.getByLabelText("Remote policy")).toBeInTheDocument();
     // No site honours it, so it is hidden rather than warned about
     // (docs/adr/0030); its key stays in the values.
@@ -47,8 +53,12 @@ describe("JobFilterFields", () => {
     await user.type(await screen.findByLabelText("Keywords"), "python");
     await user.selectOptions(screen.getByLabelText("Posted within"), "7d");
     await user.selectOptions(screen.getByLabelText("Remote policy"), "remote");
+    await user.click(screen.getByRole("checkbox", { name: "Work-study (alternance)" }));
+    await user.click(screen.getByRole("checkbox", { name: "Permanent (CDI)" }));
+    await user.click(screen.getByRole("checkbox", { name: "Work-study (alternance)" }));
 
     const last = onChange.mock.calls.at(-1)?.[0] as JobFilterValues;
+    expect(last.contractType).toEqual(["CDI"]);
     expect(last.keywords).toBe("python");
     expect(last.postedWithin).toBe("7d");
     expect(last.remote).toBe("remote");
@@ -66,6 +76,15 @@ describe("toFilterPayload", () => {
         remote: "remote",
       }),
     ).toEqual({ keywords: "backend", postedWithin: "7d", remote: "remote" });
+  });
+
+  it("sends the chosen contract types as a list, and none when nothing is chosen", () => {
+    expect(
+      toFilterPayload({ ...EMPTY_JOB_FILTERS, contractType: ["CDI", "CDD"] }),
+    ).toEqual({ postedWithin: "any", contractType: ["CDI", "CDD"] });
+    expect(toFilterPayload({ ...EMPTY_JOB_FILTERS, contractType: [] })).toEqual({
+      postedWithin: "any",
+    });
   });
 
   it("always sends postedWithin, even when it is 'any'", () => {
@@ -91,7 +110,7 @@ describe("jobFiltersFrom", () => {
       keywords: "python",
       location: "",
       postedWithin: "7d",
-      contractType: "",
+      contractType: [],
       remote: "",
       experienceLevel: "",
     });

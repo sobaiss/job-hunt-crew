@@ -31,7 +31,7 @@ ALL_FILTERS = {
     "keywords": "software engineer",
     "location": "Paris",
     "postedWithin": "7d",
-    "contractType": "CDI",
+    "contractType": ["CDI"],
     "remote": "remote",
 }
 
@@ -211,6 +211,30 @@ def test_hellowork_sends_its_own_telework_values(remote, telework):
     )
 
 
+@pytest.mark.parametrize(
+    ("contract_types", "sent"),
+    [
+        (["CDI"], "&c=CDI"),
+        (["CDI", "CDD"], "&c=CDI&c=CDD"),
+        (["INTERIM"], "&c=Travail_temp"),
+        (["STAGE"], "&c=Stage"),
+        (["ALTERNANCE"], "&c=Alternance"),
+        # HelloWork has two facets for working on one's own account; both go.
+        (["FREELANCE"], "&c=Freelance&c=Independant"),
+    ],
+)
+def test_hellowork_sends_each_contract_type_as_a_repeated_c(contract_types, sent):
+    request = build_search_request(
+        _skeleton(Siteconfigsitekey.HELLOWORK),
+        {"keywords": "python", "contractType": contract_types},
+    )
+
+    assert request.url == (
+        "https://www.hellowork.com/fr-fr/emploi/recherche.html?k=python&l="
+        f"{sent}&ray=20&st=relevance&cod=all&msa=0"
+    )
+
+
 def test_hellowork_blanks_unset_filters():
     request = build_search_request(
         _skeleton(Siteconfigsitekey.HELLOWORK),
@@ -235,6 +259,30 @@ def test_france_travail_maps_filters_onto_the_search_endpoint():
         f"{FRANCE_TRAVAIL_API}/offres/search?motsCles=software+engineer"
         "&typeContrat=CDI&departement=75"
     )
+
+
+@pytest.mark.parametrize(
+    ("contract_types", "sent"),
+    [
+        (["CDI", "CDD"], {"typeContrat": "CDI,CDD"}),
+        (["INTERIM"], {"typeContrat": "MIS"}),
+        (["FREELANCE"], {"typeContrat": "LIB"}),
+        # Alternance is a nature of contract, not a type: apprenticeship and
+        # professionalisation. The API ORs the two parameters together.
+        (["ALTERNANCE"], {"natureContrat": "E2,FS"}),
+        (["CDI", "ALTERNANCE"], {"typeContrat": "CDI", "natureContrat": "E2,FS"}),
+        # France Travail has no internship contract: a selection holding one
+        # is left out whole, so the search runs wider rather than narrower.
+        (["STAGE"], {}),
+        (["CDI", "STAGE"], {}),
+    ],
+)
+def test_france_travail_sends_contract_types_as_its_own_codes(contract_types, sent):
+    request = build_search_request(
+        _france_travail(), {"keywords": "python", "contractType": contract_types}
+    )
+
+    assert request.params == {"motsCles": "python", **sent}
 
 
 def test_france_travail_sends_a_resolved_region_as_its_insee_code():

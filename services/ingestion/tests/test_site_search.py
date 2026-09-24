@@ -114,6 +114,16 @@ def test_build_search_url_html_scrape_blanks_unset_optional_filters():
     )
 
 
+def test_build_search_url_html_scrape_joins_a_list_filter_with_commas():
+    # `contractType` is stored as a list; the template path, which has no
+    # value translation, sends the codes as one comma-separated value.
+    filters = {"keywords": "go", "contractType": ["CDI", "CDD"]}
+
+    url = build_search_url(_indeed_site_config(), filters)
+
+    assert url == "https://www.indeed.com/jobs?q=go&l=&fromage=&jt=CDI%2CCDD&remotejob="
+
+
 def test_build_search_url_hellowork_fills_template_and_keeps_fixed_defaults():
     filters = {"keywords": "ingenieur", "location": "Paris", "contractType": "CDI"}
 

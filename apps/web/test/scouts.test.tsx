@@ -472,6 +472,32 @@ describe("ScoutsPage — list", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows a Scout's contract types under their option labels", async () => {
+    server.use(
+      http.get("/api/scouts", () =>
+        HttpResponse.json({
+          scouts: [
+            scout({
+              filters: { ...scout().filters, contractType: ["CDI", "ALTERNANCE"] },
+            }),
+          ],
+        }),
+      ),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<ScoutsPage />);
+
+    await user.click(await screen.findByText("Senior Backend — Remote EU"));
+
+    const panel = within(await screen.findByRole("dialog"));
+    expect(
+      panel.getByText("Contract type: Permanent (CDI), Work-study (alternance)"),
+    ).toBeInTheDocument();
+  });
+
   it("opens the Scout panel via keyboard when a row is focused (Enter or Space)", async () => {
     server.use(
       http.get("/api/scouts", () => HttpResponse.json({ scouts: [scout()] })),
@@ -857,18 +883,64 @@ describe("NewScoutPage — create form", () => {
 
     await user.type(await screen.findByLabelText("Label"), "Filtered Scout");
     await user.selectOptions(screen.getByLabelText("CV version"), "cv-default");
-    await user.type(screen.getByLabelText("Contract type"), "CDI");
+    const contracts = screen.getByRole("group", { name: "Contract type" });
+    await user.click(within(contracts).getByRole("checkbox", { name: "Permanent (CDI)" }));
+    await user.click(within(contracts).getByRole("checkbox", { name: "Fixed-term (CDD)" }));
     await user.selectOptions(screen.getByLabelText("Remote policy"), "remote");
     await user.click(screen.getByRole("button", { name: "Create Scout" }));
 
     await waitFor(() => expect(received).toHaveLength(1));
     expect(received[0]).toMatchObject({
       filters: {
-        contractType: "CDI",
+        contractType: ["CDI", "CDD"],
         remote: "remote",
         postedWithin: "7d",
       },
     });
+  });
+
+  it("tells the candidate a selection holding an internship is not applied where a derogation says so", async () => {
+    server.use(
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+      http.get("/api/site-configs", () =>
+        HttpResponse.json({
+          siteConfigs: SUPPORT_SITE_CONFIGS.map((site) =>
+            site.siteKey === "FRANCE_TRAVAIL"
+              ? {
+                  ...site,
+                  filterSupport: {
+                    ...site.filterSupport,
+                    contractType: {
+                      ...support("SUPPORTED"),
+                      derogations: {
+                        STAGE: { level: "UNSUPPORTED", substitute: null },
+                      },
+                    },
+                  },
+                }
+              : site,
+          ),
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<NewScoutPage />);
+
+    const contracts = await screen.findByRole("group", { name: "Contract type" });
+    await screen.findByRole("checkbox", { name: "HelloWork" });
+    // CDI alone is honoured: nothing to say.
+    await user.click(within(contracts).getByRole("checkbox", { name: "Permanent (CDI)" }));
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
+
+    await user.click(within(contracts).getByRole("checkbox", { name: "Internship" }));
+    const note = await screen.findByRole("note");
+    expect(note).toHaveTextContent("France Travail will not apply: Contract type");
+
+    // Unchecking the internship takes the warning away again.
+    await user.click(within(contracts).getByRole("checkbox", { name: "Internship" }));
+    await waitFor(() => expect(screen.queryByRole("note")).not.toBeInTheDocument());
   });
 
   it("has no experience level field, since no site honours it (docs/adr/0030)", async () => {

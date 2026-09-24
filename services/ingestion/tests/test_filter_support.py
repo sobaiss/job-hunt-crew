@@ -19,6 +19,7 @@ import pytest
 import respx
 from httpx import Response
 from py_db.filter_support import (
+    CONTRACT_TYPE_VALUES,
     FILTER_SUPPORT,
     SEARCH_FILTER_KEYS,
     FilterSupportLevel,
@@ -47,7 +48,7 @@ PROBE_VALUES = {
     "keywords": "python",
     "location": "Ile-de-France",
     "postedWithin": "7d",
-    "contractType": "CDI",
+    "contractType": ["CDI"],
     "remote": "remote",
     "experienceLevel": "senior",
 }
@@ -170,17 +171,42 @@ def test_hellowork_widens_14_days_to_a_month():
     assert derogation.substitute == "30d"
 
 
+def test_france_travail_widens_a_selection_holding_an_internship():
+    # The API has no internship contract; the whole selection is left out.
+    derogation = FILTER_SUPPORT[Siteconfigsitekey.FRANCE_TRAVAIL]["contractType"].derogations[
+        "STAGE"
+    ]
+
+    assert derogation.level is FilterSupportLevel.UNSUPPORTED
+    assert derogation.substitute is None
+
+
+def test_contract_type_derogations_name_canonical_values():
+    for declared in FILTER_SUPPORT.values():
+        assert set(declared["contractType"].derogations) <= set(CONTRACT_TYPE_VALUES)
+
+
 # Freshness windows, narrowest first: a derogation widens, never narrows.
 _POSTED_WITHIN_ORDER = ["24h", "7d", "14d", "30d", "any"]
 
 
 @pytest.mark.parametrize(("site_key", "filter_key", "value", "derogation"), _derogations())
-async def test_a_derogation_sends_its_substitute(site_key, filter_key, value, derogation):
+async def test_a_derogation_sends_what_it_declares(site_key, filter_key, value, derogation):
+    # A list-valued filter (`contractType`) is driven with the value alone.
+    def _filter(v):
+        return [v] if filter_key == "contractType" else v
+
+    baseline = {"keywords": "developer"}
+    as_asked = await _site_receives(site_key, baseline | {filter_key: _filter(value)})
+    if derogation.substitute is None:
+        # With no substitute, an UNSUPPORTED value sends nothing at all.
+        assert derogation.level is FilterSupportLevel.UNSUPPORTED
+        assert as_asked == await _site_receives(site_key, baseline)
+        return
+
     # The substitute named to the candidate is what the site really receives.
-    assert derogation.substitute is not None
-    as_asked = await _site_receives(site_key, {"keywords": "developer", filter_key: value})
     as_substituted = await _site_receives(
-        site_key, {"keywords": "developer", filter_key: derogation.substitute}
+        site_key, baseline | {filter_key: _filter(derogation.substitute)}
     )
 
     assert as_asked == as_substituted

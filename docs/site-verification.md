@@ -233,3 +233,39 @@ Established by hand, `keywords=developpeur` (17,711):
 - An unrecognised label is matched as text and narrows the search:
   `l=Lyonn` gave 18. That is why a value that resolves to nothing is not
   sent, as on France Travail, and the search runs wider instead.
+
+## contractType after #214 — 2026-09-24
+
+`contractType` is now a list of canonical codes (CDI, CDD, INTERIM, STAGE,
+ALTERNANCE, FREELANCE), and the verification command probes selections
+rather than one free-text value:
+
+```
+FRANCE_TRAVAIL   contractType=CDI             honoured        3265 -> 2218
+FRANCE_TRAVAIL   contractType=CDI,CDD         honoured        3265 -> 2482
+FRANCE_TRAVAIL   contractType=INTERIM         honoured        3265 -> 194
+FRANCE_TRAVAIL   contractType=STAGE           not honoured    the adapter sends nothing for this filter
+FRANCE_TRAVAIL   contractType=ALTERNANCE      honoured        3265 -> 114
+FRANCE_TRAVAIL   contractType=FREELANCE       honoured        3265 -> 582
+HELLOWORK        contractType=CDI             honoured        1023 -> 703
+HELLOWORK        contractType=CDI,CDD         honoured        1023 -> 742
+HELLOWORK        contractType=INTERIM         honoured        1023 -> 17
+HELLOWORK        contractType=STAGE           honoured        1023 -> 98
+HELLOWORK        contractType=ALTERNANCE      honoured        1023 -> 27
+HELLOWORK        contractType=FREELANCE       honoured        1023 -> 126
+LINKEDIN         contractType=CDI             not honoured    the adapter sends nothing for this filter
+```
+
+- France Travail: `typeContrat` takes `CDI`, `CDD`, `MIS` (intérim) and
+  `LIB` (freelance), comma-separated. Alternance is a nature of contract,
+  not a type: `natureContrat=E2,FS` (apprenticeship, professionalisation),
+  which the API ORs with `typeContrat`. There is no internship contract, so
+  a selection holding STAGE is not sent at all (a derogation with no
+  substitute): sending the rest would narrow the search to exclude what was
+  asked.
+- HelloWork: `c` is repeated per value. INTERIM is `Travail_temp`, and
+  FREELANCE sends both `Freelance` and `Independant`.
+- LinkedIn: `f_JT` is still ignored on the guest search page. By hand,
+  `keywords=django&location=Lyon` returned 171 offers, the same ones, for
+  no `f_JT` and for `F`, `C`, `T`, `I` and `F,C`. `contractType` stays
+  UNSUPPORTED there, and the adapter sends nothing.

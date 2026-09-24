@@ -64,7 +64,7 @@ function statusVariant(
 // Configuration shows a Scout's filters under the same names the Scout form
 // used to set them (`JobFilterFields`), rather than the raw `ScoutFilters`
 // keys the API stores — no new messages, just the form's own labels and,
-// for the two enum-valued filters, the option label the picker showed.
+// for the enum-valued filters, the option label the picker showed.
 const FILTER_LABEL_KEYS: Record<string, string> = {
   keywords: "keywordsLabel",
   location: "locationLabel",
@@ -73,7 +73,7 @@ const FILTER_LABEL_KEYS: Record<string, string> = {
   remote: "remoteLabel",
   experienceLevel: "experienceLevelLabel",
 };
-const ENUM_FILTER_KEYS = new Set(["postedWithin", "remote"]);
+const ENUM_FILTER_KEYS = new Set(["postedWithin", "remote", "contractType"]);
 
 /** One `<dt>`/`<dd>` pair of the Configuration list. Two columns rather than
  *  a wrapping flex row, so a value that needs several lines (a long site or
@@ -143,7 +143,10 @@ export function ScoutPanel({
 
   const activeFilters = scout
     ? Object.entries(scout.filters).filter(
-        ([, value]) => value != null && value !== "",
+        ([, value]) =>
+          value != null &&
+          value !== "" &&
+          !(Array.isArray(value) && value.length === 0),
       )
     : [];
 
@@ -153,13 +156,14 @@ export function ScoutPanel({
       : tRuns("runError");
 
   /** "Posted within: Last 7 days" — the form's field label, then the option
-   *  label for the enum-valued filters and the stored text for the rest. */
-  const filterChipText = (key: string, value: string) => {
+   *  label for the enum-valued filters and the stored text for the rest. A
+   *  list (contract types) reads as its labels, comma-separated. */
+  const filterChipText = (key: string, value: string | string[]) => {
     const labelKey = FILTER_LABEL_KEYS[key];
     const label = labelKey ? tFilters(labelKey) : key;
-    const shown = ENUM_FILTER_KEYS.has(key)
-      ? tIngestion(`${key}.${value}`)
-      : value;
+    const shown = (Array.isArray(value) ? value : [value])
+      .map((v) => (ENUM_FILTER_KEYS.has(key) ? tIngestion(`${key}.${v}`) : v))
+      .join(", ");
     return `${label}: ${shown}`;
   };
 
@@ -302,7 +306,10 @@ export function ScoutPanel({
                         {activeFilters.length > 0 ? (
                           activeFilters.map(([key, value]) => (
                             <Badge key={key} variant="muted">
-                              {filterChipText(key, String(value))}
+                              {filterChipText(
+                                key,
+                                Array.isArray(value) ? value : String(value),
+                              )}
                             </Badge>
                           ))
                         ) : (

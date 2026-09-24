@@ -3,8 +3,10 @@
 import { useTranslations } from "next-intl";
 
 import {
+  CONTRACT_TYPE_VALUES,
   POSTED_WITHIN_VALUES,
   REMOTE_VALUES,
+  type ContractType,
   type PostedWithin,
   type Remote,
   type SiteSearchFilters,
@@ -20,6 +22,10 @@ import { Label } from "@/components/ui/label";
 const SELECT_CLASS =
   "flex h-9 w-full rounded-md border border-border bg-background px-3 py-1 text-sm shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50";
 
+// The Scout form's site checkboxes, for the contract type selection.
+const CHECKBOX_CLASS =
+  "h-4 w-4 rounded border-border accent-accent outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
+
 /**
  * The job-search filter fields shared by "Analyse several offers" and the Scout
  * form (issue #53 prefactor). Fully controlled: the parent owns the state and
@@ -29,7 +35,7 @@ export type JobFilterValues = {
   keywords: string;
   location: string;
   postedWithin: PostedWithin;
-  contractType: string;
+  contractType: ContractType[];
   remote: "" | Remote;
   experienceLevel: string;
 };
@@ -38,21 +44,22 @@ export const EMPTY_JOB_FILTERS: JobFilterValues = {
   keywords: "",
   location: "",
   postedWithin: "any",
-  contractType: "",
+  contractType: [],
   remote: "",
   experienceLevel: "",
 };
 
 /**
  * Build the `filters` object services/api accepts from the form state: free-text
- * fields are trimmed and dropped when blank; `postedWithin` is always sent.
+ * fields are trimmed and dropped when blank, as is an empty contract type
+ * selection; `postedWithin` is always sent.
  */
 export function toFilterPayload(values: JobFilterValues): SiteSearchFilters {
   return {
     keywords: values.keywords.trim() || undefined,
     location: values.location.trim() || undefined,
     postedWithin: values.postedWithin,
-    contractType: values.contractType.trim() || undefined,
+    contractType: values.contractType.length ? values.contractType : undefined,
     remote: values.remote || undefined,
     experienceLevel: values.experienceLevel.trim() || undefined,
   };
@@ -60,7 +67,11 @@ export function toFilterPayload(values: JobFilterValues): SiteSearchFilters {
 
 /** Seed {@link JobFilterValues} from a stored Scout's nullable `filters`. */
 export function jobFiltersFrom(
-  filters: Partial<Record<keyof JobFilterValues, string | null | undefined>>,
+  filters: Partial<
+    Record<Exclude<keyof JobFilterValues, "contractType">, string | null> & {
+      contractType: ContractType[] | null;
+    }
+  >,
   fallback: JobFilterValues = EMPTY_JOB_FILTERS,
 ): JobFilterValues {
   return {
@@ -91,14 +102,22 @@ type ShownFilter = (typeof SHOWN_FILTERS)[number][0];
 
 function isFilled(values: JobFilterValues, key: keyof JobFilterValues) {
   if (key === "postedWithin") return values.postedWithin !== "any";
+  if (key === "contractType") return values.contractType.length > 0;
   return values[key].trim() !== "";
+}
+
+/** The values a filled filter holds: one, or a contract type selection. */
+function filledValues(values: JobFilterValues, key: ShownFilter): string[] {
+  return key === "contractType" ? values.contractType : [values[key]];
 }
 
 /**
  * Per selected site, the filled filters it will not honour as asked — the
  * FilterSupport statement shown before a run (docs/adr/0030). A value the
  * site treats differently from the rest of its filter (a derogation) is
- * judged on its own, and names the substitute applied when there is one.
+ * judged on its own, and names the substitute applied when there is one; in
+ * a contract type selection, one such value decides for the whole selection,
+ * which the site then takes or leaves whole.
  * A location a site only takes resolved is judged by whether it resolves.
  * Renders nothing when every filled filter is SUPPORTED on every site.
  * Also shown on a saved Scout's panel, so a Scout nobody reopens still says
@@ -123,7 +142,7 @@ export function FilterSupportNotice({
 
   // The select filters' values have labels; free text is shown as typed.
   const valueLabel = (key: ShownFilter, value: string) =>
-    key === "postedWithin" || key === "remote"
+    key === "postedWithin" || key === "remote" || key === "contractType"
       ? tIng(`${key}.${value}` as Parameters<typeof tIng>[0])
       : value;
 
@@ -131,7 +150,9 @@ export function FilterSupportNotice({
     const filled = SHOWN_FILTERS.filter(([key]) => isFilled(values, key)).map(
       ([key, labelKey]) => {
         const support = site.filterSupport?.[key];
-        const derogation = support?.derogations?.[values[key]];
+        const derogation = filledValues(values, key)
+          .map((value) => support?.derogations?.[value])
+          .find(Boolean);
         // A location the site cannot resolve takes the level it falls to.
         const unresolvedLevel =
           key === "location" && unresolved ? support?.whenUnresolved : null;
@@ -161,7 +182,9 @@ export function FilterSupportNotice({
             t("supportSubstituted", {
               site: site.displayName,
               filter: label,
-              value: valueLabel(key, values[key]),
+              value: filledValues(values, key)
+                .map((value) => valueLabel(key, value))
+                .join(", "),
               substitute: valueLabel(key, derogation.substitute),
             }),
           ]
@@ -227,6 +250,17 @@ export function JobFilterFields({
 
   const fieldId = (name: string) => `${idPrefix}-${name}`;
 
+  // Kept in the canonical list's order, whatever order they were ticked in.
+  const toggleContractType = (value: ContractType) =>
+    set(
+      "contractType",
+      CONTRACT_TYPE_VALUES.filter((v) =>
+        v === value
+          ? !values.contractType.includes(v)
+          : values.contractType.includes(v),
+      ),
+    );
+
   return (
     <>
       <div className="flex flex-col gap-1.5">
@@ -267,17 +301,23 @@ export function JobFilterFields({
         </select>
       </div>
 
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor={fieldId("contract-type")}>
-          {t("contractTypeLabel")}
-        </Label>
-        <Input
-          id={fieldId("contract-type")}
-          type="text"
-          value={values.contractType}
-          onChange={(e) => set("contractType", e.target.value)}
-        />
-      </div>
+      <fieldset className="flex flex-col gap-1.5">
+        <legend className="text-sm font-medium">{t("contractTypeLabel")}</legend>
+        <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+          {CONTRACT_TYPE_VALUES.map((value) => (
+            <label key={value} className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                className={CHECKBOX_CLASS}
+                value={value}
+                checked={values.contractType.includes(value)}
+                onChange={() => toggleContractType(value)}
+              />
+              {tIng(`contractType.${value}`)}
+            </label>
+          ))}
+        </div>
+      </fieldset>
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor={fieldId("remote")}>{t("remoteLabel")}</Label>

@@ -35,7 +35,7 @@ from py_db.models import (
     User,
 )
 from py_db.application_stats import compute_application_stats, stats_window_since
-from py_db.filter_support import filter_support_for
+from py_db.filter_support import CONTRACT_TYPE_VALUES, filter_support_for
 from py_db.locations import resolve_location
 from py_db.quota import (
     analyses_requested_this_month,
@@ -874,6 +874,48 @@ def _optional_string(value: Any) -> str | None:
     return trimmed or None
 
 
+def _optional_contract_types(value: Any) -> list[str] | None:
+    """`contractType` as a list of canonical codes, deduplicated in the order
+    chosen; `None` when unset or empty, like every other unset filter."""
+    if value is None:
+        return None
+    if not isinstance(value, list) or any(entry not in CONTRACT_TYPE_VALUES for entry in value):
+        raise HTTPException(
+            status_code=400,
+            detail=f"filters.contractType must be a list of: {', '.join(CONTRACT_TYPE_VALUES)}",
+        )
+    return list(dict.fromkeys(value)) or None
+
+
+def _normalize_search_filters(value: Any) -> dict[str, Any]:
+    """The Search filter a site-search IngestionJob and a Scout both carry,
+    validated on write the same way for both."""
+    filters_in = value if isinstance(value, dict) else {}
+
+    posted_within = _optional_string(filters_in.get("postedWithin"))
+    if posted_within is not None and posted_within not in POSTED_WITHIN_VALUES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"filters.postedWithin must be one of: {', '.join(POSTED_WITHIN_VALUES)}",
+        )
+
+    remote = _optional_string(filters_in.get("remote"))
+    if remote is not None and remote not in REMOTE_VALUES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"filters.remote must be one of: {', '.join(REMOTE_VALUES)}",
+        )
+
+    return {
+        "keywords": _optional_string(filters_in.get("keywords")),
+        "location": _optional_string(filters_in.get("location")),
+        "postedWithin": posted_within,
+        "contractType": _optional_contract_types(filters_in.get("contractType")),
+        "remote": remote,
+        "experienceLevel": _optional_string(filters_in.get("experienceLevel")),
+    }
+
+
 class JobOfferResponse(BaseModel):
     id: str
     sourceUrl: str
@@ -1020,30 +1062,7 @@ async def create_ingestion_job(
         if site_config is None or not site_config.enabled:
             raise HTTPException(status_code=400, detail="Unknown or disabled siteConfigId")
 
-        filters_in = req.filters or {}
-
-        posted_within = _optional_string(filters_in.get("postedWithin"))
-        if posted_within is not None and posted_within not in POSTED_WITHIN_VALUES:
-            raise HTTPException(
-                status_code=400,
-                detail=f"filters.postedWithin must be one of: {', '.join(POSTED_WITHIN_VALUES)}",
-            )
-
-        remote = _optional_string(filters_in.get("remote"))
-        if remote is not None and remote not in REMOTE_VALUES:
-            raise HTTPException(
-                status_code=400,
-                detail=f"filters.remote must be one of: {', '.join(REMOTE_VALUES)}",
-            )
-
-        filters = {
-            "keywords": _optional_string(filters_in.get("keywords")),
-            "location": _optional_string(filters_in.get("location")),
-            "postedWithin": posted_within,
-            "contractType": _optional_string(filters_in.get("contractType")),
-            "remote": remote,
-            "experienceLevel": _optional_string(filters_in.get("experienceLevel")),
-        }
+        filters = _normalize_search_filters(req.filters)
         max_offers = _clamp_max_offers(req.maxOffers)
 
     # cvVersionId is required for both modes: it must reference a CV the caller
@@ -1537,33 +1556,6 @@ def _normalize_site_keys(value: Any) -> list[str]:
     return keys
 
 
-def _normalize_scout_filters(value: Any) -> dict[str, Any]:
-    filters_in = value if isinstance(value, dict) else {}
-
-    posted_within = _optional_string(filters_in.get("postedWithin"))
-    if posted_within is not None and posted_within not in POSTED_WITHIN_VALUES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"filters.postedWithin must be one of: {', '.join(POSTED_WITHIN_VALUES)}",
-        )
-
-    remote = _optional_string(filters_in.get("remote"))
-    if remote is not None and remote not in REMOTE_VALUES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"filters.remote must be one of: {', '.join(REMOTE_VALUES)}",
-        )
-
-    return {
-        "keywords": _optional_string(filters_in.get("keywords")),
-        "location": _optional_string(filters_in.get("location")),
-        "postedWithin": posted_within,
-        "contractType": _optional_string(filters_in.get("contractType")),
-        "remote": remote,
-        "experienceLevel": _optional_string(filters_in.get("experienceLevel")),
-    }
-
-
 def _normalize_threshold(value: Any) -> int:
     if (
         isinstance(value, bool)
@@ -1700,7 +1692,7 @@ async def create_scout(
     await _owned_cv_version(session, cv_version_id, user_id)
 
     target_site_keys = _normalize_site_keys(req.targetSiteKeys)
-    filters = _normalize_scout_filters(req.filters)
+    filters = _normalize_search_filters(req.filters)
     match_threshold = (
         DEFAULT_SCOUT_MATCH_THRESHOLD
         if req.matchThreshold is None
@@ -1797,7 +1789,7 @@ async def update_scout(
         scout.targetSiteKeys = _normalize_site_keys(req.targetSiteKeys)
 
     if "filters" in provided:
-        scout.filters = _normalize_scout_filters(req.filters)
+        scout.filters = _normalize_search_filters(req.filters)
 
     if "matchThreshold" in provided:
         scout.matchThreshold = _normalize_threshold(req.matchThreshold)

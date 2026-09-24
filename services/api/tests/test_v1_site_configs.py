@@ -100,6 +100,11 @@ def test_each_site_carries_its_filter_support_declarations():
     assert hellowork_posted_within["derogations"] == {
         "14d": {"level": "APPROXIMATED", "substitute": "30d"}
     }
+    # A derogation with no substitute: an internship is not applied (#214).
+    assert france_travail["contractType"]["derogations"] == {
+        "STAGE": {"level": "UNSUPPORTED", "substitute": None}
+    }
+    assert linkedin["contractType"]["level"] == "UNSUPPORTED"
 
 
 def test_list_site_configs_requires_internal_secret():

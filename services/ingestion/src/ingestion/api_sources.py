@@ -66,23 +66,26 @@ def _clean(value: object) -> str | None:
 # --- Adzuna ----------------------------------------------------------------
 
 
-def _adzuna_contract_params(contract_type: str | None) -> dict[str, str]:
-    """Adzuna exposes contract shape as four independent boolean facets
-    rather than one enum, so the app's free-text `contractType` is matched
-    loosely. An unrecognised value sends no facet — a narrower result set is
-    better than a wrong one, but no filter is better than a wrong filter."""
-    token = (contract_type or "").strip().lower()
-    if not token:
+# Search filter `contractType` -> the one Adzuna boolean facet it falls under.
+# STAGE and ALTERNANCE have none.
+_ADZUNA_CONTRACT_FACETS = {
+    "CDI": "permanent",
+    "CDD": "contract",
+    "INTERIM": "contract",
+    "FREELANCE": "contract",
+}
+
+
+def _adzuna_contract_params(contract_types: list[str] | None) -> dict[str, str]:
+    """Adzuna exposes contract shape as independent boolean facets rather
+    than one enum, and a request's facets all apply at once. A facet is sent
+    only when it alone covers the whole selection; a selection spanning two
+    facets, or holding a value with none, sends no facet — no filter is
+    better than one narrower than what was asked."""
+    facets = {_ADZUNA_CONTRACT_FACETS.get(value) for value in contract_types or []}
+    if len(facets) != 1 or None in facets:
         return {}
-    if token in ("cdi", "permanent", "full_time", "fulltime", "temps plein"):
-        return {"permanent": "1"}
-    if token in ("cdd", "contract", "contrat", "interim", "intérim", "freelance"):
-        return {"contract": "1"}
-    if token in ("part_time", "parttime", "temps partiel"):
-        return {"part_time": "1"}
-    if token in ("full_time_hours", "temps_plein"):
-        return {"full_time": "1"}
-    return {}
+    return {facets.pop(): "1"}
 
 
 def _adzuna_offer(result: dict) -> NormalisedOffer | None:
