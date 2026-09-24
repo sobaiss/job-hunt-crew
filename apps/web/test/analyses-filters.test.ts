@@ -171,6 +171,58 @@ describe("filterAnalyses", () => {
     ).toEqual(["a2"]);
   });
 
+  it("gives En attente/PENDING a bucket of its own, matched on the pipeline status", () => {
+    const withPending = [
+      ...list,
+      summary({ id: "a4", status: "PENDING", matchScore: null }),
+    ];
+
+    // Like FAILED, it is a pipeline status: no Tracking bucket matches it.
+    for (const status of TRACKING_STATUSES) {
+      expect(
+        filterAnalyses(withPending, {
+          ...DEFAULT_ANALYSES_FILTERS,
+          status: [status],
+        }).map((a) => a.id),
+      ).not.toContain("a4");
+    }
+
+    expect(
+      filterAnalyses(withPending, {
+        ...DEFAULT_ANALYSES_FILTERS,
+        status: ["PENDING"],
+      }).map((a) => a.id),
+    ).toEqual(["a4"]);
+
+    // ...and it ORs with the other buckets like any other value.
+    expect(
+      filterAnalyses(withPending, {
+        ...DEFAULT_ANALYSES_FILTERS,
+        status: ["PENDING", "FAILED"],
+      }).map((a) => a.id),
+    ).toEqual(["a2", "a4"]);
+  });
+
+  it("leaves the other non-terminal pipeline statuses unfilterable", () => {
+    const withQueued = [
+      ...list,
+      summary({ id: "a5", status: "QUEUED", matchScore: null }),
+    ];
+
+    for (const status of ANALYSES_STATUS_FILTERS) {
+      expect(
+        filterAnalyses(withQueued, {
+          ...DEFAULT_ANALYSES_FILTERS,
+          status: [status],
+        }).map((a) => a.id),
+      ).not.toContain("a5");
+    }
+
+    expect(
+      filterAnalyses(withQueued, DEFAULT_ANALYSES_FILTERS).map((a) => a.id),
+    ).toContain("a5");
+  });
+
   it("ORs the values inside one filter and ANDs the filters together", () => {
     // a1 is FRANCE_TRAVAIL/TO_APPLY, a2 LINKEDIN/FAILED, a3 WTTJ/REJECTED.
     expect(
@@ -447,13 +499,13 @@ describe("URL query-string state", () => {
     }
   });
 
-  it("rejects a raw pipeline AnalysisStatus other than FAILED as a status param", () => {
+  it("rejects a raw pipeline AnalysisStatus other than PENDING or FAILED as a status param", () => {
     expect(
       parseAnalysesTableState(new URLSearchParams("status=RUNNING_CREW")).status,
     ).toEqual([]);
   });
 
-  it("accepts exactly the 5 Tracking status buckets plus FAILED as the status param (#172)", () => {
+  it("accepts exactly the 5 Tracking status buckets plus PENDING and FAILED as the status param", () => {
     for (const status of ANALYSES_STATUS_FILTERS) {
       expect(
         parseAnalysesTableState(new URLSearchParams(`status=${status}`)).status,

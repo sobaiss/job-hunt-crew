@@ -1,6 +1,7 @@
 import type { AnalysisSummary } from "@/hooks/use-analyses";
 import {
   ANALYSES_STATUS_FILTERS,
+  isPipelineStatusFilter,
   trackingStatusOf,
   type AnalysesStatusFilter,
 } from "@/lib/tracking-status";
@@ -27,10 +28,10 @@ export type JobOfferSourceSite = (typeof JOB_OFFER_SOURCE_SITES)[number];
 export type AnalysesFilterState = {
   /** Substring over JobOffer title + company, case-insensitive. */
   search: string;
-  /** The Tracking status buckets (plus `FAILED`, issue #172) to keep, OR-ed
-   *  together. Empty means no status filter — and is still the only way to
-   *  see one of the other non-terminal pipeline statuses, since those have
-   *  no bucket of their own. */
+  /** The Tracking status buckets (plus the pipeline ones, `PENDING` and
+   *  `FAILED`) to keep, OR-ed together. Empty means no status filter — and is
+   *  still the only way to see one of the other non-terminal pipeline
+   *  statuses, since those have no bucket of their own. */
   status: AnalysesStatusFilter[];
   /** A `cvVersion.label`, or `"all"` for no CVVersion filter. */
   cvLabel: string | "all";
@@ -138,11 +139,12 @@ function matchesRequestedAtRange(
   return true;
 }
 
-/** A status filter matches `FAILED` directly against the Analysis's own
- *  pipeline status, or a Tracking status bucket against `trackingStatusOf` —
- *  mirrors `AdminAnalysesStatusFilter`'s split in `services/api`. */
+/** A status filter matches a pipeline bucket (`PENDING`/`FAILED`) directly
+ *  against the Analysis's own pipeline status, or a Tracking status bucket
+ *  against `trackingStatusOf` — mirrors `AdminAnalysesStatusFilter`'s split in
+ *  `services/api`. */
 function matchesStatus(analysis: AnalysisSummary, status: AnalysesStatusFilter): boolean {
-  if (status === "FAILED") return analysis.status === "FAILED";
+  if (isPipelineStatusFilter(status)) return analysis.status === status;
   return trackingStatusOf(analysis) === status;
 }
 
@@ -151,9 +153,9 @@ function matchesStatus(analysis: AnalysisSummary, status: AnalysesStatusFilter):
  * the CVVersion filter, the platform filter, the location search (#125) and
  * the `requestedAt` range (#172). Values inside one filter are OR-ed, the
  * filters themselves AND-ed. A specific Tracking status bucket only ever
- * matches a `COMPLETED` Analysis — a still-running one (but not `FAILED`,
- * which has its own bucket now) has no bucket and is excluded by any
- * non-empty status filter.
+ * matches a `COMPLETED` Analysis — a still-running one (but not `PENDING` or
+ * `FAILED`, which have buckets of their own) has no bucket and is excluded by
+ * any non-empty status filter.
  */
 export function filterAnalyses(
   analyses: AnalysisSummary[],

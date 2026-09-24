@@ -4,8 +4,8 @@
 // newest first) and pagination are NOT applied client-side — this state is
 // sent straight through as query params to `GET /v1/admin/analyses`. A
 // `status` filter was added in issue #172, mirroring the candidate-facing
-// page's own Tracking-status-buckets-plus-FAILED vocabulary — this still
-// only narrows which rows list; there is still no status-*transition*
+// page's own Tracking-status-buckets-plus-pipeline-ones vocabulary — this
+// still only narrows which rows list; there is still no status-*transition*
 // control here (that stays exclusively the candidate's own `/analyses`).
 
 import { ANALYSES_STATUS_FILTERS, type AnalysesStatusFilter } from "@/lib/tracking-status";
@@ -21,8 +21,8 @@ export type AdminAnalysesTableState = {
    *  so it survives a page refresh even though it plays no part in the
    *  actual server-side filter. */
   candidateQuery: string;
-  /** A Tracking status bucket, or `FAILED` (issue #172), or `null` for no
-   *  status filter. */
+  /** A Tracking status bucket, or a pipeline one (`PENDING`/`FAILED`), or
+   *  `null` for no status filter. */
   status: AnalysesStatusFilter | null;
   /** `requestedAt` range, as `YYYY-MM-DD` date-input strings, or `""` for no
    *  bound on that side. */

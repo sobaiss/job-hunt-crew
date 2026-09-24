@@ -60,6 +60,7 @@ import { analysesToCsv, downloadCsv } from "@/lib/analyses-csv";
 import {
   ANALYSES_STATUS_FILTERS,
   TRACKING_STATUS_TRANSITIONS,
+  isPipelineStatusFilter,
   trackingStatusBadgeVariant,
   trackingStatusIcon,
   trackingStatusOf,
@@ -525,7 +526,7 @@ function AnalysesTable() {
                 selected={state.status}
                 onChange={(status) => updateState({ status })}
                 valueLabel={(status) =>
-                  status === "FAILED"
+                  isPipelineStatusFilter(status)
                     ? pipelineStatusLabel(status)
                     : trackingStatusLabel(status)
                 }

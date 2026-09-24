@@ -119,6 +119,23 @@ describe("AdminAnalysesPage", () => {
     expect(capturedUrl).toContain("status=FAILED");
   });
 
+  it("offers the En attente/Pending bucket as well, sent the same way", async () => {
+    let capturedUrl = "";
+    server.use(
+      http.get("/api/admin/analyses", ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json(analysesListResponse());
+      }),
+    );
+
+    renderWithProviders(<AdminAnalysesPage />);
+    await screen.findByText("Ada Lovelace");
+
+    await userEvent.selectOptions(screen.getByLabelText("Status"), "Pending");
+
+    expect(capturedUrl).toContain("status=PENDING");
+  });
+
   it("hides the id column by default, showing it with a copy button once toggled on from the Columns menu", async () => {
     const user = userEvent.setup();
     server.use(

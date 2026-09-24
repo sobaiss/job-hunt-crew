@@ -27,21 +27,40 @@ export const TRACKING_STATUSES: readonly TrackingStatus[] = [
 ];
 
 /**
- * The Analyses tables' (candidate and admin) full Statut filter vocabulary:
- * the 5 Tracking status buckets plus `FAILED` (issue #172) -- added because a
- * `FAILED` Analysis already shows its raw pipeline status as the Statut
- * column's fallback (see `trackingStatusOf`'s `null` case) but had no
- * matching filter bucket of its own. The other non-terminal pipeline
- * statuses (`PENDING`/`QUEUED`/`RUNNING_CREW`/`AWAITING_RESULT`/
- * `PERSISTING`) stay unfilterable individually -- only "all" ("Tous les
- * statuts") shows them.
+ * The raw pipeline `AnalysisStatus`es the Statut filter gives a bucket of
+ * their own, in the filter's display order after the Tracking ones. Each is
+ * matched against `Analysis.status` directly rather than folded through
+ * `trackingStatusOf`, which is `null` for all of them. `FAILED` came first
+ * (issue #172) because a failed Analysis already shows its raw pipeline
+ * status as the Statut column's fallback but had no matching bucket;
+ * `PENDING` ("En attente") follows for the same reason, and because it is the
+ * status a stuck Analysis sits in (docs/adr/0032) — the one a candidate or an
+ * Administrator most needs to single out to repair. The remaining non-terminal
+ * statuses (`QUEUED`/`RUNNING_CREW`/`AWAITING_RESULT`/`PERSISTING`) stay
+ * unfilterable individually — only an empty selection shows them.
  */
-export type AnalysesStatusFilter = TrackingStatus | "FAILED";
+export const PIPELINE_ANALYSES_STATUS_FILTERS = ["PENDING", "FAILED"] as const;
+
+export type PipelineAnalysesStatusFilter =
+  (typeof PIPELINE_ANALYSES_STATUS_FILTERS)[number];
+
+/** The Analyses tables' (candidate and admin) full Statut filter vocabulary:
+ *  the 5 Tracking status buckets plus the pipeline ones above. */
+export type AnalysesStatusFilter = TrackingStatus | PipelineAnalysesStatusFilter;
 
 export const ANALYSES_STATUS_FILTERS: readonly AnalysesStatusFilter[] = [
   ...TRACKING_STATUSES,
-  "FAILED",
+  ...PIPELINE_ANALYSES_STATUS_FILTERS,
 ];
+
+/** Whether a bucket names a raw pipeline status — so both tables label it with
+ *  `analysisStatus` rather than `trackingStatus`, and both filters match it
+ *  against `Analysis.status` instead of a Tracking bucket. */
+export function isPipelineStatusFilter(
+  status: AnalysesStatusFilter,
+): status is PipelineAnalysesStatusFilter {
+  return (PIPELINE_ANALYSES_STATUS_FILTERS as readonly string[]).includes(status);
+}
 
 const APPLICATION_STATUS_TO_TRACKING: Record<ApplicationStatus, TrackingStatus> = {
   DRAFT: "TO_APPLY",

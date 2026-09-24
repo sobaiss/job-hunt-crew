@@ -21,6 +21,7 @@ import {
 import { useEnumLabel } from "@/lib/enum-labels";
 import {
   ANALYSES_STATUS_FILTERS,
+  isPipelineStatusFilter,
   trackingStatusBadgeVariant,
   trackingStatusOf,
 } from "@/lib/tracking-status";
@@ -197,7 +198,9 @@ function AnalysesTable() {
             <option value="all">{t("statusAll")}</option>
             {ANALYSES_STATUS_FILTERS.map((status) => (
               <option key={status} value={status}>
-                {status === "FAILED" ? pipelineStatusLabel(status) : trackingStatusLabel(status)}
+                {isPipelineStatusFilter(status)
+                  ? pipelineStatusLabel(status)
+                  : trackingStatusLabel(status)}
               </option>
             ))}
           </select>

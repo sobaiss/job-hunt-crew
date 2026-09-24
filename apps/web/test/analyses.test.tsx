@@ -539,6 +539,41 @@ describe("AnalysesDashboardPage", () => {
     expect(screen.queryByText("Completed Offer")).not.toBeInTheDocument();
   });
 
+  it("filters by the En attente/Pending status, which has a bucket of its own too", async () => {
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            summary({
+              id: "s1",
+              status: "PENDING",
+              matchScore: null,
+              // A stuck Analysis sits here for good until it is requeued
+              // (docs/adr/0032) — the case this bucket exists to surface.
+              stuck: true,
+              jobOffer: { ...summary().jobOffer, id: "j1", title: "Pending Offer" },
+            }),
+            summary({
+              id: "s2",
+              status: "COMPLETED",
+              jobOffer: { ...summary().jobOffer, id: "j2", title: "Completed Offer" },
+            }),
+          ],
+        }),
+      ),
+    );
+
+    const user = userEvent.setup();
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Pending Offer");
+
+    expect(screen.getByRole("cell", { name: "Pending" })).toBeInTheDocument();
+
+    await tickFilterValues(user, "Status", "Pending");
+    expect(screen.getByText("Pending Offer")).toBeInTheDocument();
+    expect(screen.queryByText("Completed Offer")).not.toBeInTheDocument();
+  });
+
   it("keeps several statuses at once, naming the selection on the trigger and writing them to one URL param", async () => {
     server.use(
       http.get("/api/analyses", () =>
