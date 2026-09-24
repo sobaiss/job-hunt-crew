@@ -24,6 +24,7 @@ import {
   TERMINAL_ANALYSIS_STATUSES,
   useAnalyses,
   useBulkCreateAnalyses,
+  useBulkRequeueAnalyses,
   type AnalysisSummary,
 } from "@/hooks/use-analyses";
 import { useBulkSetApplicationStatus } from "@/hooks/use-applications";
@@ -134,6 +135,7 @@ function AnalysesTable() {
   const bulkSetApplicationStatus = useBulkSetApplicationStatus();
   const bulkCreateGeneratedDocuments = useBulkCreateGeneratedDocuments();
   const bulkCreateAnalyses = useBulkCreateAnalyses();
+  const bulkRequeueAnalyses = useBulkRequeueAnalyses();
   const { data: quotas } = useQuotas();
 
   // Multi-select (#67): ids selected across however many pages the user has
@@ -414,6 +416,35 @@ function AnalysesTable() {
             t("bulk.relaunchPartialError", {
               failed: failedAnalysisIds.length,
               total: pairs.length,
+            }),
+          );
+        }
+      },
+    });
+  };
+
+  // Bulk requeue (docs/adr/0032): the repair for rows a worker or queue restart
+  // orphaned, which strands them by the dozen — the originating incident left
+  // 22 — while the only route was one Quick view at a time. Unlike the relaunch
+  // above it needs no confirm step and no quota arithmetic: it re-drives the
+  // same rows and charges nothing. `stuck` is the server's own verdict, so the
+  // eligible subset is read off the rows rather than re-derived here.
+  const eligibleForRequeue = useMemo(
+    () => selectedAnalyses.filter((a) => a.stuck),
+    [selectedAnalyses],
+  );
+  const eligibleRequeueCount = eligibleForRequeue.length;
+
+  const handleBulkRequeue = () => {
+    setBulkError(null);
+    const ids = eligibleForRequeue.map((a) => a.id);
+    bulkRequeueAnalyses.mutate(ids, {
+      onSuccess: ({ failedAnalysisIds }) => {
+        if (failedAnalysisIds.length > 0) {
+          setBulkError(
+            t("bulk.requeuePartialError", {
+              failed: failedAnalysisIds.length,
+              total: ids.length,
             }),
           );
         }
@@ -724,6 +755,25 @@ function AnalysesTable() {
               <RotateCw aria-hidden="true" />
               {td("retry")}
             </Button>
+            {/* Only offered once the selection holds a row the server called
+                stuck — a restart-orphaned Analysis is rare, and an always-on
+                button here would read as a second, competing "relaunch". */}
+            {eligibleRequeueCount > 0 && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={bulkRequeueAnalyses.isPending}
+                onClick={handleBulkRequeue}
+              >
+                {bulkRequeueAnalyses.isPending ? (
+                  <LoaderCircle className="animate-spin" aria-hidden="true" />
+                ) : (
+                  <RotateCw aria-hidden="true" />
+                )}
+                {t("bulk.requeue", { count: eligibleRequeueCount })}
+              </Button>
+            )}
           </div>
           {bulkError && (
             <p role="alert" className="w-full text-sm text-destructive">

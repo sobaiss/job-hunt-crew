@@ -603,7 +603,9 @@
       "relaunchConfirm": "{count, plural, one {Re-run # analysis} other {Re-run # analyses}} — {remaining} remaining today",
       "relaunchConfirmMixed": "{count, plural, one {# analysis} other {# analyses}} will be re-run ({skipped} skipped, still in progress) — {remaining} remaining today",
       "relaunchInsufficientQuota": "Not enough remaining quota today for this many analyses.",
-      "relaunchPartialError": "{failed} of {total} re-runs failed to start. Please try again for those."
+      "relaunchPartialError": "{failed} of {total} re-runs failed to start. Please try again for those.",
+      "requeue": "{count, plural, one {Pick up # interrupted analysis} other {Pick up # interrupted analyses}}",
+      "requeuePartialError": "{failed} of {total} could not be picked up: those analyses turned out to be running after all."
     },
     "controls": {
       "searchLabel": "Search",

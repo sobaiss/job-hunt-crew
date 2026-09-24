@@ -432,3 +432,61 @@ async def test_run_crew_task_fails_when_cv_not_converted_without_calling_llm():
         await _cleanup(
             engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
         )
+
+
+@pytest.mark.asyncio
+async def test_run_crew_task_skips_an_already_completed_analysis():
+    """A duplicate `analysis-intake` message must not re-run the crew.
+
+    The staleness rule is a plain age check (docs/adr/0032), so a row still
+    legitimately queued behind a Scout fan-out can be requeued, leaving two
+    messages for one Analysis. Running twice would re-spend LLM budget and
+    overwrite a good result, so the later message is a no-op that returns the
+    key the first run produced — and still redeems its task token, or the Step
+    Functions execution would wait for a callback that never comes.
+    """
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id = f"test-{uuid.uuid4()}"
+    job_offer_id = f"test-{uuid.uuid4()}"
+    cv_version_id = f"test-{uuid.uuid4()}"
+    analysis_id = f"test-{uuid.uuid4()}"
+
+    await _make_fixture(
+        session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+    )
+    key = analysis_result_key(analysis_id)
+    async with session_factory() as session:
+        analysis = await session.get(Analysis, analysis_id)
+        analysis.status = Analysisstatus.COMPLETED
+        analysis.s3ResultKey = key
+        await session.commit()
+
+    provider = StubLLMProvider([VALID_COMPARISON_OUTPUT, VALID_RECOMMENDATION_OUTPUT])
+    sfn = StubSfnClient()
+
+    try:
+        async with session_factory() as session:
+            returned_key = await run_crew_task(
+                session,
+                analysis_id,
+                llm_provider=provider,
+                sfn_client=sfn,
+                task_token="test-task-token",
+            )
+        assert returned_key == key
+        assert provider.calls == 0, "no LLM spend on a duplicate message"
+
+        assert sfn.failures == []
+        assert len(sfn.successes) == 1
+        token, output = sfn.successes[0]
+        assert token == "test-task-token"
+        assert json.loads(output) == {"analysisId": analysis_id, "s3ResultKey": key}
+
+        async with session_factory() as session:
+            reloaded = await session.get(Analysis, analysis_id)
+            assert reloaded.status == Analysisstatus.COMPLETED, "left untouched"
+    finally:
+        await _cleanup(
+            engine, session_factory, user_id, job_offer_id, cv_version_id, analysis_id
+        )

@@ -2,33 +2,20 @@
 whether the Web offers "Relancer l'analyse" and whether
 `POST /v1/analyses/{id}/requeue` accepts (docs/adr/0032). The HTTP-level
 behaviour of that endpoint is covered by `test_v1_analyses.py`; this file pins
-the predicate itself, including the backlog case that makes it more than an age
-check.
+the predicate itself.
 """
 
-import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 import pytest
-from py_db.models import Analysisstatus, PipelineEvent
-from py_db.session import make_engine, make_session_factory
-from py_db.stuck_analysis import is_analysis_stuck, latest_pipeline_activity
-from sqlalchemy import delete
+from py_db.models import Analysisstatus
+from py_db.stuck_analysis import is_analysis_stuck
 
 NOW = datetime(2026, 9, 24, 12, 0, 0)
-STUCK_AFTER = timedelta(minutes=20)
-IDLE_GRACE = timedelta(minutes=15)
+STUCK_AFTER = timedelta(minutes=15)
 
 LONG_AGO = NOW - timedelta(hours=3)
 JUST_NOW = NOW - timedelta(minutes=1)
-
-
-def _milliseconds(value: datetime) -> datetime:
-    """`PipelineEvent.createdAt` is `TIMESTAMP(3)` (Prisma's `DateTime`), so a
-    microsecond-precision value does not survive the round trip. Truncating up
-    front keeps the equality assertions below exact.
-    """
-    return value.replace(microsecond=(value.microsecond // 1000) * 1000)
 
 
 def _stuck(
@@ -37,7 +24,6 @@ def _stuck(
     requested_at: datetime = LONG_AGO,
     requeued_at: datetime | None = None,
     started_at: datetime | None = None,
-    last_pipeline_activity: datetime | None = None,
 ) -> bool:
     return is_analysis_stuck(
         status,
@@ -45,60 +31,38 @@ def _stuck(
         requeued_at,
         started_at,
         now=NOW,
-        last_pipeline_activity=last_pipeline_activity,
         stuck_after=STUCK_AFTER,
-        idle_grace=IDLE_GRACE,
     )
 
 
 @pytest.mark.parametrize("status", [Analysisstatus.COMPLETED, Analysisstatus.FAILED])
 def test_a_terminal_analysis_is_never_stuck(status):
-    """However old, and however dead the pipeline: re-running one of these is
-    the separate, quota-charged `POST /v1/analyses` of docs/adr/0011."""
+    """However old: re-running one of these is the separate, quota-charged
+    `POST /v1/analyses` of docs/adr/0011."""
     assert _stuck(status, started_at=LONG_AGO) is False
 
 
-def test_an_abandoned_in_flight_analysis_is_stuck():
-    """`startedAt` set means a worker was inside this row, so nothing is queued
-    behind it — an overdue clock can only mean the process died. True even while
-    the pipeline is otherwise busy, since that work is not this row's."""
-    assert _stuck(
-        Analysisstatus.RUNNING_CREW,
-        started_at=LONG_AGO,
-        last_pipeline_activity=JUST_NOW,
-    )
-
-
-def test_a_queued_analysis_is_not_stuck_while_the_pipeline_advances():
-    """The case a plain age check gets wrong. A Scout fans out up to 25 offers
-    *per site* and the local worker drains them one at a time, so the tail of a
-    multi-site run legitimately waits hours at PENDING. A recent PipelineEvent
-    proves the chain is still moving, so this row is waiting, not lost.
-    """
-    assert (
-        _stuck(
-            Analysisstatus.PENDING,
-            requested_at=LONG_AGO,
-            last_pipeline_activity=JUST_NOW,
-        )
-        is False
-    )
-
-
-def test_a_queued_analysis_is_stuck_once_the_pipeline_goes_quiet():
-    """The user's incident: the queue was dropped by a restart, so no worker is
-    coming for this row and nothing anywhere is writing events."""
-    assert _stuck(
+@pytest.mark.parametrize(
+    "status",
+    [
         Analysisstatus.PENDING,
-        requested_at=LONG_AGO,
-        last_pipeline_activity=NOW - timedelta(hours=1),
-    )
+        Analysisstatus.QUEUED,
+        Analysisstatus.RUNNING_CREW,
+        Analysisstatus.AWAITING_RESULT,
+        Analysisstatus.PERSISTING,
+    ],
+)
+def test_any_overdue_non_terminal_analysis_is_stuck(status):
+    """The whole rule, at every non-terminal status: past the threshold with
+    nothing advancing it, the row is offered for requeueing.
 
-
-def test_a_queued_analysis_is_stuck_when_the_trail_is_empty():
-    """No PipelineEvent has ever been written — a fresh install whose worker
-    never ran. Absence of a trail is not evidence of liveness."""
-    assert _stuck(Analysisstatus.PENDING, requested_at=LONG_AGO, last_pipeline_activity=None)
+    This is the user's incident — 22 rows left at PENDING by a
+    `docker compose restart`, each with no PipelineEvent of its own — and it is
+    deliberately the *same* answer for a row that may still be queued behind a
+    Scout fan-out. The predicate no longer tries to tell those apart; see
+    `test_crew_task.py` for the duplicate-message guard that pays for it.
+    """
+    assert _stuck(status, requested_at=LONG_AGO, started_at=None)
 
 
 @pytest.mark.parametrize(
@@ -112,12 +76,9 @@ def test_a_queued_analysis_is_stuck_when_the_trail_is_empty():
     ],
 )
 def test_a_recent_analysis_is_never_stuck(status):
-    """Inside the threshold nothing is declared dead, whatever the status and
-    however quiet the pipeline — an analysis is allowed to take its time."""
-    assert (
-        _stuck(status, requested_at=JUST_NOW, started_at=JUST_NOW, last_pipeline_activity=None)
-        is False
-    )
+    """Inside the threshold nothing is declared dead, whatever the status — an
+    analysis is allowed to take its time."""
+    assert _stuck(status, requested_at=JUST_NOW, started_at=JUST_NOW) is False
 
 
 def test_the_clock_is_the_latest_of_the_three_timestamps():
@@ -127,72 +88,44 @@ def test_the_clock_is_the_latest_of_the_three_timestamps():
         Analysisstatus.PENDING, requested_at=LONG_AGO, requeued_at=LONG_AGO
     ), "an old requeue leaves the row stuck"
     assert (
-        _stuck(Analysisstatus.PENDING, requested_at=LONG_AGO, requeued_at=JUST_NOW) is False
+        _stuck(Analysisstatus.PENDING, requested_at=LONG_AGO, requeued_at=JUST_NOW)
+        is False
     ), "a fresh requeue restarts the clock"
     assert (
-        _stuck(Analysisstatus.PENDING, requested_at=LONG_AGO, started_at=JUST_NOW) is False
+        _stuck(Analysisstatus.PENDING, requested_at=LONG_AGO, started_at=JUST_NOW)
+        is False
     ), "a fresh crew start restarts the clock"
 
 
-def test_the_grace_boundary_is_inclusive():
-    """Exactly at `idle_grace` the pipeline still counts as alive, so a queued
-    row is spared. Pins the comparison so a later `<` vs `<=` edit is a visible
-    behaviour change."""
-    assert (
-        _stuck(
-            Analysisstatus.PENDING,
-            requested_at=LONG_AGO,
-            last_pipeline_activity=NOW - IDLE_GRACE,
-        )
-        is False
+def test_the_threshold_boundary_is_exclusive():
+    """Exactly at `stuck_after` the row is not yet stuck. Pins the comparison so
+    a later `<` vs `<=` edit is a visible behaviour change."""
+    assert _stuck(Analysisstatus.PENDING, requested_at=NOW - STUCK_AFTER) is False
+    assert _stuck(
+        Analysisstatus.PENDING, requested_at=NOW - STUCK_AFTER - timedelta(seconds=1)
     )
 
 
-@pytest.mark.asyncio
-async def test_latest_pipeline_activity_is_the_max_over_the_whole_trail():
-    """The liveness probe is global on purpose: it answers "is anything moving?",
-    so events belonging to other analyses (or to none) count too.
+def test_the_threshold_defaults_to_the_environment(monkeypatch):
+    """`ANALYSIS_STUCK_AFTER_MINUTES` is the one knob, read per call so an
+    operator can widen the window without a redeploy."""
+    monkeypatch.setenv("ANALYSIS_STUCK_AFTER_MINUTES", "240")
+    assert (
+        is_analysis_stuck(
+            Analysisstatus.PENDING,
+            NOW - timedelta(hours=3),
+            None,
+            None,
+            now=NOW,
+        )
+        is False
+    ), "a 4-hour window spares a 3-hour-old row"
 
-    Asserted as a relationship against whatever the trail already holds rather
-    than an absolute timestamp — other suites write events to this same database,
-    so a fixed expected value would be order-dependent.
-    """
-    engine = make_engine()
-    session_factory = make_session_factory(engine)
-    event_ids: list[str] = []
-
-    try:
-        async with session_factory() as session:
-            baseline = await latest_pipeline_activity(session)
-            anchor = _milliseconds(baseline or datetime.now(UTC).replace(tzinfo=None))
-
-            older = PipelineEvent(
-                id=str(uuid.uuid4()),
-                stage="crew",
-                status="STARTED",
-                createdAt=anchor - timedelta(hours=2),
-            )
-            event_ids.append(older.id)
-            session.add(older)
-            await session.commit()
-            assert await latest_pipeline_activity(session) == (baseline or older.createdAt), (
-                "an older event must not lower the max"
-            )
-
-            newest = PipelineEvent(
-                id=str(uuid.uuid4()),
-                stage="persist",
-                status="SUCCEEDED",
-                createdAt=anchor + timedelta(hours=1),
-            )
-            event_ids.append(newest.id)
-            session.add(newest)
-            await session.commit()
-            assert await latest_pipeline_activity(session) == newest.createdAt, (
-                "a newer event must raise the max"
-            )
-    finally:
-        async with session_factory() as session:
-            await session.execute(delete(PipelineEvent).where(PipelineEvent.id.in_(event_ids)))
-            await session.commit()
-        await engine.dispose()
+    monkeypatch.setenv("ANALYSIS_STUCK_AFTER_MINUTES", "not-a-number")
+    assert is_analysis_stuck(
+        Analysisstatus.PENDING,
+        NOW - timedelta(hours=3),
+        None,
+        None,
+        now=NOW,
+    ), "a malformed override falls back to the 15-minute default"

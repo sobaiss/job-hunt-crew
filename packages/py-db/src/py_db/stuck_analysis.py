@@ -11,8 +11,17 @@ status for every *caught* step failure, but cannot help when the process dies.
 
 This module answers the question that decides whether the UI offers
 "Relancer l'analyse" and whether `POST /v1/analyses/{id}/requeue` accepts. It is
-evaluated on demand, at the moment the answer is needed -- there is no
-background watchdog and nothing is written on read.
+a plain age check, evaluated on demand -- no session, no query, no background
+watchdog, and nothing written on read.
+
+It used to carry a second term: a global "is any PipelineEvent recent?" liveness
+probe, meant to spare the tail of a Scout fan-out still waiting its turn. That
+probe silenced the button far more often than it protected anything, because
+*any* event anywhere re-armed it -- including the `requeue` event the repair
+itself writes, so fixing one stranded row hid the button on every other one for
+the next grace window. Judging each row on its own clock alone is the behaviour
+docs/adr/0032 now records; the cost is a false positive on a legitimately queued
+row, which `run_crew_task`'s terminal guard makes harmless.
 
 Hand-written, not sqlacodegen output -- like `quota.py` / `scout_schedule.py` --
 so any service can use it without depending on another.
@@ -21,19 +30,12 @@ so any service can use it without depending on another.
 import os
 from datetime import datetime, timedelta
 
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from .models import Analysisstatus, PipelineEvent
+from .models import Analysisstatus
 
 # An Analysis is never declared stuck before this much time without progress.
-DEFAULT_ANALYSIS_STUCK_AFTER_MINUTES = 20
-
-# How recently a PipelineEvent must have been written for the pipeline to count
-# as alive. Shorter than the stuck threshold on purpose: the question is only
-# "is anything still moving?", and the slowest single step (an LLM extraction or
-# crew run) stays well inside it.
-DEFAULT_PIPELINE_IDLE_GRACE_MINUTES = 15
+# Short on purpose: with the liveness probe gone this is the only term, and a
+# requeue is cheap (same row, no quota) while a row left stranded is invisible.
+DEFAULT_ANALYSIS_STUCK_AFTER_MINUTES = 15
 
 TERMINAL_ANALYSIS_STATUSES: frozenset[Analysisstatus] = frozenset(
     {Analysisstatus.COMPLETED, Analysisstatus.FAILED}
@@ -62,28 +64,6 @@ def analysis_stuck_after() -> timedelta:
     )
 
 
-def pipeline_idle_grace() -> timedelta:
-    """`PIPELINE_IDLE_GRACE_MINUTES` from the environment."""
-    return timedelta(
-        minutes=_minutes_from_env(
-            "PIPELINE_IDLE_GRACE_MINUTES", DEFAULT_PIPELINE_IDLE_GRACE_MINUTES
-        )
-    )
-
-
-async def latest_pipeline_activity(session: AsyncSession) -> datetime | None:
-    """The newest `PipelineEvent.createdAt` across the whole pipeline, or `None`
-    when the trail is empty -- the liveness probe `is_analysis_stuck` uses.
-
-    `record_pipeline_event` commits on its own row, independently of the caller's
-    work, so this trail survives the crash it documents and is the one signal
-    that reliably distinguishes "the worker is chewing through a backlog" from
-    "the worker is gone". Backed by `PipelineEvent_createdAt_idx`; callers
-    resolve it once per request and pass the value down, never once per row.
-    """
-    return await session.scalar(select(func.max(PipelineEvent.createdAt)))
-
-
 def is_analysis_stuck(
     status: Analysisstatus,
     requested_at: datetime,
@@ -91,48 +71,24 @@ def is_analysis_stuck(
     started_at: datetime | None,
     *,
     now: datetime,
-    last_pipeline_activity: datetime | None,
     stuck_after: timedelta | None = None,
-    idle_grace: timedelta | None = None,
 ) -> bool:
     """Whether this Analysis has been abandoned and should be offered for
     requeueing. Pure -- no session, no clock of its own.
 
-    Three terms must hold:
+    Two terms must hold:
 
     1. The status is non-terminal. A `COMPLETED` or `FAILED` Analysis is done;
        re-running one is the separate, quota-charged `POST /v1/analyses` of
        docs/adr/0011.
     2. Nothing has advanced it for `stuck_after`. The clock is the latest of
        `requestedAt`, `requeuedAt` and `startedAt`, so a requeue or a crew start
-       both restart it.
-    3. Either it had already started, or the pipeline as a whole is idle.
-
-    That third term is what keeps a legitimate backlog safe, and it is the whole
-    reason this is not a plain age check. `startedAt` set means a worker was
-    actively inside this row (`crew_task` stamps it), so nothing is queued behind
-    it and a timeout can only mean abandonment. `startedAt` null means the row
-    may simply be waiting its turn: a Scout fans out up to
-    `SCOUT_INGESTION_MAX_OFFERS` (25) offers *per site* and the local worker
-    drains them one at a time, so the tail of a multi-site run can legitimately
-    wait hours. An age-only rule would declare that whole tail dead. Asking
-    whether any PipelineEvent landed recently settles it without a watchdog:
-    while the chain advances, a queued row is waiting, not lost.
+       both restart it -- which is also what bounds re-clicking to once per
+       stuck window.
     """
     if status in TERMINAL_ANALYSIS_STATUSES:
         return False
 
     stuck_after = stuck_after if stuck_after is not None else analysis_stuck_after()
     clock = max(ts for ts in (requested_at, requeued_at, started_at) if ts is not None)
-    if now - clock <= stuck_after:
-        return False
-
-    if started_at is not None:
-        return True
-
-    idle_grace = idle_grace if idle_grace is not None else pipeline_idle_grace()
-    pipeline_alive = (
-        last_pipeline_activity is not None
-        and now - last_pipeline_activity <= idle_grace
-    )
-    return not pipeline_alive
+    return now - clock > stuck_after

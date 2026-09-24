@@ -265,6 +265,37 @@ export function useBulkCreateAnalyses() {
   });
 }
 
+/**
+ * Bulk requeue: {@link useRequeueAnalysis}'s call fanned out over the selected
+ * stuck rows with `Promise.allSettled`, like {@link useBulkCreateAnalyses}, so
+ * one 409 doesn't abort the rest. A restart strands rows by the dozen — the
+ * incident behind docs/adr/0032 left 22 — and repairing them one Quick view at
+ * a time was the only route.
+ *
+ * Returns the ids that failed, which on this endpoint means the server judged
+ * the row alive after all (409 `ANALYSIS_NOT_STUCK`); the caller reports the
+ * count rather than the reason, as the bulk relaunch does.
+ */
+export function useBulkRequeueAnalyses() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (analysisIds: string[]) => {
+      const results = await Promise.allSettled(
+        analysisIds.map((id) =>
+          bff.post<{ status: AnalysisStatus }>(`/analyses/${id}/requeue`, {}),
+        ),
+      );
+      const failedAnalysisIds = analysisIds.filter(
+        (_, i) => results[i]!.status === "rejected",
+      );
+      return { failedAnalysisIds };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["analyses"] });
+    },
+  });
+}
+
 export type KnownOfferResult =
   | { kind: "unknown" }
   | { kind: "ready"; jobOfferId: string; existingAnalysisId: string | null };

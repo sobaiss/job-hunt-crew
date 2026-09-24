@@ -86,6 +86,31 @@ async def run_crew_task(
     if analysis is None:
         raise CrewTaskError(f"Analysis {analysis_id} not found")
 
+    # An already-COMPLETED Analysis means this message is a duplicate: the
+    # staleness rule is a plain age check (docs/adr/0032), so a row still
+    # legitimately queued behind a Scout fan-out can be requeued, leaving two
+    # `analysis-intake` messages for one row. Running the crew again would
+    # re-spend LLM budget and overwrite a good result with a second opinion, so
+    # the later message is a no-op that returns what the first run produced.
+    if analysis.status == Analysisstatus.COMPLETED and analysis.s3ResultKey:
+        log_stage_event(
+            logger,
+            stage=STAGE,
+            status="SKIPPED",
+            analysis_id=analysis_id,
+            message="Already completed; duplicate intake message ignored",
+        )
+        # Still redeem the token, or this execution waits for a callback that
+        # will never come — the same contract every other exit here honours.
+        if task_token:
+            (sfn_client or make_sfn_client()).send_task_success(
+                taskToken=task_token,
+                output=json.dumps(
+                    {"analysisId": analysis_id, "s3ResultKey": analysis.s3ResultKey}
+                ),
+            )
+        return analysis.s3ResultKey
+
     log_stage_event(logger, stage=STAGE, status="STARTED", analysis_id=analysis_id)
     await record_pipeline_event(
         session, stage=STAGE, status="STARTED", analysis_id=analysis_id

@@ -3658,6 +3658,95 @@ describe("a stuck analysis", () => {
     await waitFor(() => expect(requeued).toBe(1));
   });
 
+  it("bulk-requeues only the stuck rows of the selection, via one POST per row", async () => {
+    // The incident behind docs/adr/0032 stranded 22 rows at once, and the only
+    // repair was one Quick view at a time. The stuck subset is the server's
+    // verdict, so a selected healthy row is left out rather than sent and
+    // refused.
+    const user = userEvent.setup();
+    const requeued: string[] = [];
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            summary({ id: "s1", status: "PENDING", stuck: true, jobOffer: { ...summary().jobOffer, title: "Stranded One" } }),
+            summary({ id: "s2", status: "PENDING", stuck: true, jobOffer: { ...summary().jobOffer, title: "Stranded Two" } }),
+            summary({ id: "s3", status: "PENDING", stuck: false, jobOffer: { ...summary().jobOffer, title: "Still Queued" } }),
+          ],
+        }),
+      ),
+      http.post("/api/analyses/:id/requeue", ({ params }) => {
+        requeued.push(params.id as string);
+        return HttpResponse.json({ status: "PENDING" }, { status: 202 });
+      }),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Stranded One");
+
+    await user.click(screen.getByLabelText("Select all on this page"));
+    await user.click(
+      await screen.findByRole("button", { name: "Pick up 2 interrupted analyses" }),
+    );
+
+    await waitFor(() => expect(requeued.sort()).toEqual(["s1", "s2"]));
+  });
+
+  it("offers no bulk requeue when nothing in the selection is stuck", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [summary({ id: "s1", status: "COMPLETED", stuck: false })],
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Backend Engineer");
+
+    await user.click(screen.getByLabelText("Select all on this page"));
+
+    expect(
+      screen.queryByRole("button", { name: /Pick up/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("reports how many of a bulk requeue the server refused as still running", async () => {
+    // A 409 here means the row was alive after all — the plain age check
+    // (docs/adr/0032) can flag a row still queued behind a Scout fan-out, and
+    // the server is the authority.
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            summary({ id: "s1", status: "PENDING", stuck: true, jobOffer: { ...summary().jobOffer, title: "Stranded One" } }),
+            summary({ id: "s2", status: "PENDING", stuck: true, jobOffer: { ...summary().jobOffer, title: "Stranded Two" } }),
+          ],
+        }),
+      ),
+      http.post("/api/analyses/:id/requeue", ({ params }) =>
+        params.id === "s2"
+          ? HttpResponse.json(
+              { detail: { code: "ANALYSIS_NOT_STUCK" } },
+              { status: 409 },
+            )
+          : HttpResponse.json({ status: "PENDING" }, { status: 202 }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Stranded One");
+
+    await user.click(screen.getByLabelText("Select all on this page"));
+    await user.click(
+      await screen.findByRole("button", { name: "Pick up 2 interrupted analyses" }),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("1 of 2");
+  });
+
   it("shows a failed analysis's reason in the Quick view, next to its relaunch", async () => {
     // The reason was only ever rendered on the full detail page, so the Quick
     // view offered a relaunch with no explanation of what went wrong.

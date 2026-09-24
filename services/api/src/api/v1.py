@@ -44,11 +44,7 @@ from py_db.quota import (
     generated_documents_created_today,
 )
 from py_db.quotas import active_scout_count, effective_quota, maybe_record_quota_alert
-from py_db.stuck_analysis import (
-    TERMINAL_ANALYSIS_STATUSES,
-    is_analysis_stuck,
-    latest_pipeline_activity,
-)
+from py_db.stuck_analysis import TERMINAL_ANALYSIS_STATUSES, is_analysis_stuck
 from pydantic import BaseModel
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1193,12 +1189,12 @@ class AnalysisResponse(BaseModel):
     requeuedAt: datetime | None
     startedAt: datetime | None
     completedAt: datetime | None
-    # Derived on read, never stored: this Analysis is non-terminal but nothing
-    # has advanced it for a while, so a worker/queue restart most likely
-    # orphaned it (`py_db.stuck_analysis`, docs/adr/0032). It is what makes the
-    # Web "Relancer l'analyse" affordance appear, and the same predicate gates
-    # `POST /analyses/{id}/requeue` — so the rule is defined once, server-side,
-    # rather than guessed again by the client.
+    # Derived on read, never stored: this Analysis is non-terminal and nothing
+    # has advanced it for `ANALYSIS_STUCK_AFTER_MINUTES`, so a worker/queue
+    # restart most likely orphaned it (`py_db.stuck_analysis`, docs/adr/0032).
+    # It is what makes the Web "Relancer l'analyse" affordance appear, and the
+    # same predicate gates `POST /analyses/{id}/requeue` — so the rule is
+    # defined once, server-side, rather than guessed again by the client.
     stuck: bool
     jobOffer: JobOfferResponse
     cvVersion: CVVersionResponse
@@ -1228,12 +1224,9 @@ def _current_generated_document(
     )
 
 
-def _analysis_response(
-    row: Analysis, *, now: datetime, last_pipeline_activity: datetime | None
-) -> AnalysisResponse:
-    """Serialise one Analysis. `now` and `last_pipeline_activity` are passed in
-    rather than resolved here so a list of rows shares one clock and one
-    `latest_pipeline_activity` query instead of one per row.
+def _analysis_response(row: Analysis, *, now: datetime) -> AnalysisResponse:
+    """Serialise one Analysis. `now` is passed in rather than read here so every
+    row of a list is judged against one clock.
     """
     ingestion_job = row.IngestionJob_
     # `Application.analysisId` is unique (0 or 1 row per Analysis); the ORM
@@ -1264,7 +1257,6 @@ def _analysis_response(
             row.requeuedAt,
             row.startedAt,
             now=now,
-            last_pipeline_activity=last_pipeline_activity,
         ),
         jobOffer=_job_offer_response(row.JobOffer_),
         cvVersion=_cv_version_response(row.CVVersion_),
@@ -1311,10 +1303,7 @@ async def list_analyses(
         stmt = stmt.where(Analysis.ingestionJobId == ingestionJobId)
     rows = (await session.scalars(stmt)).all()
     now = _now()
-    activity = await latest_pipeline_activity(session)
-    return AnalysisListResponse(
-        analyses=[_analysis_response(row, now=now, last_pipeline_activity=activity) for row in rows]
-    )
+    return AnalysisListResponse(analyses=[_analysis_response(row, now=now) for row in rows])
 
 
 class QuotaUsage(BaseModel):
@@ -1542,7 +1531,6 @@ async def requeue_analysis(
         analysis.requeuedAt,
         analysis.startedAt,
         now=_now(),
-        last_pipeline_activity=await latest_pipeline_activity(session),
     ):
         raise HTTPException(
             status_code=409,
@@ -1607,11 +1595,7 @@ async def get_analysis(
     if analysis is None or analysis.userId != user_id:
         raise HTTPException(status_code=404, detail="Not found")
 
-    return GetAnalysisResponse(
-        analysis=_analysis_response(
-            analysis, now=_now(), last_pipeline_activity=await latest_pipeline_activity(session)
-        )
-    )
+    return GetAnalysisResponse(analysis=_analysis_response(analysis, now=_now()))
 
 
 # --- Scouts (issue #53, Scout slice 1) ---
@@ -1990,15 +1974,11 @@ async def list_scout_finds(
     relevant = [row for row in rows if (row.matchScore or 0) >= scout.matchThreshold]
     low_fit = [row for row in rows if (row.matchScore or 0) < scout.matchThreshold]
     # Every row here is COMPLETED, so `stuck` is decided by `is_analysis_stuck`'s
-    # terminal-status short-circuit — no liveness query needed.
+    # terminal-status short-circuit.
     now = _now()
     return ScoutFindsResponse(
-        relevantFinds=[
-            _analysis_response(row, now=now, last_pipeline_activity=None) for row in relevant
-        ],
-        lowFitFinds=[
-            _analysis_response(row, now=now, last_pipeline_activity=None) for row in low_fit
-        ],
+        relevantFinds=[_analysis_response(row, now=now) for row in relevant],
+        lowFitFinds=[_analysis_response(row, now=now) for row in low_fit],
     )
 
 
