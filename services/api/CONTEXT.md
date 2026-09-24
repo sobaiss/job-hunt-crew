@@ -128,16 +128,24 @@ denormalised `jobOfferId`/`cvVersionId`, an optional `scoutRunId` for
 attribution, a `status` (`PENDING` | `GENERATING` | `READY` | `FAILED`),
 and a `supersededById` self-link a regenerate sets on the row it replaces.
 Produced by the [Analysis](../analysis/CONTEXT.md) context's
-GenerationWorkflow, triggered only by an explicit "Generate documents"
-action — never automatically.
-_Avoid_: Tailored CV file, generated PDF — no PDF or Word file is stored,
+GenerationWorkflow, triggered only by an explicit generation request —
+never automatically. Each is asked for on its own: `POST
+/v1/analyses/{id}/generated-documents` takes an optional `type` and creates
+that one row, omitting it creating both, which is what the bulk action and
+the Admin table still do (docs/adr/0031). So an Analysis may hold one, both,
+or neither, and the call costs whatever it creates against
+`DOCUMENTS_DAILY` — the two are not a pair, and the *act* of generating one
+has no name of its own beyond producing a GeneratedDocument.
+_Avoid_: "Generate documents" as the name of a thing that yields two (it is
+the label of the both-at-once action the bulk bar and the Admin table
+carry, not a rule about how GeneratedDocuments come into being), Tailored CV file, generated PDF — no PDF or Word file is stored,
 only rendered on demand from `markdownContent` (using the base CVVersion's
 StyleProfile when the document is a TAILORED_CV with one — docs/adr/0008).
 
 **Application**:
 The record of a candidate pursuing one Analysis's offer — user-scoped,
-created lazily on the first "Generate documents" or "Mark as applied" for
-that Analysis, and unique per `analysisId`. Carries denormalised
+created lazily on the first generation request (of either document) or
+"Mark as applied" for that Analysis, and unique per `analysisId`. Carries denormalised
 `jobOfferId`/`cvVersionId`/`scoutId` (nullable — a manually-tracked
 Analysis has none) and a `status` derived as its latest StatusEvent's
 status.
