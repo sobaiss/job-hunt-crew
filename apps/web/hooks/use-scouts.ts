@@ -47,6 +47,14 @@ export type ScoutFilters = {
   experienceLevel: string | null;
 };
 
+export type ScoutRunState =
+  | "IN_FLIGHT"
+  | "BLOCKED"
+  | "FAILED"
+  | "DEGRADED"
+  | "OK"
+  | "NEVER_RUN";
+
 export type Scout = {
   id: string;
   userId: string;
@@ -62,6 +70,14 @@ export type Scout = {
   /** Un-actioned relevant finds (completed Analyses with matchScore >=
    *  matchThreshold) — issue #56. Backs the Dashboard's cross-Scout count. */
   relevantFindsCount: number;
+  /** Whether the Scout is working right now and, if not, whether something is
+   *  wrong — derived by the server from the pipeline rows (docs/adr/0033).
+   *  Read it as-is; never re-derive it from timestamps. */
+  runState: ScoutRunState;
+  /** The oldest clock behind the state: set for IN_FLIGHT and BLOCKED only. */
+  runStateSince: string | null;
+  /** Empty unless runState is BLOCKED; the ids the panel's repair re-drives. */
+  blockedAnalysisIds: string[];
 };
 
 export type CreateScoutInput = {
