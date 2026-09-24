@@ -177,6 +177,10 @@ function AnalysesTable() {
   // not just the current page, so a bulk action can span pages.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkError, setBulkError] = useState<string | null>(null);
+  // Why an action did nothing, when that is an ordinary state of affairs
+  // rather than a failure — a selection holding no interrupted row, say.
+  // Kept apart from `bulkError` so it doesn't read as something breaking.
+  const [bulkNotice, setBulkNotice] = useState<string | null>(null);
 
   // Bulk generation (#68, split per document type here as docs/adr/0031 split
   // the Quick view's panel): which document a confirm step is currently open
@@ -265,6 +269,7 @@ function AnalysesTable() {
       if (patch.search !== undefined || patch.status !== undefined || patch.sort !== undefined) {
         setSelectedIds(new Set());
         setBulkError(null);
+        setBulkNotice(null);
         setBulkGenerateConfirming(null);
         setBulkGenerationDocumentIds([]);
         setBulkRelaunchConfirming(false);
@@ -375,6 +380,7 @@ function AnalysesTable() {
 
   const handleBulkStatusChange = (applicationStatus: (typeof TRACKING_STATUS_TRANSITIONS)[number]["applicationStatus"]) => {
     setBulkError(null);
+    setBulkNotice(null);
     const analysisIds = [...selectedIds];
     bulkSetApplicationStatus.mutate(
       { analysisIds, status: applicationStatus },
@@ -438,6 +444,7 @@ function AnalysesTable() {
   const handleConfirmBulkGenerate = () => {
     if (bulkGenerateConfirming === null) return;
     setBulkError(null);
+    setBulkNotice(null);
     const type = bulkGenerateConfirming;
     const analysisIds = generationTargets[type].map((a) => a.id);
     bulkCreateGeneratedDocuments.mutate(
@@ -480,6 +487,7 @@ function AnalysesTable() {
 
   const handleConfirmBulkRelaunch = () => {
     setBulkError(null);
+    setBulkNotice(null);
     const pairs = eligibleForRelaunch.map((a) => ({
       analysisId: a.id,
       jobOfferId: a.jobOffer.id,
@@ -515,7 +523,16 @@ function AnalysesTable() {
 
   const handleBulkRequeue = () => {
     setBulkError(null);
+    setBulkNotice(null);
     const ids = eligibleForRequeue.map((a) => a.id);
+    // The button is offered on any selection now, so the "nothing to pick up
+    // here" case is answered in words rather than by a button that looks
+    // broken. There is no confirm step to carry the explanation (a Requeue
+    // costs nothing and asks nothing), so it lands as a plain notice.
+    if (ids.length === 0) {
+      setBulkNotice(t("bulk.requeueNoneEligible"));
+      return;
+    }
     bulkRequeueAnalyses.mutate(ids, {
       onSuccess: ({ failedAnalysisIds }) => {
         if (failedAnalysisIds.length > 0) {
@@ -778,6 +795,7 @@ function AnalysesTable() {
             onClick={() => {
               setSelectedIds(new Set());
               setBulkError(null);
+              setBulkNotice(null);
               setBulkGenerateConfirming(null);
               setBulkGenerationDocumentIds([]);
               setBulkRelaunchConfirming(false);
@@ -832,11 +850,15 @@ function AnalysesTable() {
                 {td(labelKey)}
               </Button>
             ))}
+            {/* Stays live on any selection: a greyed button with nothing
+                saying why was read as the action being broken, when what it
+                meant was "nothing here is finished yet". The confirmation
+                below carries that sentence instead. */}
             <Button
               type="button"
               variant="outline"
               size="sm"
-              disabled={eligibleRelaunchCount === 0 || bulkCreateAnalyses.isPending}
+              disabled={bulkCreateAnalyses.isPending}
               onClick={() => {
                 setBulkGenerateConfirming(null);
                 setBulkRelaunchConfirming(true);
@@ -845,29 +867,34 @@ function AnalysesTable() {
               <RotateCw aria-hidden="true" />
               {td("retry")}
             </Button>
-            {/* Only offered once the selection holds a row the server called
-                stuck — a restart-orphaned Analysis is rare, and an always-on
-                button here would read as a second, competing "relaunch". */}
-            {eligibleRequeueCount > 0 && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={bulkRequeueAnalyses.isPending}
-                onClick={handleBulkRequeue}
-              >
-                {bulkRequeueAnalyses.isPending ? (
-                  <LoaderCircle className="animate-spin" aria-hidden="true" />
-                ) : (
-                  <RotateCw aria-hidden="true" />
-                )}
-                {t("bulk.requeue", { count: eligibleRequeueCount })}
-              </Button>
-            )}
+            {/* Offered on any selection too, for the same reason — and it is
+                no longer the second button in this bar saying "Relancer
+                l'analyse": a Requeue re-drives the same row for free, a
+                Re-run buys a new one (services/api's own glossary lists
+                Relaunch under Requeue's _Avoid_). */}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={bulkRequeueAnalyses.isPending}
+              onClick={handleBulkRequeue}
+            >
+              {bulkRequeueAnalyses.isPending ? (
+                <LoaderCircle className="animate-spin" aria-hidden="true" />
+              ) : (
+                <RotateCw aria-hidden="true" />
+              )}
+              {t("bulk.requeue", { count: eligibleRequeueCount })}
+            </Button>
           </div>
           {bulkError && (
             <p role="alert" className="w-full text-sm text-destructive">
               {bulkError}
+            </p>
+          )}
+          {bulkNotice && (
+            <p role="status" className="w-full text-sm text-muted">
+              {bulkNotice}
             </p>
           )}
           {bulkGenerateConfirming !== null && (
@@ -936,22 +963,28 @@ function AnalysesTable() {
           {bulkRelaunchConfirming && (
             <div className="flex w-full flex-col gap-2 rounded-md border border-border bg-background p-3">
               <p className="text-sm">
-                {skippedRelaunchCount > 0
-                  ? t("bulk.relaunchConfirmMixed", {
-                      count: eligibleRelaunchCount,
-                      skipped: skippedRelaunchCount,
-                      remaining: remainingAnalysisQuota ?? 0,
-                    })
-                  : t("bulk.relaunchConfirm", {
-                      count: eligibleRelaunchCount,
-                      remaining: remainingAnalysisQuota ?? 0,
-                    })}
+                {eligibleRelaunchCount === 0
+                  ? t("bulk.relaunchNoneEligible")
+                  : skippedRelaunchCount > 0
+                    ? t("bulk.relaunchConfirmMixed", {
+                        count: eligibleRelaunchCount,
+                        skipped: skippedRelaunchCount,
+                        remaining: remainingAnalysisQuota ?? 0,
+                      })
+                    : t("bulk.relaunchConfirm", {
+                        count: eligibleRelaunchCount,
+                        remaining: remainingAnalysisQuota ?? 0,
+                      })}
               </p>
               <div className="flex gap-2">
                 <Button
                   type="button"
                   size="sm"
-                  disabled={insufficientRelaunchQuota || bulkCreateAnalyses.isPending}
+                  disabled={
+                    eligibleRelaunchCount === 0 ||
+                    insufficientRelaunchQuota ||
+                    bulkCreateAnalyses.isPending
+                  }
                   onClick={handleConfirmBulkRelaunch}
                 >
                   {bulkCreateAnalyses.isPending ? (

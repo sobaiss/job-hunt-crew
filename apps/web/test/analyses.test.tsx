@@ -1682,7 +1682,7 @@ describe("AnalysesDashboardPage", () => {
     expect(screen.getByRole("button", { name: "Confirm" })).toBeDisabled();
   });
 
-  it("disables 'Run it again' when nothing selected is relaunchable, enabling it for a partial-eligible selection and naming the skipped count (issue #126)", async () => {
+  it("says why a bulk relaunch would do nothing rather than greying the button, and names the skipped count on a partial selection (issue #126)", async () => {
     const user = userEvent.setup();
     server.use(
       http.get("/api/analyses", () =>
@@ -1698,17 +1698,24 @@ describe("AnalysesDashboardPage", () => {
     renderWithProviders(<AnalysesDashboardPage />);
     await screen.findByText("Offer One");
 
+    // Nothing relaunchable: the button still opens, and the confirmation is
+    // what explains — a dead button was read as the action being broken.
     await user.click(screen.getByRole("checkbox", { name: "Select Offer Two" }));
-    expect(screen.getByRole("button", { name: "Run it again" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Run it again" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Run it again" }));
+    expect(
+      await screen.findByText(
+        "None of the selected analyses has finished: only a completed or failed analysis can be re-run.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Confirm" })).toBeDisabled();
 
     await user.click(screen.getByRole("checkbox", { name: "Select Offer One" }));
-    expect(screen.getByRole("button", { name: "Run it again" })).toBeEnabled();
-
-    await user.click(screen.getByRole("button", { name: "Run it again" }));
 
     expect(
       await screen.findByText("1 analysis will be re-run (1 skipped, still in progress) — 20 remaining today"),
     ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Confirm" })).toBeEnabled();
   });
 
   it("disables the bulk relaunch confirm when the eligible selection would exceed the remaining analysis quota (issue #126)", async () => {
@@ -3638,7 +3645,7 @@ describe("a stuck analysis", () => {
       screen.getByText("It picks up where it left off, and costs you no quota."),
     ).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Run it again" }));
+    await user.click(screen.getByRole("button", { name: "Pick it up again" }));
 
     await waitFor(() => expect(requeued).toBe(1));
     expect(
@@ -3687,7 +3694,7 @@ describe("a stuck analysis", () => {
     renderWithProviders(<AnalysisDetailPage />);
     await screen.findByText(STUCK_NOTE);
 
-    await user.click(screen.getByRole("button", { name: "Run it again" }));
+    await user.click(screen.getByRole("button", { name: "Pick it up again" }));
 
     expect(
       await screen.findByText(
@@ -3710,11 +3717,11 @@ describe("a stuck analysis", () => {
     renderWithProviders(<AnalysisDetailPage />);
     await screen.findByText(STUCK_NOTE);
 
-    await user.click(screen.getByRole("button", { name: "Run it again" }));
+    await user.click(screen.getByRole("button", { name: "Pick it up again" }));
 
     expect(
       await screen.findByText(
-        "We couldn't restart this analysis. Please try again.",
+        "We couldn't pick this analysis up. Please try again.",
       ),
     ).toBeInTheDocument();
   });
@@ -3762,7 +3769,7 @@ describe("a stuck analysis", () => {
     const sheet = await screen.findByRole("dialog");
     expect(within(sheet).getByText(STUCK_NOTE)).toBeInTheDocument();
 
-    await user.click(within(sheet).getByRole("button", { name: "Run it again" }));
+    await user.click(within(sheet).getByRole("button", { name: "Pick it up again" }));
 
     await waitFor(() => expect(requeued).toBe(1));
   });
@@ -3801,24 +3808,35 @@ describe("a stuck analysis", () => {
     await waitFor(() => expect(requeued.sort()).toEqual(["s1", "s2"]));
   });
 
-  it("offers no bulk requeue when nothing in the selection is stuck", async () => {
+  it("says the selection holds nothing interrupted rather than hiding the bulk requeue", async () => {
+    // Hiding it meant the repair only existed for candidates who already knew
+    // it existed; posting nothing and saying so is the honest middle.
     const user = userEvent.setup();
+    let requeued = 0;
     server.use(
       http.get("/api/analyses", () =>
         HttpResponse.json({
           analyses: [summary({ id: "s1", status: "COMPLETED", stuck: false })],
         }),
       ),
+      http.post("/api/analyses/:id/requeue", () => {
+        requeued += 1;
+        return HttpResponse.json({ status: "PENDING" }, { status: 202 });
+      }),
     );
 
     renderWithProviders(<AnalysesDashboardPage />);
     await screen.findByText("Backend Engineer");
 
     await user.click(screen.getByLabelText("Select all on this page"));
+    await user.click(
+      screen.getByRole("button", { name: "Pick up the interrupted analyses" }),
+    );
 
     expect(
-      screen.queryByRole("button", { name: /Pick up/ }),
-    ).not.toBeInTheDocument();
+      await screen.findByText("No interrupted analysis in the selection."),
+    ).toBeInTheDocument();
+    expect(requeued).toBe(0);
   });
 
   it("reports how many of a bulk requeue the server refused as still running", async () => {
