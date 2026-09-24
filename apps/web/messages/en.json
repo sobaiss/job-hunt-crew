@@ -593,8 +593,13 @@
       "exportCsv": "Export CSV",
       "csvFilename": "analyses.csv",
       "statusPartialError": "{failed} of {total} updates failed. Please try again for those.",
-      "generateDocuments": "Generate documents",
-      "generateConfirm": "Generate for {count} offers — {remaining} remaining today",
+      "document": {
+        "COVER_LETTER": "the cover letter",
+        "TAILORED_CV": "the tailored CV"
+      },
+      "generateConfirm": "Generate {document} for {count, plural, one {# offer} other {# offers}} — {remaining} remaining today",
+      "generateConfirmMixed": "Generate {document} for {count, plural, one {# offer} other {# offers}} ({skipped} skipped: analysis not completed, or document already generated) — {remaining} remaining today",
+      "generateNoneEligible": "None of the selected analyses needs {document}: they aren't completed, or the document already exists.",
       "generateConfirmAction": "Confirm",
       "cancel": "Cancel",
       "generateInsufficientQuota": "Not enough remaining quota today for this many offers.",

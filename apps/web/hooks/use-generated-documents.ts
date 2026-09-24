@@ -96,19 +96,30 @@ export function useGeneratedDocument(id: string | null) {
   });
 }
 
-/** Kicks off generation (issue #68's bulk action) for every Analysis in
- * `analysisIds`, one `POST /api/analyses/{id}/generated-documents` call per
- * id via `Promise.allSettled` — mirrors `useBulkSetApplicationStatus`'s
+/** Kicks off generation of one document `type` (issue #68's bulk action) for
+ * every Analysis in `analysisIds`, one `POST /api/analyses/{id}/generated-documents`
+ * call per id via `Promise.allSettled` — mirrors `useBulkSetApplicationStatus`'s
  * fan-out so a failure on one Analysis doesn't abort the rest. Returns the
  * ids that failed and the full list of freshly created document ids, so the
- * caller can poll each with {@link useGeneratedDocumentsStatuses}. */
+ * caller can poll each with {@link useGeneratedDocumentsStatuses}.
+ *
+ * `type` is required here, unlike {@link useCreateGeneratedDocuments}: the
+ * bulk bar asks per document since docs/adr/0031's split reached it, and the
+ * type-less "both at once" call is now the Admin table's alone. */
 export function useBulkCreateGeneratedDocuments() {
   return useMutation({
-    mutationFn: async (analysisIds: string[]) => {
+    mutationFn: async ({
+      analysisIds,
+      type,
+    }: {
+      analysisIds: string[];
+      type: GeneratedDocumentType;
+    }) => {
       const results = await Promise.allSettled(
         analysisIds.map((analysisId) =>
           bff.post<{ generatedDocuments: GeneratedDocument[] }>(
             `/analyses/${analysisId}/generated-documents`,
+            { type },
           ),
         ),
       );
@@ -126,10 +137,11 @@ export function useBulkCreateGeneratedDocuments() {
   });
 }
 
-/** Polls a fixed list of GeneratedDocument ids (the bulk "Générer les
- * documents" run's own rows), each until it leaves PENDING/GENERATING —
- * lets the bulk-actions bar show a live per-run summary without a
- * full-page reload. Shares its cache entries with {@link useGeneratedDocument}. */
+/** Polls a fixed list of GeneratedDocument ids (the rows the bulk bar's
+ * generation runs have created so far, whatever their type), each until it
+ * leaves PENDING/GENERATING — lets the bulk-actions bar show a live summary
+ * without a full-page reload. Shares its cache entries with
+ * {@link useGeneratedDocument}. */
 export function useGeneratedDocumentsStatuses(ids: string[]) {
   return useQueries({
     queries: ids.map((id) => ({

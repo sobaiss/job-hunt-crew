@@ -1500,7 +1500,7 @@ describe("AnalysesDashboardPage", () => {
           activeScouts: { cap: 20, used: 0, remaining: 20 },
           analysesDaily: { cap: 20, used: 0, remaining: 20 },
           analysesMonthly: { cap: 200, used: 0, remaining: 200 },
-          documentsDaily: { cap: 20, used: 17, remaining: 3 },
+          documentsDaily: { cap: 20, used: 19, remaining: 1 },
         }),
       ),
     );
@@ -1509,17 +1509,22 @@ describe("AnalysesDashboardPage", () => {
     await screen.findByText("Offer One");
 
     await user.click(screen.getByLabelText("Select all on this page"));
-    await user.click(screen.getByRole("button", { name: "Generate documents" }));
+    await user.click(screen.getByRole("button", { name: "Generate the cover letter" }));
 
-    expect(await screen.findByText("Generate for 2 offers — 3 remaining today")).toBeInTheDocument();
+    // One document per offer now, not two (docs/adr/0031), so two offers ask
+    // for two — one over what is left today.
+    expect(
+      await screen.findByText("Generate the cover letter for 2 offers — 1 remaining today"),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Confirm" })).toBeDisabled();
     expect(
       screen.getByText("Not enough remaining quota today for this many offers."),
     ).toBeInTheDocument();
   });
 
-  it("bulk-generates documents for the selection and reflects a live ready/failed progress summary (issue #68)", async () => {
+  it("bulk-generates one document type per button, posting that type, and merges both runs into one progress summary (issue #68, docs/adr/0031)", async () => {
     const user = userEvent.setup();
+    const posted: { analysisId: string; type: string }[] = [];
     const document = (id: string, status: string) => ({
       id,
       type: id.endsWith("cl") ? "COVER_LETTER" : "TAILORED_CV",
@@ -1530,6 +1535,18 @@ describe("AnalysesDashboardPage", () => {
       createdAt: "2026-09-11T00:00:00.000Z",
       updatedAt: "2026-09-11T00:00:00.000Z",
     });
+    /** Records what the bar asked for and answers with that one type's row —
+     *  the endpoint's own per-type behaviour since docs/adr/0031. */
+    const generationPost = (analysisId: string, prefix: string) =>
+      http.post(`/api/analyses/${analysisId}/generated-documents`, async ({ request }) => {
+        const { type } = (await request.json()) as { type: string };
+        posted.push({ analysisId, type });
+        return HttpResponse.json({
+          generatedDocuments: [
+            document(`${prefix}-${type === "COVER_LETTER" ? "cl" : "cv"}`, "PENDING"),
+          ],
+        });
+      });
     server.use(
       http.get("/api/analyses", () =>
         HttpResponse.json({
@@ -1539,16 +1556,8 @@ describe("AnalysesDashboardPage", () => {
           ],
         }),
       ),
-      http.post("/api/analyses/s1/generated-documents", () =>
-        HttpResponse.json({
-          generatedDocuments: [document("gd1-cl", "PENDING"), document("gd1-cv", "PENDING")],
-        }),
-      ),
-      http.post("/api/analyses/s2/generated-documents", () =>
-        HttpResponse.json({
-          generatedDocuments: [document("gd2-cl", "PENDING"), document("gd2-cv", "PENDING")],
-        }),
-      ),
+      generationPost("s1", "gd1"),
+      generationPost("s2", "gd2"),
       http.get("/api/generated-documents/gd1-cl", () =>
         HttpResponse.json({ generatedDocument: document("gd1-cl", "READY") }),
       ),
@@ -1565,12 +1574,112 @@ describe("AnalysesDashboardPage", () => {
 
     renderWithProviders(<AnalysesDashboardPage />);
     await screen.findByText("Offer One");
-
     await user.click(screen.getByLabelText("Select all on this page"));
-    await user.click(screen.getByRole("button", { name: "Generate documents" }));
-    await user.click(await screen.findByRole("button", { name: "Confirm" }));
 
+    await user.click(screen.getByRole("button", { name: "Generate the cover letter" }));
+    await user.click(await screen.findByRole("button", { name: "Confirm" }));
+    expect(await screen.findByText("1 ready, 1 failed, 2 total")).toBeInTheDocument();
+
+    // The second button picks up where the first left off rather than
+    // replacing its summary: one selection, one batch being watched.
+    await user.click(screen.getByRole("button", { name: "Generate the tailored CV" }));
+    await user.click(await screen.findByRole("button", { name: "Confirm" }));
     expect(await screen.findByText("2 ready, 2 failed, 4 total")).toBeInTheDocument();
+
+    const askedFor = (type: string) =>
+      posted.filter((p) => p.type === type).map((p) => p.analysisId).sort();
+    expect(askedFor("COVER_LETTER")).toEqual(["s1", "s2"]);
+    expect(askedFor("TAILORED_CV")).toEqual(["s1", "s2"]);
+  });
+
+  it("prices a bulk generation at the rows that still need that document, naming what it skips (docs/adr/0031)", async () => {
+    const user = userEvent.setup();
+    const posted: string[] = [];
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            // Needs both: completed, nothing generated yet.
+            summary({
+              id: "s1",
+              coverLetterStatus: null,
+              tailoredCvStatus: null,
+              jobOffer: { ...summary().jobOffer, id: "j1", title: "Offer One" },
+            }),
+            // Already has a cover letter — asking again would buy a duplicate
+            // the list hides. A FAILED tailored CV is still worth retrying.
+            summary({
+              id: "s2",
+              coverLetterStatus: "READY",
+              tailoredCvStatus: "FAILED",
+              jobOffer: { ...summary().jobOffer, id: "j2", title: "Offer Two" },
+            }),
+            // Still running: the endpoint would reject it with a 400.
+            summary({
+              id: "s3",
+              status: "RUNNING_CREW",
+              matchScore: null,
+              jobOffer: { ...summary().jobOffer, id: "j3", title: "Offer Three" },
+            }),
+          ],
+        }),
+      ),
+      http.post("/api/analyses/:id/generated-documents", ({ params }) => {
+        posted.push(params.id as string);
+        return HttpResponse.json({ generatedDocuments: [] });
+      }),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Offer One");
+    await user.click(screen.getByLabelText("Select all on this page"));
+
+    await user.click(screen.getByRole("button", { name: "Generate the cover letter" }));
+    expect(
+      await screen.findByText(
+        "Generate the cover letter for 1 offer (2 skipped: analysis not completed, or document already generated) — 20 remaining today",
+      ),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(posted).toEqual(["s1"]));
+
+    // The tailored CV side of the same selection has two takers, so its own
+    // confirmation prices two — each button counts for itself.
+    await user.click(screen.getByRole("button", { name: "Generate the tailored CV" }));
+    expect(
+      await screen.findByText(
+        "Generate the tailored CV for 2 offers (1 skipped: analysis not completed, or document already generated) — 20 remaining today",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("explains instead of generating when nothing selected still needs that document (docs/adr/0031)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            summary({
+              id: "s1",
+              coverLetterStatus: "READY",
+              jobOffer: { ...summary().jobOffer, id: "j1", title: "Offer One" },
+            }),
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Offer One");
+    await user.click(screen.getByLabelText("Select all on this page"));
+    await user.click(screen.getByRole("button", { name: "Generate the cover letter" }));
+
+    expect(
+      await screen.findByText(
+        "None of the selected analyses needs the cover letter: they aren't completed, or the document already exists.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Confirm" })).toBeDisabled();
   });
 
   it("disables 'Run it again' when nothing selected is relaunchable, enabling it for a partial-eligible selection and naming the skipped count (issue #126)", async () => {

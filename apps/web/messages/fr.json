@@ -593,8 +593,13 @@
       "exportCsv": "Exporter en CSV",
       "csvFilename": "analyses.csv",
       "statusPartialError": "{failed} mise(s) à jour sur {total} ont échoué. Veuillez réessayer pour celles-ci.",
-      "generateDocuments": "Générer les documents",
-      "generateConfirm": "Générer pour {count} offres — {remaining} restantes aujourd'hui",
+      "document": {
+        "COVER_LETTER": "la lettre de motivation",
+        "TAILORED_CV": "le CV adapté"
+      },
+      "generateConfirm": "Générer {document} pour {count, plural, one {# offre} other {# offres}} — {remaining} restantes aujourd'hui",
+      "generateConfirmMixed": "Générer {document} pour {count, plural, one {# offre} other {# offres}} ({skipped} ignorée(s) : analyse non terminée, ou document déjà généré) — {remaining} restantes aujourd'hui",
+      "generateNoneEligible": "Aucune des analyses sélectionnées n'attend {document} : elles ne sont pas terminées, ou le document existe déjà.",
       "generateConfirmAction": "Confirmer",
       "cancel": "Annuler",
       "generateInsufficientQuota": "Quota restant insuffisant aujourd'hui pour ce nombre d'offres.",
