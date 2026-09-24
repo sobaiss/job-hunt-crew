@@ -32,6 +32,7 @@ import {
   useBulkCreateGeneratedDocuments,
   useGeneratedDocumentsStatuses,
   type GeneratedDocumentStatus,
+  type GeneratedDocumentType,
 } from "@/hooks/use-generated-documents";
 import { useQuotas } from "@/hooks/use-quotas";
 import { useMediaQuery } from "@/hooks/use-media-query";
@@ -93,6 +94,39 @@ const SELECT_CLASS =
 
 const COLUMN_VISIBILITY_STORAGE_KEY = "column-visibility:analyses";
 
+// One bulk button per document, in the order the Quick view's own panel
+// stacks its two slots, and carrying that panel's labels so the same act is
+// named the same in both places. There is deliberately no "both at once"
+// button: documents coming in pairs was never a domain rule, only the shape
+// of the first screen that needed them (docs/adr/0031).
+const GENERATION_BUTTONS: readonly {
+  type: GeneratedDocumentType;
+  labelKey: string;
+}[] = [
+  { type: "COVER_LETTER", labelKey: "generatedDocuments.generateCoverLetter" },
+  { type: "TAILORED_CV", labelKey: "generatedDocuments.generateTailoredCv" },
+];
+
+/** Whether a bulk "Générer…" click would actually create this document for
+ *  this Analysis. The API rejects anything not `COMPLETED` (its resultJSON is
+ *  what steers the generation agents), and a row that already carries this
+ *  type would spend a quota on a duplicate `list_generated_documents` hides
+ *  anyway — docs/adr/0031's one open hole, which a button firing at 25 rows
+ *  at a time would widen. A `FAILED` document stays eligible: asking again is
+ *  how a candidate retries it from the list rather than one Quick view at a
+ *  time. */
+function needsGeneratedDocument(
+  analysis: AnalysisSummary,
+  type: GeneratedDocumentType,
+): boolean {
+  if (analysis.status !== "COMPLETED") return false;
+  const status =
+    type === "COVER_LETTER"
+      ? analysis.coverLetterStatus
+      : analysis.tailoredCvStatus;
+  return status == null || status === "FAILED";
+}
+
 // The flat table's sortable columns, left to right (#63). "Lien" is sortable
 // by `sourceUrl` too, but rendered separately since its cell is an icon, not
 // text. Poste (`title`) is the only non-`hideable` one — it, the selection
@@ -144,10 +178,15 @@ function AnalysesTable() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkError, setBulkError] = useState<string | null>(null);
 
-  // Bulk "Générer les documents" (#68): a confirm step showing the remaining
-  // daily quota, then the ids of the freshly created GeneratedDocument rows
-  // this run produced, polled for a live ready/failed/total summary.
-  const [bulkGenerateConfirming, setBulkGenerateConfirming] = useState(false);
+  // Bulk generation (#68, split per document type here as docs/adr/0031 split
+  // the Quick view's panel): which document a confirm step is currently open
+  // for, if any — showing the remaining daily quota and what the selection
+  // would actually spend — then the ids of every GeneratedDocument row the
+  // bar's runs have created, polled for a live ready/failed/total summary.
+  // One list across both types, since a candidate asking for a letter and
+  // then a CV is watching one batch, not two.
+  const [bulkGenerateConfirming, setBulkGenerateConfirming] =
+    useState<GeneratedDocumentType | null>(null);
   const [bulkGenerationDocumentIds, setBulkGenerationDocumentIds] = useState<string[]>([]);
   const bulkGenerationStatuses = useGeneratedDocumentsStatuses(bulkGenerationDocumentIds);
 
@@ -226,7 +265,7 @@ function AnalysesTable() {
       if (patch.search !== undefined || patch.status !== undefined || patch.sort !== undefined) {
         setSelectedIds(new Set());
         setBulkError(null);
-        setBulkGenerateConfirming(false);
+        setBulkGenerateConfirming(null);
         setBulkGenerationDocumentIds([]);
         setBulkRelaunchConfirming(false);
       }
@@ -355,7 +394,32 @@ function AnalysesTable() {
     );
   };
 
-  const requiredGenerationDocs = selectedIds.size * 2;
+  // What each button would actually create, so the confirm step can price the
+  // run at what it costs (one document per eligible row) rather than at the
+  // old flat "selection × 2" — and name what it is leaving out.
+  const generationTargets = useMemo(
+    () => ({
+      COVER_LETTER: selectedAnalyses.filter((a) =>
+        needsGeneratedDocument(a, "COVER_LETTER"),
+      ),
+      TAILORED_CV: selectedAnalyses.filter((a) =>
+        needsGeneratedDocument(a, "TAILORED_CV"),
+      ),
+    }),
+    [selectedAnalyses],
+  );
+
+  // The mutation is shared by both buttons, so which document is in flight is
+  // read off the variables it was called with rather than from `isPending`
+  // alone — otherwise one run would grey out the other's button.
+  const inFlightGenerationType = bulkCreateGeneratedDocuments.isPending
+    ? (bulkCreateGeneratedDocuments.variables?.type ?? null)
+    : null;
+
+  const requiredGenerationDocs = bulkGenerateConfirming
+    ? generationTargets[bulkGenerateConfirming].length
+    : 0;
+  const skippedGenerationCount = selectedIds.size - requiredGenerationDocs;
   const remainingGenerationQuota = quotas?.documentsDaily.remaining;
   const insufficientGenerationQuota =
     remainingGenerationQuota != null && requiredGenerationDocs > remainingGenerationQuota;
@@ -372,22 +436,36 @@ function AnalysesTable() {
   }, [bulkGenerationDocumentIds, bulkGenerationStatuses]);
 
   const handleConfirmBulkGenerate = () => {
+    if (bulkGenerateConfirming === null) return;
     setBulkError(null);
-    const analysisIds = [...selectedIds];
-    bulkCreateGeneratedDocuments.mutate(analysisIds, {
-      onSuccess: ({ failedAnalysisIds, documentIds }) => {
-        setBulkGenerateConfirming(false);
-        setBulkGenerationDocumentIds(documentIds);
-        if (failedAnalysisIds.length > 0) {
-          setBulkError(
-            t("bulk.generatePartialError", {
-              failed: failedAnalysisIds.length,
-              total: analysisIds.length,
-            }),
+    const type = bulkGenerateConfirming;
+    const analysisIds = generationTargets[type].map((a) => a.id);
+    bulkCreateGeneratedDocuments.mutate(
+      { analysisIds, type },
+      {
+        onSuccess: ({ failedAnalysisIds, documentIds }) => {
+          // Only closes the panel if it is still this run's — the other
+          // button stays live while this one is in flight, and a candidate
+          // who used it meanwhile shouldn't have their confirm snatched away.
+          setBulkGenerateConfirming((current) =>
+            current === type ? null : current,
           );
-        }
+          setBulkGenerationDocumentIds((current) => [...current, ...documentIds]);
+          // The rows' own document-status columns decide what is still
+          // eligible, so they have to catch up — otherwise a second click on
+          // the same button would offer to pay for the rows just queued.
+          queryClient.invalidateQueries({ queryKey: ["analyses"] });
+          if (failedAnalysisIds.length > 0) {
+            setBulkError(
+              t("bulk.generatePartialError", {
+                failed: failedAnalysisIds.length,
+                total: analysisIds.length,
+              }),
+            );
+          }
+        },
       },
-    });
+    );
   };
 
   const eligibleForRelaunch = useMemo(
@@ -700,7 +778,7 @@ function AnalysesTable() {
             onClick={() => {
               setSelectedIds(new Set());
               setBulkError(null);
-              setBulkGenerateConfirming(false);
+              setBulkGenerateConfirming(null);
               setBulkGenerationDocumentIds([]);
               setBulkRelaunchConfirming(false);
             }}
@@ -729,26 +807,38 @@ function AnalysesTable() {
               <FileDown aria-hidden="true" />
               {t("bulk.exportCsv")}
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={bulkCreateGeneratedDocuments.isPending}
-              onClick={() => {
-                setBulkRelaunchConfirming(false);
-                setBulkGenerateConfirming(true);
-              }}
-            >
-              <Sparkles aria-hidden="true" />
-              {t("bulk.generateDocuments")}
-            </Button>
+            {/* One button per document rather than the old pair-at-once:
+                asking for a letter alone used to bill a tailored CV nobody
+                wanted (docs/adr/0031). Only the one being generated goes
+                disabled, so the two are independent here as they are in the
+                Quick view's panel. */}
+            {GENERATION_BUTTONS.map(({ type, labelKey }) => (
+              <Button
+                key={type}
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={inFlightGenerationType === type}
+                onClick={() => {
+                  setBulkRelaunchConfirming(false);
+                  setBulkGenerateConfirming(type);
+                }}
+              >
+                {inFlightGenerationType === type ? (
+                  <LoaderCircle className="animate-spin" aria-hidden="true" />
+                ) : (
+                  <Sparkles aria-hidden="true" />
+                )}
+                {td(labelKey)}
+              </Button>
+            ))}
             <Button
               type="button"
               variant="outline"
               size="sm"
               disabled={eligibleRelaunchCount === 0 || bulkCreateAnalyses.isPending}
               onClick={() => {
-                setBulkGenerateConfirming(false);
+                setBulkGenerateConfirming(null);
                 setBulkRelaunchConfirming(true);
               }}
             >
@@ -780,22 +870,41 @@ function AnalysesTable() {
               {bulkError}
             </p>
           )}
-          {bulkGenerateConfirming && (
+          {bulkGenerateConfirming !== null && (
             <div className="flex w-full flex-col gap-2 rounded-md border border-border bg-background p-3">
+              {/* Prices the run at what it will actually create and names what
+                  it leaves behind — a selection can hold rows still running,
+                  and rows that already have this document. */}
               <p className="text-sm">
-                {t("bulk.generateConfirm", {
-                  count: selectedIds.size,
-                  remaining: remainingGenerationQuota ?? 0,
-                })}
+                {requiredGenerationDocs === 0
+                  ? t("bulk.generateNoneEligible", {
+                      document: t(`bulk.document.${bulkGenerateConfirming}`),
+                    })
+                  : skippedGenerationCount > 0
+                    ? t("bulk.generateConfirmMixed", {
+                        document: t(`bulk.document.${bulkGenerateConfirming}`),
+                        count: requiredGenerationDocs,
+                        skipped: skippedGenerationCount,
+                        remaining: remainingGenerationQuota ?? 0,
+                      })
+                    : t("bulk.generateConfirm", {
+                        document: t(`bulk.document.${bulkGenerateConfirming}`),
+                        count: requiredGenerationDocs,
+                        remaining: remainingGenerationQuota ?? 0,
+                      })}
               </p>
               <div className="flex gap-2">
                 <Button
                   type="button"
                   size="sm"
-                  disabled={insufficientGenerationQuota || bulkCreateGeneratedDocuments.isPending}
+                  disabled={
+                    requiredGenerationDocs === 0 ||
+                    insufficientGenerationQuota ||
+                    inFlightGenerationType === bulkGenerateConfirming
+                  }
                   onClick={handleConfirmBulkGenerate}
                 >
-                  {bulkCreateGeneratedDocuments.isPending ? (
+                  {inFlightGenerationType === bulkGenerateConfirming ? (
                     <LoaderCircle className="animate-spin" aria-hidden="true" />
                   ) : (
                     <Check aria-hidden="true" />
@@ -806,7 +915,7 @@ function AnalysesTable() {
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={() => setBulkGenerateConfirming(false)}
+                  onClick={() => setBulkGenerateConfirming(null)}
                 >
                   <X aria-hidden="true" />
                   {t("bulk.cancel")}
