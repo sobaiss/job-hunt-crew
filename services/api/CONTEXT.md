@@ -88,6 +88,10 @@ _Avoid_: Stale, orphaned, timed out (fine in prose; the field and the term are `
 Re-driving one stuck Analysis in place — `POST /v1/analyses/{id}/requeue` puts the same row back to `PENDING` (clearing `errorMessage` and `startedAt`, stamping `requeuedAt`) and re-enqueues it. No new Analysis, and **no quota charged**: the work was already paid for when the row was created, and the interruption was ours. Refused `409 ANALYSIS_ALREADY_TERMINAL` on a `COMPLETED`/`FAILED` Analysis (that is a Re-run, above) and `409 ANALYSIS_NOT_STUCK` when the row turns out to be alive — the endpoint re-checks the Stuck predicate itself rather than trusting the client, which is also what stops a stale screen spending LLM budget. Because `requeuedAt` is the newest term of the staleness clock, stamping it bounds re-clicking to once per stuck window, which is why no quota check is needed. Deliberately not `requestedAt`: that column is the quota clock (`py_db/quota.py` counts by it) and an Admin filter, so moving it would silently spend a daily and a monthly slot. See docs/adr/0032.
 _Avoid_: Retry, Re-run, Relaunch (all three are the *other* action — a new row via `POST /v1/analyses`, docs/adr/0011); Resume (the pipeline restarts from the top, it does not continue mid-step)
 
+**Blocked** (an Analysis, as a Scout's Run state counts it):
+A stuck Analysis that is genuinely broken rather than merely waiting its turn — the narrower of the two predicates, and a strict *subset* of Stuck. The same age check, split on `startedAt`: a row that was picked up and then stopped advancing is blocked after `ANALYSIS_STUCK_AFTER_MINUTES` (15), while a row never picked up is the legitimate tail of a fan-out (25 offers per site, drained one at a time) and is blocked only past `SCOUT_QUEUED_BLOCKED_AFTER_MINUTES` (default 120). Reusing Stuck unchanged here would paint every healthy multi-site run red, because that predicate knowingly flags the queued tail — a false positive docs/adr/0032 accepts for a per-row button and cannot afford in a per-Scout badge. The subset relation is load-bearing, not incidental: every blocked Analysis also satisfies `is_analysis_stuck`, which is what lets the Scout panel fan Requeue over `blockedAnalysisIds` without any of them coming back `409 ANALYSIS_NOT_STUCK`. See docs/adr/0033.
+_Avoid_: Stuck (the wider predicate, and the `AnalysisResponse` field — deliberately not the same set), Stale (that is a ScoutRun's term, see [Scout](../scout/CONTEXT.md)), Dead, Orphaned
+
 **Analysis batch**:
 The set of Analyses sharing one IngestionJob — every JobOffer that IngestionJob discovered, each matched against the single CVVersion it carries. It has no row of its own: it is exactly the Analyses for one `ingestionJobId`, and is what the multi-offer result view lists, ranked by Match score.
 _Avoid_: Match run, matching job — there is deliberately no dedicated entity, see ADR 0002.
@@ -127,6 +131,27 @@ discarded. `Analysis.scoutId` (denormalised, nullable) links it back to its
 Scout.
 _Avoid_: Match — "match" is the generic comparison result; "relevant find"
 specifically means it cleared the threshold.
+
+**Run state** (a Scout):
+Whether a Scout is working right now and, if not, whether something is
+wrong — derived on read from the pipeline rows its runs produced, never from
+`ScoutRun.status` (which spans only `dispatch_scout_run`'s fan-out and is
+terminal within seconds of a run starting). One of `IN_FLIGHT` | `BLOCKED` |
+`FAILED` | `DEGRADED` | `OK` | `NEVER_RUN`, carried by
+`ScoutResponse.runState` alongside `runStateSince` (the clock behind "en
+cours depuis 12 min") and `blockedAnalysisIds`. The unit is the Scout, not
+one of its runs: a straggler from the previous run counts as work in
+progress, because it is. When several states hold at once `IN_FLIGHT` wins —
+work happening now outranks a verdict inherited from the previous run — and
+`IN_FLIGHT` deliberately excludes Blocked rows, without which it would be
+permanent and the state could never go red. `FAILED` covers two causes: a
+latest run that *is* `FAILED`, and one still `RUNNING` that
+`is_scout_run_stale` judges abandoned — reading the second as `FAILED`
+anticipates, by one guard, the write `close_stale_running_runs` will make to
+that row anyway, so a dead worker never reads as healthy. See docs/adr/0033.
+_Avoid_: Scout status (that is the `ACTIVE`/`PAUSED`/`ARCHIVED` lifecycle, a
+different field and a different column), ScoutRunStatus (the run row's own
+enum — unchanged, and still the run history's vocabulary), Health, Activity
 
 **GeneratedDocument**:
 A generated cover letter (`COVER_LETTER`) or tailored CV (`TAILORED_CV`)
