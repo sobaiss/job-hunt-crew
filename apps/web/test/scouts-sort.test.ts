@@ -24,6 +24,9 @@ function scout(overrides: Partial<Scout> = {}): Scout {
     createdAt: "2026-08-01T00:00:00.000Z",
     updatedAt: "2026-08-01T00:00:00.000Z",
     relevantFindsCount: 0,
+    runState: "NEVER_RUN",
+    runStateSince: null,
+    blockedAnalysisIds: [],
     ...overrides,
   };
 }
@@ -134,5 +137,23 @@ describe("sortScouts", () => {
     expect(
       sortScouts(list, { column: "lastRun", direction: "desc" }).map((s) => s.id),
     ).toEqual(["ran", "never"]);
+  });
+
+  it("sorts the runState column worst first on the explicit severity rank, reversed when descending", () => {
+    const list = [
+      scout({ id: "never", runState: "NEVER_RUN" }),
+      scout({ id: "ok", runState: "OK" }),
+      scout({ id: "flight", runState: "IN_FLIGHT" }),
+      scout({ id: "degraded", runState: "DEGRADED" }),
+      scout({ id: "failed", runState: "FAILED" }),
+      scout({ id: "blocked", runState: "BLOCKED" }),
+    ];
+
+    expect(
+      sortScouts(list, { column: "runState", direction: "asc" }).map((s) => s.id),
+    ).toEqual(["blocked", "failed", "degraded", "flight", "ok", "never"]);
+    expect(
+      sortScouts(list, { column: "runState", direction: "desc" }).map((s) => s.id),
+    ).toEqual(["never", "ok", "flight", "degraded", "failed", "blocked"]);
   });
 });

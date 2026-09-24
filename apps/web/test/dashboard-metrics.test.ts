@@ -34,6 +34,9 @@ function scout(overrides: Partial<Scout> = {}): Scout {
     createdAt: "2026-08-01T00:00:00.000Z",
     updatedAt: "2026-08-01T00:00:00.000Z",
     relevantFindsCount: 0,
+    runState: "NEVER_RUN",
+    runStateSince: null,
+    blockedAnalysisIds: [],
     ...overrides,
   };
 }

@@ -44,6 +44,7 @@ from py_db.quota import (
     generated_documents_created_today,
 )
 from py_db.quotas import active_scout_count, effective_quota, maybe_record_quota_alert
+from py_db.scout_run_state import OpenAnalysis, ScoutRunState, derive_scout_run_state
 from py_db.stuck_analysis import TERMINAL_ANALYSIS_STATUSES, is_analysis_stuck
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select, update
@@ -1703,9 +1704,17 @@ class ScoutResponse(BaseModel):
     # find currently counts; the field name is kept forward-looking so the
     # Dashboard block doesn't need a contract change once that lands.
     relevantFindsCount: int
+    # Run state (docs/adr/0033, issue #225): whether the Scout is working
+    # right now and, if not, whether something is wrong. Derived on read from
+    # the pipeline rows, never from `ScoutRun.status`.
+    runState: Literal["IN_FLIGHT", "BLOCKED", "FAILED", "DEGRADED", "OK", "NEVER_RUN"]
+    runStateSince: datetime | None
+    blockedAnalysisIds: list[str]
 
 
-def _scout_response(row: Scout, relevant_finds_count: int = 0) -> ScoutResponse:
+def _scout_response(
+    row: Scout, run_state: ScoutRunState, relevant_finds_count: int = 0
+) -> ScoutResponse:
     return ScoutResponse(
         id=row.id,
         userId=row.userId,
@@ -1719,6 +1728,9 @@ def _scout_response(row: Scout, relevant_finds_count: int = 0) -> ScoutResponse:
         createdAt=row.createdAt,
         updatedAt=row.updatedAt,
         relevantFindsCount=relevant_finds_count,
+        runState=run_state.state.value,
+        runStateSince=run_state.since,
+        blockedAnalysisIds=run_state.blocked_analysis_ids,
     )
 
 
@@ -1751,12 +1763,104 @@ async def _relevant_finds_counts_by_scout(
     return {scout_id: count for scout_id, count in rows}
 
 
+# Anything else is terminal for an IngestionJob.
+OPEN_INGESTION_JOB_STATUSES = (Ingestionjobstatus.PENDING, Ingestionjobstatus.RUNNING)
+
+
+async def _run_states_by_scout(
+    session: AsyncSession, user_id: str, scouts: list[Scout]
+) -> dict[str, ScoutRunState]:
+    """Run state for each of `scouts`, all owned by `user_id`. Three queries
+    for the whole list, never one per row -- the rule
+    `_relevant_finds_counts_by_scout` exists to enforce -- each on an existing
+    index (`ScoutRun_scoutId_idx`, `IngestionJob_scoutRunId_idx`,
+    `Analysis_scoutId_idx`).
+
+    The pipeline rows are also filtered on their own `userId`: `Analysis` is
+    reached by a denormalised `scoutId`, and a Scout's state must never be
+    coloured by another user's rows.
+    """
+    scout_ids = [scout.id for scout in scouts]
+    if not scout_ids:
+        return {}
+
+    latest_runs = {
+        run.scoutId: run
+        for run in (
+            await session.scalars(
+                select(ScoutRun)
+                .where(ScoutRun.scoutId.in_(scout_ids))
+                .order_by(ScoutRun.scoutId, ScoutRun.createdAt.desc())
+                .distinct(ScoutRun.scoutId)
+            )
+        ).all()
+    }
+
+    oldest_open_jobs = {
+        scout_id: oldest
+        for scout_id, oldest in (
+            await session.execute(
+                select(ScoutRun.scoutId, func.min(IngestionJob.createdAt))
+                .select_from(IngestionJob)
+                .join(ScoutRun, ScoutRun.id == IngestionJob.scoutRunId)
+                .where(
+                    ScoutRun.scoutId.in_(scout_ids),
+                    IngestionJob.userId == user_id,
+                    IngestionJob.status.in_(OPEN_INGESTION_JOB_STATUSES),
+                )
+                .group_by(ScoutRun.scoutId)
+            )
+        ).all()
+    }
+
+    open_analyses: dict[str, list[OpenAnalysis]] = {}
+    for row in (
+        await session.execute(
+            select(
+                Analysis.scoutId,
+                Analysis.id,
+                Analysis.status,
+                Analysis.requestedAt,
+                Analysis.requeuedAt,
+                Analysis.startedAt,
+            ).where(
+                Analysis.scoutId.in_(scout_ids),
+                Analysis.userId == user_id,
+                Analysis.status.not_in(TERMINAL_ANALYSIS_STATUSES),
+            )
+        )
+    ).all():
+        open_analyses.setdefault(row.scoutId, []).append(
+            OpenAnalysis(row.id, row.status, row.requestedAt, row.requeuedAt, row.startedAt)
+        )
+
+    now = _now()
+    return {
+        scout.id: derive_scout_run_state(
+            last_run_at=scout.lastRunAt,
+            latest_run=latest_runs.get(scout.id),
+            oldest_open_ingestion_job_at=oldest_open_jobs.get(scout.id),
+            open_analyses=open_analyses.get(scout.id, []),
+            now=now,
+        )
+        for scout in scouts
+    }
+
+
 class ScoutListResponse(BaseModel):
     scouts: list[ScoutResponse]
 
 
 class GetScoutResponse(BaseModel):
     scout: ScoutResponse
+
+
+async def _single_scout_response(
+    session: AsyncSession, user_id: str, scout: Scout
+) -> GetScoutResponse:
+    count = await _relevant_finds_count(session, scout.id, scout.matchThreshold)
+    run_states = await _run_states_by_scout(session, user_id, [scout])
+    return GetScoutResponse(scout=_scout_response(scout, run_states[scout.id], count))
 
 
 @router.get("/scouts", response_model=ScoutListResponse)
@@ -1770,8 +1874,11 @@ async def list_scouts(
         )
     ).all()
     counts = await _relevant_finds_counts_by_scout(session, user_id)
+    run_states = await _run_states_by_scout(session, user_id, list(rows))
     return ScoutListResponse(
-        scouts=[_scout_response(row, counts.get(row.id, 0)) for row in rows]
+        scouts=[
+            _scout_response(row, run_states[row.id], counts.get(row.id, 0)) for row in rows
+        ]
     )
 
 
@@ -1837,7 +1944,7 @@ async def create_scout(
     await session.commit()
     await session.refresh(scout)
 
-    return GetScoutResponse(scout=_scout_response(scout))
+    return await _single_scout_response(session, user_id, scout)
 
 
 @router.get("/scouts/{scout_id}", response_model=GetScoutResponse)
@@ -1849,8 +1956,7 @@ async def get_scout(
     scout = await session.get(Scout, scout_id)
     if scout is None or scout.userId != user_id:
         raise HTTPException(status_code=404, detail="Not found")
-    count = await _relevant_finds_count(session, scout.id, scout.matchThreshold)
-    return GetScoutResponse(scout=_scout_response(scout, count))
+    return await _single_scout_response(session, user_id, scout)
 
 
 class UpdateScoutRequest(BaseModel):
@@ -1937,8 +2043,7 @@ async def update_scout(
     await session.commit()
     await session.refresh(scout)
 
-    count = await _relevant_finds_count(session, scout.id, scout.matchThreshold)
-    return GetScoutResponse(scout=_scout_response(scout, count))
+    return await _single_scout_response(session, user_id, scout)
 
 
 class ScoutFindsResponse(BaseModel):

@@ -47,6 +47,14 @@ export type ScoutFilters = {
   experienceLevel: string | null;
 };
 
+export type ScoutRunState =
+  | "IN_FLIGHT"
+  | "BLOCKED"
+  | "FAILED"
+  | "DEGRADED"
+  | "OK"
+  | "NEVER_RUN";
+
 export type Scout = {
   id: string;
   userId: string;
@@ -62,6 +70,14 @@ export type Scout = {
   /** Un-actioned relevant finds (completed Analyses with matchScore >=
    *  matchThreshold) — issue #56. Backs the Dashboard's cross-Scout count. */
   relevantFindsCount: number;
+  /** Whether the Scout is working right now and, if not, whether something is
+   *  wrong — derived by the server from the pipeline rows (docs/adr/0033).
+   *  Read it as-is; never re-derive it from timestamps. */
+  runState: ScoutRunState;
+  /** The oldest clock behind the state: set for IN_FLIGHT and BLOCKED only. */
+  runStateSince: string | null;
+  /** Empty unless runState is BLOCKED; the ids the panel's repair re-drives. */
+  blockedAnalysisIds: string[];
 };
 
 export type CreateScoutInput = {
@@ -86,12 +102,35 @@ export type { PostedWithin, Remote };
 
 const SCOUTS_KEY = ["scouts"] as const;
 
-/** Every Scout the signed-in Candidate owns, newest first. */
-export function useScouts() {
+/** How often the Scouts list re-reads Run state while a Scout is working —
+ *  slower than the run history's 3 s, this request being the heavier one. */
+export const SCOUTS_IN_FLIGHT_POLL_MS = 5000;
+
+/**
+ * Every Scout the signed-in Candidate owns, newest first.
+ *
+ * `pollWhileInFlight` is opt-in (issue #228): only the Scouts list renders the
+ * Execution column, so only it passes the flag. The Dashboard, Applications
+ * and CV versions read the same query and must not pay for a column they do
+ * not show. While set, the list refetches every SCOUTS_IN_FLIGHT_POLL_MS for
+ * as long as at least one Scout's Run state is IN_FLIGHT, and stops once none
+ * is.
+ */
+export function useScouts({
+  pollWhileInFlight = false,
+}: { pollWhileInFlight?: boolean } = {}) {
   return useQuery({
     queryKey: SCOUTS_KEY,
     queryFn: () => bff.get<{ scouts: Scout[] }>("/scouts"),
     select: (data) => data.scouts,
+    refetchInterval: pollWhileInFlight
+      ? (query) => {
+          const scouts = query.state.data?.scouts ?? [];
+          return scouts.some((scout) => scout.runState === "IN_FLIGHT")
+            ? SCOUTS_IN_FLIGHT_POLL_MS
+            : false;
+        }
+      : false,
   });
 }
 
@@ -178,17 +217,21 @@ export function useScoutRuns(scoutId: string) {
   });
 }
 
+/** The Run cooldown: how long after a run's `createdAt` the API refuses the
+ *  next "Run now" with a 429 — the default of `SCOUT_RUN_RATE_LIMIT_SECONDS`.
+ *  The screen counts down from the same clock; the 429 stays the backstop. */
+export const SCOUT_RUN_COOLDOWN_MS = 60 * 60_000;
+
 /** "Run now": enqueues a ScoutRun. Rate-limited to once per hour per Scout (429). */
 export function useRunScout(scoutId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => bff.post<{ scoutRun: ScoutRun }>(`/scouts/${scoutId}/run`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: [...SCOUTS_KEY, scoutId, "runs"],
-      });
-      queryClient.invalidateQueries({ queryKey: [...SCOUTS_KEY, scoutId] });
-    },
+    // The whole Scouts tree, list included: the new run makes the Run state
+    // IN_FLIGHT, and the button's working face reads it from the list.
+    // Awaited, so the mutation stays pending until the list has caught up
+    // and the button goes straight from "Starting…" to working.
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: SCOUTS_KEY }),
   });
 }
 

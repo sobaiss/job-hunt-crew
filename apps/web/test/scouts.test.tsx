@@ -61,6 +61,9 @@ function scout(overrides: Record<string, unknown> = {}) {
     createdAt: "2026-09-01T00:00:00.000Z",
     updatedAt: "2026-09-01T00:00:00.000Z",
     relevantFindsCount: 0,
+    runState: "NEVER_RUN",
+    runStateSince: null,
+    blockedAnalysisIds: [],
     ...overrides,
   };
 }
@@ -184,6 +187,7 @@ describe("ScoutsPage — list", () => {
     for (const name of [
       "Label",
       "Status",
+      "Execution",
       "Base CV",
       "Sites",
       "Last run",
@@ -197,6 +201,7 @@ describe("ScoutsPage — list", () => {
     for (const name of [
       "ID",
       "Status",
+      "Execution",
       "Base CV",
       "Sites",
       "Last run",
@@ -696,6 +701,315 @@ describe("ScoutsPage — list", () => {
   });
 });
 
+describe("ScoutsPage — Execution column (issue #226)", () => {
+  const minutesAgo = (minutes: number) =>
+    new Date(Date.now() - minutes * 60_000).toISOString();
+
+  function renderList(scouts: Record<string, unknown>[]) {
+    server.use(
+      http.get("/api/scouts", () => HttpResponse.json({ scouts })),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+    );
+    renderWithProviders(<ScoutsPage />);
+  }
+
+  async function rowOf(label: string) {
+    const row = (await screen.findByText(label)).closest("tr");
+    expect(row).not.toBeNull();
+    return within(row as HTMLElement);
+  }
+
+  it("sits immediately after Status", async () => {
+    renderList([scout()]);
+    await screen.findByText("Senior Backend — Remote EU");
+
+    const headers = screen
+      .getAllByRole("columnheader")
+      .map((header) => header.textContent);
+    expect(headers.indexOf("Execution")).toBe(headers.indexOf("Status") + 1);
+  });
+
+  it("reads a working Scout as In progress, with how long it has been working", async () => {
+    renderList([
+      scout({ label: "Working", runState: "IN_FLIGHT", runStateSince: minutesAgo(12) }),
+      scout({
+        id: "scout-long",
+        label: "Long haul",
+        runState: "IN_FLIGHT",
+        runStateSince: minutesAgo(125),
+      }),
+    ]);
+
+    const working = await rowOf("Working");
+    expect(working.getByText("In progress")).toHaveAttribute("data-slot", "badge");
+    expect(working.getByText("12 min")).toBeInTheDocument();
+    expect((await rowOf("Long haul")).getByText("2 h 5 min")).toBeInTheDocument();
+  });
+
+  it("says a Scout working for under a minute has been at it less than a minute, not 0 min", async () => {
+    renderList([
+      scout({
+        runState: "IN_FLIGHT",
+        runStateSince: new Date(Date.now() - 20_000).toISOString(),
+      }),
+    ]);
+
+    const row = await rowOf("Senior Backend — Remote EU");
+    expect(row.getByText("less than a minute")).toBeInTheDocument();
+    expect(row.queryByText("0 min")).not.toBeInTheDocument();
+  });
+
+  it("renders Blocked, Failed and Degraded each as a badge", async () => {
+    renderList([
+      scout({
+        id: "b",
+        label: "Stranded",
+        runState: "BLOCKED",
+        runStateSince: minutesAgo(40),
+        blockedAnalysisIds: ["an-1"],
+      }),
+      scout({ id: "f", label: "Broken", runState: "FAILED", lastRunAt: minutesAgo(90) }),
+      scout({ id: "d", label: "Partial", runState: "DEGRADED", lastRunAt: minutesAgo(90) }),
+    ]);
+
+    expect((await rowOf("Stranded")).getByText("Blocked")).toHaveAttribute(
+      "data-slot",
+      "badge",
+    );
+    expect((await rowOf("Stranded")).getByText("40 min")).toBeInTheDocument();
+    expect((await rowOf("Broken")).getByText("Failed")).toHaveAttribute(
+      "data-slot",
+      "badge",
+    );
+    expect((await rowOf("Partial")).getByText("Degraded")).toHaveAttribute(
+      "data-slot",
+      "badge",
+    );
+  });
+
+  it("reads a healthy Scout as muted Up to date text, not a coloured badge", async () => {
+    renderList([scout({ runState: "OK", lastRunAt: minutesAgo(90) })]);
+
+    const upToDate = (await rowOf("Senior Backend — Remote EU")).getByText(
+      "Up to date",
+    );
+    expect(upToDate).not.toHaveAttribute("data-slot", "badge");
+    expect(upToDate).toHaveClass("text-muted");
+  });
+
+  it("shows a plain dash for a Scout that has never run", async () => {
+    renderList([scout({ runState: "NEVER_RUN", lastRunAt: null })]);
+
+    const row = await rowOf("Senior Backend — Remote EU");
+    expect(row.getByText("—")).toBeInTheDocument();
+    expect(row.getByText("Never run")).toBeInTheDocument();
+  });
+
+  it("explains each badge in a tooltip reachable by keyboard focus, saying when there is nothing to do", async () => {
+    renderList([
+      scout({
+        id: "b",
+        label: "Stranded",
+        runState: "BLOCKED",
+        runStateSince: minutesAgo(40),
+        blockedAnalysisIds: ["an-1"],
+      }),
+      scout({ id: "f", label: "Broken", runState: "FAILED", lastRunAt: minutesAgo(90) }),
+    ]);
+
+    const failed = (await rowOf("Broken")).getByText("Failed");
+    const failedTrigger = failed.closest("[tabindex='0']") as HTMLElement;
+    expect(failedTrigger).not.toBeNull();
+    failedTrigger.focus();
+    const failedTooltip = await screen.findByRole("tooltip");
+    expect(failedTooltip).toHaveTextContent(/nothing you can do/i);
+    expect(failedTooltip).toHaveTextContent(/administrator/i);
+    expect(failedTrigger).toHaveAttribute("aria-describedby");
+
+    const blockedTrigger = (await rowOf("Stranded"))
+      .getByText("Blocked")
+      .closest("[tabindex='0']") as HTMLElement;
+    blockedTrigger.focus();
+    await waitFor(() =>
+      expect(screen.getByRole("tooltip")).toHaveTextContent(/relaunch them/i),
+    );
+  });
+
+  it("sorts worst first on an explicit severity rank, not the labels' alphabetical order", async () => {
+    const user = userEvent.setup();
+    renderList([
+      scout({ id: "never", label: "S-never", runState: "NEVER_RUN" }),
+      scout({ id: "ok", label: "S-ok", runState: "OK", lastRunAt: minutesAgo(90) }),
+      scout({
+        id: "flight",
+        label: "S-flight",
+        runState: "IN_FLIGHT",
+        runStateSince: minutesAgo(3),
+        lastRunAt: minutesAgo(3),
+      }),
+      scout({ id: "degraded", label: "S-degraded", runState: "DEGRADED", lastRunAt: minutesAgo(90) }),
+      scout({ id: "failed", label: "S-failed", runState: "FAILED", lastRunAt: minutesAgo(90) }),
+      scout({
+        id: "blocked",
+        label: "S-blocked",
+        runState: "BLOCKED",
+        runStateSince: minutesAgo(40),
+        lastRunAt: minutesAgo(90),
+      }),
+    ]);
+    await screen.findByText("S-never");
+
+    await user.click(screen.getByRole("button", { name: "Execution" }));
+    const labels = () =>
+      screen
+        .getAllByRole("row")
+        .slice(1)
+        .map((row) => row.textContent?.match(/S-[a-z]+/)?.[0]);
+    expect(labels()).toEqual([
+      "S-blocked",
+      "S-failed",
+      "S-degraded",
+      "S-flight",
+      "S-ok",
+      "S-never",
+    ]);
+  });
+
+  it("can be hidden and restored through the Columns menu", async () => {
+    const user = userEvent.setup();
+    renderList([scout({ runState: "FAILED", lastRunAt: minutesAgo(90) })]);
+    await screen.findByText("Failed");
+
+    await user.click(screen.getByRole("button", { name: "Columns" }));
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "Execution" }));
+    await user.keyboard("{Escape}");
+    expect(
+      screen.queryByRole("columnheader", { name: "Execution" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Failed")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Columns" }));
+    await user.click(screen.getByRole("menuitem", { name: "Reset" }));
+    expect(
+      screen.getByRole("columnheader", { name: "Execution" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Failed")).toBeInTheDocument();
+  });
+
+  it("recomputes the duration when the list is refetched, with no ticking timer", async () => {
+    const user = userEvent.setup();
+    let since = minutesAgo(5);
+    server.use(
+      http.get("/api/scouts", () =>
+        HttpResponse.json({
+          scouts: [scout({ runState: "IN_FLIGHT", runStateSince: since })],
+        }),
+      ),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+    );
+    renderWithProviders(<ScoutsPage />);
+    expect(await screen.findByText("5 min")).toBeInTheDocument();
+
+    since = minutesAgo(9);
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(await screen.findByText("9 min")).toBeInTheDocument();
+  });
+});
+
+describe("ScoutsPage — keeping the Execution column current (issue #228)", () => {
+  function stubScouts(respond: (call: number) => Record<string, unknown>[]) {
+    let calls = 0;
+    server.use(
+      http.get("/api/scouts", () => {
+        calls += 1;
+        return HttpResponse.json({ scouts: respond(calls) });
+      }),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+    );
+    return () => calls;
+  }
+
+  it("updates a row whose run finishes without the Candidate pressing Refresh, then stops polling", async () => {
+    const calls = stubScouts((call) => [
+      call === 1
+        ? scout({
+            runState: "IN_FLIGHT",
+            runStateSince: new Date(Date.now() - 3 * 60_000).toISOString(),
+          })
+        : scout({ runState: "OK", lastRunAt: "2026-09-20T00:00:00.000Z" }),
+    ]);
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      renderWithProviders(<ScoutsPage />);
+      expect(await screen.findByText("In progress")).toBeInTheDocument();
+      expect(calls()).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(5000);
+      await vi.waitFor(() => expect(calls()).toBe(2));
+      expect(await screen.findByText("Up to date")).toBeInTheDocument();
+      expect(screen.queryByText("In progress")).not.toBeInTheDocument();
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(calls()).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("advances a working row's duration with each poll", async () => {
+    const start = Date.now();
+    stubScouts(() => [
+      scout({
+        runState: "IN_FLIGHT",
+        runStateSince: new Date(start - 4 * 60_000 - 58_000).toISOString(),
+      }),
+    ]);
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      renderWithProviders(<ScoutsPage />);
+      expect(await screen.findByText("4 min")).toBeInTheDocument();
+
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(await screen.findByText("5 min")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not poll when nothing is in flight", async () => {
+    const calls = stubScouts(() => [
+      scout({ runState: "OK", lastRunAt: "2026-09-20T00:00:00.000Z" }),
+      scout({
+        id: "scout-2",
+        label: "Stranded",
+        runState: "BLOCKED",
+        runStateSince: "2026-09-20T00:00:00.000Z",
+        blockedAnalysisIds: ["an-1"],
+      }),
+      scout({ id: "scout-3", label: "Fresh" }),
+    ]);
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      renderWithProviders(<ScoutsPage />);
+      expect(await screen.findByText("Stranded")).toBeInTheDocument();
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(calls()).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 function support(level: string) {
   return { level, reason: "Recorded reason." };
 }
@@ -1190,6 +1504,412 @@ describe("Scout panel — Run now + run history", () => {
     expect(await panel.findByText("3 already seen")).toBeInTheDocument();
     expect(panel.getByText("2 not analysed — run limit")).toBeInTheDocument();
     expect(panel.getByText("1 not analysed — daily limit")).toBeInTheDocument();
+  });
+});
+
+/** A run-history row, for the panel blocks below. */
+function panelRun(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "run-1",
+    scoutId: "scout-1",
+    status: "COMPLETED",
+    sitesQueried: 2,
+    siteUnavailableCount: 0,
+    offersDiscovered: 0,
+    offersAnalysed: 0,
+    relevantCount: 0,
+    failedCount: 0,
+    alreadySeenCount: 0,
+    runLimitSkippedCount: 0,
+    capSkippedCount: 0,
+    errorMessage: null,
+    startedAt: "2026-09-11T00:00:00.000Z",
+    finishedAt: "2026-09-11T00:00:05.000Z",
+    createdAt: "2026-09-11T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+describe("Scout panel — Run state and the Blocked-analyses repair (issue #227)", () => {
+  const minutesAgo = (minutes: number) =>
+    new Date(Date.now() - minutes * 60_000).toISOString();
+
+  function serve(
+    scoutOverrides: Record<string, unknown>,
+    scoutRuns: Record<string, unknown>[] = [],
+  ) {
+    server.use(
+      http.get("/api/scouts", () =>
+        HttpResponse.json({ scouts: [scout(scoutOverrides)] }),
+      ),
+      http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
+      http.get("/api/scouts/scout-1/runs", () => HttpResponse.json({ scoutRuns })),
+    );
+  }
+
+  /** The panel's sticky header: identity and every action, above the sections. */
+  async function openHeader(user: ReturnType<typeof userEvent.setup>) {
+    const panel = await openPanel(user);
+    const header = panel
+      .getByRole("heading", { name: "Senior Backend — Remote EU" })
+      .closest("[data-slot='scout-panel-header']");
+    expect(header).not.toBeNull();
+    return { panel, header: within(header as HTMLElement) };
+  }
+
+  it("shows the Run state badge and its duration beside the lifecycle badge", async () => {
+    serve({ runState: "IN_FLIGHT", runStateSince: minutesAgo(12) });
+    const user = userEvent.setup();
+    const { header } = await openHeader(user);
+
+    expect(header.getByText("Active")).toHaveAttribute("data-slot", "badge");
+    expect(header.getByText("In progress")).toHaveAttribute("data-slot", "badge");
+    expect(header.getByText("12 min")).toBeInTheDocument();
+  });
+
+  it("shows both facts for a paused Scout with work still in flight", async () => {
+    serve({ status: "PAUSED", runState: "IN_FLIGHT", runStateSince: minutesAgo(3) });
+    const user = userEvent.setup();
+    const { header } = await openHeader(user);
+
+    expect(header.getByText("Paused")).toBeInTheDocument();
+    expect(header.getByText("In progress")).toBeInTheDocument();
+  });
+
+  it("says a Scout is working right now even if its last run ended badly", async () => {
+    serve({ runState: "IN_FLIGHT", runStateSince: minutesAgo(2), lastRunAt: minutesAgo(90) }, [
+      { ...panelRun(), status: "FAILED", errorMessage: "All sites disabled" },
+    ]);
+    const user = userEvent.setup();
+    const { panel, header } = await openHeader(user);
+
+    expect(header.getByText("In progress")).toBeInTheDocument();
+    // The failed run is still the run history's own fact, down below.
+    expect(await panel.findByText("Failed")).toBeInTheDocument();
+    expect(header.queryByText("Failed")).toBeNull();
+  });
+
+  it("explains a Run state through a tooltip reachable from the keyboard", async () => {
+    serve({ runState: "FAILED", lastRunAt: minutesAgo(90) });
+    const user = userEvent.setup();
+    const { header } = await openHeader(user);
+
+    header.getByText("Failed").parentElement!.focus();
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+      /an Administrator needs to step in/,
+    );
+  });
+
+  it("offers the repair only while Blocked, naming the real count", async () => {
+    serve({
+      runState: "BLOCKED",
+      runStateSince: minutesAgo(40),
+      blockedAnalysisIds: ["an-1", "an-2", "an-3"],
+    });
+    const user = userEvent.setup();
+    const { header } = await openHeader(user);
+
+    expect(
+      header.getByRole("button", { name: "Relaunch the 3 blocked analyses" }),
+    ).toBeInTheDocument();
+  });
+
+  it.each(["IN_FLIGHT", "FAILED", "DEGRADED", "OK", "NEVER_RUN"])(
+    "offers no repair when the Run state is %s",
+    async (runState) => {
+      serve({ runState, runStateSince: runState === "IN_FLIGHT" ? minutesAgo(5) : null });
+      const user = userEvent.setup();
+      const { header } = await openHeader(user);
+
+      expect(header.queryByRole("button", { name: /blocked analys/i })).toBeNull();
+    },
+  );
+
+  it("re-drives every blocked Analysis with one requeue per id, and charges no quota", async () => {
+    const requeued: string[] = [];
+    let created = 0;
+    serve({
+      runState: "BLOCKED",
+      runStateSince: minutesAgo(40),
+      blockedAnalysisIds: ["an-1", "an-2"],
+    });
+    server.use(
+      http.post("/api/analyses/:id/requeue", ({ params }) => {
+        requeued.push(String(params.id));
+        return HttpResponse.json({ status: "PENDING" });
+      }),
+      http.post("/api/analyses", () => {
+        created += 1;
+        return HttpResponse.json({ analysisId: "new" }, { status: 201 });
+      }),
+    );
+    const user = userEvent.setup();
+    const { header } = await openHeader(user);
+
+    await user.click(
+      header.getByRole("button", { name: "Relaunch the 2 blocked analyses" }),
+    );
+
+    await waitFor(() => expect(requeued.sort()).toEqual(["an-1", "an-2"]));
+    expect(created).toBe(0);
+    expect(header.queryByRole("alert")).toBeNull();
+  });
+
+  it("refetches the Scout once the repair is done, so the badge moves on", async () => {
+    let requeued = false;
+    server.use(
+      http.get("/api/scouts", () =>
+        HttpResponse.json({
+          scouts: [
+            requeued
+              ? scout({ runState: "IN_FLIGHT", runStateSince: minutesAgo(0) })
+              : scout({
+                  runState: "BLOCKED",
+                  runStateSince: minutesAgo(40),
+                  blockedAnalysisIds: ["an-1"],
+                }),
+          ],
+        }),
+      ),
+      http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
+      http.get("/api/scouts/scout-1/runs", () => HttpResponse.json({ scoutRuns: [] })),
+      http.post("/api/analyses/an-1/requeue", () => {
+        requeued = true;
+        return HttpResponse.json({ status: "PENDING" });
+      }),
+    );
+    const user = userEvent.setup();
+    const { header } = await openHeader(user);
+
+    await user.click(
+      header.getByRole("button", { name: "Relaunch the 1 blocked analysis" }),
+    );
+
+    expect(await header.findByText("In progress")).toBeInTheDocument();
+    expect(header.queryByRole("button", { name: /blocked analys/i })).toBeNull();
+  });
+
+  it("says how many could not be relaunched when a stale screen offered a row that had moved on", async () => {
+    serve({
+      runState: "BLOCKED",
+      runStateSince: minutesAgo(40),
+      blockedAnalysisIds: ["an-1", "an-2"],
+    });
+    server.use(
+      http.post("/api/analyses/an-1/requeue", () =>
+        HttpResponse.json({ status: "PENDING" }),
+      ),
+      http.post("/api/analyses/an-2/requeue", () =>
+        HttpResponse.json({ error: "ANALYSIS_NOT_STUCK" }, { status: 409 }),
+      ),
+    );
+    const user = userEvent.setup();
+    const { header } = await openHeader(user);
+
+    await user.click(
+      header.getByRole("button", { name: "Relaunch the 2 blocked analyses" }),
+    );
+
+    expect(await header.findByRole("alert")).toHaveTextContent(
+      "1 of 2 analyses could not be relaunched: they were still being processed after all.",
+    );
+  });
+
+  it("shows no progress fraction in the header, while the run history keeps its live counters", async () => {
+    // Deliberate (docs/adr/0033): the counters belong to one run while the
+    // badge is scoped to the Scout, so a fraction up here could visibly
+    // disagree with the badge beside it. Do not add one back.
+    serve({ runState: "IN_FLIGHT", runStateSince: minutesAgo(8) }, [
+      { ...panelRun(), status: "COMPLETED", offersDiscovered: 10, offersAnalysed: 3 },
+    ]);
+    const user = userEvent.setup();
+    const { panel, header } = await openHeader(user);
+
+    expect(await panel.findByText("10 offers found")).toBeInTheDocument();
+    expect(panel.getByText("3 analysed")).toBeInTheDocument();
+
+    const headerText = header.getByText("In progress").closest(
+      "[data-slot='scout-panel-header']",
+    )!.textContent!;
+    expect(headerText).not.toMatch(/\d+\s*\/\s*\d+/);
+    expect(headerText).not.toMatch(/%/);
+    expect(headerText).not.toMatch(/analysed|offers found/);
+    expect(header.queryByRole("progressbar")).toBeNull();
+  });
+});
+
+describe("Scout panel — Run now's three faces (issue #229)", () => {
+  const minutesAgo = (minutes: number) =>
+    new Date(Date.now() - minutes * 60_000).toISOString();
+
+  function serve(
+    scoutOverrides: Record<string, unknown>,
+    scoutRuns: Record<string, unknown>[] = [],
+  ) {
+    const runPosts: unknown[] = [];
+    server.use(
+      http.get("/api/scouts", () =>
+        HttpResponse.json({ scouts: [scout(scoutOverrides)] }),
+      ),
+      http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
+      http.get("/api/scouts/scout-1/runs", () => HttpResponse.json({ scoutRuns })),
+      http.post("/api/scouts/scout-1/run", () => {
+        runPosts.push(true);
+        return HttpResponse.json(
+          { scoutRun: panelRun({ status: "PENDING" }) },
+          { status: 201 },
+        );
+      }),
+    );
+    return runPosts;
+  }
+
+  it("reads as working and cannot be clicked while the Scout is in flight", async () => {
+    // Even with the latest run created over an hour ago: the work, not the
+    // clock, decides this face.
+    serve({ runState: "IN_FLIGHT", runStateSince: minutesAgo(75) }, [
+      panelRun({ status: "COMPLETED", createdAt: minutesAgo(75) }),
+    ]);
+    const user = userEvent.setup();
+    const panel = await openPanel(user);
+
+    const button = await panel.findByRole("button", { name: "In progress…" });
+    expect(button).toBeDisabled();
+    expect(panel.queryByRole("button", { name: "Run now" })).toBeNull();
+  });
+
+  it("keeps the working face once the request is done, for as long as the Scout works", async () => {
+    let posted = false;
+    let listCalls = 0;
+    server.use(
+      http.get("/api/scouts", () => {
+        listCalls += 1;
+        return HttpResponse.json({
+          scouts: [
+            posted
+              ? scout({ runState: "IN_FLIGHT", runStateSince: minutesAgo(0) })
+              : scout(),
+          ],
+        });
+      }),
+      http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
+      http.get("/api/scouts/scout-1/runs", () =>
+        HttpResponse.json({
+          scoutRuns: posted
+            ? [panelRun({ status: "PENDING", createdAt: minutesAgo(0) })]
+            : [],
+        }),
+      ),
+      http.post("/api/scouts/scout-1/run", () => {
+        posted = true;
+        return HttpResponse.json(
+          { scoutRun: panelRun({ status: "PENDING" }) },
+          { status: 201 },
+        );
+      }),
+    );
+    const user = userEvent.setup();
+    const panel = await openPanel(user);
+    const callsBefore = listCalls;
+
+    await user.click(await panel.findByRole("button", { name: "Run now" }));
+
+    // The list is refetched on success, so the badge and the button pick up
+    // IN_FLIGHT without waiting for a poll — and then stay there.
+    const working = await panel.findByRole("button", { name: "In progress…" });
+    expect(working).toBeDisabled();
+    expect(listCalls).toBeGreaterThan(callsBefore);
+    expect(panel.queryByRole("button", { name: /Available in/ })).toBeNull();
+  });
+
+  it("counts down from the latest run's creation once the work is done", async () => {
+    serve({ runState: "OK", lastRunAt: minutesAgo(2) }, [
+      panelRun({ status: "COMPLETED", createdAt: minutesAgo(13) }),
+      panelRun({ id: "run-0", status: "COMPLETED", createdAt: minutesAgo(200) }),
+    ]);
+    const user = userEvent.setup();
+    const panel = await openPanel(user);
+
+    const button = await panel.findByRole("button", { name: "Available in 47 min" });
+    expect(button).toBeDisabled();
+    expect(panel.queryByRole("button", { name: "Run now" })).toBeNull();
+  });
+
+  it("uses the run's creation, not the Scout's last-run timestamp", async () => {
+    // The worker stamps lastRunAt separately: here it is ninety minutes old
+    // while the run the endpoint rate-limits on was created twenty ago.
+    serve({ runState: "FAILED", lastRunAt: minutesAgo(90) }, [
+      panelRun({ status: "FAILED", createdAt: minutesAgo(20) }),
+    ]);
+    const user = userEvent.setup();
+    const panel = await openPanel(user);
+
+    expect(
+      await panel.findByRole("button", { name: "Available in 40 min" }),
+    ).toBeDisabled();
+  });
+
+  it("offers Run now again once the hour is up, and starts a run", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const runPosts = serve({ runState: "OK", lastRunAt: minutesAgo(59) }, [
+        panelRun({ status: "COMPLETED", createdAt: minutesAgo(59.5) }),
+      ]);
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const panel = await openPanel(user);
+
+      expect(
+        await panel.findByRole("button", { name: "Available in 1 min" }),
+      ).toBeDisabled();
+
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      const runNow = await panel.findByRole("button", { name: "Run now" });
+      expect(runNow).toBeEnabled();
+      await user.click(runNow);
+      await waitFor(() => expect(runPosts).toHaveLength(1));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reads as itself for a Scout whose latest run is over an hour old", async () => {
+    serve({ runState: "OK", lastRunAt: minutesAgo(61) }, [
+      panelRun({ status: "COMPLETED", createdAt: minutesAgo(61) }),
+    ]);
+    const user = userEvent.setup();
+    const panel = await openPanel(user);
+
+    await waitFor(() =>
+      expect(panel.getByRole("button", { name: "Run now" })).toBeEnabled(),
+    );
+    expect(panel.queryByRole("button", { name: /Available in/ })).toBeNull();
+  });
+
+  it("still shows the rate-limit error when a stale screen gets a refused click through", async () => {
+    // The screen believes the hour is up (its runs are stale); the server
+    // knows better, and its 429 remains the backstop.
+    serve({ runState: "OK", lastRunAt: minutesAgo(61) }, [
+      panelRun({ status: "COMPLETED", createdAt: minutesAgo(61) }),
+    ]);
+    server.use(
+      http.post("/api/scouts/scout-1/run", () =>
+        HttpResponse.json(
+          { error: "This Scout ran within the last hour. Try again later." },
+          { status: 429 },
+        ),
+      ),
+    );
+    const user = userEvent.setup();
+    const panel = await openPanel(user);
+
+    const runNow = await panel.findByRole("button", { name: "Run now" });
+    await waitFor(() => expect(runNow).toBeEnabled());
+    await user.click(runNow);
+
+    expect(await panel.findByRole("alert")).toHaveTextContent(
+      "This Scout ran within the last hour.",
+    );
   });
 });
 

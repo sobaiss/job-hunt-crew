@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { http, HttpResponse } from "msw";
 
 import { renderWithProviders, screen, within } from "./test-utils";
@@ -222,6 +222,31 @@ describe("Dashboard", () => {
     await screen.findByText("Backend Engineer");
 
     expect(screen.queryByText(/new matches from your agents/)).not.toBeInTheDocument();
+  });
+
+  it("does not poll the Scouts list, even while a Scout is working (issue #228)", async () => {
+    let scoutCalls = 0;
+    stub({ analyses: [analysis()], cvVersions: [cv({ id: "cv1" })] });
+    server.use(
+      http.get("/api/scouts", () => {
+        scoutCalls += 1;
+        return HttpResponse.json({
+          scouts: [{ id: "s1", relevantFindsCount: 2, runState: "IN_FLIGHT" }],
+        });
+      }),
+    );
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      renderWithProviders(<Dashboard />);
+      await screen.findByText("Backend Engineer");
+      expect(scoutCalls).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(scoutCalls).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows an error state when a request fails", async () => {

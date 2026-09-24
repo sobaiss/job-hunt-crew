@@ -22,6 +22,7 @@ import { ColumnVisibilityMenu } from "@/components/column-visibility-menu";
 import { TruncatedCell } from "@/components/truncated-cell";
 import { CopyIdButton } from "@/components/copy-id-button";
 import { ScoutPanel } from "@/components/scout-panel";
+import { ScoutRunStateBadge } from "@/components/scout-run-state-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -46,6 +47,9 @@ const COLUMNS: ColumnConfig<ScoutsSortColumn>[] = [
     defaultVisible: false,
   },
   { key: "status", labelKey: "list.columns.status", hideable: true },
+  // Execution (#226) sits right after Status: lifecycle beside activity, read
+  // together (docs/adr/0033).
+  { key: "runState", labelKey: "list.columns.runState", hideable: true },
   { key: "baseCv", labelKey: "list.columns.baseCv", hideable: true },
   { key: "sites", labelKey: "list.columns.sites", hideable: true },
   { key: "lastRun", labelKey: "list.columns.lastRun", hideable: true },
@@ -69,7 +73,14 @@ function statusVariant(
 
 function ScoutsPageContent() {
   const t = useTranslations("scouts");
-  const { data: scouts, isPending, isError, isFetching, refetch } = useScouts();
+  const {
+    data: scouts,
+    dataUpdatedAt,
+    isPending,
+    isError,
+    isFetching,
+    refetch,
+  } = useScouts({ pollWhileInFlight: true });
   const { data: cvVersions } = useCvVersions();
   const router = useRouter();
   const pathname = usePathname();
@@ -259,6 +270,17 @@ function ScoutsPageContent() {
                     </Badge>
                   </TableCell>
                 )}
+                {columnVisibility.isVisible("runState") && (
+                  <TableCell>
+                    {/* Judged against the fetch time, so the duration moves
+                        with each refetch and never ticks on its own. */}
+                    <ScoutRunStateBadge
+                      runState={scout.runState}
+                      runStateSince={scout.runStateSince}
+                      now={dataUpdatedAt}
+                    />
+                  </TableCell>
+                )}
                 {columnVisibility.isVisible("baseCv") && (
                   <TableCell>{cvLabel(scout.cvVersionId)}</TableCell>
                 )}
@@ -288,6 +310,7 @@ function ScoutsPageContent() {
       <ScoutPanel
         scout={panelScout}
         cvLabel={panelScout ? cvLabel(panelScout.cvVersionId) : ""}
+        now={dataUpdatedAt}
         open={panelId !== null}
         onOpenChange={(open) => {
           if (!open) setPanelId(null);
