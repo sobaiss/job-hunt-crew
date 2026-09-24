@@ -89,10 +89,94 @@ function detail(overrides: Record<string, unknown> = {}) {
   };
 }
 
+const PENDING_DOCUMENTS = [
+  { id: "gd-cl", type: "COVER_LETTER", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
+  { id: "gd-cv", type: "TAILORED_CV", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
+];
+
+/** The generation endpoint as services/api implements it since
+ *  docs/adr/0031: a `type` in the body produces just that document, its
+ *  absence (the bulk action, the Admin table) still produces both. */
+function pendingDocumentsPost() {
+  return http.post("/api/analyses/a1/generated-documents", async ({ request }) => {
+    const body = await request.text();
+    const type = body ? (JSON.parse(body) as { type?: string }).type : undefined;
+    return HttpResponse.json({
+      generatedDocuments: type
+        ? PENDING_DOCUMENTS.filter((d) => d.type === type)
+        : PENDING_DOCUMENTS,
+    });
+  });
+}
+
+/** Generation is per document now, so a test that wants both asks twice. */
+async function generateBothDocuments(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(
+    await screen.findByRole("button", { name: "Generate the cover letter" }),
+  );
+  await user.click(
+    await screen.findByRole("button", { name: "Generate the tailored CV" }),
+  );
+}
+
+/** Three distinct offers for the Quick view's navigation tests, dated so the
+ *  default `postedAt`-descending sort ranks them A, B, C — and all older than
+ *  `summary()`'s own offer, which therefore outranks them when mixed in. */
+function navigableOffer(letter: string, day: number) {
+  return detail({
+    id: `a-${letter}`,
+    jobOffer: {
+      id: `job-${letter}`,
+      title: `Offer ${letter}`,
+      company: "Acme Inc",
+      location: "Paris",
+      sourceSite: "OTHER",
+      postedAt: `2026-06-${String(day).padStart(2, "0")}T00:00:00.000Z`,
+      sourceUrl: `https://example.com/jobs/${letter}`,
+    },
+  });
+}
+
+const OFFER_A = navigableOffer("A", 5);
+const OFFER_B = navigableOffer("B", 4);
+const OFFER_C = navigableOffer("C", 3);
+
 /** Every filter but Search and Status is folded away behind "More filters",
  *  so a test that drives one of them opens the panel first. */
 async function openMoreFilters(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: /More filters/ }));
+}
+
+/** Status and Platform are checkbox menus, so choosing means opening the menu
+ *  and ticking. The trigger's accessible name is the filter's label followed
+ *  by its current value ("Status All statuses"); the trailing space in the
+ *  pattern is what keeps it apart from the "Platform" column's own sort
+ *  button, whose name is that word alone. */
+function filterTrigger(filter: "Status" | "Platform") {
+  return screen.getByRole("button", { name: new RegExp(`^${filter} .`) });
+}
+
+async function tickFilterValues(
+  user: ReturnType<typeof userEvent.setup>,
+  filter: "Status" | "Platform",
+  ...values: string[]
+) {
+  await user.click(filterTrigger(filter));
+  for (const value of values) {
+    await user.click(
+      await screen.findByRole("menuitemcheckbox", { name: value }),
+    );
+  }
+  await user.keyboard("{Escape}");
+}
+
+/** Empties one checkbox menu through its own "Clear all" item. */
+async function clearFilter(
+  user: ReturnType<typeof userEvent.setup>,
+  filter: "Status" | "Platform",
+) {
+  await user.click(filterTrigger(filter));
+  await user.click(await screen.findByRole("menuitem", { name: "Clear all" }));
 }
 
 describe("AnalysesDashboardPage", () => {
@@ -414,7 +498,7 @@ describe("AnalysesDashboardPage", () => {
     // The pipeline-only row is excluded from every specific Tracking status
     // filter, but stays visible under "All statuses" (the default).
     const user = userEvent.setup();
-    await user.selectOptions(screen.getByLabelText("Status"), "TO_APPLY");
+    await tickFilterValues(user, "Status", "To apply");
     expect(screen.queryByText("Still Running Offer")).not.toBeInTheDocument();
     expect(screen.getByText("To Apply Offer")).toBeInTheDocument();
   });
@@ -446,9 +530,118 @@ describe("AnalysesDashboardPage", () => {
 
     expect(screen.getByRole("cell", { name: "Failed" })).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText("Status"), "FAILED");
+    await tickFilterValues(user, "Status", "Failed");
     expect(screen.getByText("Failed Offer")).toBeInTheDocument();
     expect(screen.queryByText("Completed Offer")).not.toBeInTheDocument();
+  });
+
+  it("keeps several statuses at once, naming the selection on the trigger and writing them to one URL param", async () => {
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            summary({
+              id: "s1",
+              status: "FAILED",
+              matchScore: null,
+              jobOffer: { ...summary().jobOffer, id: "j1", title: "Failed Offer" },
+            }),
+            summary({
+              id: "s2",
+              status: "COMPLETED",
+              jobOffer: { ...summary().jobOffer, id: "j2", title: "To Apply Offer" },
+            }),
+            summary({
+              id: "s3",
+              status: "COMPLETED",
+              applicationStatus: "REJECTED",
+              jobOffer: { ...summary().jobOffer, id: "j3", title: "Rejected Offer" },
+            }),
+          ],
+        }),
+      ),
+    );
+
+    const user = userEvent.setup();
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Failed Offer");
+
+    // A single selection names itself; two report their count.
+    await tickFilterValues(user, "Status", "To apply");
+    expect(filterTrigger("Status")).toHaveAccessibleName("Status To apply");
+
+    await tickFilterValues(user, "Status", "Failed");
+    expect(filterTrigger("Status")).toHaveAccessibleName("Status 2 statuses");
+
+    expect(screen.getByText("To Apply Offer")).toBeInTheDocument();
+    expect(screen.getByText("Failed Offer")).toBeInTheDocument();
+    expect(screen.queryByText("Rejected Offer")).not.toBeInTheDocument();
+
+    await waitFor(() => {
+      const url = new URL(__getUrl(), "http://localhost");
+      expect(url.searchParams.get("status")).toBe("TO_APPLY,FAILED");
+    });
+
+    // Unticking one leaves the other in force, rather than clearing both.
+    await tickFilterValues(user, "Status", "Failed");
+    expect(filterTrigger("Status")).toHaveAccessibleName("Status To apply");
+    expect(screen.queryByText("Failed Offer")).not.toBeInTheDocument();
+    expect(screen.getByText("To Apply Offer")).toBeInTheDocument();
+  });
+
+  it("combines several platforms, counting the filter once on the 'More filters' toggle", async () => {
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            summary({
+              id: "s1",
+              jobOffer: {
+                ...summary().jobOffer,
+                id: "j1",
+                title: "LinkedIn Offer",
+                sourceSite: "LINKEDIN",
+              },
+            }),
+            summary({
+              id: "s2",
+              jobOffer: {
+                ...summary().jobOffer,
+                id: "j2",
+                title: "HelloWork Offer",
+                sourceSite: "HELLOWORK",
+              },
+            }),
+            summary({
+              id: "s3",
+              jobOffer: {
+                ...summary().jobOffer,
+                id: "j3",
+                title: "Indeed Offer",
+                sourceSite: "INDEED",
+              },
+            }),
+          ],
+        }),
+      ),
+    );
+
+    const user = userEvent.setup();
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("LinkedIn Offer");
+
+    await openMoreFilters(user);
+    await tickFilterValues(user, "Platform", "LinkedIn", "HelloWork");
+
+    expect(screen.getByText("LinkedIn Offer")).toBeInTheDocument();
+    expect(screen.getByText("HelloWork Offer")).toBeInTheDocument();
+    expect(screen.queryByText("Indeed Offer")).not.toBeInTheDocument();
+
+    // Two values ticked, one filter narrowing: the toggle counts filters, so
+    // a closed panel never overstates what is hiding inside it.
+    expect(
+      screen.getByRole("button", { name: "More filters (1)" }),
+    ).toBeInTheDocument();
   });
 
   it("filters by the requestedAt range (issue #172)", async () => {
@@ -642,7 +835,7 @@ describe("AnalysesDashboardPage", () => {
 
     expect(await screen.findByText("Backend Engineer")).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText("Status"), "REJECTED");
+    await tickFilterValues(user, "Status", "Rejected");
     expect(screen.queryByText("Backend Engineer")).not.toBeInTheDocument();
     expect(screen.getByText("Frontend Developer")).toBeInTheDocument();
 
@@ -709,24 +902,26 @@ describe("AnalysesDashboardPage", () => {
 
     // Platform options include a correctly-translated HelloWork label, not a
     // raw enum value.
+    // The menu lists a correctly-translated HelloWork label, not a raw enum
+    // value.
+    await user.click(filterTrigger("Platform"));
     expect(
-      within(screen.getByLabelText("Platform")).getByRole("option", {
-        name: "HelloWork",
-      }),
+      await screen.findByRole("menuitemcheckbox", { name: "HelloWork" }),
     ).toBeInTheDocument();
+    await user.keyboard("{Escape}");
 
-    await user.selectOptions(screen.getByLabelText("Platform"), "HELLOWORK");
+    await tickFilterValues(user, "Platform", "HelloWork");
     expect(screen.queryByText("Backend Engineer")).not.toBeInTheDocument();
     expect(screen.queryByText("Frontend Developer")).not.toBeInTheDocument();
     expect(screen.getByText("Platform Engineer")).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText("Platform"), "all");
+    await clearFilter(user, "Platform");
     await user.type(screen.getByLabelText("Location"), "par");
     expect(screen.getByText("Backend Engineer")).toBeInTheDocument();
     expect(screen.getByText("Platform Engineer")).toBeInTheDocument();
     expect(screen.queryByText("Frontend Developer")).not.toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText("Platform"), "FRANCE_TRAVAIL");
+    await tickFilterValues(user, "Platform", "France Travail");
     expect(screen.getByText("Backend Engineer")).toBeInTheDocument();
     expect(screen.queryByText("Platform Engineer")).not.toBeInTheDocument();
 
@@ -775,10 +970,10 @@ describe("AnalysesDashboardPage", () => {
 
     expect(await screen.findByText("Frontend Developer")).toBeInTheDocument();
     expect(screen.queryByText("Backend Engineer")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Platform")).toHaveValue("LINKEDIN");
+    expect(filterTrigger("Platform")).toHaveAccessibleName("Platform LinkedIn");
     expect(screen.getByLabelText("Location")).toHaveValue("lyon");
 
-    await user.selectOptions(screen.getByLabelText("Platform"), "all");
+    await clearFilter(user, "Platform");
     await waitFor(() => {
       const url = new URL(__getUrl(), "http://localhost");
       expect(url.searchParams.has("platform")).toBe(false);
@@ -797,7 +992,7 @@ describe("AnalysesDashboardPage", () => {
     await screen.findByText("Backend Engineer");
 
     expect(screen.getByLabelText("Search")).toBeInTheDocument();
-    expect(screen.getByLabelText("Status")).toBeInTheDocument();
+    expect(filterTrigger("Status")).toBeInTheDocument();
     for (const label of [
       "Requested from",
       "Requested to",
@@ -838,7 +1033,7 @@ describe("AnalysesDashboardPage", () => {
     renderWithProviders(<AnalysesDashboardPage />);
     await screen.findByLabelText("Search");
 
-    expect(screen.getByLabelText("Platform")).toHaveValue("LINKEDIN");
+    expect(filterTrigger("Platform")).toHaveAccessibleName("Platform LinkedIn");
     expect(
       screen.getByRole("button", { name: "More filters (2)" }),
     ).toHaveAttribute("aria-expanded", "true");
@@ -1012,7 +1207,7 @@ describe("AnalysesDashboardPage", () => {
     expect(await screen.findByText("Frontend Developer")).toBeInTheDocument();
     expect(screen.queryByText("Backend Engineer")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Search")).toHaveValue("front");
-    expect(screen.getByLabelText("Status")).toHaveValue("REJECTED");
+    expect(filterTrigger("Status")).toHaveAccessibleName("Status Rejected");
   });
 
   it("writes filter changes back to the URL query string", async () => {
@@ -1606,6 +1801,194 @@ describe("AnalysesDashboardPage", () => {
     expect(document.activeElement).toBe(row);
   });
 
+  it("closes the Quick view from its own labelled Fermer button, the bare corner X being gone", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () => HttpResponse.json({ analyses: [detail()] })),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await user.click(await screen.findByText("Backend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    await user.click(quickView.getByRole("button", { name: "Close" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("walks the filtered, sorted list from inside the Quick view without closing it, and disables each arrow at its end", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({ analyses: [OFFER_A, OFFER_B, OFFER_C] }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await user.click(await screen.findByText("Offer A"));
+
+    const dialog = await screen.findByRole("dialog");
+    const quickView = within(dialog);
+    expect(quickView.getByRole("heading", { name: "Offer A" })).toBeInTheDocument();
+    expect(quickView.getByText("1 / 3")).toBeInTheDocument();
+    expect(quickView.getByRole("button", { name: "Previous" })).toBeDisabled();
+
+    await user.click(quickView.getByRole("button", { name: "Next" }));
+    expect(
+      await quickView.findByRole("heading", { name: "Offer B" }),
+    ).toBeInTheDocument();
+    expect(quickView.getByText("2 / 3")).toBeInTheDocument();
+
+    await user.click(quickView.getByRole("button", { name: "Next" }));
+    expect(
+      await quickView.findByRole("heading", { name: "Offer C" }),
+    ).toBeInTheDocument();
+    expect(quickView.getByText("3 / 3")).toBeInTheDocument();
+    expect(quickView.getByRole("button", { name: "Next" })).toBeDisabled();
+
+    await user.click(quickView.getByRole("button", { name: "Previous" }));
+    expect(
+      await quickView.findByRole("heading", { name: "Offer B" }),
+    ).toBeInTheDocument();
+    // The whole point: never closed once between the two ends.
+    expect(screen.getByRole("dialog")).toBe(dialog);
+  });
+
+  it("walks the list with the left and right arrow keys", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({ analyses: [OFFER_A, OFFER_B, OFFER_C] }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await user.click(await screen.findByText("Offer A"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    await quickView.findByRole("heading", { name: "Offer A" });
+
+    await user.keyboard("{ArrowRight}");
+    expect(
+      await quickView.findByRole("heading", { name: "Offer B" }),
+    ).toBeInTheDocument();
+
+    await user.keyboard("{ArrowLeft}");
+    expect(
+      await quickView.findByRole("heading", { name: "Offer A" }),
+    ).toBeInTheDocument();
+  });
+
+  it("flips the table to the next page when the arrows cross a page boundary, and hands focus back to the row actually shown", async () => {
+    const user = userEvent.setup();
+    const analyses = Array.from({ length: 30 }, (_, i) =>
+      detail({
+        id: `a${i}`,
+        jobOffer: {
+          id: `job${i}`,
+          title: `Offer ${String(i).padStart(2, "0")}`,
+          company: "Acme",
+          location: "Paris",
+          sourceSite: "OTHER",
+          // Descending title order matches the default postedAt-desc sort, so
+          // "Offer 29" is rank 1 and "Offer 00" is rank 30.
+          postedAt: `2026-07-${String(i + 1).padStart(2, "0")}T00:00:00.000Z`,
+          sourceUrl: `https://example.com/jobs/${i}`,
+        },
+      }),
+    );
+    server.use(http.get("/api/analyses", () => HttpResponse.json({ analyses })));
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Page 1 of 2");
+
+    // "Offer 05" is rank 25 — the last row of page 1.
+    await user.click(screen.getByText("Offer 05"));
+    const quickView = within(await screen.findByRole("dialog"));
+    expect(quickView.getByText("25 / 30")).toBeInTheDocument();
+
+    await user.click(quickView.getByRole("button", { name: "Next" }));
+    expect(
+      await quickView.findByRole("heading", { name: "Offer 04" }),
+    ).toBeInTheDocument();
+    expect(quickView.getByText("26 / 30")).toBeInTheDocument();
+    expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    // Not the row that opened the panel — that one is on page 1 and unmounted.
+    expect(document.activeElement).toBe(
+      screen.getByText("Offer 04").closest("tr"),
+    );
+  });
+
+  it("keeps showing an Analysis that a status change has just dropped out of the active filter, with an unknown rank", async () => {
+    __setUrl("/analyses?status=TO_APPLY&sort=postedAt&dir=desc&page=1&pageSize=25");
+    const user = userEvent.setup();
+    let applicationStatus: string | null = null;
+    const application = {
+      id: "app-1",
+      userId: "user_1",
+      analysisId: "a1",
+      jobOfferId: "job1",
+      cvVersionId: "cv1",
+      scoutId: null,
+      coverLetterDocId: null,
+      tailoredCvDocId: null,
+      status: "DRAFT",
+      appliedAt: null,
+      createdAt: "2026-09-11T00:00:00.000Z",
+      updatedAt: "2026-09-11T00:00:00.000Z",
+      jobOffer: { id: "job1", title: "Backend Engineer", company: "Acme Inc" },
+      cvVersion: { label: "Grad CV" },
+    };
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({ analyses: [detail({ applicationStatus }), OFFER_C] }),
+      ),
+      http.post("/api/applications", () => HttpResponse.json({ application })),
+      http.post("/api/applications/app-1/status-events", () => {
+        applicationStatus = "APPLIED";
+        return HttpResponse.json({
+          application: { ...application, status: "APPLIED" },
+          statusEvent: {
+            id: "se-1",
+            applicationId: "app-1",
+            status: "APPLIED",
+            note: null,
+            effectiveDate: "2026-09-11T00:00:00.000Z",
+            createdAt: "2026-09-11T00:00:00.000Z",
+          },
+        });
+      }),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await user.click(await screen.findByText("Backend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    expect(quickView.getByText("1 / 2")).toBeInTheDocument();
+
+    await user.click(quickView.getByRole("button", { name: "In progress" }));
+
+    // Still on screen, still the Analysis just acted on — only its rank is
+    // gone, the "To apply" filter no longer holding it.
+    await waitFor(() => expect(quickView.getByText("— / 1")).toBeInTheDocument());
+    expect(
+      quickView.getByRole("heading", { name: "Backend Engineer" }),
+    ).toBeInTheDocument();
+
+    // The slot it vacated now holds Offer C, which is what "next" reaches.
+    await user.click(quickView.getByRole("button", { name: "Next" }));
+    expect(
+      await quickView.findByRole("heading", { name: "Offer C" }),
+    ).toBeInTheDocument();
+  });
+
   it("opens the offer in a new tab from the Quick view's \"View job offer\" link (issue #66)", async () => {
     const user = userEvent.setup();
     server.use(
@@ -1711,32 +2094,7 @@ describe("AnalysesDashboardPage", () => {
     const user = userEvent.setup();
     server.use(
       http.get("/api/analyses", () => HttpResponse.json({ analyses: [detail()] })),
-      http.post("/api/analyses/a1/generated-documents", () =>
-        HttpResponse.json({
-          generatedDocuments: [
-            {
-              id: "gd-cl",
-              type: "COVER_LETTER",
-              analysisId: "a1",
-              status: "PENDING",
-              markdownContent: null,
-              errorMessage: null,
-              createdAt: "2026-09-11T00:00:00.000Z",
-              updatedAt: "2026-09-11T00:00:00.000Z",
-            },
-            {
-              id: "gd-cv",
-              type: "TAILORED_CV",
-              analysisId: "a1",
-              status: "PENDING",
-              markdownContent: null,
-              errorMessage: null,
-              createdAt: "2026-09-11T00:00:00.000Z",
-              updatedAt: "2026-09-11T00:00:00.000Z",
-            },
-          ],
-        }),
-      ),
+      pendingDocumentsPost(),
       http.get("/api/generated-documents/gd-cl", () =>
         HttpResponse.json({
           generatedDocument: {
@@ -1771,10 +2129,20 @@ describe("AnalysesDashboardPage", () => {
     await user.click(await screen.findByText("Backend Engineer"));
 
     const quickView = within(await screen.findByRole("dialog"));
-    await user.click(
-      quickView.getByRole("button", { name: "Generate documents" }),
-    );
 
+    // One slot at a time: asking for the cover letter leaves the tailored CV's
+    // own button standing, which is the whole point of the split (adr/0031).
+    await user.click(
+      quickView.getByRole("button", { name: "Generate the cover letter" }),
+    );
+    expect(await quickView.findByText("Queued…")).toBeInTheDocument();
+    expect(
+      quickView.getByRole("button", { name: "Generate the tailored CV" }),
+    ).toBeInTheDocument();
+
+    await user.click(
+      quickView.getByRole("button", { name: "Generate the tailored CV" }),
+    );
     expect(await quickView.findAllByText("Queued…")).toHaveLength(2);
   });
 
@@ -2506,14 +2874,7 @@ describe("AnalysisDetailPage", () => {
       http.get("/api/analyses/a1", () =>
         HttpResponse.json({ analysis: detail() }),
       ),
-      http.post("/api/analyses/a1/generated-documents", () =>
-        HttpResponse.json({
-          generatedDocuments: [
-            { id: "gd-cl", type: "COVER_LETTER", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
-            { id: "gd-cv", type: "TAILORED_CV", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
-          ],
-        }),
-      ),
+      pendingDocumentsPost(),
       http.get("/api/generated-documents/gd-cl", () =>
         HttpResponse.json({
           generatedDocument: {
@@ -2546,9 +2907,7 @@ describe("AnalysisDetailPage", () => {
 
     renderWithProviders(<AnalysisDetailPage />);
 
-    await user.click(
-      await screen.findByRole("button", { name: "Generate documents" }),
-    );
+    await generateBothDocuments(user);
 
     expect(await screen.findByText("Dear Hiring Manager, ...")).toBeInTheDocument();
     expect(
@@ -2571,14 +2930,7 @@ describe("AnalysisDetailPage", () => {
     const user = userEvent.setup();
     server.use(
       http.get("/api/analyses/a1", () => HttpResponse.json({ analysis: detail() })),
-      http.post("/api/analyses/a1/generated-documents", () =>
-        HttpResponse.json({
-          generatedDocuments: [
-            { id: "gd-cl", type: "COVER_LETTER", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
-            { id: "gd-cv", type: "TAILORED_CV", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
-          ],
-        }),
-      ),
+      pendingDocumentsPost(),
       http.get("/api/generated-documents/gd-cl", () =>
         HttpResponse.json({
           generatedDocument: {
@@ -2611,7 +2963,7 @@ describe("AnalysisDetailPage", () => {
 
     renderWithProviders(<AnalysisDetailPage />);
 
-    await user.click(await screen.findByRole("button", { name: "Generate documents" }));
+    await generateBothDocuments(user);
     await screen.findByText("Dear Hiring Manager, ...");
 
     const formatSelects = screen.getAllByRole("combobox");
@@ -2636,14 +2988,7 @@ describe("AnalysisDetailPage", () => {
       http.get("/api/analyses/a1", () =>
         HttpResponse.json({ analysis: detail() }),
       ),
-      http.post("/api/analyses/a1/generated-documents", () =>
-        HttpResponse.json({
-          generatedDocuments: [
-            { id: "gd-cl", type: "COVER_LETTER", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
-            { id: "gd-cv", type: "TAILORED_CV", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
-          ],
-        }),
-      ),
+      pendingDocumentsPost(),
       http.get("/api/generated-documents/gd-cl", () =>
         HttpResponse.json({
           generatedDocument: {
@@ -2676,9 +3021,7 @@ describe("AnalysisDetailPage", () => {
 
     renderWithProviders(<AnalysisDetailPage />);
 
-    await user.click(
-      await screen.findByRole("button", { name: "Generate documents" }),
-    );
+    await generateBothDocuments(user);
     await screen.findByText("Dear Hiring Manager, ...");
 
     await user.click(await screen.findByRole("button", { name: "Download both" }));
@@ -2703,14 +3046,7 @@ describe("AnalysisDetailPage", () => {
       http.get("/api/analyses/a1", () =>
         HttpResponse.json({ analysis: detail() }),
       ),
-      http.post("/api/analyses/a1/generated-documents", () =>
-        HttpResponse.json({
-          generatedDocuments: [
-            { id: "gd-cl", type: "COVER_LETTER", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
-            { id: "gd-cv", type: "TAILORED_CV", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
-          ],
-        }),
-      ),
+      pendingDocumentsPost(),
       http.get("/api/generated-documents/gd-cl", () =>
         HttpResponse.json({
           generatedDocument: {
@@ -2771,9 +3107,7 @@ describe("AnalysisDetailPage", () => {
 
     renderWithProviders(<AnalysisDetailPage />);
 
-    await user.click(
-      await screen.findByRole("button", { name: "Generate documents" }),
-    );
+    await generateBothDocuments(user);
     await screen.findByText("Dear Hiring Manager, ...");
 
     const regenerateButtons = screen.getAllByRole("button", { name: "Regenerate" });
@@ -2788,14 +3122,7 @@ describe("AnalysisDetailPage", () => {
       http.get("/api/analyses/a1", () =>
         HttpResponse.json({ analysis: detail() }),
       ),
-      http.post("/api/analyses/a1/generated-documents", () =>
-        HttpResponse.json({
-          generatedDocuments: [
-            { id: "gd-cl", type: "COVER_LETTER", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
-            { id: "gd-cv", type: "TAILORED_CV", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
-          ],
-        }),
-      ),
+      pendingDocumentsPost(),
       http.get("/api/generated-documents/gd-cl", () =>
         HttpResponse.json({
           generatedDocument: {
@@ -2831,9 +3158,7 @@ describe("AnalysisDetailPage", () => {
 
     renderWithProviders(<AnalysisDetailPage />);
 
-    await user.click(
-      await screen.findByRole("button", { name: "Generate documents" }),
-    );
+    await generateBothDocuments(user);
     await screen.findByText("Dear Hiring Manager, ...");
 
     const regenerateButtons = screen.getAllByRole("button", { name: "Regenerate" });
@@ -2857,13 +3182,18 @@ describe("AnalysisDetailPage", () => {
 
     renderWithProviders(<AnalysisDetailPage />);
 
+    // One slot's failure is reported in that slot, and leaves the other's
+    // button untouched rather than failing the pair.
     await user.click(
-      await screen.findByRole("button", { name: "Generate documents" }),
+      await screen.findByRole("button", { name: "Generate the cover letter" }),
     );
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "We couldn't start generation. Please try again.",
     );
+    expect(
+      screen.getByRole("button", { name: "Generate the tailored CV" }),
+    ).toBeEnabled();
   });
 
   it("marks a completed analysis as applied and links to the Application", async () => {
@@ -2931,9 +3261,27 @@ describe("AnalysisDetailPage", () => {
     );
   });
 
-  it("disables Apply until both generated documents are ready", async () => {
+  it("disables Apply while no generated document is ready", async () => {
     server.use(
       http.get("/api/analyses/a1", () => HttpResponse.json({ analysis: detail() })),
+      http.get("/api/analyses/a1/generated-documents", () =>
+        HttpResponse.json({ generatedDocuments: PENDING_DOCUMENTS }),
+      ),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />);
+
+    expect(await screen.findByRole("button", { name: "Apply" })).toBeDisabled();
+  });
+
+  it("enables Apply on the first ready document, the pair no longer being required (adr/0031)", async () => {
+    const user = userEvent.setup();
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    server.use(
+      http.get("/api/analyses/a1", () => HttpResponse.json({ analysis: detail() })),
+      // A candidate who deliberately asked for a cover letter alone: the
+      // tailored CV was never requested, so waiting for it would grey Apply
+      // out forever.
       http.get("/api/analyses/a1/generated-documents", () =>
         HttpResponse.json({
           generatedDocuments: [
@@ -2947,24 +3295,53 @@ describe("AnalysisDetailPage", () => {
               createdAt: "2026-09-11T00:00:00.000Z",
               updatedAt: "2026-09-11T00:00:00.000Z",
             },
-            {
-              id: "gd-cv",
-              type: "TAILORED_CV",
-              analysisId: "a1",
-              status: "GENERATING",
-              markdownContent: null,
-              errorMessage: null,
-              createdAt: "2026-09-11T00:00:00.000Z",
-              updatedAt: "2026-09-11T00:00:00.000Z",
-            },
           ],
+        }),
+      ),
+      http.post("/api/applications", () =>
+        HttpResponse.json({
+          application: {
+            id: "app-1",
+            userId: "user_1",
+            analysisId: "a1",
+            jobOfferId: "job1",
+            cvVersionId: "cv1",
+            scoutId: null,
+            coverLetterDocId: null,
+            tailoredCvDocId: null,
+            status: "APPLIED",
+            appliedAt: "2026-09-11T00:00:00.000Z",
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+            jobOffer: { id: "job1", title: "Backend Engineer", company: "Acme Inc" },
+            cvVersion: { label: "Grad CV" },
+          },
         }),
       ),
     );
 
     renderWithProviders(<AnalysisDetailPage />);
 
-    expect(await screen.findByRole("button", { name: "Apply" })).toBeDisabled();
+    const applyButton = await screen.findByRole("button", { name: "Apply" });
+    await waitFor(() => expect(applyButton).toBeEnabled());
+
+    await user.click(applyButton);
+
+    // The posting, then the one document that exists — not a failed attempt
+    // at the missing one.
+    expect(openSpy).toHaveBeenCalledWith(
+      "https://example.com/jobs/job1",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(openSpy).toHaveBeenCalledWith(
+      "/api/generated-documents/gd-cl/download",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(openSpy).toHaveBeenCalledTimes(2);
+
+    openSpy.mockRestore();
   });
 
   it("applies once both documents are ready: opens the posting, downloads both PDFs, and marks applied", async () => {

@@ -577,7 +577,12 @@
       "viewFullAnalysis": "View full analysis",
       "viewOffer": "View job offer",
       "statusError": "We couldn't update the tracking status. Please try again.",
-      "relaunchConfirm": "This will use one of your daily analyses. Continue?"
+      "relaunchConfirm": "This will use one of your daily analyses. Continue?",
+      "previous": "Previous",
+      "next": "Next",
+      "close": "Close",
+      "position": "{position} / {total}",
+      "positionUnknown": "— / {total}"
     },
     "bulk": {
       "selectPageLabel": "Select all on this page",
@@ -605,10 +610,12 @@
       "searchPlaceholder": "Offer title or company",
       "statusLabel": "Status",
       "statusAll": "All statuses",
+      "statusCount": "{count} statuses",
       "cvLabel": "CV version",
       "cvAll": "All CV versions",
       "platformLabel": "Platform",
       "platformAll": "All platforms",
+      "platformCount": "{count} platforms",
       "locationLabel": "Location",
       "locationPlaceholder": "City or region",
       "requestedAtFromLabel": "Requested from",
@@ -616,6 +623,7 @@
       "moreFilters": "More filters",
       "moreFiltersActive": "More filters ({count})",
       "clearFilters": "Clear filters",
+      "clearThisFilter": "Clear all",
       "columnsLabel": "Columns",
       "columnsReset": "Reset"
     },
@@ -679,7 +687,8 @@
       "summary": "Summary",
       "generatedDocuments": {
         "heading": "Generated documents",
-        "generate": "Generate documents",
+        "generateCoverLetter": "Generate the cover letter",
+        "generateTailoredCv": "Generate the tailored CV",
         "generating": "Generating your cover letter and tailored CV…",
         "generateError": "We couldn't start generation. Please try again.",
         "coverLetter": "Cover letter",

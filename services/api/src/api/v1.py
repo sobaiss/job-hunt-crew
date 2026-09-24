@@ -2180,6 +2180,15 @@ def _generated_document_response(row: GeneratedDocument) -> GeneratedDocumentRes
     )
 
 
+class CreateGeneratedDocumentsRequest(BaseModel):
+    """Which document to produce. Omitting `type` — which every pre-#N caller
+    does, and which the bulk action and the Admin table still do — means both,
+    so the endpoint's original contract is untouched.
+    """
+
+    type: Generateddocumenttype | None = None
+
+
 class CreateGeneratedDocumentsResponse(BaseModel):
     generatedDocuments: list[GeneratedDocumentResponse]
 
@@ -2191,15 +2200,18 @@ class CreateGeneratedDocumentsResponse(BaseModel):
 )
 async def create_generated_documents(
     analysis_id: str,
+    req: CreateGeneratedDocumentsRequest | None = None,
     user_id: str = Depends(require_user_id),
     session: AsyncSession = Depends(get_session),
 ) -> CreateGeneratedDocumentsResponse:
-    """Creates a COVER_LETTER and a TAILORED_CV GeneratedDocument (PENDING)
-    for a completed Analysis and enqueues one generation-intake message per
-    row. Requires the Analysis to be COMPLETED — its resultJSON's
-    matched/missing skills steer the generation agents. Bounded by the
-    caller's effective `QuotaKind.DOCUMENTS_DAILY` quota (issue #137); each
-    call counts as 2 documents against that budget.
+    """Creates a GeneratedDocument (PENDING) per requested type for a
+    completed Analysis and enqueues one generation-intake message per row —
+    a COVER_LETTER, a TAILORED_CV, or both when `type` is omitted. Requires
+    the Analysis to be COMPLETED — its resultJSON's matched/missing skills
+    steer the generation agents. Bounded by the caller's effective
+    `QuotaKind.DOCUMENTS_DAILY` quota (issue #137): a call counts the rows it
+    actually creates, so asking for one document costs 1 and asking for both
+    still costs 2 (docs/adr/0031).
     """
     analysis = await _owned_analysis(session, analysis_id, user_id)
     if analysis.status != Analysisstatus.COMPLETED:
@@ -2224,6 +2236,12 @@ async def create_generated_documents(
         if ingestion_job is not None:
             scout_run_id = ingestion_job.scoutRunId
 
+    requested_types = (
+        (req.type,)
+        if req is not None and req.type is not None
+        else (Generateddocumenttype.COVER_LETTER, Generateddocumenttype.TAILORED_CV)
+    )
+
     now = _now()
     documents = [
         GeneratedDocument(
@@ -2236,7 +2254,7 @@ async def create_generated_documents(
             status=Generateddocumentstatus.PENDING,
             updatedAt=now,
         )
-        for doc_type in (Generateddocumenttype.COVER_LETTER, Generateddocumenttype.TAILORED_CV)
+        for doc_type in requested_types
     ]
     session.add_all(documents)
     # QuotaAlert issue #142: this call creates len(documents) new rows, so

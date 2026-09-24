@@ -11,9 +11,12 @@ import { Button } from "@/components/ui/button";
 
 // The two actions a completed Analysis offers (issue #59, Scout slice 7,
 // full composition landed as a follow-up once #58's PDF endpoint existed):
-// - "Apply": opens the offer's posting in a new tab, downloads both READY
-//   generated documents, and records the Application as APPLIED — all in
-//   one click. Only enabled once both documents are READY.
+// - "Apply": opens the offer's posting in a new tab, downloads every READY
+//   generated document, and records the Application as APPLIED — all in
+//   one click. Enabled as soon as *one* document is READY (docs/adr/0031):
+//   the old "both or nothing" rule only made sense while generating meant
+//   generating the pair, and would now leave a candidate who deliberately
+//   asked for a cover letter alone staring at a permanently greyed button.
 // - "Mark as applied": records the Application at APPLIED without
 //   generating or downloading documents (e.g. the Candidate applied
 //   directly on the site). Always available.
@@ -33,7 +36,7 @@ export function ApplicationAction({
   const readyDocumentIds = (documents ?? [])
     .filter((doc) => doc.status === "READY")
     .map((doc) => doc.id);
-  const bothDocumentsReady = (documents ?? []).length === 2 && readyDocumentIds.length === 2;
+  const hasReadyDocument = readyDocumentIds.length > 0;
 
   if (markAsApplied.data) {
     return (
@@ -64,7 +67,7 @@ export function ApplicationAction({
           size="sm"
           className="w-fit"
           onClick={apply}
-          disabled={!bothDocumentsReady || markAsApplied.isPending}
+          disabled={!hasReadyDocument || markAsApplied.isPending}
         >
           {markAsApplied.isPending ? (
             <LoaderCircle className="animate-spin" aria-hidden="true" />

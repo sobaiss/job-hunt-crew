@@ -14,15 +14,22 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   });
 }
 
-export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const { id } = await params;
 
+  // The body carries an optional `type` (docs/adr/0031). It stays optional
+  // all the way down — the bulk action and the Admin table send none, and the
+  // API then produces both documents as it always has — so an absent or
+  // unparseable body is forwarded as no body rather than rejected here.
+  const body = await request.text();
+
   return proxyToApi(`/v1/analyses/${id}/generated-documents`, {
     method: "POST",
     headers: { "X-User-Id": session.user.id },
+    ...(body ? { body } : {}),
   });
 }

@@ -37,12 +37,16 @@ const TERMINAL_GENERATED_DOCUMENT_STATUSES: ReadonlySet<GeneratedDocumentStatus>
 const GENERATED_DOCUMENT_POLL_INTERVAL_MS = 3000;
 
 /** Kicks off generation for an Analysis (`POST /api/analyses/{id}/generated-documents`),
- * returning the two freshly created PENDING rows. */
+ * returning the freshly created PENDING rows. Pass a `type` to produce just
+ * that document — which is what the panel's two buttons do, each costing 1
+ * against DOCUMENTS_DAILY rather than 2 (docs/adr/0031); omit it to get both,
+ * as the bulk action and the Admin table still do. */
 export function useCreateGeneratedDocuments(analysisId: string) {
   return useMutation({
-    mutationFn: () =>
+    mutationFn: (type?: GeneratedDocumentType) =>
       bff.post<{ generatedDocuments: GeneratedDocument[] }>(
         `/analyses/${analysisId}/generated-documents`,
+        type ? { type } : undefined,
       ),
   });
 }

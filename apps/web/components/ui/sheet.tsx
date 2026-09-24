@@ -40,9 +40,15 @@ function SheetContent({
   className,
   children,
   side = "right",
+  showCloseButton = true,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   side?: "top" | "right" | "bottom" | "left";
+  /** The bare X pinned in the corner. A sheet wide enough for it to read as
+   *  "excentré" (the Quick view, at `sm:max-w-5xl`) turns it off and carries
+   *  its own labelled "Fermer" in a sticky header instead — DESIGN.md's
+   *  tertiary/dismissive `ghost`. Every other sheet keeps it. */
+  showCloseButton?: boolean;
 }) {
   return (
     <SheetPrimitive.Portal>
@@ -64,10 +70,12 @@ function SheetContent({
         {...props}
       >
         {children}
-        <SheetPrimitive.Close className="absolute top-4 right-4 rounded-sm opacity-70 transition-opacity outline-none hover:opacity-100 focus-visible:ring-2 focus-visible:ring-ring">
-          <X className="size-4" />
-          <span className="sr-only">Close</span>
-        </SheetPrimitive.Close>
+        {showCloseButton && (
+          <SheetPrimitive.Close className="absolute top-4 right-4 rounded-sm opacity-70 transition-opacity outline-none hover:opacity-100 focus-visible:ring-2 focus-visible:ring-ring">
+            <X className="size-4" />
+            <span className="sr-only">Close</span>
+          </SheetPrimitive.Close>
+        )}
       </SheetPrimitive.Content>
     </SheetPrimitive.Portal>
   );

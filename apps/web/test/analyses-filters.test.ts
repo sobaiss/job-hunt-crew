@@ -4,6 +4,7 @@ import {
   ANALYSES_PAGE_SIZES,
   DEFAULT_ANALYSES_FILTERS,
   DEFAULT_ANALYSES_SORT,
+  DEFAULT_ANALYSES_TABLE_STATE,
   JOB_OFFER_SOURCE_SITES,
   activeAdvancedFilterCount,
   analysesTableStateToParams,
@@ -104,7 +105,7 @@ describe("filterAnalyses", () => {
     expect(
       filterAnalyses(list, {
         ...DEFAULT_ANALYSES_FILTERS,
-        platform: "LINKEDIN",
+        platform: ["LINKEDIN"],
       }).map((a) => a.id),
     ).toEqual(["a2"]);
 
@@ -118,7 +119,7 @@ describe("filterAnalyses", () => {
     expect(
       filterAnalyses(list, {
         ...DEFAULT_ANALYSES_FILTERS,
-        platform: "FRANCE_TRAVAIL",
+        platform: ["FRANCE_TRAVAIL"],
         location: "par",
       }).map((a) => a.id),
     ).toEqual(["a1"]);
@@ -128,7 +129,7 @@ describe("filterAnalyses", () => {
     expect(
       filterAnalyses(list, {
         ...DEFAULT_ANALYSES_FILTERS,
-        status: "TO_APPLY",
+        status: ["TO_APPLY"],
       }).map((a) => a.id),
     ).toEqual(["a1"]);
 
@@ -143,7 +144,7 @@ describe("filterAnalyses", () => {
       filterAnalyses(list, {
         ...DEFAULT_ANALYSES_FILTERS,
         cvLabel: "Grad CV",
-        status: "REJECTED",
+        status: ["REJECTED"],
       }).map((a) => a.id),
     ).toEqual(["a3"]);
   });
@@ -155,16 +156,43 @@ describe("filterAnalyses", () => {
 
     for (const status of TRACKING_STATUSES) {
       expect(
-        filterAnalyses(list, { ...DEFAULT_ANALYSES_FILTERS, status }).map(
+        filterAnalyses(list, { ...DEFAULT_ANALYSES_FILTERS, status: [status] }).map(
           (a) => a.id,
         ),
       ).not.toContain("a2");
     }
 
     expect(
-      filterAnalyses(list, { ...DEFAULT_ANALYSES_FILTERS, status: "FAILED" }).map(
+      filterAnalyses(list, { ...DEFAULT_ANALYSES_FILTERS, status: ["FAILED"] }).map(
         (a) => a.id,
       ),
+    ).toEqual(["a2"]);
+  });
+
+  it("ORs the values inside one filter and ANDs the filters together", () => {
+    // a1 is FRANCE_TRAVAIL/TO_APPLY, a2 LINKEDIN/FAILED, a3 WTTJ/REJECTED.
+    expect(
+      filterAnalyses(list, {
+        ...DEFAULT_ANALYSES_FILTERS,
+        platform: ["LINKEDIN", "WTTJ"],
+      }).map((a) => a.id),
+    ).toEqual(["a2", "a3"]);
+
+    expect(
+      filterAnalyses(list, {
+        ...DEFAULT_ANALYSES_FILTERS,
+        status: ["TO_APPLY", "FAILED"],
+      }).map((a) => a.id),
+    ).toEqual(["a1", "a2"]);
+
+    // Two statuses OR-ed, then AND-ed with a platform that only one of them
+    // has — the intersection, not the union.
+    expect(
+      filterAnalyses(list, {
+        ...DEFAULT_ANALYSES_FILTERS,
+        status: ["TO_APPLY", "FAILED"],
+        platform: ["LINKEDIN"],
+      }).map((a) => a.id),
     ).toEqual(["a2"]);
   });
 
@@ -207,17 +235,28 @@ describe("active filter counts", () => {
       activeAdvancedFilterCount({
         ...DEFAULT_ANALYSES_FILTERS,
         search: "backend",
-        status: "IN_PROGRESS",
+        status: ["IN_PROGRESS"],
       }),
     ).toBe(0);
     expect(
       activeAdvancedFilterCount({
         ...DEFAULT_ANALYSES_FILTERS,
-        platform: "LINKEDIN",
+        platform: ["LINKEDIN"],
         location: "lyon",
         requestedAtFrom: "2026-08-01",
       }),
     ).toBe(3);
+  });
+
+  it("counts a multi-select filter once however many values it holds", () => {
+    // The number answers "how much is hidden behind this closed panel", not
+    // "how many boxes did I tick".
+    expect(
+      activeAdvancedFilterCount({
+        ...DEFAULT_ANALYSES_FILTERS,
+        platform: ["LINKEDIN", "INDEED", "WTTJ"],
+      }),
+    ).toBe(1);
   });
 
   it("reports any filter at all as active, visible or folded away", () => {
@@ -226,7 +265,7 @@ describe("active filter counts", () => {
       hasActiveFilters({ ...DEFAULT_ANALYSES_FILTERS, search: "backend" }),
     ).toBe(true);
     expect(
-      hasActiveFilters({ ...DEFAULT_ANALYSES_FILTERS, status: "IN_PROGRESS" }),
+      hasActiveFilters({ ...DEFAULT_ANALYSES_FILTERS, status: ["IN_PROGRESS"] }),
     ).toBe(true);
     expect(
       hasActiveFilters({ ...DEFAULT_ANALYSES_FILTERS, cvLabel: "Grad CV" }),
@@ -349,9 +388,9 @@ describe("URL query-string state", () => {
   it("round-trips a fully-specified state through params and back", () => {
     const state: AnalysesTableState = {
       search: "backend",
-      status: "REJECTED",
+      status: ["REJECTED"],
       cvLabel: "Grad CV",
-      platform: "LINKEDIN",
+      platform: ["LINKEDIN"],
       location: "lyon",
       requestedAtFrom: "2026-07-01",
       requestedAtTo: "2026-07-31",
@@ -367,9 +406,9 @@ describe("URL query-string state", () => {
   it("falls back to defaults for a missing or invalid query string", () => {
     expect(parseAnalysesTableState(new URLSearchParams())).toEqual({
       search: "",
-      status: "all",
+      status: [],
       cvLabel: "all",
-      platform: "all",
+      platform: [],
       location: "",
       requestedAtFrom: "",
       requestedAtTo: "",
@@ -386,9 +425,9 @@ describe("URL query-string state", () => {
       ),
     ).toEqual({
       search: "",
-      status: "all",
+      status: [],
       cvLabel: "all",
-      platform: "all",
+      platform: [],
       location: "",
       requestedAtFrom: "",
       requestedAtTo: "",
@@ -402,30 +441,70 @@ describe("URL query-string state", () => {
     for (const platform of JOB_OFFER_SOURCE_SITES) {
       expect(
         parseAnalysesTableState(new URLSearchParams(`platform=${platform}`)).platform,
-      ).toBe(platform);
+      ).toEqual([platform]);
     }
   });
 
   it("rejects a raw pipeline AnalysisStatus other than FAILED as a status param", () => {
     expect(
       parseAnalysesTableState(new URLSearchParams("status=RUNNING_CREW")).status,
-    ).toBe("all");
+    ).toEqual([]);
   });
 
   it("accepts exactly the 5 Tracking status buckets plus FAILED as the status param (#172)", () => {
     for (const status of ANALYSES_STATUS_FILTERS) {
       expect(
         parseAnalysesTableState(new URLSearchParams(`status=${status}`)).status,
-      ).toBe(status);
+      ).toEqual([status]);
     }
+  });
+
+  it("round-trips several values through one comma-separated param", () => {
+    const params = analysesTableStateToParams({
+      ...DEFAULT_ANALYSES_TABLE_STATE,
+      status: ["TO_APPLY", "FAILED"],
+      platform: ["LINKEDIN", "WTTJ"],
+    });
+    expect(params.get("status")).toBe("TO_APPLY,FAILED");
+    expect(params.get("platform")).toBe("LINKEDIN,WTTJ");
+    expect(parseAnalysesTableState(params).status).toEqual(["TO_APPLY", "FAILED"]);
+    expect(parseAnalysesTableState(params).platform).toEqual(["LINKEDIN", "WTTJ"]);
+  });
+
+  it("keeps the values a multi-select param got right and drops the rest", () => {
+    // A hand-edited or stale link narrows by what it can, rather than
+    // crashing or falling back to no filter at all.
+    expect(
+      parseAnalysesTableState(new URLSearchParams("status=TO_APPLY,NOPE,FAILED"))
+        .status,
+    ).toEqual(["TO_APPLY", "FAILED"]);
+    expect(
+      parseAnalysesTableState(new URLSearchParams("platform=LINKEDIN,LINKEDIN"))
+        .platform,
+    ).toEqual(["LINKEDIN"]);
+    expect(
+      parseAnalysesTableState(new URLSearchParams("status=,")).status,
+    ).toEqual([]);
+  });
+
+  it("still reads a single-value param, as every link minted before the filters went multiple carries", () => {
+    expect(
+      parseAnalysesTableState(
+        new URLSearchParams("q=front&status=REJECTED&platform=INDEED"),
+      ),
+    ).toMatchObject({
+      search: "front",
+      status: ["REJECTED"],
+      platform: ["INDEED"],
+    });
   });
 
   it("omits a param from the query string when it's the default", () => {
     const params = analysesTableStateToParams({
       search: "",
-      status: "all",
+      status: [],
       cvLabel: "all",
-      platform: "all",
+      platform: [],
       location: "",
       requestedAtFrom: "",
       requestedAtTo: "",

@@ -577,7 +577,12 @@
       "viewFullAnalysis": "Voir l'analyse complète",
       "viewOffer": "Voir l'offre",
       "statusError": "Impossible de mettre à jour le statut de suivi. Veuillez réessayer.",
-      "relaunchConfirm": "Cela utilisera l'un de vos quotas d'analyse quotidiens. Continuer ?"
+      "relaunchConfirm": "Cela utilisera l'un de vos quotas d'analyse quotidiens. Continuer ?",
+      "previous": "Précédent",
+      "next": "Suivant",
+      "close": "Fermer",
+      "position": "{position} / {total}",
+      "positionUnknown": "— / {total}"
     },
     "bulk": {
       "selectPageLabel": "Sélectionner tout sur cette page",
@@ -605,10 +610,12 @@
       "searchPlaceholder": "Titre de l'offre ou entreprise",
       "statusLabel": "Statut",
       "statusAll": "Tous les statuts",
+      "statusCount": "{count} statuts",
       "cvLabel": "Version de CV",
       "cvAll": "Toutes les versions de CV",
       "platformLabel": "Plateforme",
       "platformAll": "Toutes les plateformes",
+      "platformCount": "{count} plateformes",
       "locationLabel": "Localisation",
       "locationPlaceholder": "Ville ou région",
       "requestedAtFromLabel": "Demandée à partir du",
@@ -616,6 +623,7 @@
       "moreFilters": "Plus de filtres",
       "moreFiltersActive": "Plus de filtres ({count})",
       "clearFilters": "Effacer les filtres",
+      "clearThisFilter": "Tout effacer",
       "columnsLabel": "Colonnes",
       "columnsReset": "Réinitialiser"
     },
@@ -679,7 +687,8 @@
       "summary": "Résumé",
       "generatedDocuments": {
         "heading": "Documents générés",
-        "generate": "Générer les documents",
+        "generateCoverLetter": "Générer la lettre",
+        "generateTailoredCv": "Générer le CV adapté",
         "generating": "Génération de votre lettre de motivation et de votre CV adapté…",
         "generateError": "Impossible de démarrer la génération. Veuillez réessayer.",
         "coverLetter": "Lettre de motivation",

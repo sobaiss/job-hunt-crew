@@ -27,15 +27,16 @@ export type JobOfferSourceSite = (typeof JOB_OFFER_SOURCE_SITES)[number];
 export type AnalysesFilterState = {
   /** Substring over JobOffer title + company, case-insensitive. */
   search: string;
-  /** A Tracking status bucket, or `FAILED` (issue #172), or `"all"` for no
-   *  status filter — "all" is the only way to see one of the other
-   *  non-terminal pipeline statuses, since those have no filter bucket of
-   *  their own. */
-  status: AnalysesStatusFilter | "all";
+  /** The Tracking status buckets (plus `FAILED`, issue #172) to keep, OR-ed
+   *  together. Empty means no status filter — and is still the only way to
+   *  see one of the other non-terminal pipeline statuses, since those have
+   *  no bucket of their own. */
+  status: AnalysesStatusFilter[];
   /** A `cvVersion.label`, or `"all"` for no CVVersion filter. */
   cvLabel: string | "all";
-  /** A `JobOfferSourceSite`, or `"all"` for no platform filter (#125). */
-  platform: JobOfferSourceSite | "all";
+  /** The `JobOfferSourceSite`s to keep (#125), OR-ed together; empty means
+   *  no platform filter. */
+  platform: JobOfferSourceSite[];
   /** Substring over JobOffer location, case-insensitive (#125). */
   location: string;
   /** `Analysis.requestedAt` range, as `YYYY-MM-DD` date-input strings, or
@@ -48,9 +49,9 @@ export type AnalysesFilterState = {
 
 export const DEFAULT_ANALYSES_FILTERS: AnalysesFilterState = {
   search: "",
-  status: "all",
+  status: [],
   cvLabel: "all",
-  platform: "all",
+  platform: [],
   location: "",
   requestedAtFrom: "",
   requestedAtTo: "",
@@ -67,21 +68,34 @@ export const ADVANCED_ANALYSES_FILTERS = [
   "location",
 ] as const satisfies readonly (keyof AnalysesFilterState)[];
 
-/** How many of the folded-away filters are set to something other than their
- *  "no filter" default. The toggle shows this count so a filter restored from
- *  the URL is never invisibly narrowing the table from inside a closed panel. */
+/** Whether one filter is narrowing the table at all. A multi-select filter
+ *  (status, platform) is set once it holds a value; the rest compare against
+ *  their own "no filter" default. */
+function isFilterSet(
+  state: AnalysesFilterState,
+  key: keyof AnalysesFilterState,
+): boolean {
+  const value = state[key];
+  return Array.isArray(value)
+    ? value.length > 0
+    : value !== DEFAULT_ANALYSES_FILTERS[key];
+}
+
+/** How many of the folded-away *filters* are narrowing the table — filters,
+ *  not values: two platforms ticked still count as one, because the number
+ *  answers "how much is hidden inside this closed panel". The toggle shows it
+ *  so a filter restored from the URL is never invisibly narrowing the table
+ *  from behind a fold. */
 export function activeAdvancedFilterCount(state: AnalysesFilterState): number {
-  return ADVANCED_ANALYSES_FILTERS.filter(
-    (key) => state[key] !== DEFAULT_ANALYSES_FILTERS[key],
-  ).length;
+  return ADVANCED_ANALYSES_FILTERS.filter((key) => isFilterSet(state, key)).length;
 }
 
 /** Any filter at all is set — drives the "Effacer les filtres" reset, which
  *  covers the visible two as well as the folded-away ones. */
 export function hasActiveFilters(state: AnalysesFilterState): boolean {
   return (
-    state.search !== DEFAULT_ANALYSES_FILTERS.search ||
-    state.status !== DEFAULT_ANALYSES_FILTERS.status ||
+    isFilterSet(state, "search") ||
+    isFilterSet(state, "status") ||
     activeAdvancedFilterCount(state) > 0
   );
 }
@@ -135,10 +149,11 @@ function matchesStatus(analysis: AnalysisSummary, status: AnalysesStatusFilter):
 /**
  * Narrow the analyses to those matching the search term, the status filter,
  * the CVVersion filter, the platform filter, the location search (#125) and
- * the `requestedAt` range (#172) — all combined with AND. A specific
- * Tracking status bucket only ever matches a `COMPLETED` Analysis — a
- * still-running one (but not `FAILED`, which has its own bucket now) has no
- * bucket and is excluded from every status filter but `"all"`.
+ * the `requestedAt` range (#172). Values inside one filter are OR-ed, the
+ * filters themselves AND-ed. A specific Tracking status bucket only ever
+ * matches a `COMPLETED` Analysis — a still-running one (but not `FAILED`,
+ * which has its own bucket now) has no bucket and is excluded by any
+ * non-empty status filter.
  */
 export function filterAnalyses(
   analyses: AnalysisSummary[],
@@ -147,9 +162,11 @@ export function filterAnalyses(
   return analyses.filter(
     (analysis) =>
       matchesSearch(analysis, search) &&
-      (status === "all" || matchesStatus(analysis, status)) &&
+      (status.length === 0 ||
+        status.some((bucket) => matchesStatus(analysis, bucket))) &&
       (cvLabel === "all" || analysis.cvVersion.label === cvLabel) &&
-      (platform === "all" || analysis.jobOffer.sourceSite === platform) &&
+      (platform.length === 0 ||
+        platform.includes(analysis.jobOffer.sourceSite as JobOfferSourceSite)) &&
       matchesLocation(analysis, location) &&
       matchesRequestedAtRange(analysis, requestedAtFrom, requestedAtTo),
   );
@@ -290,12 +307,27 @@ export const DEFAULT_ANALYSES_TABLE_STATE: AnalysesTableState = {
 /** Reads the table's state from the page's URL query string, falling back to
  *  the default for anything missing or invalid — an edited or stale URL never
  *  crashes the page. */
+/** A comma-separated multi-select param, narrowed to the values the filter
+ *  actually offers and de-duplicated. Anything unknown is dropped rather than
+ *  rejected — an edited, stale or hand-written URL narrows by what it got
+ *  right instead of crashing — and a bare single value (every link minted
+ *  before these filters went multiple) parses as a one-element selection. */
+function parseMultiParam<T extends string>(
+  raw: string | null,
+  allowed: readonly T[],
+): T[] {
+  if (!raw) return [];
+  const seen = new Set<T>();
+  for (const value of raw.split(",")) {
+    if ((allowed as readonly string[]).includes(value)) seen.add(value as T);
+  }
+  return [...seen];
+}
+
 export function parseAnalysesTableState(
   params: URLSearchParams,
 ): AnalysesTableState {
-  const status = params.get("status");
   const cvLabel = params.get("cv");
-  const platform = params.get("platform");
   const column = params.get("sort");
   const direction = params.get("dir");
   const page = Number(params.get("page"));
@@ -303,13 +335,9 @@ export function parseAnalysesTableState(
 
   return {
     search: params.get("q") ?? DEFAULT_ANALYSES_TABLE_STATE.search,
-    status: ANALYSES_STATUS_FILTERS.includes(status as AnalysesStatusFilter)
-      ? (status as AnalysesStatusFilter)
-      : "all",
+    status: parseMultiParam(params.get("status"), ANALYSES_STATUS_FILTERS),
     cvLabel: cvLabel ?? "all",
-    platform: JOB_OFFER_SOURCE_SITES.includes(platform as JobOfferSourceSite)
-      ? (platform as JobOfferSourceSite)
-      : "all",
+    platform: parseMultiParam(params.get("platform"), JOB_OFFER_SOURCE_SITES),
     location: params.get("location") ?? DEFAULT_ANALYSES_TABLE_STATE.location,
     requestedAtFrom:
       params.get("requestedFrom") ?? DEFAULT_ANALYSES_TABLE_STATE.requestedAtFrom,
@@ -337,9 +365,9 @@ export function analysesTableStateToParams(
 ): URLSearchParams {
   const params = new URLSearchParams();
   if (state.search) params.set("q", state.search);
-  if (state.status !== "all") params.set("status", state.status);
+  if (state.status.length > 0) params.set("status", state.status.join(","));
   if (state.cvLabel !== "all") params.set("cv", state.cvLabel);
-  if (state.platform !== "all") params.set("platform", state.platform);
+  if (state.platform.length > 0) params.set("platform", state.platform.join(","));
   if (state.location) params.set("location", state.location);
   if (state.requestedAtFrom) params.set("requestedFrom", state.requestedAtFrom);
   if (state.requestedAtTo) params.set("requestedTo", state.requestedAtTo);
