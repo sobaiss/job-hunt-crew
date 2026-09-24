@@ -684,7 +684,8 @@
       "summary": "Summary",
       "generatedDocuments": {
         "heading": "Generated documents",
-        "generate": "Generate documents",
+        "generateCoverLetter": "Generate the cover letter",
+        "generateTailoredCv": "Generate the tailored CV",
         "generating": "Generating your cover letter and tailored CV…",
         "generateError": "We couldn't start generation. Please try again.",
         "coverLetter": "Cover letter",

@@ -684,7 +684,8 @@
       "summary": "Résumé",
       "generatedDocuments": {
         "heading": "Documents générés",
-        "generate": "Générer les documents",
+        "generateCoverLetter": "Générer la lettre",
+        "generateTailoredCv": "Générer le CV adapté",
         "generating": "Génération de votre lettre de motivation et de votre CV adapté…",
         "generateError": "Impossible de démarrer la génération. Veuillez réessayer.",
         "coverLetter": "Lettre de motivation",

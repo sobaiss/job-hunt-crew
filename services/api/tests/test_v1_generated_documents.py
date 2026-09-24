@@ -229,6 +229,122 @@ def test_create_generated_documents_creates_both_types_and_enqueues(user_id):
         }
 
 
+@pytest.mark.parametrize(
+    "requested_type", ["COVER_LETTER", "TAILORED_CV"]
+)
+def test_create_generated_documents_produces_only_the_requested_type(user_id, requested_type):
+    """docs/adr/0031: a `type` in the body produces that document alone, so a
+    candidate can ask for a cover letter without a tailored CV.
+    """
+    with TestClient(app) as client:
+        cv = _make_cv_version(client, user_id)
+        analysis_id = asyncio.run(
+            _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.COMPLETED)
+        )
+
+        response = client.post(
+            f"/v1/analyses/{analysis_id}/generated-documents",
+            headers=_headers(user_id),
+            json={"type": requested_type},
+        )
+        assert response.status_code == 202
+        documents = response.json()["generatedDocuments"]
+        assert [doc["type"] for doc in documents] == [requested_type]
+        assert documents[0]["status"] == "PENDING"
+
+        enqueued = _drain_generation_intake()
+        assert [b["generatedDocumentId"] for b in enqueued] == [documents[0]["id"]]
+
+        # The other type stays absent, and therefore still askable.
+        listed = client.get(
+            f"/v1/analyses/{analysis_id}/generated-documents", headers=_headers(user_id)
+        ).json()["generatedDocuments"]
+        assert [doc["type"] for doc in listed] == [requested_type]
+
+
+def test_create_generated_documents_treats_a_null_type_as_both(user_id):
+    """An explicit `{"type": null}` is the same as sending no body at all —
+    the bulk action and the Admin table both rely on the two-document default.
+    """
+    with TestClient(app) as client:
+        cv = _make_cv_version(client, user_id)
+        analysis_id = asyncio.run(
+            _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.COMPLETED)
+        )
+
+        response = client.post(
+            f"/v1/analyses/{analysis_id}/generated-documents",
+            headers=_headers(user_id),
+            json={"type": None},
+        )
+        assert response.status_code == 202
+        assert {doc["type"] for doc in response.json()["generatedDocuments"]} == {
+            "COVER_LETTER",
+            "TAILORED_CV",
+        }
+        _drain_generation_intake()
+
+
+def test_create_generated_documents_rejects_an_unknown_type(user_id):
+    with TestClient(app) as client:
+        cv = _make_cv_version(client, user_id)
+        analysis_id = asyncio.run(
+            _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.COMPLETED)
+        )
+
+        response = client.post(
+            f"/v1/analyses/{analysis_id}/generated-documents",
+            headers=_headers(user_id),
+            json={"type": "MOTIVATION_POEM"},
+        )
+        assert response.status_code == 422
+        assert _drain_generation_intake() == []
+
+
+def test_create_generated_documents_one_type_costs_one_against_the_daily_cap(
+    documents_daily_cap, user_id
+):
+    """docs/adr/0031's quota consequence: a call counts the rows it creates,
+    so a cap of 2 buys two single-document calls, where it only ever bought
+    one two-document call.
+    """
+    documents_daily_cap(2)
+    with TestClient(app) as client:
+        cv = _make_cv_version(client, user_id)
+        first_analysis_id = asyncio.run(
+            _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.COMPLETED)
+        )
+        second_analysis_id = asyncio.run(
+            _seed_analysis(user_id=user_id, cv_version_id=cv, status=Analysisstatus.COMPLETED)
+        )
+
+        first = client.post(
+            f"/v1/analyses/{first_analysis_id}/generated-documents",
+            headers=_headers(user_id),
+            json={"type": "COVER_LETTER"},
+        )
+        assert first.status_code == 202
+        _drain_generation_intake()
+
+        # Still inside the cap, where a two-document first call would already
+        # have exhausted it (see the 429 test below).
+        second = client.post(
+            f"/v1/analyses/{second_analysis_id}/generated-documents",
+            headers=_headers(user_id),
+            json={"type": "COVER_LETTER"},
+        )
+        assert second.status_code == 202
+        _drain_generation_intake()
+
+        third = client.post(
+            f"/v1/analyses/{first_analysis_id}/generated-documents",
+            headers=_headers(user_id),
+            json={"type": "TAILORED_CV"},
+        )
+        assert third.status_code == 429
+        assert _drain_generation_intake() == []
+
+
 def test_create_generated_documents_rejects_a_non_completed_analysis(user_id):
     with TestClient(app) as client:
         cv = _make_cv_version(client, user_id)

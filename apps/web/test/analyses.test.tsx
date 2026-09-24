@@ -89,6 +89,36 @@ function detail(overrides: Record<string, unknown> = {}) {
   };
 }
 
+const PENDING_DOCUMENTS = [
+  { id: "gd-cl", type: "COVER_LETTER", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
+  { id: "gd-cv", type: "TAILORED_CV", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
+];
+
+/** The generation endpoint as services/api implements it since
+ *  docs/adr/0031: a `type` in the body produces just that document, its
+ *  absence (the bulk action, the Admin table) still produces both. */
+function pendingDocumentsPost() {
+  return http.post("/api/analyses/a1/generated-documents", async ({ request }) => {
+    const body = await request.text();
+    const type = body ? (JSON.parse(body) as { type?: string }).type : undefined;
+    return HttpResponse.json({
+      generatedDocuments: type
+        ? PENDING_DOCUMENTS.filter((d) => d.type === type)
+        : PENDING_DOCUMENTS,
+    });
+  });
+}
+
+/** Generation is per document now, so a test that wants both asks twice. */
+async function generateBothDocuments(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(
+    await screen.findByRole("button", { name: "Generate the cover letter" }),
+  );
+  await user.click(
+    await screen.findByRole("button", { name: "Generate the tailored CV" }),
+  );
+}
+
 /** Three distinct offers for the Quick view's navigation tests, dated so the
  *  default `postedAt`-descending sort ranks them A, B, C — and all older than
  *  `summary()`'s own offer, which therefore outranks them when mixed in. */
@@ -1921,32 +1951,7 @@ describe("AnalysesDashboardPage", () => {
     const user = userEvent.setup();
     server.use(
       http.get("/api/analyses", () => HttpResponse.json({ analyses: [detail()] })),
-      http.post("/api/analyses/a1/generated-documents", () =>
-        HttpResponse.json({
-          generatedDocuments: [
-            {
-              id: "gd-cl",
-              type: "COVER_LETTER",
-              analysisId: "a1",
-              status: "PENDING",
-              markdownContent: null,
-              errorMessage: null,
-              createdAt: "2026-09-11T00:00:00.000Z",
-              updatedAt: "2026-09-11T00:00:00.000Z",
-            },
-            {
-              id: "gd-cv",
-              type: "TAILORED_CV",
-              analysisId: "a1",
-              status: "PENDING",
-              markdownContent: null,
-              errorMessage: null,
-              createdAt: "2026-09-11T00:00:00.000Z",
-              updatedAt: "2026-09-11T00:00:00.000Z",
-            },
-          ],
-        }),
-      ),
+      pendingDocumentsPost(),
       http.get("/api/generated-documents/gd-cl", () =>
         HttpResponse.json({
           generatedDocument: {
@@ -1981,10 +1986,20 @@ describe("AnalysesDashboardPage", () => {
     await user.click(await screen.findByText("Backend Engineer"));
 
     const quickView = within(await screen.findByRole("dialog"));
-    await user.click(
-      quickView.getByRole("button", { name: "Generate documents" }),
-    );
 
+    // One slot at a time: asking for the cover letter leaves the tailored CV's
+    // own button standing, which is the whole point of the split (adr/0031).
+    await user.click(
+      quickView.getByRole("button", { name: "Generate the cover letter" }),
+    );
+    expect(await quickView.findByText("Queued…")).toBeInTheDocument();
+    expect(
+      quickView.getByRole("button", { name: "Generate the tailored CV" }),
+    ).toBeInTheDocument();
+
+    await user.click(
+      quickView.getByRole("button", { name: "Generate the tailored CV" }),
+    );
     expect(await quickView.findAllByText("Queued…")).toHaveLength(2);
   });
 
@@ -2716,14 +2731,7 @@ describe("AnalysisDetailPage", () => {
       http.get("/api/analyses/a1", () =>
         HttpResponse.json({ analysis: detail() }),
       ),
-      http.post("/api/analyses/a1/generated-documents", () =>
-        HttpResponse.json({
-          generatedDocuments: [
-            { id: "gd-cl", type: "COVER_LETTER", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
-            { id: "gd-cv", type: "TAILORED_CV", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
-          ],
-        }),
-      ),
+      pendingDocumentsPost(),
       http.get("/api/generated-documents/gd-cl", () =>
         HttpResponse.json({
           generatedDocument: {
@@ -2756,9 +2764,7 @@ describe("AnalysisDetailPage", () => {
 
     renderWithProviders(<AnalysisDetailPage />);
 
-    await user.click(
-      await screen.findByRole("button", { name: "Generate documents" }),
-    );
+    await generateBothDocuments(user);
 
     expect(await screen.findByText("Dear Hiring Manager, ...")).toBeInTheDocument();
     expect(
@@ -2781,14 +2787,7 @@ describe("AnalysisDetailPage", () => {
     const user = userEvent.setup();
     server.use(
       http.get("/api/analyses/a1", () => HttpResponse.json({ analysis: detail() })),
-      http.post("/api/analyses/a1/generated-documents", () =>
-        HttpResponse.json({
-          generatedDocuments: [
-            { id: "gd-cl", type: "COVER_LETTER", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
-            { id: "gd-cv", type: "TAILORED_CV", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
-          ],
-        }),
-      ),
+      pendingDocumentsPost(),
       http.get("/api/generated-documents/gd-cl", () =>
         HttpResponse.json({
           generatedDocument: {
@@ -2821,7 +2820,7 @@ describe("AnalysisDetailPage", () => {
 
     renderWithProviders(<AnalysisDetailPage />);
 
-    await user.click(await screen.findByRole("button", { name: "Generate documents" }));
+    await generateBothDocuments(user);
     await screen.findByText("Dear Hiring Manager, ...");
 
     const formatSelects = screen.getAllByRole("combobox");
@@ -2846,14 +2845,7 @@ describe("AnalysisDetailPage", () => {
       http.get("/api/analyses/a1", () =>
         HttpResponse.json({ analysis: detail() }),
       ),
-      http.post("/api/analyses/a1/generated-documents", () =>
-        HttpResponse.json({
-          generatedDocuments: [
-            { id: "gd-cl", type: "COVER_LETTER", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
-            { id: "gd-cv", type: "TAILORED_CV", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
-          ],
-        }),
-      ),
+      pendingDocumentsPost(),
       http.get("/api/generated-documents/gd-cl", () =>
         HttpResponse.json({
           generatedDocument: {
@@ -2886,9 +2878,7 @@ describe("AnalysisDetailPage", () => {
 
     renderWithProviders(<AnalysisDetailPage />);
 
-    await user.click(
-      await screen.findByRole("button", { name: "Generate documents" }),
-    );
+    await generateBothDocuments(user);
     await screen.findByText("Dear Hiring Manager, ...");
 
     await user.click(await screen.findByRole("button", { name: "Download both" }));
@@ -2913,14 +2903,7 @@ describe("AnalysisDetailPage", () => {
       http.get("/api/analyses/a1", () =>
         HttpResponse.json({ analysis: detail() }),
       ),
-      http.post("/api/analyses/a1/generated-documents", () =>
-        HttpResponse.json({
-          generatedDocuments: [
-            { id: "gd-cl", type: "COVER_LETTER", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
-            { id: "gd-cv", type: "TAILORED_CV", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
-          ],
-        }),
-      ),
+      pendingDocumentsPost(),
       http.get("/api/generated-documents/gd-cl", () =>
         HttpResponse.json({
           generatedDocument: {
@@ -2981,9 +2964,7 @@ describe("AnalysisDetailPage", () => {
 
     renderWithProviders(<AnalysisDetailPage />);
 
-    await user.click(
-      await screen.findByRole("button", { name: "Generate documents" }),
-    );
+    await generateBothDocuments(user);
     await screen.findByText("Dear Hiring Manager, ...");
 
     const regenerateButtons = screen.getAllByRole("button", { name: "Regenerate" });
@@ -2998,14 +2979,7 @@ describe("AnalysisDetailPage", () => {
       http.get("/api/analyses/a1", () =>
         HttpResponse.json({ analysis: detail() }),
       ),
-      http.post("/api/analyses/a1/generated-documents", () =>
-        HttpResponse.json({
-          generatedDocuments: [
-            { id: "gd-cl", type: "COVER_LETTER", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
-            { id: "gd-cv", type: "TAILORED_CV", analysisId: "a1", status: "PENDING", markdownContent: null, errorMessage: null, createdAt: "2026-09-11T00:00:00.000Z", updatedAt: "2026-09-11T00:00:00.000Z" },
-          ],
-        }),
-      ),
+      pendingDocumentsPost(),
       http.get("/api/generated-documents/gd-cl", () =>
         HttpResponse.json({
           generatedDocument: {
@@ -3041,9 +3015,7 @@ describe("AnalysisDetailPage", () => {
 
     renderWithProviders(<AnalysisDetailPage />);
 
-    await user.click(
-      await screen.findByRole("button", { name: "Generate documents" }),
-    );
+    await generateBothDocuments(user);
     await screen.findByText("Dear Hiring Manager, ...");
 
     const regenerateButtons = screen.getAllByRole("button", { name: "Regenerate" });
@@ -3067,13 +3039,18 @@ describe("AnalysisDetailPage", () => {
 
     renderWithProviders(<AnalysisDetailPage />);
 
+    // One slot's failure is reported in that slot, and leaves the other's
+    // button untouched rather than failing the pair.
     await user.click(
-      await screen.findByRole("button", { name: "Generate documents" }),
+      await screen.findByRole("button", { name: "Generate the cover letter" }),
     );
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "We couldn't start generation. Please try again.",
     );
+    expect(
+      screen.getByRole("button", { name: "Generate the tailored CV" }),
+    ).toBeEnabled();
   });
 
   it("marks a completed analysis as applied and links to the Application", async () => {
@@ -3141,9 +3118,27 @@ describe("AnalysisDetailPage", () => {
     );
   });
 
-  it("disables Apply until both generated documents are ready", async () => {
+  it("disables Apply while no generated document is ready", async () => {
     server.use(
       http.get("/api/analyses/a1", () => HttpResponse.json({ analysis: detail() })),
+      http.get("/api/analyses/a1/generated-documents", () =>
+        HttpResponse.json({ generatedDocuments: PENDING_DOCUMENTS }),
+      ),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />);
+
+    expect(await screen.findByRole("button", { name: "Apply" })).toBeDisabled();
+  });
+
+  it("enables Apply on the first ready document, the pair no longer being required (adr/0031)", async () => {
+    const user = userEvent.setup();
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    server.use(
+      http.get("/api/analyses/a1", () => HttpResponse.json({ analysis: detail() })),
+      // A candidate who deliberately asked for a cover letter alone: the
+      // tailored CV was never requested, so waiting for it would grey Apply
+      // out forever.
       http.get("/api/analyses/a1/generated-documents", () =>
         HttpResponse.json({
           generatedDocuments: [
@@ -3157,24 +3152,53 @@ describe("AnalysisDetailPage", () => {
               createdAt: "2026-09-11T00:00:00.000Z",
               updatedAt: "2026-09-11T00:00:00.000Z",
             },
-            {
-              id: "gd-cv",
-              type: "TAILORED_CV",
-              analysisId: "a1",
-              status: "GENERATING",
-              markdownContent: null,
-              errorMessage: null,
-              createdAt: "2026-09-11T00:00:00.000Z",
-              updatedAt: "2026-09-11T00:00:00.000Z",
-            },
           ],
+        }),
+      ),
+      http.post("/api/applications", () =>
+        HttpResponse.json({
+          application: {
+            id: "app-1",
+            userId: "user_1",
+            analysisId: "a1",
+            jobOfferId: "job1",
+            cvVersionId: "cv1",
+            scoutId: null,
+            coverLetterDocId: null,
+            tailoredCvDocId: null,
+            status: "APPLIED",
+            appliedAt: "2026-09-11T00:00:00.000Z",
+            createdAt: "2026-09-11T00:00:00.000Z",
+            updatedAt: "2026-09-11T00:00:00.000Z",
+            jobOffer: { id: "job1", title: "Backend Engineer", company: "Acme Inc" },
+            cvVersion: { label: "Grad CV" },
+          },
         }),
       ),
     );
 
     renderWithProviders(<AnalysisDetailPage />);
 
-    expect(await screen.findByRole("button", { name: "Apply" })).toBeDisabled();
+    const applyButton = await screen.findByRole("button", { name: "Apply" });
+    await waitFor(() => expect(applyButton).toBeEnabled());
+
+    await user.click(applyButton);
+
+    // The posting, then the one document that exists — not a failed attempt
+    // at the missing one.
+    expect(openSpy).toHaveBeenCalledWith(
+      "https://example.com/jobs/job1",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(openSpy).toHaveBeenCalledWith(
+      "/api/generated-documents/gd-cl/download",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(openSpy).toHaveBeenCalledTimes(2);
+
+    openSpy.mockRestore();
   });
 
   it("applies once both documents are ready: opens the posting, downloads both PDFs, and marks applied", async () => {
