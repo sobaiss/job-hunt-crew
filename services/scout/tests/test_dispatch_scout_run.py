@@ -1,6 +1,6 @@
 import json
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from py_db.models import (
@@ -257,6 +257,45 @@ async def test_dispatch_skips_when_a_previous_run_is_still_running():
 
         assert run.status == Scoutrunstatus.PENDING
         assert fake_sqs.messages == []
+    finally:
+        await _cleanup(session_factory, user_id=user_id, scout_id=scout_id)
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_proceeds_when_the_previous_running_run_was_abandoned():
+    """Skip-on-overlap must not be a permanent lock (docs/adr/0032). A RUNNING run
+    left behind by a killed worker is closed FAILED and this run goes ahead,
+    where the test above shows a genuinely live one still blocks it."""
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    user_id, cv_id, scout_id, run_id = await _seed(
+        session_factory,
+        target_site_keys=["FRANCE_TRAVAIL"],
+    )
+    abandoned_run_id = f"scout-run-{uuid.uuid4()}"
+    async with session_factory() as session:
+        session.add(
+            ScoutRun(
+                id=abandoned_run_id,
+                scoutId=scout_id,
+                status=Scoutrunstatus.RUNNING,
+                startedAt=_now() - timedelta(hours=2),
+            )
+        )
+        await session.commit()
+    fake_sqs = FakeSqs()
+    try:
+        async with session_factory() as session:
+            run = await dispatch_scout_run(session, run_id, sqs_client=fake_sqs)
+
+        assert run.status == Scoutrunstatus.COMPLETED
+        assert len(fake_sqs.messages) == 1
+
+        async with session_factory() as session:
+            abandoned = await session.get(ScoutRun, abandoned_run_id)
+            assert abandoned.status == Scoutrunstatus.FAILED
+            assert abandoned.finishedAt is not None
     finally:
         await _cleanup(session_factory, user_id=user_id, scout_id=scout_id)
         await engine.dispose()

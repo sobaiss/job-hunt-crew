@@ -479,6 +479,13 @@ model Analysis {
   errorMessage             String?
   stepFunctionExecutionArn String?
   requestedAt              DateTime       @default(now())
+  // Set by POST /v1/analyses/{id}/requeue when a stuck Analysis is re-driven
+  // in place (docs/adr/0032). Deliberately not `requestedAt`: that column is
+  // the daily/monthly quota clock (py_db/quota.py) and an admin filter, so
+  // rewriting it would silently spend a quota slot on work already paid for.
+  // It is also the staleness clock's most recent term, so a requeue restarts
+  // that clock and bounds re-clicking to once per stuck window.
+  requeuedAt               DateTime?
   startedAt                DateTime?
   completedAt              DateTime?
 
@@ -515,6 +522,10 @@ model PipelineEvent {
 
   @@index([analysisId])
   @@index([ingestionJobId])
+  // `max(createdAt)` is the pipeline-liveness probe behind the stuck-Analysis
+  // rule (py_db/stuck_analysis.py), run once per analyses read. This is the
+  // busiest table in the schema, so that probe needs an index to stay cheap.
+  @@index([createdAt])
 }
 
 enum ScoutStatus {

@@ -37,12 +37,18 @@ from py_db.models import (
 from py_db.application_stats import compute_application_stats, stats_window_since
 from py_db.filter_support import CONTRACT_TYPE_VALUES, filter_support_for
 from py_db.locations import resolve_location
+from py_db.pipeline_events import record_pipeline_event
 from py_db.quota import (
     analyses_requested_this_month,
     analyses_requested_today,
     generated_documents_created_today,
 )
 from py_db.quotas import active_scout_count, effective_quota, maybe_record_quota_alert
+from py_db.stuck_analysis import (
+    TERMINAL_ANALYSIS_STATUSES,
+    is_analysis_stuck,
+    latest_pipeline_activity,
+)
 from pydantic import BaseModel
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1184,8 +1190,16 @@ class AnalysisResponse(BaseModel):
     errorMessage: str | None
     stepFunctionExecutionArn: str | None
     requestedAt: datetime
+    requeuedAt: datetime | None
     startedAt: datetime | None
     completedAt: datetime | None
+    # Derived on read, never stored: this Analysis is non-terminal but nothing
+    # has advanced it for a while, so a worker/queue restart most likely
+    # orphaned it (`py_db.stuck_analysis`, docs/adr/0032). It is what makes the
+    # Web "Relancer l'analyse" affordance appear, and the same predicate gates
+    # `POST /analyses/{id}/requeue` — so the rule is defined once, server-side,
+    # rather than guessed again by the client.
+    stuck: bool
     jobOffer: JobOfferResponse
     cvVersion: CVVersionResponse
     ingestionJob: AnalysisIngestionJobRef | None
@@ -1214,7 +1228,13 @@ def _current_generated_document(
     )
 
 
-def _analysis_response(row: Analysis) -> AnalysisResponse:
+def _analysis_response(
+    row: Analysis, *, now: datetime, last_pipeline_activity: datetime | None
+) -> AnalysisResponse:
+    """Serialise one Analysis. `now` and `last_pipeline_activity` are passed in
+    rather than resolved here so a list of rows shares one clock and one
+    `latest_pipeline_activity` query instead of one per row.
+    """
     ingestion_job = row.IngestionJob_
     # `Application.analysisId` is unique (0 or 1 row per Analysis); the ORM
     # relationship is still a list since it's declared without `uselist=False`.
@@ -1235,8 +1255,17 @@ def _analysis_response(row: Analysis) -> AnalysisResponse:
         errorMessage=row.errorMessage,
         stepFunctionExecutionArn=row.stepFunctionExecutionArn,
         requestedAt=row.requestedAt,
+        requeuedAt=row.requeuedAt,
         startedAt=row.startedAt,
         completedAt=row.completedAt,
+        stuck=is_analysis_stuck(
+            row.status,
+            row.requestedAt,
+            row.requeuedAt,
+            row.startedAt,
+            now=now,
+            last_pipeline_activity=last_pipeline_activity,
+        ),
         jobOffer=_job_offer_response(row.JobOffer_),
         cvVersion=_cv_version_response(row.CVVersion_),
         ingestionJob=(
@@ -1281,7 +1310,11 @@ async def list_analyses(
     if ingestionJobId:
         stmt = stmt.where(Analysis.ingestionJobId == ingestionJobId)
     rows = (await session.scalars(stmt)).all()
-    return AnalysisListResponse(analyses=[_analysis_response(row) for row in rows])
+    now = _now()
+    activity = await latest_pipeline_activity(session)
+    return AnalysisListResponse(
+        analyses=[_analysis_response(row, now=now, last_pipeline_activity=activity) for row in rows]
+    )
 
 
 class QuotaUsage(BaseModel):
@@ -1463,6 +1496,92 @@ async def create_analysis(
     return CreateAnalysisResponse(analysisId=analysis.id)
 
 
+class RequeueAnalysisResponse(BaseModel):
+    status: str
+
+
+@router.post("/analyses/{analysis_id}/requeue", response_model=RequeueAnalysisResponse, status_code=202)
+async def requeue_analysis(
+    analysis_id: str,
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> RequeueAnalysisResponse:
+    """Re-drive a stuck Analysis in place (docs/adr/0032).
+
+    A worker or ElasticMQ restart drops the queued `analysis-intake` message and
+    leaves the row non-terminal forever, with nothing to pick it up again. This
+    puts the same row back at `PENDING` and re-enqueues it — it does not create a
+    new Analysis. Re-running a *terminal* Analysis stays `POST /analyses`
+    (docs/adr/0011): a brand-new row, quota charged, possibly against a different
+    CV. The two are different intentions and stay different verbs.
+
+    No quota is charged: the interruption is ours, and the work was already paid
+    for when the row was created. Abuse is bounded instead by the staleness gate
+    plus the `requeuedAt` stamp, which restarts the staleness clock — a row
+    cannot be requeued twice inside one stuck window.
+
+    Both 409s carry a machine-readable `detail.code` (the USER_BLOCKED shape), as
+    `POST /cv-versions/{id}/convert` does, so a client can tell them apart.
+    """
+    analysis = await session.get(Analysis, analysis_id)
+    if analysis is None or analysis.userId != user_id:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    if analysis.status in TERMINAL_ANALYSIS_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "ANALYSIS_ALREADY_TERMINAL",
+                "message": "This Analysis has finished; start a new one instead",
+            },
+        )
+
+    if not is_analysis_stuck(
+        analysis.status,
+        analysis.requestedAt,
+        analysis.requeuedAt,
+        analysis.startedAt,
+        now=_now(),
+        last_pipeline_activity=await latest_pipeline_activity(session),
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "ANALYSIS_NOT_STUCK",
+                "message": "This Analysis is still being processed",
+            },
+        )
+
+    analysis.status = Analysisstatus.PENDING
+    analysis.errorMessage = None
+    # Cleared so the staleness clock restarts from `requeuedAt` alone and the
+    # next run stamps a truthful crew-start time. `s3ResultKey` is left as-is:
+    # the crew run overwrites that object.
+    analysis.startedAt = None
+    analysis.requeuedAt = _now()
+    await session.commit()
+
+    await record_pipeline_event(
+        session,
+        stage="requeue",
+        status="STARTED",
+        analysis_id=analysis.id,
+        message="Requeued after being stuck non-terminal",
+    )
+
+    # Commit before enqueueing, like every other producer here. A send that
+    # fails after the commit leaves the row PENDING — which is now simply a
+    # stuck row again, requeueable once the threshold passes, rather than a dead
+    # end.
+    sqs = make_sqs_client()
+    sqs.send_message(
+        QueueUrl=ANALYSIS_INTAKE_QUEUE_URL,
+        MessageBody=json.dumps({"analysisId": analysis.id}),
+    )
+
+    return RequeueAnalysisResponse(status=analysis.status.value)
+
+
 class GetAnalysisResponse(BaseModel):
     analysis: AnalysisResponse
 
@@ -1488,7 +1607,11 @@ async def get_analysis(
     if analysis is None or analysis.userId != user_id:
         raise HTTPException(status_code=404, detail="Not found")
 
-    return GetAnalysisResponse(analysis=_analysis_response(analysis))
+    return GetAnalysisResponse(
+        analysis=_analysis_response(
+            analysis, now=_now(), last_pipeline_activity=await latest_pipeline_activity(session)
+        )
+    )
 
 
 # --- Scouts (issue #53, Scout slice 1) ---
@@ -1866,9 +1989,16 @@ async def list_scout_finds(
     ).all()
     relevant = [row for row in rows if (row.matchScore or 0) >= scout.matchThreshold]
     low_fit = [row for row in rows if (row.matchScore or 0) < scout.matchThreshold]
+    # Every row here is COMPLETED, so `stuck` is decided by `is_analysis_stuck`'s
+    # terminal-status short-circuit — no liveness query needed.
+    now = _now()
     return ScoutFindsResponse(
-        relevantFinds=[_analysis_response(row) for row in relevant],
-        lowFitFinds=[_analysis_response(row) for row in low_fit],
+        relevantFinds=[
+            _analysis_response(row, now=now, last_pipeline_activity=None) for row in relevant
+        ],
+        lowFitFinds=[
+            _analysis_response(row, now=now, last_pipeline_activity=None) for row in low_fit
+        ],
     )
 
 

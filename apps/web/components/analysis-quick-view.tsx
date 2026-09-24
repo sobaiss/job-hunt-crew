@@ -20,8 +20,10 @@ import {
 import {
   TERMINAL_ANALYSIS_STATUSES,
   useCreateAnalysis,
+  useRequeueAnalysis,
   type AnalysisDetail,
 } from "@/hooks/use-analyses";
+import { BffError } from "@/lib/bff-client";
 import { useCvVersions } from "@/hooks/use-cv-versions";
 import { useSetApplicationStatus } from "@/hooks/use-applications";
 import {
@@ -96,6 +98,7 @@ export function AnalysisQuickView({
   const queryClient = useQueryClient();
   const setApplicationStatus = useSetApplicationStatus();
   const relaunch = useCreateAnalysis();
+  const requeue = useRequeueAnalysis();
   const [relaunchConfirming, setRelaunchConfirming] = useState(false);
   const [relaunchCvVersionId, setRelaunchCvVersionId] = useState("");
 
@@ -297,6 +300,56 @@ export function AnalysisQuickView({
                 {setApplicationStatus.isError && (
                   <p role="alert" className="text-sm text-destructive">
                     {t("quickView.statusError")}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Why a FAILED Analysis failed was only ever visible on the full
+                detail page; the Quick view offered a relaunch with no reason
+                shown. It reads the same `errorMessage` that page does. */}
+            {analysis.status === "FAILED" && analysis.errorMessage && (
+              <p role="alert" className="text-sm text-destructive">
+                {analysis.errorMessage}
+              </p>
+            )}
+
+            {/* Orphaned by a worker/queue restart (docs/adr/0032): the row is
+                non-terminal but nothing is coming for it. Re-drives the same
+                Analysis — no new row, no quota — unlike the relaunch below. */}
+            {analysis.stuck && (
+              <div
+                role="alert"
+                className="flex flex-col items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive"
+              >
+                <p>{td("stuck")}</p>
+                {requeue.isSuccess ? (
+                  <p role="status">{td("requeueStarted")}</p>
+                ) : (
+                  <>
+                    <p className="text-muted">{td("requeueHint")}</p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={requeue.isPending}
+                      onClick={() => requeue.mutate(analysis.id)}
+                    >
+                      {requeue.isPending ? (
+                        <LoaderCircle className="animate-spin" aria-hidden="true" />
+                      ) : (
+                        <RotateCw aria-hidden="true" />
+                      )}
+                      {td("requeue")}
+                    </Button>
+                  </>
+                )}
+                {requeue.isError && (
+                  <p>
+                    {requeue.error instanceof BffError &&
+                    requeue.error.status === 409
+                      ? td("requeueNotStuck")
+                      : td("requeueError")}
                   </p>
                 )}
               </div>

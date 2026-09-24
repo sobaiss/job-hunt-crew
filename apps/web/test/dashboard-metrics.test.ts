@@ -44,6 +44,8 @@ function analysis(overrides: Partial<AnalysisSummary> = {}): AnalysisSummary {
     status: "COMPLETED",
     matchScore: 80,
     requestedAt: "2026-08-01T00:00:00.000Z",
+    requeuedAt: null,
+    stuck: false,
     cvVersionId: "cv1",
     ingestionJobId: null,
     scoutId: null,

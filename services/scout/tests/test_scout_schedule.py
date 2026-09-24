@@ -11,7 +11,14 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from py_db.models import CVVersion, Cvfiletype, Cvconversionstatus, Scout, ScoutRun, Scoutrunstatus, Scoutstatus, User
-from py_db.scout_schedule import DEFAULT_SCOUT_SCHEDULE_HOUR_UTC, is_scout_due, scout_schedule_hour_utc
+from py_db.scout_schedule import (
+    DEFAULT_SCOUT_RUN_STUCK_AFTER_MINUTES,
+    DEFAULT_SCOUT_SCHEDULE_HOUR_UTC,
+    is_scout_due,
+    is_scout_run_stale,
+    scout_run_stuck_after,
+    scout_schedule_hour_utc,
+)
 from py_db.session import make_engine, make_session_factory
 from sqlalchemy import select
 
@@ -252,6 +259,136 @@ async def test_run_scheduler_tick_does_not_re_enqueue_a_scout_that_already_ran_t
         this_scout_runs = await _scout_run_ids(session_factory, scout_id)
         assert this_scout_runs == set()
         assert not (this_scout_runs & set(run_ids))
+    finally:
+        await _cleanup(session_factory, user_id=user_id, scout_id=scout_id)
+        await engine.dispose()
+
+
+# --- is_scout_run_stale (docs/adr/0032) ---------------------------------------
+# A ScoutRun is only RUNNING while `dispatch_scout_run` fans out — DB writes and
+# SQS sends, no LLM — so a RUNNING run older than the threshold was abandoned by
+# a dead worker. It matters because both skip-on-overlap guards would otherwise
+# honour it forever and silence the Scout's schedule for good (docs/adr/0004).
+
+STALE_NOW = datetime(2026, 9, 11, 7, 0)
+
+
+def test_a_fresh_running_run_is_not_stale():
+    started = STALE_NOW - timedelta(minutes=5)
+    assert is_scout_run_stale(Scoutrunstatus.RUNNING, started, started, now=STALE_NOW) is False
+
+
+def test_a_long_running_run_is_stale():
+    started = STALE_NOW - timedelta(hours=2)
+    assert is_scout_run_stale(Scoutrunstatus.RUNNING, started, started, now=STALE_NOW) is True
+
+
+def test_created_at_is_the_fallback_clock():
+    """`startedAt` is stamped in the same commit as RUNNING, so it is normally
+    set; a row that somehow lacks it must still be recoverable."""
+    created = STALE_NOW - timedelta(hours=2)
+    assert is_scout_run_stale(Scoutrunstatus.RUNNING, None, created, now=STALE_NOW) is True
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        Scoutrunstatus.PENDING,
+        Scoutrunstatus.COMPLETED,
+        Scoutrunstatus.PARTIALLY_COMPLETED,
+        Scoutrunstatus.FAILED,
+    ],
+)
+def test_only_a_running_run_can_go_stale(status):
+    """PENDING in particular: it holds no overlap lock over the Scout, so an old
+    undispatched run is left alone rather than failed."""
+    old = STALE_NOW - timedelta(days=3)
+    assert is_scout_run_stale(status, old, old, now=STALE_NOW) is False
+
+
+def test_scout_run_stuck_after_reads_env(monkeypatch):
+    monkeypatch.setenv("SCOUT_RUN_STUCK_AFTER_MINUTES", "45")
+    assert scout_run_stuck_after() == timedelta(minutes=45)
+    monkeypatch.setenv("SCOUT_RUN_STUCK_AFTER_MINUTES", "not-a-number")
+    assert scout_run_stuck_after() == timedelta(minutes=DEFAULT_SCOUT_RUN_STUCK_AFTER_MINUTES)
+    monkeypatch.setenv("SCOUT_RUN_STUCK_AFTER_MINUTES", "0")
+    assert scout_run_stuck_after() == timedelta(minutes=DEFAULT_SCOUT_RUN_STUCK_AFTER_MINUTES)
+
+
+@pytest.mark.asyncio
+async def test_run_scheduler_tick_closes_an_abandoned_run_and_enqueues_the_scout():
+    """The recovery the user's incident needs: a worker killed mid-fan-out left a
+    RUNNING run behind, which without this would block the Scout permanently.
+    The run is closed FAILED and the Scout runs again on the same tick."""
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    now = datetime(2026, 9, 11, 7, 0)
+    async with session_factory() as session:
+        user_id, cv_id, scout_id = await _make_scout(
+            session, status=Scoutstatus.ACTIVE, last_run_at=None
+        )
+        abandoned_run_id = f"run-{uuid.uuid4()}"
+        session.add(
+            ScoutRun(
+                id=abandoned_run_id,
+                scoutId=scout_id,
+                status=Scoutrunstatus.RUNNING,
+                startedAt=now - timedelta(hours=2),
+            )
+        )
+        await session.commit()
+    fake_sqs = FakeSqs()
+    try:
+        async with session_factory() as session:
+            run_ids = await run_scheduler_tick(session, sqs_client=fake_sqs, now=now)
+
+        assert len(run_ids) == 1, "the Scout is no longer blocked"
+        assert abandoned_run_id not in run_ids
+        assert any(body.get("scoutRunId") == run_ids[0] for _, body in fake_sqs.messages)
+
+        async with session_factory() as session:
+            abandoned = await session.get(ScoutRun, abandoned_run_id)
+            assert abandoned.status == Scoutrunstatus.FAILED
+            assert abandoned.finishedAt == now
+            assert "interrupted" in abandoned.errorMessage
+    finally:
+        await _cleanup(session_factory, user_id=user_id, scout_id=scout_id)
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_run_scheduler_tick_still_honours_a_genuinely_running_run():
+    """The guard is not weakened: a run that started moments ago still blocks the
+    Scout, and is left untouched."""
+    engine = make_engine()
+    session_factory = make_session_factory(engine)
+    now = datetime(2026, 9, 11, 7, 0)
+    async with session_factory() as session:
+        user_id, cv_id, scout_id = await _make_scout(
+            session, status=Scoutstatus.ACTIVE, last_run_at=None
+        )
+        live_run_id = f"run-{uuid.uuid4()}"
+        session.add(
+            ScoutRun(
+                id=live_run_id,
+                scoutId=scout_id,
+                status=Scoutrunstatus.RUNNING,
+                startedAt=now - timedelta(minutes=2),
+            )
+        )
+        await session.commit()
+    fake_sqs = FakeSqs()
+    try:
+        async with session_factory() as session:
+            run_ids = await run_scheduler_tick(session, sqs_client=fake_sqs, now=now)
+
+        assert run_ids == []
+        assert fake_sqs.messages == []
+
+        async with session_factory() as session:
+            live = await session.get(ScoutRun, live_run_id)
+            assert live.status == Scoutrunstatus.RUNNING
+            assert live.errorMessage is None
     finally:
         await _cleanup(session_factory, user_id=user_id, scout_id=scout_id)
         await engine.dispose()

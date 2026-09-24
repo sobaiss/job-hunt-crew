@@ -61,6 +61,10 @@ function summary(overrides: Record<string, unknown> = {}) {
     status: "COMPLETED",
     matchScore: 87,
     requestedAt: "2026-08-01T00:00:00.000Z",
+    requeuedAt: null,
+    // Derived server-side (docs/adr/0032); `true` is what makes the
+    // "interrupted / run it again" block appear.
+    stuck: false,
     cvVersionId: "cv1",
     ingestionJobId: null,
     ingestionJob: null,
@@ -3449,5 +3453,203 @@ describe("AnalysisDetailPage", () => {
     expect(await screen.findByText("Applied")).toBeInTheDocument();
 
     openSpy.mockRestore();
+  });
+});
+
+// A worker or ElasticMQ restart orphans a non-terminal Analysis: the queued
+// message is gone, the row stays "Pending" forever and nothing is coming for it.
+// The server derives `stuck` (docs/adr/0032) and these cover the one repair the
+// UI offers — re-drive the same row, no new Analysis and no quota.
+describe("a stuck analysis", () => {
+  const STUCK_NOTE =
+    "This analysis looks interrupted: nothing has advanced it for a while, most likely because the service restarted.";
+
+  function stuckDetail(overrides: Record<string, unknown> = {}) {
+    return detail({
+      status: "PENDING",
+      stuck: true,
+      matchScore: null,
+      resultJSON: null,
+      ...overrides,
+    });
+  }
+
+  it("offers a requeue on the detail page and posts to the requeue endpoint", async () => {
+    const user = userEvent.setup();
+    let requeued = 0;
+    server.use(
+      http.get("/api/analyses/a1", () =>
+        HttpResponse.json({ analysis: stuckDetail() }),
+      ),
+      http.post("/api/analyses/a1/requeue", () => {
+        requeued += 1;
+        return HttpResponse.json({ status: "PENDING" }, { status: 202 });
+      }),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />);
+
+    expect(await screen.findByText(STUCK_NOTE)).toBeInTheDocument();
+    expect(
+      screen.getByText("It picks up where it left off, and costs you no quota."),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Run it again" }));
+
+    await waitFor(() => expect(requeued).toBe(1));
+    expect(
+      await screen.findByText(
+        "The analysis is back in the queue — this page updates on its own.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("does not also claim the analysis is still running", async () => {
+    // Both messages are true of a non-terminal row, and showing them together
+    // would contradict itself: "it updates on its own" next to "it is stuck".
+    server.use(
+      http.get("/api/analyses/a1", () =>
+        HttpResponse.json({ analysis: stuckDetail() }),
+      ),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />);
+
+    expect(await screen.findByText(STUCK_NOTE)).toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        "This analysis is still running — this page updates itself.",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("reports a 409 as 'still being processed' rather than a generic failure", async () => {
+    // The client offers the button from the server's own flag, but the server
+    // re-checks on the way in: between the read and the click the worker may
+    // have picked the row up after all.
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses/a1", () =>
+        HttpResponse.json({ analysis: stuckDetail() }),
+      ),
+      http.post("/api/analyses/a1/requeue", () =>
+        HttpResponse.json(
+          { detail: { code: "ANALYSIS_NOT_STUCK", message: "still processing" } },
+          { status: 409 },
+        ),
+      ),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />);
+    await screen.findByText(STUCK_NOTE);
+
+    await user.click(screen.getByRole("button", { name: "Run it again" }));
+
+    expect(
+      await screen.findByText(
+        "This analysis is in fact still being processed. Let it finish.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("reports any other failure as a retryable error", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses/a1", () =>
+        HttpResponse.json({ analysis: stuckDetail() }),
+      ),
+      http.post("/api/analyses/a1/requeue", () =>
+        HttpResponse.json({ error: "boom" }, { status: 500 }),
+      ),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />);
+    await screen.findByText(STUCK_NOTE);
+
+    await user.click(screen.getByRole("button", { name: "Run it again" }));
+
+    expect(
+      await screen.findByText(
+        "We couldn't restart this analysis. Please try again.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("leaves a healthy non-terminal analysis alone", async () => {
+    server.use(
+      http.get("/api/analyses/a1", () =>
+        HttpResponse.json({
+          analysis: stuckDetail({ stuck: false }),
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysisDetailPage />);
+
+    expect(
+      await screen.findByText(
+        "This analysis is still running — this page updates itself.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(STUCK_NOTE)).not.toBeInTheDocument();
+  });
+
+  it("offers the requeue from the Quick view too", async () => {
+    const user = userEvent.setup();
+    let requeued = 0;
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            stuckDetail({ jobOffer: { ...summary().jobOffer, title: "Stuck Offer" } }),
+          ],
+        }),
+      ),
+      http.post("/api/analyses/a1/requeue", () => {
+        requeued += 1;
+        return HttpResponse.json({ status: "PENDING" }, { status: 202 });
+      }),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+
+    await user.click(await screen.findByText("Stuck Offer"));
+
+    const sheet = await screen.findByRole("dialog");
+    expect(within(sheet).getByText(STUCK_NOTE)).toBeInTheDocument();
+
+    await user.click(within(sheet).getByRole("button", { name: "Run it again" }));
+
+    await waitFor(() => expect(requeued).toBe(1));
+  });
+
+  it("shows a failed analysis's reason in the Quick view, next to its relaunch", async () => {
+    // The reason was only ever rendered on the full detail page, so the Quick
+    // view offered a relaunch with no explanation of what went wrong.
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            detail({
+              status: "FAILED",
+              matchScore: null,
+              resultJSON: null,
+              errorMessage: "ExtractionError: the offer page had no description",
+              jobOffer: { ...summary().jobOffer, title: "Failed Offer" },
+            }),
+          ],
+        }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+
+    await user.click(await screen.findByText("Failed Offer"));
+
+    const sheet = await screen.findByRole("dialog");
+    expect(
+      within(sheet).getByText("ExtractionError: the offer page had no description"),
+    ).toBeInTheDocument();
   });
 });

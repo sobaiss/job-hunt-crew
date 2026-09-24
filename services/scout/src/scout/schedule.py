@@ -27,6 +27,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .sqs_client import SCOUT_INTAKE_QUEUE_URL, make_sqs_client
+from .stale_runs import close_stale_running_runs
 
 logger = get_logger(__name__)
 
@@ -35,17 +36,14 @@ def _now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-async def _has_running_run(session: AsyncSession, scout_id: str) -> bool:
-    stmt = select(ScoutRun.id).where(
-        ScoutRun.scoutId == scout_id, ScoutRun.status == Scoutrunstatus.RUNNING
-    )
-    return (await session.scalars(stmt)).first() is not None
-
-
 async def due_scouts(session: AsyncSession, *, now: datetime | None = None) -> list[Scout]:
     """Active Scouts due for their daily run (`is_scout_due`), excluding any
     whose latest run is still `RUNNING` (skip-on-overlap) — a Scout mid-run
     from a manual "Run now" or an earlier tick is not enqueued again.
+
+    A `RUNNING` run left behind by a killed worker is closed here rather than
+    honoured (`close_stale_running_runs`, docs/adr/0032): without that, one
+    abandoned run would silence its Scout's schedule for good.
     """
     now = now or _now()
     candidates = (
@@ -54,7 +52,7 @@ async def due_scouts(session: AsyncSession, *, now: datetime | None = None) -> l
     due = [s for s in candidates if is_scout_due(s.status, s.lastRunAt, now)]
     result: list[Scout] = []
     for scout in due:
-        if not await _has_running_run(session, scout.id):
+        if not await close_stale_running_runs(session, scout.id, now=now):
             result.append(scout)
     return result
 

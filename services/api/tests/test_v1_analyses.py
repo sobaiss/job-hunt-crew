@@ -1,7 +1,7 @@
 import asyncio
 import json
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -555,3 +555,216 @@ def test_list_and_get_analyses_expose_scout_id(user_id, job_offer_id, cv_version
             f"/v1/analyses/{scouted_id}", headers=_headers(user_id)
         ).json()["analysis"]
         assert detail["scoutId"] == "scout-xyz"
+
+
+# --- POST /v1/analyses/{id}/requeue (docs/adr/0032) ---
+# Re-drives a stuck Analysis in place instead of creating a new one: a worker or
+# ElasticMQ restart drops the queued message and leaves the row non-terminal
+# with nothing coming for it. The staleness rule itself is pinned by
+# test_stuck_analysis_helper.py; these cover the HTTP contract.
+
+
+async def _age_analysis(analysis_id: str, *, requested_minutes_ago: int, started: bool) -> None:
+    """Backdate an Analysis so the staleness rule sees it as abandoned, and put
+    it in the requested non-terminal shape. `started=True` is the mid-flight case
+    (RUNNING_CREW with a startedAt), `False` the queued case (PENDING)."""
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            analysis = await session.get(Analysis, analysis_id)
+            moment = _now() - timedelta(minutes=requested_minutes_ago)
+            analysis.requestedAt = moment
+            if started:
+                analysis.status = Analysisstatus.RUNNING_CREW
+                analysis.startedAt = moment
+            else:
+                analysis.status = Analysisstatus.PENDING
+                analysis.startedAt = None
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+
+async def _set_terminal(analysis_id: str, status: Analysisstatus) -> None:
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            analysis = await session.get(Analysis, analysis_id)
+            analysis.status = status
+            await session.commit()
+    finally:
+        await engine.dispose()
+
+
+async def _read_analysis(analysis_id: str) -> dict:
+    engine = make_engine()
+    try:
+        session_factory = make_session_factory(engine)
+        async with session_factory() as session:
+            row = await session.get(Analysis, analysis_id)
+            return {
+                "status": row.status,
+                "errorMessage": row.errorMessage,
+                "startedAt": row.startedAt,
+                "requeuedAt": row.requeuedAt,
+                "requestedAt": row.requestedAt,
+            }
+    finally:
+        await engine.dispose()
+
+
+def _create(client, user_id, job_offer_id, cv_version_id) -> str:
+    return client.post(
+        "/v1/analyses",
+        headers=_headers(user_id),
+        json={"jobOfferId": job_offer_id, "cvVersionId": cv_version_id},
+    ).json()["analysisId"]
+
+
+def test_requeue_returns_404_for_another_users_analysis(user_id, job_offer_id, cv_version_id):
+    """User-scoped like every other analyses route: another user's row is a 404,
+    never a 403."""
+    other_user_id = asyncio.run(_create_user())
+    try:
+        with TestClient(app) as client:
+            analysis_id = _create(client, user_id, job_offer_id, cv_version_id)
+            asyncio.run(_age_analysis(analysis_id, requested_minutes_ago=180, started=False))
+
+            response = client.post(
+                f"/v1/analyses/{analysis_id}/requeue", headers=_headers(other_user_id)
+            )
+        assert response.status_code == 404
+    finally:
+        asyncio.run(_delete_user(other_user_id))
+
+
+@pytest.mark.parametrize("status", [Analysisstatus.COMPLETED, Analysisstatus.FAILED])
+def test_requeue_refuses_a_terminal_analysis(status, user_id, job_offer_id, cv_version_id):
+    """Re-running a finished Analysis is `POST /v1/analyses` (docs/adr/0011): a
+    new row, quota charged. Requeue is only for rows that never finished."""
+    with TestClient(app) as client:
+        analysis_id = _create(client, user_id, job_offer_id, cv_version_id)
+        asyncio.run(_set_terminal(analysis_id, status))
+
+        response = client.post(f"/v1/analyses/{analysis_id}/requeue", headers=_headers(user_id))
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "ANALYSIS_ALREADY_TERMINAL"
+
+
+def test_requeue_refuses_an_analysis_that_is_still_being_processed(
+    user_id, job_offer_id, cv_version_id
+):
+    """The row was created moments ago, so nothing is wrong with it. The client
+    may offer the button optimistically; the server is the authority."""
+    with TestClient(app) as client:
+        analysis_id = _create(client, user_id, job_offer_id, cv_version_id)
+
+        response = client.post(f"/v1/analyses/{analysis_id}/requeue", headers=_headers(user_id))
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "ANALYSIS_NOT_STUCK"
+
+
+def test_requeue_resets_the_same_row_and_enqueues_it(user_id, job_offer_id, cv_version_id):
+    """The whole point: one row, put back at PENDING and re-enqueued — not a
+    second Analysis."""
+    with TestClient(app) as client:
+        analysis_id = _create(client, user_id, job_offer_id, cv_version_id)
+        asyncio.run(_age_analysis(analysis_id, requested_minutes_ago=180, started=True))
+        _purge_queue()
+
+        response = client.post(f"/v1/analyses/{analysis_id}/requeue", headers=_headers(user_id))
+        assert response.status_code == 202
+        assert response.json()["status"] == "PENDING"
+
+        rows = client.get("/v1/analyses", headers=_headers(user_id)).json()["analyses"]
+        assert [row["id"] for row in rows] == [analysis_id], "no second Analysis was created"
+
+    row = asyncio.run(_read_analysis(analysis_id))
+    assert row["status"] == Analysisstatus.PENDING
+    assert row["errorMessage"] is None
+    assert row["startedAt"] is None, "cleared so the next run stamps a truthful crew start"
+    assert row["requeuedAt"] is not None
+
+    sqs = make_sqs_client()
+    received = sqs.receive_message(
+        QueueUrl=ANALYSIS_INTAKE_QUEUE_URL, MaxNumberOfMessages=10, WaitTimeSeconds=2
+    )
+    messages = received.get("Messages", [])
+    assert len(messages) == 1
+    assert json.loads(messages[0]["Body"]) == {"analysisId": analysis_id}
+
+
+def test_requeue_does_not_spend_a_quota_slot(analyses_daily_cap, user_id, job_offer_id, cv_version_id):
+    """The interruption is ours, and the work was already charged when the row
+    was created. With the daily cap at 1, the single analysis is requeueable even
+    though a `POST /v1/analyses` would now be refused.
+
+    Guards `requestedAt` specifically: that column is the quota clock
+    (py_db/quota.py), which is why requeue stamps `requeuedAt` instead.
+    """
+    analyses_daily_cap(1)
+    with TestClient(app) as client:
+        analysis_id = _create(client, user_id, job_offer_id, cv_version_id)
+        asyncio.run(_age_analysis(analysis_id, requested_minutes_ago=180, started=True))
+        aged_requested_at = asyncio.run(_read_analysis(analysis_id))["requestedAt"]
+
+        assert (
+            client.post(
+                "/v1/analyses",
+                headers=_headers(user_id),
+                json={"jobOfferId": job_offer_id, "cvVersionId": cv_version_id},
+            ).status_code
+            == 429
+        ), "the cap is genuinely reached"
+
+        response = client.post(f"/v1/analyses/{analysis_id}/requeue", headers=_headers(user_id))
+    assert response.status_code == 202
+
+    after = asyncio.run(_read_analysis(analysis_id))
+    assert after["requestedAt"] == aged_requested_at, (
+        "requeue must not touch the quota clock; it stamps requeuedAt instead"
+    )
+    assert after["requeuedAt"] is not None
+
+
+def test_requeue_is_refused_twice_in_a_row(user_id, job_offer_id, cv_version_id):
+    """The `requeuedAt` stamp restarts the staleness clock, so a second click
+    right after the first is refused instead of queueing a duplicate run."""
+    with TestClient(app) as client:
+        analysis_id = _create(client, user_id, job_offer_id, cv_version_id)
+        asyncio.run(_age_analysis(analysis_id, requested_minutes_ago=180, started=True))
+
+        assert (
+            client.post(
+                f"/v1/analyses/{analysis_id}/requeue", headers=_headers(user_id)
+            ).status_code
+            == 202
+        )
+        second = client.post(f"/v1/analyses/{analysis_id}/requeue", headers=_headers(user_id))
+    assert second.status_code == 409
+    assert second.json()["detail"]["code"] == "ANALYSIS_NOT_STUCK"
+
+
+def test_list_and_get_analyses_expose_the_stuck_flag(user_id, job_offer_id, cv_version_id):
+    """The flag the Web reads to offer "Relancer l'analyse" — derived on read, so
+    both the list and the detail endpoint agree without the client re-deriving it
+    from timestamps."""
+    with TestClient(app) as client:
+        fresh_id = _create(client, user_id, job_offer_id, cv_version_id)
+        stuck_id = _create(client, user_id, job_offer_id, cv_version_id)
+        asyncio.run(_age_analysis(stuck_id, requested_minutes_ago=180, started=True))
+
+        rows = {
+            a["id"]: a
+            for a in client.get("/v1/analyses", headers=_headers(user_id)).json()["analyses"]
+        }
+        assert rows[stuck_id]["stuck"] is True
+        assert rows[fresh_id]["stuck"] is False
+
+        detail = client.get(f"/v1/analyses/{stuck_id}", headers=_headers(user_id)).json()[
+            "analysis"
+        ]
+        assert detail["stuck"] is True
+        assert detail["requeuedAt"] is None
