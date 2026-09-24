@@ -60,6 +60,7 @@ function scout(overrides: Record<string, unknown> = {}) {
     lastRunAt: null,
     createdAt: "2026-09-01T00:00:00.000Z",
     updatedAt: "2026-09-01T00:00:00.000Z",
+    relevantFindsCount: 0,
     ...overrides,
   };
 }
@@ -1246,6 +1247,54 @@ describe("Scout panel — relevant finds (issue #56)", () => {
 
     expect(await panel.findByText("No relevant finds yet.")).toBeInTheDocument();
   });
+
+  // The endpoint caps `relevantFinds` at the ten newest. The badge keeps
+  // showing the Scout's real count — the same number the table column shows —
+  // so a capped list doesn't read as the Scout having found fewer offers.
+  it("badges the Scout's full count and says so when the list is capped", async () => {
+    server.use(
+      http.get("/api/scouts", () =>
+        HttpResponse.json({ scouts: [scout({ relevantFindsCount: 43 })] }),
+      ),
+      http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
+      http.get("/api/scouts/scout-1/finds", () =>
+        HttpResponse.json({
+          relevantFinds: Array.from({ length: 10 }, (_, i) =>
+            find({
+              id: `a${i}`,
+              jobOffer: { id: `o${i}`, title: `Backend Engineer ${i}`, company: "Acme" },
+            }),
+          ),
+          lowFitFinds: [],
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    const panel = await openPanel(user);
+
+    expect(await panel.findByText("Backend Engineer 0")).toBeInTheDocument();
+    expect(panel.getByText("43")).toBeInTheDocument();
+    expect(
+      panel.getByText("The 10 most recent analyses out of 43."),
+    ).toBeInTheDocument();
+  });
+
+  it("leaves the note off when the list already holds every relevant find", async () => {
+    server.use(
+      http.get("/api/scouts", () =>
+        HttpResponse.json({ scouts: [scout({ relevantFindsCount: 1 })] }),
+      ),
+      http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
+      http.get("/api/scouts/scout-1/finds", () =>
+        HttpResponse.json({ relevantFinds: [find()], lowFitFinds: [] }),
+      ),
+    );
+    const user = userEvent.setup();
+    const panel = await openPanel(user);
+
+    expect(await panel.findByText("Backend Engineer")).toBeInTheDocument();
+    expect(panel.queryByText(/most recent analyses out of/)).not.toBeInTheDocument();
+  });
 });
 
 describe("Scout panel — scoped stats (issue #60)", () => {
@@ -1372,5 +1421,30 @@ describe("Scout panel — FilterSupport (issue #211)", () => {
     expect(panel.getByText("Keywords: python")).toBeInTheDocument();
     await waitFor(() => expect(siteConfigsRead).toBe(true));
     expect(panel.queryByRole("note")).not.toBeInTheDocument();
+  });
+
+  // The panel is mounted by the Scouts page from the first render, closed.
+  // The site catalogue only feeds the notice inside an open panel, so a plain
+  // visit to /scouts shouldn't pay for it.
+  it("doesn't fetch the site catalogue until a Scout is opened", async () => {
+    let siteConfigReads = 0;
+    server.use(
+      http.get("/api/scouts", () => HttpResponse.json({ scouts: [scout()] })),
+      http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
+      http.get("/api/site-configs", () => {
+        siteConfigReads += 1;
+        return HttpResponse.json({ siteConfigs: SUPPORT_SITE_CONFIGS });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<ScoutsPage />);
+
+    // The table is up and the page has settled — still no catalogue request.
+    expect(await screen.findByText("Senior Backend — Remote EU")).toBeInTheDocument();
+    expect(siteConfigReads).toBe(0);
+
+    await user.click(screen.getByText("Senior Backend — Remote EU"));
+    await screen.findByRole("dialog");
+    await waitFor(() => expect(siteConfigReads).toBe(1));
   });
 });

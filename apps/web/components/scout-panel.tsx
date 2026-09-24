@@ -136,7 +136,10 @@ export function ScoutPanel({
   // The same FilterSupport statement the Scout form shows, read from the
   // stored filters and the targeted sites (issue #211). Nothing is written
   // back: a key with no enabled SiteConfig simply carries no warning.
-  const siteConfigs = useSiteConfigs();
+  // Fetched only once a Scout is actually open — the panel is mounted by the
+  // Scouts page from the first render, and the catalogue is of no use to it
+  // while it's closed.
+  const siteConfigs = useSiteConfigs({ enabled: open && Boolean(scout) });
   const targetedSites = (siteConfigs.data ?? []).filter((site) =>
     scout?.targetSiteKeys.some((key) => key === site.siteKey),
   );
@@ -341,7 +344,10 @@ export function ScoutPanel({
                   />
                 </div>
 
-                <ScoutFinds scoutId={scout.id} />
+                <ScoutFinds
+                  scoutId={scout.id}
+                  totalCount={scout.relevantFindsCount}
+                />
 
                 <ScoutRunHistory scoutId={scout.id} />
               </div>

@@ -1,6 +1,6 @@
 import asyncio
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -86,7 +86,12 @@ def _make_scout(client: TestClient, user_id: str, cv_version_id: str, **override
 
 
 async def _seed_completed_analysis(
-    *, user_id: str, cv_version_id: str, scout_id: str, match_score: int
+    *,
+    user_id: str,
+    cv_version_id: str,
+    scout_id: str,
+    match_score: int,
+    completed_at: datetime | None = None,
 ) -> str:
     """Directly inserts a COMPLETED Analysis tagged with `scoutId`, as the
     ingestion fan-out does for a Scout run (issue #55) — there is no HTTP
@@ -114,7 +119,7 @@ async def _seed_completed_analysis(
                     scoutId=scout_id,
                     status=Analysisstatus.COMPLETED,
                     matchScore=match_score,
-                    completedAt=_now(),
+                    completedAt=completed_at or _now(),
                 )
             )
             await session.commit()
@@ -153,6 +158,41 @@ def test_finds_splits_by_threshold(user_id):
         # Each row is the same shape a manual analysis uses, so the web
         # client can open the identical gap report.
         assert body["relevantFinds"][0]["scoutId"] == scout_id
+
+
+def test_finds_returns_only_the_ten_most_recent_relevant_analyses(user_id):
+    """The panel reads the top of the list, so the endpoint ships the newest
+    ten rather than a long-running Scout's whole history. The low-fit list is
+    not capped — no client surfaces it, and its cap would be a separate call."""
+    with TestClient(app) as client:
+        cv = _make_cv_version(client, user_id)
+        scout_id = _make_scout(client, user_id, cv, matchThreshold=70)
+
+        base = _now()
+        # Seeded oldest-first, so the twelve newest are the last twelve here.
+        seeded = [
+            asyncio.run(
+                _seed_completed_analysis(
+                    user_id=user_id,
+                    cv_version_id=cv,
+                    scout_id=scout_id,
+                    match_score=80,
+                    completed_at=base - timedelta(hours=12 - i),
+                )
+            )
+            for i in range(12)
+        ]
+
+        response = client.get(f"/v1/scouts/{scout_id}/finds", headers=_headers(user_id))
+        assert response.status_code == 200
+        returned = [a["id"] for a in response.json()["relevantFinds"]]
+        # Newest first, and only ten of the twelve.
+        assert returned == list(reversed(seeded[2:]))
+
+        # The true total stays on the Scout itself, which is what the table
+        # column and the panel badge read.
+        single = client.get(f"/v1/scouts/{scout_id}", headers=_headers(user_id))
+        assert single.json()["scout"]["relevantFindsCount"] == 12
 
 
 def test_finds_is_user_scoped(user_id):
