@@ -78,4 +78,15 @@ rather than by a background sweeper; closing it on the way past also keeps
 the run history from showing an eternal "in progress". A `PENDING` run is
 never stale: it was created but never dispatched, and holds no lock over the
 Scout. See docs/adr/0032.
-_Avoid_: Stuck run (fine in prose, but "stuck" is the [API](../../services/api/CONTEXT.md) context's term for an Analysis, which is a different predicate), Timed-out run, Zombie run
+
+Three near-synonyms now live side by side and mean three different
+predicates, so the distinction is worth stating once: **stale** is a
+`ScoutRun` abandoned mid-fan-out (this entry, judged on age alone),
+**stuck** is a non-terminal `Analysis` nothing will advance
+([API](../api/CONTEXT.md)'s term, `is_analysis_stuck`), and **blocked** is
+the narrower subset of stuck that a Scout's Run state counts as broken
+rather than merely queued ([API](../api/CONTEXT.md), docs/adr/0033). A stale
+run does not make its Scout's Run state `BLOCKED`: it closes itself at the
+next guard, which is precisely why the interface can only explain it rather
+than offer a repair.
+_Avoid_: Stuck run, Blocked run (both belong to the [API](../api/CONTEXT.md) context and to different predicates — see above), Timed-out run, Zombie run

@@ -64,8 +64,9 @@ _Avoid_: Layout (too generic), navbar / header (it's a Sidebar now)
 The sidebar entry and `/scouts` area where a candidate creates and manages
 Scouts (defined in [API](../../services/api/CONTEXT.md)'s context) — a
 sortable, full-width table with Column visibility control (Label, Status,
-Base CV, Sites, Last run, Relevant finds; Archived Scouts hidden by default
-behind a "show archived" toggle, mirroring CV versions' superseded filter)
+Execution column, Base CV, Sites, Last run, Relevant finds; Archived Scouts
+hidden by default behind a "show archived" toggle, mirroring CV versions'
+superseded filter)
 and a create/edit form.
 Clicking a table row opens the Scout panel, which is the only place a
 Scout's config, run history, and Finds are shown — there is no separate
@@ -74,12 +75,70 @@ _Avoid_: Scouts (fine in prose for the entity itself; "Agents" is
 specifically the nav label and route area a candidate sees), Scout detail
 page (retired — see Scout panel)
 
+**Execution column**:
+The Scouts table's "Exécution" column — one badge per row carrying the API's
+Run state (see [API](../../services/api/CONTEXT.md)): **En cours** with how
+long it has been working, **Bloqué**, **Échec**, **Dégradé**, **À jour** as
+muted text rather than a coloured badge, and a plain `—` when the Scout has
+never run, since "Jamais exécuté" is already the adjacent Last-run column's
+answer. It sits immediately after Status, and the two are meant to be read
+together: lifecycle beside activity, so a paused Scout whose last run failed
+tells its whole story without a click. Never re-derives the state from
+timestamps here — the condition is read straight off `runState`, the
+duration computed from `runStateSince` at minute granularity on each poll
+(no ticking timer; the work lasts minutes, and scrolling seconds would be
+agitation, not information). Sorting uses an explicit severity rank — worst
+first: Bloqué, Échec, Dégradé, En cours, À jour, jamais exécuté — which is
+**not** the precedence order the API applies when several states hold at
+once; conflating the two would bury what the column exists to surface.
+Each badge carries a `Tooltip` with the full sentence and the remedy, the
+same primitive `TruncatedCell` already uses in this table: with three
+abnormal states and only one of them repairable by the candidate,
+explaining *is* the feature for the other two.
+_Avoid_: Status column (that is the `ACTIVE`/`PAUSED`/`ARCHIVED` one beside
+it — the whole point is that they are two columns), Health column, Progress
+column (no fraction is shown; see Scout panel for why)
+
+**Blocked-analyses repair**:
+The Scout panel's "Relancer les N analyses bloquées" action, shown in the
+panel header only while the Scout's Run state is `BLOCKED`. Fans the
+existing per-Analysis Requeue over `blockedAnalysisIds` via
+`useBulkRequeueAnalyses` — the same hook the Analyses-list bulk bar uses for
+Interrupted analysis — so no new endpoint, and no quota spent. It exists for
+exactly one of the three red states: a stale run closes itself at the next
+guard and a run that failed on a disabled site needs an Administrator, so
+for those two the panel explains and offers nothing (docs/adr/0033).
+_Avoid_: Relancer le Scout / Run again (that is "Lancer maintenant", which
+the one-hour cooldown may still be refusing), Reprendre (the Analyses list's
+own wording for the same repair over its own selection)
+
+**Run cooldown**:
+What "Lancer maintenant" reads while the API would refuse it — "Disponible
+dans 47 min", counted from the latest run's `createdAt`, the same clock
+`POST /v1/scouts/{id}/run` rate-limits on. The button therefore has three
+faces, not two: **En cours…** while the Run state is `IN_FLIGHT`, then the
+countdown until the hour is up, then itself. Before this, the button was
+disabled only for the few hundred milliseconds the `POST` took, so a
+candidate learned about the cooldown by clicking and reading a red 429 —
+which is the surplus click the whole Execution column exists to prevent. The
+`scouts.runs.rateLimited` message stays as the backstop for a stale screen,
+not as the way the rule is discovered.
+_Avoid_: Rate limit (the server's term for the same rule — fine in prose and
+in the API context, but the candidate-facing concept is the countdown),
+Throttle, Debounce
+
 **Scout panel**:
 The right-hand slide-over opened by clicking a Scouts-table row (~1152px on
 desktop, full-width on mobile): a sticky header carrying the label, status,
 and every action (Run now / Pause / Resume / Edit / Archive), then
 Configuration paired with Statistiques, then Résultats pertinents, then
-Historique des exécutions — each a `PanelSection`. Absorbs everything the
+Historique des exécutions — each a `PanelSection`. The header also carries
+the Run state badge and its duration beside the lifecycle status, and the
+Blocked-analyses repair when there is one; it deliberately shows **no**
+progress fraction, because `offersAnalysed / offersDiscovered` belongs to
+one run while the badge is scoped to the Scout, so the two could visibly
+disagree — the live per-run counters stay in Historique des exécutions,
+which already polls them (docs/adr/0033). Absorbs everything the
 former `/scouts/[id]` detail page showed, that route now being gone
 (docs/adr/0007, superseding docs/adr/0006's Quick-view shape), minus the
 "Patterns across your matches" panel and the "found — low fit" list, both
