@@ -37,6 +37,7 @@ import { useMediaQuery } from "@/hooks/use-media-query";
 import { useColumnVisibility } from "@/hooks/use-column-visibility";
 import { SortableHead } from "@/components/sortable-head";
 import { ColumnVisibilityMenu } from "@/components/column-visibility-menu";
+import { CheckboxFilterMenu } from "@/components/checkbox-filter-menu";
 import type { ColumnConfig } from "@/lib/column-visibility";
 import {
   ANALYSES_PAGE_SIZES,
@@ -513,24 +514,24 @@ function AnalysesTable() {
             </div>
 
             <div className="flex flex-col gap-1.5 lg:w-56">
-              <Label htmlFor="analyses-status">{t("controls.statusLabel")}</Label>
-              <select
+              <Label id="analyses-status-label" htmlFor="analyses-status">
+                {t("controls.statusLabel")}
+              </Label>
+              <CheckboxFilterMenu
                 id="analyses-status"
-                className={SELECT_CLASS}
-                value={state.status}
-                onChange={(event) =>
-                  updateState({
-                    status: event.target.value as AnalysesTableState["status"],
-                  })
+                labelId="analyses-status-label"
+                emptyLabel={t("controls.statusAll")}
+                values={ANALYSES_STATUS_FILTERS}
+                selected={state.status}
+                onChange={(status) => updateState({ status })}
+                valueLabel={(status) =>
+                  status === "FAILED"
+                    ? pipelineStatusLabel(status)
+                    : trackingStatusLabel(status)
                 }
-              >
-                <option value="all">{t("controls.statusAll")}</option>
-                {ANALYSES_STATUS_FILTERS.map((status) => (
-                  <option key={status} value={status}>
-                    {status === "FAILED" ? pipelineStatusLabel(status) : trackingStatusLabel(status)}
-                  </option>
-                ))}
-              </select>
+                countLabel={(count) => t("controls.statusCount", { count })}
+                clearLabel={t("controls.clearThisFilter")}
+              />
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -612,24 +613,20 @@ function AnalysesTable() {
               </div>
 
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="analyses-platform">{t("controls.platformLabel")}</Label>
-                <select
+                <Label id="analyses-platform-label" htmlFor="analyses-platform">
+                  {t("controls.platformLabel")}
+                </Label>
+                <CheckboxFilterMenu
                   id="analyses-platform"
-                  className={SELECT_CLASS}
-                  value={state.platform}
-                  onChange={(event) =>
-                    updateState({
-                      platform: event.target.value as AnalysesTableState["platform"],
-                    })
-                  }
-                >
-                  <option value="all">{t("controls.platformAll")}</option>
-                  {JOB_OFFER_SOURCE_SITES.map((site) => (
-                    <option key={site} value={site}>
-                      {sourceSiteLabel(site)}
-                    </option>
-                  ))}
-                </select>
+                  labelId="analyses-platform-label"
+                  emptyLabel={t("controls.platformAll")}
+                  values={JOB_OFFER_SOURCE_SITES}
+                  selected={state.platform}
+                  onChange={(platform) => updateState({ platform })}
+                  valueLabel={sourceSiteLabel}
+                  countLabel={(count) => t("controls.platformCount", { count })}
+                  clearLabel={t("controls.clearThisFilter")}
+                />
               </div>
 
               <div className="flex flex-col gap-1.5">

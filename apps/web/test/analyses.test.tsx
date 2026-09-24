@@ -147,6 +147,38 @@ async function openMoreFilters(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: /More filters/ }));
 }
 
+/** Status and Platform are checkbox menus, so choosing means opening the menu
+ *  and ticking. The trigger's accessible name is the filter's label followed
+ *  by its current value ("Status All statuses"); the trailing space in the
+ *  pattern is what keeps it apart from the "Platform" column's own sort
+ *  button, whose name is that word alone. */
+function filterTrigger(filter: "Status" | "Platform") {
+  return screen.getByRole("button", { name: new RegExp(`^${filter} .`) });
+}
+
+async function tickFilterValues(
+  user: ReturnType<typeof userEvent.setup>,
+  filter: "Status" | "Platform",
+  ...values: string[]
+) {
+  await user.click(filterTrigger(filter));
+  for (const value of values) {
+    await user.click(
+      await screen.findByRole("menuitemcheckbox", { name: value }),
+    );
+  }
+  await user.keyboard("{Escape}");
+}
+
+/** Empties one checkbox menu through its own "Clear all" item. */
+async function clearFilter(
+  user: ReturnType<typeof userEvent.setup>,
+  filter: "Status" | "Platform",
+) {
+  await user.click(filterTrigger(filter));
+  await user.click(await screen.findByRole("menuitem", { name: "Clear all" }));
+}
+
 describe("AnalysesDashboardPage", () => {
   beforeEach(() => {
     __setUrl("/analyses");
@@ -466,7 +498,7 @@ describe("AnalysesDashboardPage", () => {
     // The pipeline-only row is excluded from every specific Tracking status
     // filter, but stays visible under "All statuses" (the default).
     const user = userEvent.setup();
-    await user.selectOptions(screen.getByLabelText("Status"), "TO_APPLY");
+    await tickFilterValues(user, "Status", "To apply");
     expect(screen.queryByText("Still Running Offer")).not.toBeInTheDocument();
     expect(screen.getByText("To Apply Offer")).toBeInTheDocument();
   });
@@ -498,9 +530,118 @@ describe("AnalysesDashboardPage", () => {
 
     expect(screen.getByRole("cell", { name: "Failed" })).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText("Status"), "FAILED");
+    await tickFilterValues(user, "Status", "Failed");
     expect(screen.getByText("Failed Offer")).toBeInTheDocument();
     expect(screen.queryByText("Completed Offer")).not.toBeInTheDocument();
+  });
+
+  it("keeps several statuses at once, naming the selection on the trigger and writing them to one URL param", async () => {
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            summary({
+              id: "s1",
+              status: "FAILED",
+              matchScore: null,
+              jobOffer: { ...summary().jobOffer, id: "j1", title: "Failed Offer" },
+            }),
+            summary({
+              id: "s2",
+              status: "COMPLETED",
+              jobOffer: { ...summary().jobOffer, id: "j2", title: "To Apply Offer" },
+            }),
+            summary({
+              id: "s3",
+              status: "COMPLETED",
+              applicationStatus: "REJECTED",
+              jobOffer: { ...summary().jobOffer, id: "j3", title: "Rejected Offer" },
+            }),
+          ],
+        }),
+      ),
+    );
+
+    const user = userEvent.setup();
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Failed Offer");
+
+    // A single selection names itself; two report their count.
+    await tickFilterValues(user, "Status", "To apply");
+    expect(filterTrigger("Status")).toHaveAccessibleName("Status To apply");
+
+    await tickFilterValues(user, "Status", "Failed");
+    expect(filterTrigger("Status")).toHaveAccessibleName("Status 2 statuses");
+
+    expect(screen.getByText("To Apply Offer")).toBeInTheDocument();
+    expect(screen.getByText("Failed Offer")).toBeInTheDocument();
+    expect(screen.queryByText("Rejected Offer")).not.toBeInTheDocument();
+
+    await waitFor(() => {
+      const url = new URL(__getUrl(), "http://localhost");
+      expect(url.searchParams.get("status")).toBe("TO_APPLY,FAILED");
+    });
+
+    // Unticking one leaves the other in force, rather than clearing both.
+    await tickFilterValues(user, "Status", "Failed");
+    expect(filterTrigger("Status")).toHaveAccessibleName("Status To apply");
+    expect(screen.queryByText("Failed Offer")).not.toBeInTheDocument();
+    expect(screen.getByText("To Apply Offer")).toBeInTheDocument();
+  });
+
+  it("combines several platforms, counting the filter once on the 'More filters' toggle", async () => {
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({
+          analyses: [
+            summary({
+              id: "s1",
+              jobOffer: {
+                ...summary().jobOffer,
+                id: "j1",
+                title: "LinkedIn Offer",
+                sourceSite: "LINKEDIN",
+              },
+            }),
+            summary({
+              id: "s2",
+              jobOffer: {
+                ...summary().jobOffer,
+                id: "j2",
+                title: "HelloWork Offer",
+                sourceSite: "HELLOWORK",
+              },
+            }),
+            summary({
+              id: "s3",
+              jobOffer: {
+                ...summary().jobOffer,
+                id: "j3",
+                title: "Indeed Offer",
+                sourceSite: "INDEED",
+              },
+            }),
+          ],
+        }),
+      ),
+    );
+
+    const user = userEvent.setup();
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("LinkedIn Offer");
+
+    await openMoreFilters(user);
+    await tickFilterValues(user, "Platform", "LinkedIn", "HelloWork");
+
+    expect(screen.getByText("LinkedIn Offer")).toBeInTheDocument();
+    expect(screen.getByText("HelloWork Offer")).toBeInTheDocument();
+    expect(screen.queryByText("Indeed Offer")).not.toBeInTheDocument();
+
+    // Two values ticked, one filter narrowing: the toggle counts filters, so
+    // a closed panel never overstates what is hiding inside it.
+    expect(
+      screen.getByRole("button", { name: "More filters (1)" }),
+    ).toBeInTheDocument();
   });
 
   it("filters by the requestedAt range (issue #172)", async () => {
@@ -694,7 +835,7 @@ describe("AnalysesDashboardPage", () => {
 
     expect(await screen.findByText("Backend Engineer")).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText("Status"), "REJECTED");
+    await tickFilterValues(user, "Status", "Rejected");
     expect(screen.queryByText("Backend Engineer")).not.toBeInTheDocument();
     expect(screen.getByText("Frontend Developer")).toBeInTheDocument();
 
@@ -761,24 +902,26 @@ describe("AnalysesDashboardPage", () => {
 
     // Platform options include a correctly-translated HelloWork label, not a
     // raw enum value.
+    // The menu lists a correctly-translated HelloWork label, not a raw enum
+    // value.
+    await user.click(filterTrigger("Platform"));
     expect(
-      within(screen.getByLabelText("Platform")).getByRole("option", {
-        name: "HelloWork",
-      }),
+      await screen.findByRole("menuitemcheckbox", { name: "HelloWork" }),
     ).toBeInTheDocument();
+    await user.keyboard("{Escape}");
 
-    await user.selectOptions(screen.getByLabelText("Platform"), "HELLOWORK");
+    await tickFilterValues(user, "Platform", "HelloWork");
     expect(screen.queryByText("Backend Engineer")).not.toBeInTheDocument();
     expect(screen.queryByText("Frontend Developer")).not.toBeInTheDocument();
     expect(screen.getByText("Platform Engineer")).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText("Platform"), "all");
+    await clearFilter(user, "Platform");
     await user.type(screen.getByLabelText("Location"), "par");
     expect(screen.getByText("Backend Engineer")).toBeInTheDocument();
     expect(screen.getByText("Platform Engineer")).toBeInTheDocument();
     expect(screen.queryByText("Frontend Developer")).not.toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText("Platform"), "FRANCE_TRAVAIL");
+    await tickFilterValues(user, "Platform", "France Travail");
     expect(screen.getByText("Backend Engineer")).toBeInTheDocument();
     expect(screen.queryByText("Platform Engineer")).not.toBeInTheDocument();
 
@@ -827,10 +970,10 @@ describe("AnalysesDashboardPage", () => {
 
     expect(await screen.findByText("Frontend Developer")).toBeInTheDocument();
     expect(screen.queryByText("Backend Engineer")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Platform")).toHaveValue("LINKEDIN");
+    expect(filterTrigger("Platform")).toHaveAccessibleName("Platform LinkedIn");
     expect(screen.getByLabelText("Location")).toHaveValue("lyon");
 
-    await user.selectOptions(screen.getByLabelText("Platform"), "all");
+    await clearFilter(user, "Platform");
     await waitFor(() => {
       const url = new URL(__getUrl(), "http://localhost");
       expect(url.searchParams.has("platform")).toBe(false);
@@ -849,7 +992,7 @@ describe("AnalysesDashboardPage", () => {
     await screen.findByText("Backend Engineer");
 
     expect(screen.getByLabelText("Search")).toBeInTheDocument();
-    expect(screen.getByLabelText("Status")).toBeInTheDocument();
+    expect(filterTrigger("Status")).toBeInTheDocument();
     for (const label of [
       "Requested from",
       "Requested to",
@@ -890,7 +1033,7 @@ describe("AnalysesDashboardPage", () => {
     renderWithProviders(<AnalysesDashboardPage />);
     await screen.findByLabelText("Search");
 
-    expect(screen.getByLabelText("Platform")).toHaveValue("LINKEDIN");
+    expect(filterTrigger("Platform")).toHaveAccessibleName("Platform LinkedIn");
     expect(
       screen.getByRole("button", { name: "More filters (2)" }),
     ).toHaveAttribute("aria-expanded", "true");
@@ -1064,7 +1207,7 @@ describe("AnalysesDashboardPage", () => {
     expect(await screen.findByText("Frontend Developer")).toBeInTheDocument();
     expect(screen.queryByText("Backend Engineer")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Search")).toHaveValue("front");
-    expect(screen.getByLabelText("Status")).toHaveValue("REJECTED");
+    expect(filterTrigger("Status")).toHaveAccessibleName("Status Rejected");
   });
 
   it("writes filter changes back to the URL query string", async () => {
