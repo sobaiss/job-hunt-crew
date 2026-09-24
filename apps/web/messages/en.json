@@ -916,6 +916,8 @@
     "runs": {
       "runNow": "Run now",
       "running": "Starting…",
+      "working": "In progress…",
+      "availableIn": "Available in {minutes} min",
       "rateLimited": "This Scout ran within the last hour. Try again later.",
       "runError": "We couldn't start a run. Please try again.",
       "heading": "Run history",

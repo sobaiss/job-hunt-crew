@@ -217,17 +217,21 @@ export function useScoutRuns(scoutId: string) {
   });
 }
 
+/** The Run cooldown: how long after a run's `createdAt` the API refuses the
+ *  next "Run now" with a 429 — the default of `SCOUT_RUN_RATE_LIMIT_SECONDS`.
+ *  The screen counts down from the same clock; the 429 stays the backstop. */
+export const SCOUT_RUN_COOLDOWN_MS = 60 * 60_000;
+
 /** "Run now": enqueues a ScoutRun. Rate-limited to once per hour per Scout (429). */
 export function useRunScout(scoutId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => bff.post<{ scoutRun: ScoutRun }>(`/scouts/${scoutId}/run`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: [...SCOUTS_KEY, scoutId, "runs"],
-      });
-      queryClient.invalidateQueries({ queryKey: [...SCOUTS_KEY, scoutId] });
-    },
+    // The whole Scouts tree, list included: the new run makes the Run state
+    // IN_FLIGHT, and the button's working face reads it from the list.
+    // Awaited, so the mutation stays pending until the list has caught up
+    // and the button goes straight from "Starting…" to working.
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: SCOUTS_KEY }),
   });
 }
 

@@ -1738,6 +1738,181 @@ describe("Scout panel — Run state and the Blocked-analyses repair (issue #227)
   });
 });
 
+describe("Scout panel — Run now's three faces (issue #229)", () => {
+  const minutesAgo = (minutes: number) =>
+    new Date(Date.now() - minutes * 60_000).toISOString();
+
+  function serve(
+    scoutOverrides: Record<string, unknown>,
+    scoutRuns: Record<string, unknown>[] = [],
+  ) {
+    const runPosts: unknown[] = [];
+    server.use(
+      http.get("/api/scouts", () =>
+        HttpResponse.json({ scouts: [scout(scoutOverrides)] }),
+      ),
+      http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
+      http.get("/api/scouts/scout-1/runs", () => HttpResponse.json({ scoutRuns })),
+      http.post("/api/scouts/scout-1/run", () => {
+        runPosts.push(true);
+        return HttpResponse.json(
+          { scoutRun: panelRun({ status: "PENDING" }) },
+          { status: 201 },
+        );
+      }),
+    );
+    return runPosts;
+  }
+
+  it("reads as working and cannot be clicked while the Scout is in flight", async () => {
+    // Even with the latest run created over an hour ago: the work, not the
+    // clock, decides this face.
+    serve({ runState: "IN_FLIGHT", runStateSince: minutesAgo(75) }, [
+      panelRun({ status: "COMPLETED", createdAt: minutesAgo(75) }),
+    ]);
+    const user = userEvent.setup();
+    const panel = await openPanel(user);
+
+    const button = await panel.findByRole("button", { name: "In progress…" });
+    expect(button).toBeDisabled();
+    expect(panel.queryByRole("button", { name: "Run now" })).toBeNull();
+  });
+
+  it("keeps the working face once the request is done, for as long as the Scout works", async () => {
+    let posted = false;
+    let listCalls = 0;
+    server.use(
+      http.get("/api/scouts", () => {
+        listCalls += 1;
+        return HttpResponse.json({
+          scouts: [
+            posted
+              ? scout({ runState: "IN_FLIGHT", runStateSince: minutesAgo(0) })
+              : scout(),
+          ],
+        });
+      }),
+      http.get("/api/cv-versions", () => HttpResponse.json({ cvVersions: [cv()] })),
+      http.get("/api/scouts/scout-1/runs", () =>
+        HttpResponse.json({
+          scoutRuns: posted
+            ? [panelRun({ status: "PENDING", createdAt: minutesAgo(0) })]
+            : [],
+        }),
+      ),
+      http.post("/api/scouts/scout-1/run", () => {
+        posted = true;
+        return HttpResponse.json(
+          { scoutRun: panelRun({ status: "PENDING" }) },
+          { status: 201 },
+        );
+      }),
+    );
+    const user = userEvent.setup();
+    const panel = await openPanel(user);
+    const callsBefore = listCalls;
+
+    await user.click(await panel.findByRole("button", { name: "Run now" }));
+
+    // The list is refetched on success, so the badge and the button pick up
+    // IN_FLIGHT without waiting for a poll — and then stay there.
+    const working = await panel.findByRole("button", { name: "In progress…" });
+    expect(working).toBeDisabled();
+    expect(listCalls).toBeGreaterThan(callsBefore);
+    expect(panel.queryByRole("button", { name: /Available in/ })).toBeNull();
+  });
+
+  it("counts down from the latest run's creation once the work is done", async () => {
+    serve({ runState: "OK", lastRunAt: minutesAgo(2) }, [
+      panelRun({ status: "COMPLETED", createdAt: minutesAgo(13) }),
+      panelRun({ id: "run-0", status: "COMPLETED", createdAt: minutesAgo(200) }),
+    ]);
+    const user = userEvent.setup();
+    const panel = await openPanel(user);
+
+    const button = await panel.findByRole("button", { name: "Available in 47 min" });
+    expect(button).toBeDisabled();
+    expect(panel.queryByRole("button", { name: "Run now" })).toBeNull();
+  });
+
+  it("uses the run's creation, not the Scout's last-run timestamp", async () => {
+    // The worker stamps lastRunAt separately: here it is ninety minutes old
+    // while the run the endpoint rate-limits on was created twenty ago.
+    serve({ runState: "FAILED", lastRunAt: minutesAgo(90) }, [
+      panelRun({ status: "FAILED", createdAt: minutesAgo(20) }),
+    ]);
+    const user = userEvent.setup();
+    const panel = await openPanel(user);
+
+    expect(
+      await panel.findByRole("button", { name: "Available in 40 min" }),
+    ).toBeDisabled();
+  });
+
+  it("offers Run now again once the hour is up, and starts a run", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const runPosts = serve({ runState: "OK", lastRunAt: minutesAgo(59) }, [
+        panelRun({ status: "COMPLETED", createdAt: minutesAgo(59.5) }),
+      ]);
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const panel = await openPanel(user);
+
+      expect(
+        await panel.findByRole("button", { name: "Available in 1 min" }),
+      ).toBeDisabled();
+
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      const runNow = await panel.findByRole("button", { name: "Run now" });
+      expect(runNow).toBeEnabled();
+      await user.click(runNow);
+      await waitFor(() => expect(runPosts).toHaveLength(1));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reads as itself for a Scout whose latest run is over an hour old", async () => {
+    serve({ runState: "OK", lastRunAt: minutesAgo(61) }, [
+      panelRun({ status: "COMPLETED", createdAt: minutesAgo(61) }),
+    ]);
+    const user = userEvent.setup();
+    const panel = await openPanel(user);
+
+    await waitFor(() =>
+      expect(panel.getByRole("button", { name: "Run now" })).toBeEnabled(),
+    );
+    expect(panel.queryByRole("button", { name: /Available in/ })).toBeNull();
+  });
+
+  it("still shows the rate-limit error when a stale screen gets a refused click through", async () => {
+    // The screen believes the hour is up (its runs are stale); the server
+    // knows better, and its 429 remains the backstop.
+    serve({ runState: "OK", lastRunAt: minutesAgo(61) }, [
+      panelRun({ status: "COMPLETED", createdAt: minutesAgo(61) }),
+    ]);
+    server.use(
+      http.post("/api/scouts/scout-1/run", () =>
+        HttpResponse.json(
+          { error: "This Scout ran within the last hour. Try again later." },
+          { status: 429 },
+        ),
+      ),
+    );
+    const user = userEvent.setup();
+    const panel = await openPanel(user);
+
+    const runNow = await panel.findByRole("button", { name: "Run now" });
+    await waitFor(() => expect(runNow).toBeEnabled());
+    await user.click(runNow);
+
+    expect(await panel.findByRole("alert")).toHaveTextContent(
+      "This Scout ran within the last hour.",
+    );
+  });
+});
+
 describe("Scout panel — relevant finds (issue #56)", () => {
   function find(overrides: Record<string, unknown> = {}) {
     return {

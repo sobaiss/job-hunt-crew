@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode, type RefObject } from "react";
+import { useEffect, useState, type ReactNode, type RefObject } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useQueryClient } from "@tanstack/react-query";
@@ -8,6 +8,7 @@ import {
   Archive,
   ChartColumn,
   CircleAlert,
+  Hourglass,
   LoaderCircle,
   Pause,
   Pencil,
@@ -17,7 +18,9 @@ import {
 } from "lucide-react";
 
 import {
+  SCOUT_RUN_COOLDOWN_MS,
   useRunScout,
+  useScoutRuns,
   useScoutStats,
   useUpdateScout,
   type Scout,
@@ -63,6 +66,12 @@ import {
 // fraction: the run counters belong to one run while the badge is scoped to
 // the Scout, so the two could visibly disagree. The live counters stay in the
 // run history below, which polls them.
+//
+// "Run now" has three faces (#229, the Run cooldown in apps/web/CONTEXT.md):
+// working while the Run state is IN_FLIGHT, then "Available in X min" until
+// an hour has passed since the latest run's `createdAt` — the clock the API
+// rate-limits on, not `lastRunAt`, which the worker stamps separately — then
+// itself. The 429 message stays as the backstop for a stale screen.
 
 function statusVariant(
   status: ScoutStatus,
@@ -149,6 +158,19 @@ export function ScoutPanel({
   const run = useRunScout(scout?.id ?? "");
   const update = useUpdateScout(scout?.id ?? "");
   const stats = useScoutStats(scout?.id ?? "");
+  const runs = useScoutRuns(scout?.id ?? "");
+
+  // The runs come newest first; the latest one's creation starts the clock.
+  const latestRunCreatedAt = runs.data?.[0]?.createdAt;
+  const cooldownEndsAt = latestRunCreatedAt
+    ? new Date(latestRunCreatedAt).getTime() + SCOUT_RUN_COOLDOWN_MS
+    : null;
+  const clock = useCooldownClock(cooldownEndsAt);
+  const cooldownMinutes =
+    cooldownEndsAt !== null && cooldownEndsAt > clock
+      ? Math.ceil((cooldownEndsAt - clock) / 60_000)
+      : null;
+  const working = scout?.runState === "IN_FLIGHT";
 
   // The Blocked-analyses repair: the Analyses list's bulk requeue, fanned
   // over the ids the server judged blocked. No new endpoint and no quota —
@@ -267,15 +289,25 @@ export function ScoutPanel({
                     <Button
                       type="button"
                       className="shadow-sm"
-                      disabled={run.isPending}
+                      disabled={
+                        run.isPending || working || cooldownMinutes !== null
+                      }
                       onClick={() => run.mutate()}
                     >
-                      {run.isPending ? (
+                      {run.isPending || working ? (
                         <LoaderCircle className="animate-spin" aria-hidden />
+                      ) : cooldownMinutes !== null ? (
+                        <Hourglass aria-hidden />
                       ) : (
                         <Play aria-hidden />
                       )}
-                      {run.isPending ? tRuns("running") : tRuns("runNow")}
+                      {working
+                        ? tRuns("working")
+                        : run.isPending
+                          ? tRuns("running")
+                          : cooldownMinutes !== null
+                            ? tRuns("availableIn", { minutes: cooldownMinutes })
+                            : tRuns("runNow")}
                     </Button>
                   )}
                   {scout.status === "ACTIVE" && (
@@ -442,4 +474,21 @@ export function ScoutPanel({
       </SheetContent>
     </Sheet>
   );
+}
+
+/** Now, for the Run cooldown — ticking only while a cooldown is running, so
+ *  the countdown moves and the button comes back on its own once the hour is
+ *  up, without the Scouts list having to poll for it. */
+function useCooldownClock(endsAt: number | null): number {
+  const [clock, setClock] = useState(() => Date.now());
+  const running = endsAt !== null && endsAt > clock;
+  useEffect(() => {
+    if (endsAt === null) return;
+    const tick = () => setClock(Date.now());
+    tick();
+    if (!running) return;
+    const id = setInterval(tick, 15_000);
+    return () => clearInterval(id);
+  }, [endsAt, running]);
+  return clock;
 }

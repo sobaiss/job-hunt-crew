@@ -916,6 +916,8 @@
     "runs": {
       "runNow": "Lancer maintenant",
       "running": "Démarrage…",
+      "working": "En cours…",
+      "availableIn": "Disponible dans {minutes} min",
       "rateLimited": "Cet agent a été lancé il y a moins d'une heure. Réessayez plus tard.",
       "runError": "Impossible de lancer une exécution. Veuillez réessayer.",
       "heading": "Historique des exécutions",
