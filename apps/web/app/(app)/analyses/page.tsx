@@ -11,7 +11,6 @@ import {
   ChevronRight,
   ExternalLink,
   FileDown,
-  ListChecks,
   LoaderCircle,
   RefreshCw,
   RotateCw,
@@ -22,9 +21,11 @@ import {
 
 import {
   TERMINAL_ANALYSIS_STATUSES,
-  useAnalyses,
+  useAnalysesCvLabels,
+  useAnalysesPage,
   useBulkCreateAnalyses,
   useBulkRequeueAnalyses,
+  type AnalysisDetail,
   type AnalysisSummary,
 } from "@/hooks/use-analyses";
 import { useBulkSetApplicationStatus } from "@/hooks/use-applications";
@@ -35,6 +36,7 @@ import {
   type GeneratedDocumentType,
 } from "@/hooks/use-generated-documents";
 import { useQuotas } from "@/hooks/use-quotas";
+import { useDebouncedField } from "@/hooks/use-debounced-field";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useColumnVisibility } from "@/hooks/use-column-visibility";
 import { SortableHead } from "@/components/sortable-head";
@@ -47,13 +49,9 @@ import {
   JOB_OFFER_SOURCE_SITES,
   activeAdvancedFilterCount,
   analysesTableStateToParams,
-  cvLabelsOf,
-  filterAnalyses,
   hasActiveFilters,
   pageCount,
-  paginate,
   parseAnalysesTableState,
-  sortAnalyses,
   type AnalysesPageSize,
   type AnalysesSortColumn,
   type AnalysesTableState,
@@ -164,7 +162,27 @@ function AnalysesTable() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const { data: analyses, isPending, isError, isFetching, refetch } = useAnalyses();
+  const state = useMemo(
+    () => parseAnalysesTableState(searchParams),
+    [searchParams],
+  );
+
+  const {
+    data: analysesPage,
+    isPending,
+    isError,
+    isFetching,
+    refetch,
+  } = useAnalysesPage(state);
+  const rows = useMemo(() => analysesPage?.analyses ?? [], [analysesPage]);
+  const total = analysesPage?.total ?? 0;
+  const totalPages = pageCount(total, state.pageSize);
+  // The page the server actually served, which it clamps to the last one when
+  // asked for a page a filter or a deletion has outlived. Reading it back from
+  // the response rather than clamping here keeps one authority over what "page
+  // 9 of 2" means, and costs no extra request.
+  const page = analysesPage?.page ?? state.page;
+  const { data: cvLabels } = useAnalysesCvLabels();
   const queryClient = useQueryClient();
   const bulkSetApplicationStatus = useBulkSetApplicationStatus();
   const bulkCreateGeneratedDocuments = useBulkCreateGeneratedDocuments();
@@ -203,20 +221,22 @@ function AnalysesTable() {
   // `handleBulkStatusChange`/`handleConfirmBulkGenerate` do.
   const [bulkRelaunchConfirming, setBulkRelaunchConfirming] = useState(false);
 
-  // Which Analysis's Quick view (#65) is open, if any — looked up by id
-  // rather than held as the row's data so it always reflects the latest
-  // fetch instead of a stale snapshot taken at click time.
+  // Whether the Quick view (#65) is open, and which Analysis it is on — an id
+  // rather than the row's data, so it always reflects the latest fetch instead
+  // of a stale snapshot taken at click time. The two are separate because the
+  // panel can be open on a rank whose id is not known yet: see the navigation
+  // section below.
+  const [quickViewOpen, setQuickViewOpen] = useState(false);
   const [quickViewId, setQuickViewId] = useState<string | null>(null);
   const quickViewTriggerRef = useRef<HTMLElement | null>(null);
-  const quickViewAnalysis = useMemo(
-    () => analyses?.find((a) => a.id === quickViewId) ?? null,
-    [analyses, quickViewId],
-  );
-
-  const state = useMemo(
-    () => parseAnalysesTableState(searchParams),
-    [searchParams],
-  );
+  // The row the panel was opened or stepped onto, kept so it can go on being
+  // shown after it leaves the loaded page — the common case being a Tracking
+  // status changed from the panel itself while that status is being filtered
+  // on. It survived for free while every Analysis was in memory; now the page
+  // is all there is, and taking the panel away would punish the action the
+  // candidate just took. Written only by the events that hold the row, so no
+  // effect has to chase the list.
+  const [openedAnalysis, setOpenedAnalysis] = useState<AnalysisDetail | null>(null);
 
   const columnVisibility = useColumnVisibility(
     COLUMN_VISIBILITY_STORAGE_KEY,
@@ -231,25 +251,16 @@ function AnalysesTable() {
   const advancedFilterCount = activeAdvancedFilterCount(state);
   const [filtersOpen, setFiltersOpen] = useState(() => advancedFilterCount > 0);
 
-  const cvLabels = useMemo(
-    () => (analyses ? cvLabelsOf(analyses) : []),
-    [analyses],
-  );
 
-  const filtered = useMemo(
-    () => (analyses ? filterAnalyses(analyses, state) : []),
-    [analyses, state],
-  );
-  const sorted = useMemo(
-    () => sortAnalyses(filtered, state.sort),
-    [filtered, state.sort],
-  );
-  const totalPages = pageCount(sorted.length, state.pageSize);
-  const page = Math.min(state.page, totalPages);
-  const rows = useMemo(
-    () => paginate(sorted, page, state.pageSize),
-    [sorted, page, state.pageSize],
-  );
+  // `updateState` patches whatever the table state is *when it runs*, not when
+  // it was created. The two debounced text filters commit from a timer, so the
+  // state they closed over can be several changes old by then: typing a search
+  // term and then ticking a platform used to end with the platform quietly
+  // dropped when the search landed on top of it.
+  const stateRef = useRef(state);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
   // Any change to a filter, sort or page size resets `page` to 1 — a stale
   // page number from before the change would otherwise show an empty or
@@ -257,25 +268,38 @@ function AnalysesTable() {
   const updateState = useCallback(
     (patch: Partial<AnalysesTableState>) => {
       const next: AnalysesTableState = {
-        ...state,
+        ...stateRef.current,
         ...patch,
         page: patch.page ?? 1,
       };
       const qs = analysesTableStateToParams(next).toString();
       router.replace(`${pathname}?${qs}`, { scroll: false });
-      // A selection tied to a search term, Tracking status filter or sort
-      // that's about to change is confusing to keep around (#67) — page size
-      // and the CV filter aren't in that list, so they leave it untouched.
-      if (patch.search !== undefined || patch.status !== undefined || patch.sort !== undefined) {
-        setSelectedIds(new Set());
-        setBulkError(null);
-        setBulkNotice(null);
-        setBulkGenerateConfirming(null);
-        setBulkGenerationDocumentIds([]);
-        setBulkRelaunchConfirming(false);
-      }
+      // The selection is the page's, so anything that changes which rows are
+      // on it empties the selection — including the page itself, which used
+      // to be the one change that left it alone, back when every row was in
+      // memory and a selection could span pages (docs/adr/0033).
+      setSelectedIds(new Set());
+      setBulkError(null);
+      setBulkNotice(null);
+      setBulkGenerateConfirming(null);
+      setBulkGenerationDocumentIds([]);
+      setBulkRelaunchConfirming(false);
     },
-    [state, router, pathname],
+    // No `state`: it is read through `stateRef` precisely so a patch applies
+    // to the newest one, and listing it here would rebuild this on every
+    // filter change for nothing.
+    [router, pathname],
+  );
+
+  // The two free-text filters commit on a pause rather than on every
+  // keystroke — see `useDebouncedField`.
+  const [searchDraft, setSearchDraft] = useDebouncedField(
+    state.search,
+    (search) => updateState({ search }),
+  );
+  const [locationDraft, setLocationDraft] = useDebouncedField(
+    state.location,
+    (location) => updateState({ location }),
   );
 
   // --- Quick view navigation ---
@@ -283,74 +307,100 @@ function AnalysesTable() {
   // stopping every 25 rows would reinstate the very "close the panel to see
   // another one" friction they exist to remove. Crossing a page boundary
   // flips the table behind the panel, so the list and the panel never
-  // disagree about where the candidate is.
-  const quickViewIndex = useMemo(
-    () =>
-      quickViewId === null ? -1 : sorted.findIndex((a) => a.id === quickViewId),
-    [sorted, quickViewId],
-  );
+  // disagree about where the candidate is — and, since the list became one
+  // page at a time (docs/adr/0033), fetches that page on the way.
+  //
+  // Every index here is a rank in the *whole* filtered list, not an offset
+  // into the loaded page; `firstRowIndex` converts between the two.
+  const firstRowIndex = (page - 1) * state.pageSize;
 
-  // The slot the panel occupied the last time its Analysis was still in the
-  // list. A status change made from the panel can drop it out of the active
-  // filter (marking a "À postuler" row "En cours" while that filter is on),
-  // and a relaunch switches to an Analysis that isn't in it yet — in both
-  // cases the panel deliberately keeps showing what the candidate just acted
-  // on, and the arrows resume from the slot it left. Only ever written by the
-  // two events that know the slot for certain — opening a row and stepping
-  // with the arrows — so no effect has to chase the list's own churn.
+  // The slot the panel occupies. It is what "suivant" resumes from when the
+  // Analysis itself has left the list, and what a page-crossing step resolves
+  // against once the new page lands. Only ever written by the two events that
+  // know the slot for certain — opening a row and stepping with the arrows.
   const [quickViewAnchor, setQuickViewAnchor] = useState(0);
 
-  const openQuickViewAt = useCallback(
-    (id: string, rowIndex: number, element: HTMLElement) => {
-      quickViewTriggerRef.current = element;
-      setQuickViewId(id);
-      setQuickViewAnchor((page - 1) * state.pageSize + rowIndex);
-    },
-    [page, state.pageSize],
-  );
+  // Which Analysis the panel shows, in the two ways it can be identified.
+  // Normally by id. But an arrow that crosses a page boundary knows only the
+  // rank it asked for — the row itself arrives a request later — so it clears
+  // the id and the panel resolves the rank against whatever page comes back.
+  const quickViewAnalysis =
+    (quickViewId === null
+      ? rows[quickViewAnchor - firstRowIndex]
+      : (rows.find((a) => a.id === quickViewId) ??
+        (openedAnalysis?.id === quickViewId ? openedAnalysis : undefined))) ?? null;
+
+  const quickViewIndex = quickViewAnalysis
+    ? (() => {
+        const rowIndex = rows.findIndex((a) => a.id === quickViewAnalysis.id);
+        return rowIndex === -1 ? -1 : firstRowIndex + rowIndex;
+      })()
+    : -1;
+
+  const openQuickViewAt = (
+    analysis: AnalysisDetail,
+    rowIndex: number,
+    element: HTMLElement,
+  ) => {
+    quickViewTriggerRef.current = element;
+    setQuickViewOpen(true);
+    setQuickViewId(analysis.id);
+    setOpenedAnalysis(analysis);
+    setQuickViewAnchor(firstRowIndex + rowIndex);
+  };
 
   // Dropping the panel's own Analysis shifts everything after it down one
   // slot, so the anchor already points at what "suivant" should show.
   const previousIndex =
     quickViewIndex >= 0 ? quickViewIndex - 1 : quickViewAnchor - 1;
   const nextIndex = quickViewIndex >= 0 ? quickViewIndex + 1 : quickViewAnchor;
-  const hasPreviousAnalysis = quickViewId !== null && previousIndex >= 0;
-  const hasNextAnalysis = quickViewId !== null && nextIndex < sorted.length;
+  const hasPreviousAnalysis = quickViewOpen && previousIndex >= 0;
+  const hasNextAnalysis = quickViewOpen && nextIndex < total;
 
-  const goToAnalysisAt = useCallback(
-    (index: number) => {
-      const target = sorted[index];
+  const goToAnalysisAt = (index: number) => {
+    if (index < 0 || index >= total) return;
+    setQuickViewAnchor(index);
+    const targetPage = Math.floor(index / state.pageSize) + 1;
+    if (targetPage === page) {
+      const target = rows[index - firstRowIndex];
       if (!target) return;
       setQuickViewId(target.id);
-      setQuickViewAnchor(index);
-      const targetPage = Math.floor(index / state.pageSize) + 1;
-      if (targetPage !== page) updateState({ page: targetPage });
-    },
-    [sorted, state.pageSize, page, updateState],
-  );
+      setOpenedAnalysis(target);
+      return;
+    }
+    // Off this page: ask for the one holding it, and let the panel resolve the
+    // rank when it lands. It stays open on the row it was showing meanwhile —
+    // it already renders a loading state, and blanking it mid-step would be
+    // worse than a beat of delay.
+    setQuickViewId(null);
+    updateState({ page: targetPage });
+  };
 
   // Radix hands focus back to whatever `quickViewTriggerRef` names when the
   // panel closes. Keep it on the row actually *shown*: after a few "suivant"
   // the row that opened the panel may be on another page and unmounted, and
   // focus would land nowhere. Depends on `rows` too, so it finds the row once
   // a page flip has rendered it.
+  const shownAnalysisId = quickViewAnalysis?.id ?? null;
   useEffect(() => {
-    if (quickViewId === null) return;
+    if (shownAnalysisId === null) return;
     const row = document.querySelector<HTMLElement>(
-      `[data-analysis-id="${quickViewId}"]`,
+      `[data-analysis-id="${shownAnalysisId}"]`,
     );
     if (row) quickViewTriggerRef.current = row;
-  }, [quickViewId, rows]);
+  }, [shownAnalysisId, rows]);
 
   const pageIds = useMemo(() => rows.map((a) => a.id), [rows]);
   const allPageSelected =
     pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
   const somePageSelected = pageIds.some((id) => selectedIds.has(id));
-  const allFilteredSelected =
-    filtered.length > 0 && filtered.every((a) => selectedIds.has(a.id));
+  // Only ever rows on screen: every bulk action needs the row itself, not just
+  // its id — which is terminal, which is stuck, which still needs a document,
+  // and the fields the CSV export writes — and off-page rows are no longer in
+  // memory to ask (docs/adr/0033).
   const selectedAnalyses = useMemo(
-    () => (analyses ?? []).filter((a) => selectedIds.has(a.id)),
-    [analyses, selectedIds],
+    () => rows.filter((a) => selectedIds.has(a.id)),
+    [rows, selectedIds],
   );
 
   const togglePageSelection = () => {
@@ -372,10 +422,6 @@ function AnalysesTable() {
       else next.add(id);
       return next;
     });
-  };
-
-  const selectAllFiltered = () => {
-    setSelectedIds(new Set(filtered.map((a) => a.id)));
   };
 
   const handleBulkStatusChange = (applicationStatus: (typeof TRACKING_STATUS_TRANSITIONS)[number]["applicationStatus"]) => {
@@ -565,7 +611,13 @@ function AnalysesTable() {
     });
   };
 
-  const hasAnalyses = Boolean(analyses && analyses.length > 0);
+  // A filter that matches nothing now returns an empty page, which used to be
+  // indistinguishable from "this candidate has no analyses" — and which hid
+  // the filter panel, and with it the only way back out (docs/adr/0033). The
+  // filters are shown whenever one is set, whatever came back.
+  const filtering = hasActiveFilters(state);
+  const showFilters = filtering || total > 0;
+  const showEmptyState = !isPending && !isError && total === 0;
 
   // Below ~640px the table becomes cramped even with every collapsible
   // column dropped (#69), so it's replaced outright by a stacked card per
@@ -620,11 +672,11 @@ function AnalysesTable() {
         </p>
       )}
 
-      {analyses && analyses.length === 0 && (
+      {showEmptyState && !filtering && (
         <p className="text-sm text-muted">{t("empty")}</p>
       )}
 
-      {hasAnalyses && (
+      {showFilters && (
         <div className="flex flex-col gap-3 rounded-md border border-border bg-panel/40 p-3">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
             <div className="flex flex-col gap-1.5 lg:flex-1">
@@ -633,10 +685,8 @@ function AnalysesTable() {
                 id="analyses-search"
                 type="search"
                 placeholder={t("controls.searchPlaceholder")}
-                value={state.search}
-                onChange={(event) =>
-                  updateState({ search: event.target.value })
-                }
+                value={searchDraft}
+                onChange={(event) => setSearchDraft(event.target.value)}
               />
             </div>
 
@@ -731,7 +781,15 @@ function AnalysesTable() {
                   onChange={(event) => updateState({ cvLabel: event.target.value })}
                 >
                   <option value="all">{t("controls.cvAll")}</option>
-                  {cvLabels.map((label) => (
+                  {/* A label the URL carries but the list no longer offers —
+                      the last analysis using that CV was deleted, say — would
+                      leave the select showing a value with no option and read
+                      as "Tous les CV" while still narrowing the table. */}
+                  {state.cvLabel !== "all" &&
+                    !(cvLabels ?? []).includes(state.cvLabel) && (
+                      <option value={state.cvLabel}>{state.cvLabel}</option>
+                    )}
+                  {(cvLabels ?? []).map((label) => (
                     <option key={label} value={label}>
                       {label}
                     </option>
@@ -762,10 +820,8 @@ function AnalysesTable() {
                   id="analyses-location"
                   type="search"
                   placeholder={t("controls.locationPlaceholder")}
-                  value={state.location}
-                  onChange={(event) =>
-                    updateState({ location: event.target.value })
-                  }
+                  value={locationDraft}
+                  onChange={(event) => setLocationDraft(event.target.value)}
                 />
               </div>
             </div>
@@ -773,7 +829,7 @@ function AnalysesTable() {
         </div>
       )}
 
-      {hasAnalyses && sorted.length === 0 && (
+      {showEmptyState && filtering && (
         <p className="text-sm text-muted">{t("noMatches")}</p>
       )}
 
@@ -782,12 +838,6 @@ function AnalysesTable() {
           <span className="text-sm font-medium">
             {t("bulk.selectedCount", { count: selectedIds.size })}
           </span>
-          {!allFilteredSelected && (
-            <Button type="button" variant="link" size="sm" onClick={selectAllFiltered}>
-              <ListChecks aria-hidden="true" />
-              {t("bulk.extendAction", { total: filtered.length })}
-            </Button>
-          )}
           <Button
             type="button"
             variant="ghost"
@@ -1014,7 +1064,7 @@ function AnalysesTable() {
         </div>
       )}
 
-      {sorted.length > 0 && (
+      {rows.length > 0 && (
         <>
           {isCardLayout ? (
             <div className="flex flex-col gap-3">
@@ -1036,7 +1086,7 @@ function AnalysesTable() {
                   })}
                   onToggleSelect={() => toggleRowSelection(analysis.id)}
                   onOpenQuickView={(row) =>
-                    openQuickViewAt(analysis.id, rowIndex, row)
+                    openQuickViewAt(analysis, rowIndex, row)
                   }
                 />
               ))}
@@ -1097,7 +1147,7 @@ function AnalysesTable() {
                     })}
                     onToggleSelect={() => toggleRowSelection(analysis.id)}
                     onOpenQuickView={(row) =>
-                      openQuickViewAt(analysis.id, rowIndex, row)
+                      openQuickViewAt(analysis, rowIndex, row)
                     }
                   />
                 ))}
@@ -1159,22 +1209,23 @@ function AnalysesTable() {
 
       <AnalysisQuickView
         analysis={quickViewAnalysis}
-        // `quickViewId !== null` (not `quickViewAnalysis !== null`): right
-        // after a successful relaunch (#124) the Quick view switches to the
-        // new id before the invalidated list query has refetched it, so
-        // `quickViewAnalysis` is briefly null — checking `quickViewId` keeps
-        // the Sheet open through that gap instead of having Radix treat it
-        // as a close, mirroring the CV-versions panel's Replace flow.
-        open={quickViewId !== null}
+        // Its own state, not `quickViewAnalysis !== null`: right after a
+        // successful relaunch (#124), and for the beat after an arrow crosses
+        // a page boundary, the panel has no row to show yet — and Radix would
+        // read that as a close, mirroring the CV-versions panel's Replace flow.
+        open={quickViewOpen}
         onOpenChange={(open) => {
-          if (!open) setQuickViewId(null);
+          if (open) return;
+          setQuickViewOpen(false);
+          setQuickViewId(null);
+          setOpenedAnalysis(null);
         }}
         pipelineStatusLabel={pipelineStatusLabel}
         trackingStatusLabel={trackingStatusLabel}
         returnFocusRef={quickViewTriggerRef}
         onRelaunched={(newId) => setQuickViewId(newId)}
         position={quickViewIndex >= 0 ? quickViewIndex + 1 : null}
-        total={sorted.length}
+        total={total}
         hasPrevious={hasPreviousAnalysis}
         hasNext={hasNextAnalysis}
         onPrevious={() => goToAnalysisAt(previousIndex)}

@@ -1,15 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  analysesThisWeek,
-  bestScoreOffer,
-  computeStats,
   defaultCvLabel,
   newMatchesCount,
   onboardingSteps,
   scoreTrend,
 } from "@/lib/dashboard-metrics";
-import type { AnalysisSummary } from "@/hooks/use-analyses";
 import type { CvVersion } from "@/hooks/use-cv-versions";
 import type { Scout } from "@/hooks/use-scouts";
 
@@ -38,63 +34,6 @@ function scout(overrides: Partial<Scout> = {}): Scout {
   };
 }
 
-function analysis(overrides: Partial<AnalysisSummary> = {}): AnalysisSummary {
-  return {
-    id: "a1",
-    status: "COMPLETED",
-    matchScore: 80,
-    requestedAt: "2026-08-01T00:00:00.000Z",
-    requeuedAt: null,
-    stuck: false,
-    cvVersionId: "cv1",
-    ingestionJobId: null,
-    scoutId: null,
-    applicationStatus: null,
-    tailoredCvStatus: null,
-    coverLetterStatus: null,
-    ingestionJob: null,
-    jobOffer: {
-      id: "job1",
-      title: "Role",
-      company: "Co",
-      location: "Paris",
-      sourceSite: "OTHER",
-      postedAt: null,
-      sourceUrl: "https://example.com/jobs/job1",
-    },
-    cvVersion: { label: "CV" },
-    ...overrides,
-  };
-}
-
-describe("computeStats", () => {
-  it("averages and maxes only completed, scored analyses", () => {
-    const stats = computeStats(
-      [
-        analysis({ id: "a1", matchScore: 60 }),
-        analysis({ id: "a2", matchScore: 90 }),
-        analysis({ id: "a3", status: "RUNNING_CREW", matchScore: null }),
-        analysis({ id: "a4", status: "FAILED", matchScore: null }),
-      ],
-      3,
-    );
-
-    expect(stats.analysisCount).toBe(4);
-    expect(stats.averageScore).toBe(75);
-    expect(stats.bestScore).toBe(90);
-    expect(stats.cvVersionCount).toBe(3);
-  });
-
-  it("returns null scores when nothing has completed", () => {
-    const stats = computeStats(
-      [analysis({ status: "QUEUED", matchScore: null })],
-      0,
-    );
-    expect(stats.averageScore).toBeNull();
-    expect(stats.bestScore).toBeNull();
-  });
-});
-
 function cvVersion(overrides: Partial<CvVersion> = {}): CvVersion {
   return {
     id: "cv1",
@@ -112,65 +51,6 @@ function cvVersion(overrides: Partial<CvVersion> = {}): CvVersion {
   };
 }
 
-describe("bestScoreOffer", () => {
-  it("returns the job offer of the highest-scoring completed analysis", () => {
-    expect(
-      bestScoreOffer([
-        analysis({
-          id: "a1",
-          matchScore: 60,
-          jobOffer: {
-            id: "job1",
-            title: "Low",
-            company: "LowCo",
-            location: "Paris",
-            sourceSite: "OTHER",
-            postedAt: null,
-            sourceUrl: "https://example.com/jobs/job1",
-          },
-        }),
-        analysis({
-          id: "a2",
-          matchScore: 90,
-          jobOffer: {
-            id: "job2",
-            title: "High",
-            company: "HighCo",
-            location: "Paris",
-            sourceSite: "OTHER",
-            postedAt: null,
-            sourceUrl: "https://example.com/jobs/job2",
-          },
-        }),
-      ]),
-    ).toEqual({ title: "High", company: "HighCo" });
-  });
-
-  it("is null when nothing is scored", () => {
-    expect(bestScoreOffer([analysis({ status: "QUEUED", matchScore: null })])).toBeNull();
-  });
-});
-
-describe("analysesThisWeek", () => {
-  const now = new Date("2026-08-10T00:00:00.000Z").getTime();
-
-  it("counts only analyses requested within the trailing 7 days", () => {
-    const count = analysesThisWeek(
-      [
-        analysis({ id: "a1", requestedAt: "2026-08-09T00:00:00.000Z" }),
-        analysis({ id: "a2", requestedAt: "2026-08-04T00:00:00.000Z" }),
-        analysis({ id: "a3", requestedAt: "2026-07-20T00:00:00.000Z" }),
-      ],
-      now,
-    );
-    expect(count).toBe(2);
-  });
-
-  it("is zero-safe with no analyses", () => {
-    expect(analysesThisWeek([], now)).toBe(0);
-  });
-});
-
 describe("defaultCvLabel", () => {
   it("returns the label of the default CV version", () => {
     expect(
@@ -187,50 +67,29 @@ describe("defaultCvLabel", () => {
 });
 
 describe("onboardingSteps", () => {
-  it("derives each step from the data", () => {
-    expect(onboardingSteps([], 0)).toEqual({
+  it("derives each step from the stats and the CV count", () => {
+    expect(
+      onboardingSteps({ analysisCount: 0, hasComparison: false }, 0),
+    ).toEqual({
       hasCv: false,
       hasAnalysis: false,
       hasComparison: false,
     });
-    expect(onboardingSteps([analysis()], 1)).toEqual({
+    expect(
+      onboardingSteps({ analysisCount: 1, hasComparison: false }, 1),
+    ).toEqual({
       hasCv: true,
       hasAnalysis: true,
       hasComparison: false,
     });
   });
 
-  it("marks the comparison step once one job offer has two analyses", () => {
-    const steps = onboardingSteps(
-      [
-        analysis({
-          id: "a1",
-          jobOffer: {
-            id: "j1",
-            title: null,
-            company: null,
-            location: null,
-            sourceSite: "OTHER",
-            postedAt: null,
-            sourceUrl: "https://example.com/jobs/j1",
-          },
-        }),
-        analysis({
-          id: "a2",
-          jobOffer: {
-            id: "j1",
-            title: null,
-            company: null,
-            location: null,
-            sourceSite: "OTHER",
-            postedAt: null,
-            sourceUrl: "https://example.com/jobs/j1",
-          },
-        }),
-      ],
-      1,
-    );
-    expect(steps.hasComparison).toBe(true);
+  it("takes the comparison step from the stats' own verdict", () => {
+    // Which JobOffer has two analyses is a GROUP BY the server runs over every
+    // row; the browser holds one page and could not answer it.
+    expect(
+      onboardingSteps({ analysisCount: 2, hasComparison: true }, 1).hasComparison,
+    ).toBe(true);
   });
 });
 
@@ -250,14 +109,19 @@ describe("newMatchesCount", () => {
 });
 
 describe("scoreTrend", () => {
-  it("is a cumulative moving average over requestedAt-ordered completed analyses", () => {
+  it("is a cumulative moving average over the points the stats endpoint gives", () => {
+    // Which analyses count as scored, and their order, are settled server-side
+    // now; what is left here is the running average drawn over them.
     const trend = scoreTrend([
-      analysis({ id: "a2", matchScore: 90, requestedAt: "2026-08-02T00:00:00.000Z" }),
-      analysis({ id: "a1", matchScore: 60, requestedAt: "2026-08-01T00:00:00.000Z" }),
-      analysis({ id: "a3", status: "FAILED", matchScore: null, requestedAt: "2026-08-03T00:00:00.000Z" }),
+      { requestedAt: "2026-08-01T00:00:00.000Z", score: 60 },
+      { requestedAt: "2026-08-02T00:00:00.000Z", score: 90 },
     ]);
 
     expect(trend.map((p) => p.movingAverage)).toEqual([60, 75]);
     expect(trend.map((p) => p.score)).toEqual([60, 90]);
+  });
+
+  it("is empty when nothing has been scored yet", () => {
+    expect(scoreTrend([])).toEqual([]);
   });
 });

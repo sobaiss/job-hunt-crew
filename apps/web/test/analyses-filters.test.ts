@@ -8,278 +8,13 @@ import {
   JOB_OFFER_SOURCE_SITES,
   activeAdvancedFilterCount,
   analysesTableStateToParams,
-  cvLabelsOf,
-  filterAnalyses,
+  analysesTableStateToQuery,
   hasActiveFilters,
   pageCount,
-  paginate,
   parseAnalysesTableState,
-  sortAnalyses,
   type AnalysesTableState,
 } from "@/lib/analyses-filters";
-import { ANALYSES_STATUS_FILTERS, TRACKING_STATUSES } from "@/lib/tracking-status";
-import type { AnalysisSummary } from "@/hooks/use-analyses";
-
-function summary(overrides: Partial<AnalysisSummary> = {}): AnalysisSummary {
-  return {
-    id: "a1",
-    status: "COMPLETED",
-    matchScore: 80,
-    requestedAt: "2026-08-01T00:00:00.000Z",
-    requeuedAt: null,
-    stuck: false,
-    cvVersionId: "cv1",
-    ingestionJobId: null,
-    scoutId: null,
-    applicationStatus: null,
-    tailoredCvStatus: null,
-    coverLetterStatus: null,
-    ingestionJob: null,
-    jobOffer: {
-      id: "job1",
-      title: "Backend Engineer",
-      company: "Acme Inc",
-      location: "Paris",
-      sourceSite: "FRANCE_TRAVAIL",
-      postedAt: "2026-07-01T00:00:00.000Z",
-      sourceUrl: "https://example.com/jobs/job1",
-    },
-    cvVersion: { label: "Grad CV" },
-    ...overrides,
-  };
-}
-
-describe("filterAnalyses", () => {
-  const list = [
-    summary({ id: "a1" }), // COMPLETED, no Application yet -> TO_APPLY
-    summary({
-      id: "a2",
-      status: "FAILED",
-      jobOffer: {
-        id: "job2",
-        title: "Frontend Dev",
-        company: "Globex",
-        location: "Lyon",
-        sourceSite: "LINKEDIN",
-        postedAt: "2026-07-02T00:00:00.000Z",
-        sourceUrl: "https://example.com/jobs/job2",
-      },
-      cvVersion: { label: "Senior CV" },
-    }),
-    summary({
-      id: "a3",
-      status: "COMPLETED",
-      applicationStatus: "REJECTED",
-      jobOffer: {
-        id: "job3",
-        title: "Platform Engineer",
-        company: "Acme Inc",
-        location: "Paris",
-        sourceSite: "WTTJ",
-        postedAt: "2026-07-03T00:00:00.000Z",
-        sourceUrl: "https://example.com/jobs/job3",
-      },
-      cvVersion: { label: "Grad CV" },
-    }),
-  ];
-
-  it("returns everything with the default filters", () => {
-    expect(filterAnalyses(list, DEFAULT_ANALYSES_FILTERS)).toEqual(list);
-  });
-
-  it("matches the search term against the offer title and company, case-insensitively", () => {
-    expect(
-      filterAnalyses(list, {
-        ...DEFAULT_ANALYSES_FILTERS,
-        search: "acme",
-      }).map((a) => a.id),
-    ).toEqual(["a1", "a3"]);
-
-    expect(
-      filterAnalyses(list, {
-        ...DEFAULT_ANALYSES_FILTERS,
-        search: "frontend",
-      }).map((a) => a.id),
-    ).toEqual(["a2"]);
-  });
-
-  it("filters by platform, and by location as a case-insensitive substring", () => {
-    expect(
-      filterAnalyses(list, {
-        ...DEFAULT_ANALYSES_FILTERS,
-        platform: ["LINKEDIN"],
-      }).map((a) => a.id),
-    ).toEqual(["a2"]);
-
-    expect(
-      filterAnalyses(list, {
-        ...DEFAULT_ANALYSES_FILTERS,
-        location: "par",
-      }).map((a) => a.id),
-    ).toEqual(["a1", "a3"]);
-
-    expect(
-      filterAnalyses(list, {
-        ...DEFAULT_ANALYSES_FILTERS,
-        platform: ["FRANCE_TRAVAIL"],
-        location: "par",
-      }).map((a) => a.id),
-    ).toEqual(["a1"]);
-  });
-
-  it("filters by Tracking status and by CVVersion label, and combines the two", () => {
-    expect(
-      filterAnalyses(list, {
-        ...DEFAULT_ANALYSES_FILTERS,
-        status: ["TO_APPLY"],
-      }).map((a) => a.id),
-    ).toEqual(["a1"]);
-
-    expect(
-      filterAnalyses(list, {
-        ...DEFAULT_ANALYSES_FILTERS,
-        cvLabel: "Grad CV",
-      }).map((a) => a.id),
-    ).toEqual(["a1", "a3"]);
-
-    expect(
-      filterAnalyses(list, {
-        ...DEFAULT_ANALYSES_FILTERS,
-        cvLabel: "Grad CV",
-        status: ["REJECTED"],
-      }).map((a) => a.id),
-    ).toEqual(["a3"]);
-  });
-
-  it("excludes a still-running Analysis from every status filter but \"all\" and every Tracking bucket, while FAILED gets its own bucket", () => {
-    expect(
-      filterAnalyses(list, DEFAULT_ANALYSES_FILTERS).map((a) => a.id),
-    ).toContain("a2");
-
-    for (const status of TRACKING_STATUSES) {
-      expect(
-        filterAnalyses(list, { ...DEFAULT_ANALYSES_FILTERS, status: [status] }).map(
-          (a) => a.id,
-        ),
-      ).not.toContain("a2");
-    }
-
-    expect(
-      filterAnalyses(list, { ...DEFAULT_ANALYSES_FILTERS, status: ["FAILED"] }).map(
-        (a) => a.id,
-      ),
-    ).toEqual(["a2"]);
-  });
-
-  it("gives En attente/PENDING a bucket of its own, matched on the pipeline status", () => {
-    const withPending = [
-      ...list,
-      summary({ id: "a4", status: "PENDING", matchScore: null }),
-    ];
-
-    // Like FAILED, it is a pipeline status: no Tracking bucket matches it.
-    for (const status of TRACKING_STATUSES) {
-      expect(
-        filterAnalyses(withPending, {
-          ...DEFAULT_ANALYSES_FILTERS,
-          status: [status],
-        }).map((a) => a.id),
-      ).not.toContain("a4");
-    }
-
-    expect(
-      filterAnalyses(withPending, {
-        ...DEFAULT_ANALYSES_FILTERS,
-        status: ["PENDING"],
-      }).map((a) => a.id),
-    ).toEqual(["a4"]);
-
-    // ...and it ORs with the other buckets like any other value.
-    expect(
-      filterAnalyses(withPending, {
-        ...DEFAULT_ANALYSES_FILTERS,
-        status: ["PENDING", "FAILED"],
-      }).map((a) => a.id),
-    ).toEqual(["a2", "a4"]);
-  });
-
-  it("leaves the other non-terminal pipeline statuses unfilterable", () => {
-    const withQueued = [
-      ...list,
-      summary({ id: "a5", status: "QUEUED", matchScore: null }),
-    ];
-
-    for (const status of ANALYSES_STATUS_FILTERS) {
-      expect(
-        filterAnalyses(withQueued, {
-          ...DEFAULT_ANALYSES_FILTERS,
-          status: [status],
-        }).map((a) => a.id),
-      ).not.toContain("a5");
-    }
-
-    expect(
-      filterAnalyses(withQueued, DEFAULT_ANALYSES_FILTERS).map((a) => a.id),
-    ).toContain("a5");
-  });
-
-  it("ORs the values inside one filter and ANDs the filters together", () => {
-    // a1 is FRANCE_TRAVAIL/TO_APPLY, a2 LINKEDIN/FAILED, a3 WTTJ/REJECTED.
-    expect(
-      filterAnalyses(list, {
-        ...DEFAULT_ANALYSES_FILTERS,
-        platform: ["LINKEDIN", "WTTJ"],
-      }).map((a) => a.id),
-    ).toEqual(["a2", "a3"]);
-
-    expect(
-      filterAnalyses(list, {
-        ...DEFAULT_ANALYSES_FILTERS,
-        status: ["TO_APPLY", "FAILED"],
-      }).map((a) => a.id),
-    ).toEqual(["a1", "a2"]);
-
-    // Two statuses OR-ed, then AND-ed with a platform that only one of them
-    // has — the intersection, not the union.
-    expect(
-      filterAnalyses(list, {
-        ...DEFAULT_ANALYSES_FILTERS,
-        status: ["TO_APPLY", "FAILED"],
-        platform: ["LINKEDIN"],
-      }).map((a) => a.id),
-    ).toEqual(["a2"]);
-  });
-
-  it("filters by the requestedAt range, inclusive of both bounds", () => {
-    const dated = [
-      summary({ id: "early", requestedAt: "2026-07-01T00:00:00.000Z" }),
-      summary({ id: "mid", requestedAt: "2026-07-15T12:00:00.000Z" }),
-      summary({ id: "late", requestedAt: "2026-08-01T00:00:00.000Z" }),
-    ];
-
-    expect(
-      filterAnalyses(dated, {
-        ...DEFAULT_ANALYSES_FILTERS,
-        requestedAtFrom: "2026-07-10",
-        requestedAtTo: "2026-07-20",
-      }).map((a) => a.id),
-    ).toEqual(["mid"]);
-
-    expect(
-      filterAnalyses(dated, {
-        ...DEFAULT_ANALYSES_FILTERS,
-        requestedAtFrom: "2026-07-15",
-      }).map((a) => a.id),
-    ).toEqual(["mid", "late"]);
-
-    expect(
-      filterAnalyses(dated, {
-        ...DEFAULT_ANALYSES_FILTERS,
-        requestedAtTo: "2026-07-15",
-      }).map((a) => a.id),
-    ).toEqual(["early", "mid"]);
-  });
-});
+import { ANALYSES_STATUS_FILTERS } from "@/lib/tracking-status";
 
 describe("active filter counts", () => {
   it("counts only the filters folded away behind 'Plus de filtres'", () => {
@@ -327,110 +62,10 @@ describe("active filter counts", () => {
   });
 });
 
-describe("cvLabelsOf", () => {
-  it("lists the distinct labels in first-seen order", () => {
-    expect(
-      cvLabelsOf([
-        summary({ cvVersion: { label: "Grad CV" } }),
-        summary({ cvVersion: { label: "Senior CV" } }),
-        summary({ cvVersion: { label: "Grad CV" } }),
-      ]),
-    ).toEqual(["Grad CV", "Senior CV"]);
-  });
-});
-
-describe("sortAnalyses", () => {
-  it("sorts strings ascending/descending by localeCompare", () => {
-    const list = [
-      summary({ id: "b", jobOffer: { ...summary().jobOffer, title: "Beta" } }),
-      summary({ id: "a", jobOffer: { ...summary().jobOffer, title: "Alpha" } }),
-    ];
-
-    expect(
-      sortAnalyses(list, { column: "title", direction: "asc" }).map((a) => a.id),
-    ).toEqual(["a", "b"]);
-    expect(
-      sortAnalyses(list, { column: "title", direction: "desc" }).map((a) => a.id),
-    ).toEqual(["b", "a"]);
-  });
-
-  it("sorts numbers, and always sorts a null value last regardless of direction", () => {
-    const list = [
-      summary({ id: "mid", matchScore: 50 }),
-      summary({ id: "none", matchScore: null }),
-      summary({ id: "high", matchScore: 90 }),
-    ];
-
-    expect(
-      sortAnalyses(list, { column: "matchScore", direction: "asc" }).map(
-        (a) => a.id,
-      ),
-    ).toEqual(["mid", "high", "none"]);
-    expect(
-      sortAnalyses(list, { column: "matchScore", direction: "desc" }).map(
-        (a) => a.id,
-      ),
-    ).toEqual(["high", "mid", "none"]);
-  });
-
-  it("compares postedAt as ISO-8601 UTC strings without needing Date parsing", () => {
-    const list = [
-      summary({
-        id: "later",
-        jobOffer: { ...summary().jobOffer, postedAt: "2026-08-01T00:00:00.000Z" },
-      }),
-      summary({
-        id: "earlier",
-        jobOffer: { ...summary().jobOffer, postedAt: "2026-07-01T00:00:00.000Z" },
-      }),
-    ];
-
-    expect(
-      sortAnalyses(list, DEFAULT_ANALYSES_SORT).map((a) => a.id),
-    ).toEqual(["later", "earlier"]);
-  });
-
-  it("sorts by requestedAt as ISO-8601 UTC strings, and by id (#172)", () => {
-    const list = [
-      summary({ id: "b", requestedAt: "2026-08-01T00:00:00.000Z" }),
-      summary({ id: "a", requestedAt: "2026-07-01T00:00:00.000Z" }),
-    ];
-
-    expect(
-      sortAnalyses(list, { column: "requestedAt", direction: "asc" }).map((a) => a.id),
-    ).toEqual(["a", "b"]);
-    expect(
-      sortAnalyses(list, { column: "id", direction: "asc" }).map((a) => a.id),
-    ).toEqual(["a", "b"]);
-  });
-
-  it("sorts by sourceUrl for the Lien column and by cvVersion.label for CV", () => {
-    const list = [
-      summary({ id: "z", jobOffer: { ...summary().jobOffer, sourceUrl: "https://z.example.com" } }),
-      summary({ id: "a", jobOffer: { ...summary().jobOffer, sourceUrl: "https://a.example.com" } }),
-    ];
-    expect(
-      sortAnalyses(list, { column: "sourceUrl", direction: "asc" }).map((a) => a.id),
-    ).toEqual(["a", "z"]);
-
-    const byCv = [
-      summary({ id: "s", cvVersion: { label: "Senior CV" } }),
-      summary({ id: "g", cvVersion: { label: "Grad CV" } }),
-    ];
-    expect(
-      sortAnalyses(byCv, { column: "cvLabel", direction: "asc" }).map((a) => a.id),
-    ).toEqual(["g", "s"]);
-  });
-});
-
 describe("pagination", () => {
-  const items = Array.from({ length: 12 }, (_, i) => i);
-
-  it("computes page count and slices one page at a time", () => {
+  it("computes how many pages a total covers", () => {
     expect(pageCount(12, 5)).toBe(3);
     expect(pageCount(0, 5)).toBe(1);
-    expect(paginate(items, 1, 5)).toEqual([0, 1, 2, 3, 4]);
-    expect(paginate(items, 3, 5)).toEqual([10, 11]);
   });
 
   it("exposes exactly the two supported page sizes", () => {
@@ -578,5 +213,65 @@ describe("URL query-string state", () => {
     expect(params.get("dir")).toBe("desc");
     expect(params.get("page")).toBe("1");
     expect(params.get("pageSize")).toBe("25");
+  });
+});
+
+describe("analysesTableStateToQuery", () => {
+  // What the browser's URL carries and what the endpoint is asked for are two
+  // different query strings: the first is a shareable link, the second a
+  // request. This is the second one.
+  const state: AnalysesTableState = {
+    search: "  backend  ",
+    status: ["REJECTED", "PENDING"],
+    cvLabel: "Grad CV",
+    platform: ["LINKEDIN", "INDEED"],
+    location: "  lyon ",
+    requestedAtFrom: "2026-07-01",
+    requestedAtTo: "2026-07-31",
+    sort: { column: "matchScore", direction: "asc" },
+    page: 2,
+    pageSize: 50,
+  };
+
+  it("spells out every filter under the endpoint's own parameter names", () => {
+    const query = analysesTableStateToQuery(state);
+    expect(query.get("q")).toBe("backend");
+    expect(query.get("status")).toBe("REJECTED,PENDING");
+    expect(query.get("cv")).toBe("Grad CV");
+    expect(query.get("platform")).toBe("LINKEDIN,INDEED");
+    expect(query.get("location")).toBe("lyon");
+    expect(query.get("sort")).toBe("matchScore");
+    expect(query.get("dir")).toBe("asc");
+    expect(query.get("page")).toBe("2");
+    expect(query.get("pageSize")).toBe("50");
+  });
+
+  it("widens each date bound to cover the whole named day", () => {
+    // The date input gives a bare YYYY-MM-DD; the endpoint takes timestamps,
+    // and a bare date would exclude everything requested later that day.
+    const query = analysesTableStateToQuery(state);
+    expect(query.get("requestedAtFrom")).toBe("2026-07-01T00:00:00.000Z");
+    expect(query.get("requestedAtTo")).toBe("2026-07-31T23:59:59.999Z");
+  });
+
+  it("sends no filter at all for the default state", () => {
+    const query = analysesTableStateToQuery(DEFAULT_ANALYSES_TABLE_STATE);
+    for (const name of ["q", "status", "cv", "platform", "location", "requestedAtFrom", "requestedAtTo"]) {
+      expect(query.has(name)).toBe(false);
+    }
+    // The sort and the page are never left to the endpoint's own defaults:
+    // the table's default sort (postedAt) and the endpoint's would then be two
+    // facts to keep in step.
+    expect(query.get("sort")).toBe("postedAt");
+    expect(query.get("page")).toBe("1");
+    expect(query.get("pageSize")).toBe("25");
+  });
+
+  it("gives the same query for two states that differ only in whitespace", () => {
+    // Otherwise every trailing space typed into the search box is its own
+    // cache entry and its own request for identical results.
+    expect(analysesTableStateToQuery(state).toString()).toBe(
+      analysesTableStateToQuery({ ...state, search: "backend", location: "lyon" }).toString(),
+    );
   });
 });

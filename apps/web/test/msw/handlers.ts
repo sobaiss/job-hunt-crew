@@ -40,6 +40,10 @@ export const handlers = [
   // `/scouts/[id]` detail page); default to none so suites exercising other
   // parts of the panel don't have to stub it.
   http.get("/api/scouts/:id/runs", () => HttpResponse.json({ scoutRuns: [] })),
+  // The Analyses table's CV filter reads its options from their own endpoint
+  // since the table stopped holding every row (docs/adr/0033); default to none
+  // so suites exercising other parts of the page don't have to stub it.
+  http.get("/api/analyses/cv-labels", () => HttpResponse.json({ labels: [] })),
   // The Analysis detail page's GeneratedDocumentsPanel and "Apply" action
   // (issue #59) check for already-generated documents on load; default to
   // none so suites exercising other parts of the page don't have to stub it.

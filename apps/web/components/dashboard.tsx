@@ -14,14 +14,11 @@ import {
 } from "recharts";
 
 import type { AnalysisStatus, AnalysisSummary } from "@/hooks/use-analyses";
-import { useAnalyses } from "@/hooks/use-analyses";
+import { useAnalysesStats, useRecentAnalyses } from "@/hooks/use-analyses";
 import { useCvVersions } from "@/hooks/use-cv-versions";
 import { useScouts } from "@/hooks/use-scouts";
 import { useEnumLabel } from "@/lib/enum-labels";
 import {
-  analysesThisWeek,
-  bestScoreOffer,
-  computeStats,
   defaultCvLabel,
   newMatchesCount,
   onboardingSteps,
@@ -166,20 +163,23 @@ function RecentAnalysisRow({ analysis }: { analysis: AnalysisSummary }) {
 }
 
 /**
- * The signed-in `/` Dashboard: an at-a-glance overview computed entirely
- * client-side from the `/api/analyses` list and the `/api/cv-versions` count
- * (spec #43) — stat tiles, a Match score trend, recent analyses and quick
- * actions. While the Candidate has no Analysis yet, a data-derived onboarding
- * checklist replaces the stat tiles.
+ * The signed-in `/` Dashboard: stat tiles, a Match score trend, recent
+ * analyses and quick actions (spec #43). Its numbers come from
+ * `/api/analyses/stats`, which answers over *every* Analysis the Candidate
+ * has — they used to be derived here from the full `/api/analyses` list, which
+ * stopped being something to fetch when that list became one page at a time
+ * (docs/adr/0033). The onboarding checklist that replaces the tiles while the
+ * Candidate has no Analysis is still data-derived, from the same numbers.
  */
 export function Dashboard() {
   const t = useTranslations("dashboard");
   const tAnalyses = useTranslations("analyses");
-  const analysesQuery = useAnalyses();
+  const statsQuery = useAnalysesStats();
+  const recentQuery = useRecentAnalyses(RECENT_LIMIT);
   const cvVersionsQuery = useCvVersions();
   const scoutsQuery = useScouts();
 
-  if (analysesQuery.isPending || cvVersionsQuery.isPending) {
+  if (statsQuery.isPending || cvVersionsQuery.isPending) {
     return (
       <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-8">
         <h1 className="sr-only">{t("title")}</h1>
@@ -196,7 +196,7 @@ export function Dashboard() {
     );
   }
 
-  if (analysesQuery.isError || cvVersionsQuery.isError) {
+  if (statsQuery.isError || cvVersionsQuery.isError) {
     return (
       <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-8">
         <h1 className="sr-only">{t("title")}</h1>
@@ -207,19 +207,17 @@ export function Dashboard() {
     );
   }
 
-  const analyses = analysesQuery.data ?? [];
+  const stats = statsQuery.data;
   const activeCvVersions =
     cvVersionsQuery.data?.filter((cv) => cv.supersededById === null) ?? [];
-  const stats = computeStats(analyses, activeCvVersions.length);
-  const bestOffer = bestScoreOffer(analyses);
-  const weekCount = analysesThisWeek(analyses);
+  const bestOffer = stats.bestScoreOffer;
+  const weekCount = stats.analysesThisWeek;
   const defaultCv = defaultCvLabel(activeCvVersions);
-  const steps = onboardingSteps(analyses, activeCvVersions.length);
-  const trend = scoreTrend(analyses);
+  const steps = onboardingSteps(stats, activeCvVersions.length);
+  const trend = scoreTrend(stats.trend);
   const trendValues = trend.map((p) => p.movingAverage);
-  // The `/api/analyses` list is already recency-ordered.
-  const recent = analyses.slice(0, RECENT_LIMIT);
-  const showOnboarding = analyses.length === 0;
+  const recent = recentQuery.data ?? [];
+  const showOnboarding = stats.analysisCount === 0;
   const newMatches = newMatchesCount(scoutsQuery.data ?? []);
 
   return (
@@ -279,7 +277,7 @@ export function Dashboard() {
           />
           <StatTile
             label={t("stats.cvVersionCount")}
-            value={stats.cvVersionCount}
+            value={activeCvVersions.length}
             sub={defaultCv && t("stats.defaultCvLabel", { label: defaultCv })}
           />
         </section>

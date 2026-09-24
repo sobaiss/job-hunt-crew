@@ -3,7 +3,7 @@ import math
 import os
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from botocore.exceptions import ClientError
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
@@ -24,6 +24,7 @@ from py_db.models import (
     Ingestionjobstatus,
     Ingestionmode,
     JobOffer,
+    Joboffersourcesite,
     QuotaAlert,
     Quotakind,
     Scout,
@@ -46,10 +47,11 @@ from py_db.quota import (
 from py_db.quotas import active_scout_count, effective_quota, maybe_record_quota_alert
 from py_db.stuck_analysis import TERMINAL_ANALYSIS_STATUSES, is_analysis_stuck
 from pydantic import BaseModel
-from sqlalchemy import func, select, update
+from sqlalchemy import Text, and_, cast, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from .analysis_filters import AnalysesStatusFilter, status_bucket_condition
 from .db import get_session
 from .document_render import (
     render_markdown_to_docx,
@@ -1276,34 +1278,348 @@ def _analysis_response(row: Analysis, *, now: datetime) -> AnalysisResponse:
 
 class AnalysisListResponse(BaseModel):
     analyses: list[AnalysisResponse]
+    total: int
+    #: The page actually served, which is not always the page asked for -- see
+    #: the clamping note in `list_analyses`.
+    page: int
+    pageSize: int
+
+
+AnalysesSortColumn = Literal[
+    "id",
+    "title",
+    "company",
+    "location",
+    "sourceSite",
+    "postedAt",
+    "requestedAt",
+    "cvLabel",
+    "matchScore",
+    "tailoredCvStatus",
+    "coverLetterStatus",
+    "sourceUrl",
+]
+
+DEFAULT_ANALYSES_PAGE_SIZE = 25
+
+
+def _current_generated_document_status(doc_type: Generateddocumenttype):
+    """The status the list serialises for this document type, as a correlated
+    scalar subquery so the table can sort by a column it computes per row
+    (`_current_generated_document`) rather than stores."""
+    return (
+        select(GeneratedDocument.status)
+        .where(
+            GeneratedDocument.analysisId == Analysis.id,
+            GeneratedDocument.type == doc_type,
+            GeneratedDocument.supersededById.is_(None),
+        )
+        .limit(1)
+        .correlate(Analysis)
+        .scalar_subquery()
+    )
+
+
+def _analyses_sort_expression(column: AnalysesSortColumn):
+    """The sortable columns of the candidate's Analyses table, each mapped to
+    what it sorts by. Enum columns are cast to text because the client sorted
+    their *names* alphabetically and Postgres would otherwise order them by
+    declaration."""
+    if column == "id":
+        return Analysis.id
+    if column == "title":
+        return JobOffer.title
+    if column == "company":
+        return JobOffer.company
+    if column == "location":
+        return JobOffer.location
+    if column == "sourceSite":
+        return cast(JobOffer.sourceSite, Text)
+    if column == "postedAt":
+        return JobOffer.postedAt
+    if column == "requestedAt":
+        return Analysis.requestedAt
+    if column == "cvLabel":
+        return CVVersion.label
+    if column == "matchScore":
+        return Analysis.matchScore
+    if column == "tailoredCvStatus":
+        return cast(_current_generated_document_status(Generateddocumenttype.TAILORED_CV), Text)
+    if column == "coverLetterStatus":
+        return cast(_current_generated_document_status(Generateddocumenttype.COVER_LETTER), Text)
+    return JobOffer.sourceUrl
+
+
+_TEXT_SORT_COLUMNS = {
+    "id",
+    "title",
+    "company",
+    "location",
+    "sourceSite",
+    "cvLabel",
+    "tailoredCvStatus",
+    "coverLetterStatus",
+    "sourceUrl",
+}
+
+
+def _parse_multi(raw: str | None, allowed: set[str], name: str) -> list[str]:
+    """A comma-separated multi-value filter. Unknown values are rejected rather
+    than dropped: the client narrows to the values its own filter offers before
+    sending, so anything else is a bug worth seeing, not a stale link."""
+    if not raw:
+        return []
+    values = [value for value in raw.split(",") if value]
+    unknown = [value for value in values if value not in allowed]
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"Unknown {name}: {', '.join(unknown)}")
+    return list(dict.fromkeys(values))
 
 
 @router.get("/analyses", response_model=AnalysisListResponse)
 async def list_analyses(
     jobOfferId: str | None = None,
     ingestionJobId: str | None = None,
+    q: str | None = None,
+    status: str | None = Query(None),
+    cv: str | None = None,
+    platform: str | None = Query(None),
+    location: str | None = None,
+    requestedAtFrom: datetime | None = Query(None),
+    requestedAtTo: datetime | None = Query(None),
+    sort: AnalysesSortColumn = Query("postedAt"),
+    dir: Literal["asc", "desc"] = Query("desc"),
+    page: int = Query(1, ge=1),
+    pageSize: int = Query(DEFAULT_ANALYSES_PAGE_SIZE, ge=1, le=100),
     user_id: str = Depends(require_user_id),
     session: AsyncSession = Depends(get_session),
 ) -> AnalysisListResponse:
+    """The caller's Analyses, filtered, sorted and paginated server-side.
+
+    All three moved here from the browser: the list was returned whole, with
+    every row's `resultJSON`, and narrowed in the client. Paginating without
+    also moving the filter and the sort would have been worse than either --
+    a page of 25 sliced before the filter ran is not a page of the filtered
+    list. The filter vocabulary is the Admin analyses table's (see
+    `analysis_filters`), and so are the query-parameter names, except that
+    `status` and `platform` take several comma-separated values here, OR-ed.
+
+    Sorting always appends `requestedAt DESC, id` after the requested column.
+    Without that tie-break, rows sharing a sort value -- the default sort is
+    `postedAt`, which is NULL in bulk -- can order differently between two
+    page requests, and the candidate silently sees a row twice or never. NULLs
+    sort last in both directions, and text sorts case-insensitively, both
+    matching what the client's own comparator did.
+
+    A `page` past the end is clamped to the last page rather than answered with
+    an empty list, and the response says which page it served: a `?page=9` that
+    a filter or a deletion has outlived is a stale link, not a request for
+    nothing. `jobOfferId`/`ingestionJobId` skip pagination entirely -- those
+    scopes are bounded by their own nature (one JobOffer's analyses, one
+    batch's) and their callers page nothing.
+    """
+    scoped = bool(jobOfferId or ingestionJobId)
+
     stmt = (
         select(Analysis)
-        .options(
-            selectinload(Analysis.JobOffer_),
-            selectinload(Analysis.CVVersion_),
-            selectinload(Analysis.IngestionJob_),
-            selectinload(Analysis.Application),
-            selectinload(Analysis.GeneratedDocument),
-        )
+        .join(JobOffer, Analysis.jobOfferId == JobOffer.id)
+        .join(CVVersion, Analysis.cvVersionId == CVVersion.id)
+        .outerjoin(Application, Application.analysisId == Analysis.id)
         .where(Analysis.userId == user_id)
-        .order_by(Analysis.requestedAt.desc())
     )
     if jobOfferId:
         stmt = stmt.where(Analysis.jobOfferId == jobOfferId)
     if ingestionJobId:
         stmt = stmt.where(Analysis.ingestionJobId == ingestionJobId)
+    if q:
+        term = f"%{q.strip()}%"
+        stmt = stmt.where(or_(JobOffer.title.ilike(term), JobOffer.company.ilike(term)))
+    if location:
+        stmt = stmt.where(JobOffer.location.ilike(f"%{location.strip()}%"))
+    if cv:
+        stmt = stmt.where(CVVersion.label == cv)
+    buckets = _parse_multi(status, set(get_args(AnalysesStatusFilter)), "status")
+    if buckets:
+        stmt = stmt.where(or_(*(status_bucket_condition(bucket) for bucket in buckets)))
+    sites = _parse_multi(platform, {site.value for site in Joboffersourcesite}, "platform")
+    if sites:
+        stmt = stmt.where(JobOffer.sourceSite.in_([Joboffersourcesite(site) for site in sites]))
+    if requestedAtFrom is not None:
+        stmt = stmt.where(Analysis.requestedAt >= requestedAtFrom)
+    if requestedAtTo is not None:
+        stmt = stmt.where(Analysis.requestedAt <= requestedAtTo)
+
+    total = await session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+
+    sort_expression = _analyses_sort_expression(sort)
+    if sort in _TEXT_SORT_COLUMNS:
+        sort_expression = func.lower(sort_expression)
+    ordered = sort_expression.asc() if dir == "asc" else sort_expression.desc()
+    stmt = stmt.order_by(ordered.nulls_last(), Analysis.requestedAt.desc(), Analysis.id)
+
+    served_page = page
+    if not scoped:
+        last_page = max(1, math.ceil(total / pageSize))
+        served_page = min(page, last_page)
+        stmt = stmt.offset((served_page - 1) * pageSize).limit(pageSize)
+
+    stmt = stmt.options(
+        selectinload(Analysis.JobOffer_),
+        selectinload(Analysis.CVVersion_),
+        selectinload(Analysis.IngestionJob_),
+        selectinload(Analysis.Application),
+        selectinload(Analysis.GeneratedDocument),
+    )
     rows = (await session.scalars(stmt)).all()
     now = _now()
-    return AnalysisListResponse(analyses=[_analysis_response(row, now=now) for row in rows])
+    return AnalysisListResponse(
+        analyses=[_analysis_response(row, now=now) for row in rows],
+        total=total,
+        page=served_page,
+        pageSize=total if scoped else pageSize,
+    )
+
+
+class AnalysesTrendPoint(BaseModel):
+    requestedAt: datetime
+    score: int
+
+
+class BestScoreOffer(BaseModel):
+    title: str | None
+    company: str | None
+
+
+class AnalysesStatsResponse(BaseModel):
+    analysisCount: int
+    averageScore: int | None
+    bestScore: int | None
+    bestScoreOffer: BestScoreOffer | None
+    analysesThisWeek: int
+    #: At least one JobOffer analysed against two or more CVVersions -- the
+    #: Dashboard's third onboarding step.
+    hasComparison: bool
+    #: One point per scored Analysis, oldest first. The Dashboard turns these
+    #: into the cumulative moving average it plots; the raw pairs are what it
+    #: used to derive from the whole list it no longer holds.
+    trend: list[AnalysesTrendPoint]
+
+
+@router.get("/analyses/stats", response_model=AnalysesStatsResponse)
+async def get_analyses_stats(
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> AnalysesStatsResponse:
+    """Everything the Dashboard shows over *all* of a candidate's Analyses.
+
+    It used to compute these in the browser from the full `/v1/analyses` list,
+    which is the one caller that would still have pulled every row -- and with
+    every row's `resultJSON` -- after the list itself became paginated. Only a
+    `COMPLETED` Analysis carrying a `matchScore` counts towards the scores,
+    matching the client's own `isScored`.
+    """
+    scored = and_(
+        Analysis.userId == user_id,
+        Analysis.status == Analysisstatus.COMPLETED,
+        Analysis.matchScore.is_not(None),
+    )
+
+    analysis_count = (
+        await session.scalar(
+            select(func.count()).select_from(Analysis).where(Analysis.userId == user_id)
+        )
+        or 0
+    )
+    average_score = await session.scalar(select(func.avg(Analysis.matchScore)).where(scored))
+    best_score = await session.scalar(select(func.max(Analysis.matchScore)).where(scored))
+
+    best_offer: BestScoreOffer | None = None
+    if best_score is not None:
+        best_row = (
+            await session.execute(
+                select(JobOffer.title, JobOffer.company)
+                .join(Analysis, Analysis.jobOfferId == JobOffer.id)
+                .where(scored)
+                .order_by(Analysis.matchScore.desc(), Analysis.requestedAt.desc())
+                .limit(1)
+            )
+        ).first()
+        if best_row is not None:
+            best_offer = BestScoreOffer(title=best_row.title, company=best_row.company)
+
+    week_ago = _now() - timedelta(days=7)
+    analyses_this_week = (
+        await session.scalar(
+            select(func.count())
+            .select_from(Analysis)
+            .where(Analysis.userId == user_id, Analysis.requestedAt >= week_ago)
+        )
+        or 0
+    )
+
+    compared = (
+        await session.scalar(
+            select(func.count())
+            .select_from(
+                select(Analysis.jobOfferId)
+                .where(Analysis.userId == user_id)
+                .group_by(Analysis.jobOfferId)
+                .having(func.count() >= 2)
+                .subquery()
+            )
+        )
+        or 0
+    )
+
+    trend_rows = (
+        await session.execute(
+            select(Analysis.requestedAt, Analysis.matchScore)
+            .where(scored)
+            .order_by(Analysis.requestedAt.asc())
+        )
+    ).all()
+
+    return AnalysesStatsResponse(
+        analysisCount=analysis_count,
+        averageScore=round(average_score) if average_score is not None else None,
+        bestScore=best_score,
+        bestScoreOffer=best_offer,
+        analysesThisWeek=analyses_this_week,
+        hasComparison=compared > 0,
+        trend=[
+            AnalysesTrendPoint(requestedAt=row.requestedAt, score=row.matchScore)
+            for row in trend_rows
+        ],
+    )
+
+
+class AnalysesCvLabelsResponse(BaseModel):
+    labels: list[str]
+
+
+@router.get("/analyses/cv-labels", response_model=AnalysesCvLabelsResponse)
+async def list_analyses_cv_labels(
+    user_id: str = Depends(require_user_id),
+    session: AsyncSession = Depends(get_session),
+) -> AnalysesCvLabelsResponse:
+    """The CVVersion labels the candidate's Analyses actually use -- the "CV"
+    filter's options, which the client used to read off the full list.
+
+    Deliberately its own endpoint rather than a field on the list response:
+    computed over the filtered set it would hide the very labels the filter
+    exists to switch between, and computed over the unfiltered set it would be
+    a stranger in a filtered response.
+    """
+    labels = (
+        await session.scalars(
+            select(CVVersion.label)
+            .join(Analysis, Analysis.cvVersionId == CVVersion.id)
+            .where(Analysis.userId == user_id)
+            .distinct()
+            .order_by(CVVersion.label)
+        )
+    ).all()
+    return AnalysesCvLabelsResponse(labels=list(labels))
 
 
 class QuotaUsage(BaseModel):

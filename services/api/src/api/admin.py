@@ -50,6 +50,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .analysis_filters import AnalysesStatusFilter, status_bucket_condition
 from .db import get_session
 from .sqs_client import (
     ANALYSIS_INTAKE_QUEUE_URL,
@@ -1068,26 +1069,11 @@ class AdminAnalysesListResponse(BaseModel):
     pageSize: int
 
 
-AdminAnalysesStatusFilter = Literal[
-    "TO_APPLY", "IN_PROGRESS", "REJECTED", "ACCEPTED", "WITHDRAWN", "PENDING", "FAILED"
-]
-
-# The buckets naming a raw pipeline status rather than a Tracking one --
-# `PIPELINE_ANALYSES_STATUS_FILTERS` in the frontend's `lib/tracking-status.ts`.
-_PIPELINE_STATUS_FILTERS: dict[str, Analysisstatus] = {
-    "PENDING": Analysisstatus.PENDING,
-    "FAILED": Analysisstatus.FAILED,
-}
-
-# Mirrors `APPLICATION_STATUS_TO_TRACKING` in the frontend's
-# `lib/tracking-status.ts` -- DRAFT/no-Application folds into TO_APPLY,
-# handled separately below since it also has to match a missing Application row.
-_TRACKING_STATUS_TO_APPLICATION_STATUSES: dict[str, list[Applicationstatus]] = {
-    "IN_PROGRESS": [Applicationstatus.APPLIED, Applicationstatus.INTERVIEWING, Applicationstatus.OFFER],
-    "REJECTED": [Applicationstatus.REJECTED],
-    "ACCEPTED": [Applicationstatus.ACCEPTED],
-    "WITHDRAWN": [Applicationstatus.WITHDRAWN],
-}
+# The bucket vocabulary and its SQL now live in `analysis_filters`, shared with
+# the candidate-facing `/v1/analyses` since that table's own filtering moved
+# server-side. What is *not* shared is how many buckets a caller may name: one
+# here, any number there.
+AdminAnalysesStatusFilter = AnalysesStatusFilter
 
 
 @router.get("/analyses", response_model=AdminAnalysesListResponse)
@@ -1128,17 +1114,9 @@ async def list_admin_analyses(
         stmt = stmt.where(Analysis.requestedAt >= requested_at_from)
     if requested_at_to is not None:
         stmt = stmt.where(Analysis.requestedAt <= requested_at_to)
-    if status_filter in _PIPELINE_STATUS_FILTERS:
-        stmt = stmt.where(Analysis.status == _PIPELINE_STATUS_FILTERS[status_filter])
-    elif status_filter == "TO_APPLY":
+    if status_filter is not None:
         stmt = stmt.outerjoin(Application, Application.analysisId == Analysis.id).where(
-            Analysis.status == Analysisstatus.COMPLETED,
-            or_(Application.id.is_(None), Application.status == Applicationstatus.DRAFT),
-        )
-    elif status_filter is not None:
-        stmt = stmt.join(Application, Application.analysisId == Analysis.id).where(
-            Analysis.status == Analysisstatus.COMPLETED,
-            Application.status.in_(_TRACKING_STATUS_TO_APPLICATION_STATUSES[status_filter]),
+            status_bucket_condition(status_filter)
         )
     stmt = stmt.order_by(Analysis.requestedAt.desc())
 

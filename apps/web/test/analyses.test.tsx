@@ -84,6 +84,56 @@ function summary(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/**
+ * `GET /api/analyses` as the endpoint answers it since docs/adr/0033: a
+ * paginated envelope, `{analyses, total, page, pageSize}`.
+ *
+ * The fake slices, and nothing else. Narrowing and ordering are the server's
+ * job now and are tested where they run — `services/api/tests/
+ * test_v1_analyses_list.py`. Re-implementing them here would only prove this
+ * file can filter, which is exactly the thing that stopped being true of the
+ * page. So a filter test drives the control and asserts the *request* the page
+ * made; what comes back is whatever the test decided to serve.
+ */
+function analysesPage(rows: unknown[], request: Request) {
+  const params = new URL(request.url).searchParams;
+  const pageSize = Number(params.get("pageSize") ?? 25);
+  const lastPage = Math.max(1, Math.ceil(rows.length / pageSize));
+  // The endpoint clamps a page past the end rather than serving nothing.
+  const page = Math.min(Number(params.get("page") ?? 1), lastPage);
+  return HttpResponse.json({
+    analyses: rows.slice((page - 1) * pageSize, page * pageSize),
+    total: rows.length,
+    page,
+    pageSize,
+  });
+}
+
+/** Records the query string of every `GET /api/analyses` the page makes, so a
+ *  test can assert on what it asked for rather than on what a fake filtered.
+ *  `latest` is the request that produced what is on screen. */
+function recordAnalysesRequests(rows: unknown[]) {
+  const queries: URLSearchParams[] = [];
+  server.use(
+    http.get("/api/analyses", ({ request }) => {
+      queries.push(new URL(request.url).searchParams);
+      return analysesPage(rows, request);
+    }),
+  );
+  return {
+    queries,
+    latest: () => queries[queries.length - 1]!,
+    /** Waits for the page to have asked for `param=value`, then returns that
+     *  request — a commit can be a debounce away. */
+    async waitForQuery(param: string, value: string) {
+      await waitFor(() =>
+        expect(queries.some((q) => (q.get(param) ?? "") === value)).toBe(true),
+      );
+      return queries.findLast((q) => (q.get(param) ?? "") === value)!;
+    },
+  };
+}
+
 function detail(overrides: Record<string, unknown> = {}) {
   return {
     ...summary(),
@@ -174,15 +224,6 @@ async function tickFilterValues(
   await user.keyboard("{Escape}");
 }
 
-/** Empties one checkbox menu through its own "Clear all" item. */
-async function clearFilter(
-  user: ReturnType<typeof userEvent.setup>,
-  filter: "Status" | "Platform",
-) {
-  await user.click(filterTrigger(filter));
-  await user.click(await screen.findByRole("menuitem", { name: "Clear all" }));
-}
-
 describe("AnalysesDashboardPage", () => {
   beforeEach(() => {
     __setUrl("/analyses");
@@ -194,8 +235,8 @@ describe("AnalysesDashboardPage", () => {
 
   it("shows a loading state, then a flat table row per analysis with title, company, location, platform, CV, score and a link", async () => {
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({ analyses: [summary()] }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([summary()], request),
       ),
     );
 
@@ -216,19 +257,17 @@ describe("AnalysesDashboardPage", () => {
 
   it("falls back to a '—' placeholder for company, location and publication date when the offer has none, in both the table and card layout (issue #116)", async () => {
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            summary({
-              jobOffer: {
-                ...summary().jobOffer,
-                company: null,
-                location: null,
-                postedAt: null,
-              },
-            }),
-          ],
-        }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([
+          summary({
+            jobOffer: {
+              ...summary().jobOffer,
+              company: null,
+              location: null,
+              postedAt: null,
+            },
+          }),
+        ], request),
       ),
     );
 
@@ -249,19 +288,17 @@ describe("AnalysesDashboardPage", () => {
     const longCompany = "A Very Long International Holding Company";
     const longLocation = "San Francisco Bay Area, California";
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            summary({
-              jobOffer: {
-                ...summary().jobOffer,
-                title: longTitle,
-                company: longCompany,
-                location: longLocation,
-              },
-            }),
-          ],
-        }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([
+          summary({
+            jobOffer: {
+              ...summary().jobOffer,
+              title: longTitle,
+              company: longCompany,
+              location: longLocation,
+            },
+          }),
+        ], request),
       ),
     );
 
@@ -289,7 +326,9 @@ describe("AnalysesDashboardPage", () => {
 
   it("renders a Poste/Entreprise/Localisation value at or under its limit unchanged, with no tooltip (issue #128)", async () => {
     server.use(
-      http.get("/api/analyses", () => HttpResponse.json({ analyses: [summary()] })),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([summary()], request),
+      ),
     );
 
     renderWithProviders(<AnalysesDashboardPage />);
@@ -303,7 +342,9 @@ describe("AnalysesDashboardPage", () => {
   it("shows every column visible by default, with Position/Status/Link absent from the Columns menu (issue #129)", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/analyses", () => HttpResponse.json({ analyses: [summary()] })),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([summary()], request),
+      ),
     );
 
     renderWithProviders(<AnalysesDashboardPage />);
@@ -350,7 +391,9 @@ describe("AnalysesDashboardPage", () => {
   it("toggles a column's visibility independently and persists the choice across a remount, restored by Réinitialiser (issue #129)", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/analyses", () => HttpResponse.json({ analyses: [summary()] })),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([summary()], request),
+      ),
     );
 
     const { unmount } = renderWithProviders(<AnalysesDashboardPage />);
@@ -377,19 +420,17 @@ describe("AnalysesDashboardPage", () => {
   it("keeps sorting on a column after it's hidden (issue #129)", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            summary({
-              id: "a1",
-              jobOffer: { ...summary().jobOffer, title: "Zeta Offer", company: "Zeta Co" },
-            }),
-            summary({
-              id: "a2",
-              jobOffer: { ...summary().jobOffer, title: "Alpha Offer", company: "Alpha Co" },
-            }),
-          ],
-        }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([
+          summary({
+            id: "a1",
+            jobOffer: { ...summary().jobOffer, title: "Zeta Offer", company: "Zeta Co" },
+          }),
+          summary({
+            id: "a2",
+            jobOffer: { ...summary().jobOffer, title: "Alpha Offer", company: "Alpha Co" },
+          }),
+        ], request),
       ),
     );
 
@@ -424,7 +465,9 @@ describe("AnalysesDashboardPage", () => {
         }) as unknown as MediaQueryList) as typeof window.matchMedia;
 
       server.use(
-        http.get("/api/analyses", () => HttpResponse.json({ analyses: [detail()] })),
+        http.get("/api/analyses", ({ request }) =>
+        analysesPage([detail()], request),
+      ),
       );
 
       renderWithProviders(<AnalysesDashboardPage />);
@@ -457,37 +500,35 @@ describe("AnalysesDashboardPage", () => {
 
   it("shows a Tracking status badge for a COMPLETED analysis and a pipeline badge otherwise (issue #64)", async () => {
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            summary({
-              id: "s1",
-              status: "COMPLETED",
-              applicationStatus: null,
-              jobOffer: {
-                id: "j1",
-                title: "To Apply Offer",
-                company: "Acme",
-                sourceSite: "FRANCE_TRAVAIL",
-                postedAt: "2026-07-01T00:00:00.000Z",
-                sourceUrl: "https://example.com/jobs/j1",
-              },
-            }),
-            summary({
-              id: "s2",
-              status: "RUNNING_CREW",
-              matchScore: null,
-              jobOffer: {
-                id: "j2",
-                title: "Still Running Offer",
-                company: "Globex",
-                sourceSite: "LINKEDIN",
-                postedAt: "2026-07-02T00:00:00.000Z",
-                sourceUrl: "https://example.com/jobs/j2",
-              },
-            }),
-          ],
-        }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([
+          summary({
+            id: "s1",
+            status: "COMPLETED",
+            applicationStatus: null,
+            jobOffer: {
+              id: "j1",
+              title: "To Apply Offer",
+              company: "Acme",
+              sourceSite: "FRANCE_TRAVAIL",
+              postedAt: "2026-07-01T00:00:00.000Z",
+              sourceUrl: "https://example.com/jobs/j1",
+            },
+          }),
+          summary({
+            id: "s2",
+            status: "RUNNING_CREW",
+            matchScore: null,
+            jobOffer: {
+              id: "j2",
+              title: "Still Running Offer",
+              company: "Globex",
+              sourceSite: "LINKEDIN",
+              postedAt: "2026-07-02T00:00:00.000Z",
+              sourceUrl: "https://example.com/jobs/j2",
+            },
+          }),
+        ], request),
       ),
     );
 
@@ -499,34 +540,17 @@ describe("AnalysesDashboardPage", () => {
     // Still running -> its raw pipeline state, not a Tracking status bucket.
     expect(screen.getByRole("cell", { name: "Running" })).toBeInTheDocument();
 
-    // The pipeline-only row is excluded from every specific Tracking status
-    // filter, but stays visible under "All statuses" (the default).
-    const user = userEvent.setup();
-    await tickFilterValues(user, "Status", "To apply");
-    expect(screen.queryByText("Still Running Offer")).not.toBeInTheDocument();
-    expect(screen.getByText("To Apply Offer")).toBeInTheDocument();
   });
 
-  it("filters by the Échouée/Failed status, which now has its own filter bucket (issue #172)", async () => {
-    server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            summary({
-              id: "s1",
-              status: "FAILED",
-              matchScore: null,
-              jobOffer: { ...summary().jobOffer, id: "j1", title: "Failed Offer" },
-            }),
-            summary({
-              id: "s2",
-              status: "COMPLETED",
-              jobOffer: { ...summary().jobOffer, id: "j2", title: "Completed Offer" },
-            }),
-          ],
-        }),
-      ),
-    );
+  it("asks for the Échouée/Failed bucket, which has a filter of its own (issue #172)", async () => {
+    const requests = recordAnalysesRequests([
+      summary({
+        id: "s1",
+        status: "FAILED",
+        matchScore: null,
+        jobOffer: { ...summary().jobOffer, id: "j1", title: "Failed Offer" },
+      }),
+    ]);
 
     const user = userEvent.setup();
     renderWithProviders(<AnalysesDashboardPage />);
@@ -535,33 +559,21 @@ describe("AnalysesDashboardPage", () => {
     expect(screen.getByRole("cell", { name: "Failed" })).toBeInTheDocument();
 
     await tickFilterValues(user, "Status", "Failed");
-    expect(screen.getByText("Failed Offer")).toBeInTheDocument();
-    expect(screen.queryByText("Completed Offer")).not.toBeInTheDocument();
+    expect(await requests.waitForQuery("status", "FAILED")).toBeDefined();
   });
 
-  it("filters by the En attente/Pending status, which has a bucket of its own too", async () => {
-    server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            summary({
-              id: "s1",
-              status: "PENDING",
-              matchScore: null,
-              // A stuck Analysis sits here for good until it is requeued
-              // (docs/adr/0032) — the case this bucket exists to surface.
-              stuck: true,
-              jobOffer: { ...summary().jobOffer, id: "j1", title: "Pending Offer" },
-            }),
-            summary({
-              id: "s2",
-              status: "COMPLETED",
-              jobOffer: { ...summary().jobOffer, id: "j2", title: "Completed Offer" },
-            }),
-          ],
-        }),
-      ),
-    );
+  it("asks for the En attente/Pending bucket, which has one of its own too", async () => {
+    const requests = recordAnalysesRequests([
+      summary({
+        id: "s1",
+        status: "PENDING",
+        matchScore: null,
+        // A stuck Analysis sits here for good until it is requeued
+        // (docs/adr/0032) — the case this bucket exists to surface.
+        stuck: true,
+        jobOffer: { ...summary().jobOffer, id: "j1", title: "Pending Offer" },
+      }),
+    ]);
 
     const user = userEvent.setup();
     renderWithProviders(<AnalysesDashboardPage />);
@@ -570,36 +582,18 @@ describe("AnalysesDashboardPage", () => {
     expect(screen.getByRole("cell", { name: "Pending" })).toBeInTheDocument();
 
     await tickFilterValues(user, "Status", "Pending");
-    expect(screen.getByText("Pending Offer")).toBeInTheDocument();
-    expect(screen.queryByText("Completed Offer")).not.toBeInTheDocument();
+    expect(await requests.waitForQuery("status", "PENDING")).toBeDefined();
   });
 
-  it("keeps several statuses at once, naming the selection on the trigger and writing them to one URL param", async () => {
-    server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            summary({
-              id: "s1",
-              status: "FAILED",
-              matchScore: null,
-              jobOffer: { ...summary().jobOffer, id: "j1", title: "Failed Offer" },
-            }),
-            summary({
-              id: "s2",
-              status: "COMPLETED",
-              jobOffer: { ...summary().jobOffer, id: "j2", title: "To Apply Offer" },
-            }),
-            summary({
-              id: "s3",
-              status: "COMPLETED",
-              applicationStatus: "REJECTED",
-              jobOffer: { ...summary().jobOffer, id: "j3", title: "Rejected Offer" },
-            }),
-          ],
-        }),
-      ),
-    );
+  it("keeps several statuses at once, naming the selection on the trigger and asking for them OR-ed", async () => {
+    const requests = recordAnalysesRequests([
+      summary({
+        id: "s1",
+        status: "FAILED",
+        matchScore: null,
+        jobOffer: { ...summary().jobOffer, id: "j1", title: "Failed Offer" },
+      }),
+    ]);
 
     const user = userEvent.setup();
     renderWithProviders(<AnalysesDashboardPage />);
@@ -612,10 +606,9 @@ describe("AnalysesDashboardPage", () => {
     await tickFilterValues(user, "Status", "Failed");
     expect(filterTrigger("Status")).toHaveAccessibleName("Status 2 statuses");
 
-    expect(screen.getByText("To Apply Offer")).toBeInTheDocument();
-    expect(screen.getByText("Failed Offer")).toBeInTheDocument();
-    expect(screen.queryByText("Rejected Offer")).not.toBeInTheDocument();
-
+    // Both buckets in one param, which is how the endpoint takes them (it
+    // ORs the values of one filter and ANDs the filters).
+    expect(await requests.waitForQuery("status", "TO_APPLY,FAILED")).toBeDefined();
     await waitFor(() => {
       const url = new URL(__getUrl(), "http://localhost");
       expect(url.searchParams.get("status")).toBe("TO_APPLY,FAILED");
@@ -624,46 +617,39 @@ describe("AnalysesDashboardPage", () => {
     // Unticking one leaves the other in force, rather than clearing both.
     await tickFilterValues(user, "Status", "Failed");
     expect(filterTrigger("Status")).toHaveAccessibleName("Status To apply");
-    expect(screen.queryByText("Failed Offer")).not.toBeInTheDocument();
-    expect(screen.getByText("To Apply Offer")).toBeInTheDocument();
+    expect(await requests.waitForQuery("status", "TO_APPLY")).toBeDefined();
   });
 
   it("combines several platforms, counting the filter once on the 'More filters' toggle", async () => {
-    server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            summary({
-              id: "s1",
-              jobOffer: {
-                ...summary().jobOffer,
-                id: "j1",
-                title: "LinkedIn Offer",
-                sourceSite: "LINKEDIN",
-              },
-            }),
-            summary({
-              id: "s2",
-              jobOffer: {
-                ...summary().jobOffer,
-                id: "j2",
-                title: "HelloWork Offer",
-                sourceSite: "HELLOWORK",
-              },
-            }),
-            summary({
-              id: "s3",
-              jobOffer: {
-                ...summary().jobOffer,
-                id: "j3",
-                title: "Indeed Offer",
-                sourceSite: "INDEED",
-              },
-            }),
-          ],
-        }),
-      ),
-    );
+    const requests = recordAnalysesRequests([
+      summary({
+        id: "s1",
+        jobOffer: {
+          ...summary().jobOffer,
+          id: "j1",
+          title: "LinkedIn Offer",
+          sourceSite: "LINKEDIN",
+        },
+      }),
+      summary({
+        id: "s2",
+        jobOffer: {
+          ...summary().jobOffer,
+          id: "j2",
+          title: "HelloWork Offer",
+          sourceSite: "HELLOWORK",
+        },
+      }),
+      summary({
+        id: "s3",
+        jobOffer: {
+          ...summary().jobOffer,
+          id: "j3",
+          title: "Indeed Offer",
+          sourceSite: "INDEED",
+        },
+      }),
+    ]);
 
     const user = userEvent.setup();
     renderWithProviders(<AnalysesDashboardPage />);
@@ -672,9 +658,7 @@ describe("AnalysesDashboardPage", () => {
     await openMoreFilters(user);
     await tickFilterValues(user, "Platform", "LinkedIn", "HelloWork");
 
-    expect(screen.getByText("LinkedIn Offer")).toBeInTheDocument();
-    expect(screen.getByText("HelloWork Offer")).toBeInTheDocument();
-    expect(screen.queryByText("Indeed Offer")).not.toBeInTheDocument();
+    expect(await requests.waitForQuery("platform", "LINKEDIN,HELLOWORK")).toBeDefined();
 
     // Two values ticked, one filter narrowing: the toggle counts filters, so
     // a closed panel never overstates what is hiding inside it.
@@ -683,25 +667,14 @@ describe("AnalysesDashboardPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("filters by the requestedAt range (issue #172)", async () => {
-    server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            summary({
-              id: "s1",
-              requestedAt: "2026-07-05T00:00:00.000Z",
-              jobOffer: { ...summary().jobOffer, id: "j1", title: "Early Offer" },
-            }),
-            summary({
-              id: "s2",
-              requestedAt: "2026-08-15T00:00:00.000Z",
-              jobOffer: { ...summary().jobOffer, id: "j2", title: "Late Offer" },
-            }),
-          ],
-        }),
-      ),
-    );
+  it("asks for the requestedAt range, widened to cover each named day (issue #172)", async () => {
+    const requests = recordAnalysesRequests([
+      summary({
+        id: "s1",
+        requestedAt: "2026-07-05T00:00:00.000Z",
+        jobOffer: { ...summary().jobOffer, id: "j1", title: "Early Offer" },
+      }),
+    ]);
 
     const user = userEvent.setup();
     renderWithProviders(<AnalysesDashboardPage />);
@@ -709,13 +682,26 @@ describe("AnalysesDashboardPage", () => {
 
     await openMoreFilters(user);
     await user.type(screen.getByLabelText("Requested from"), "2026-08-01");
-    expect(screen.queryByText("Early Offer")).not.toBeInTheDocument();
-    expect(screen.getByText("Late Offer")).toBeInTheDocument();
+
+    // The date input gives a bare day; an analysis requested at 14:00 that day
+    // has to fall inside it, so the bound is widened before it is sent.
+    const query = await requests.waitForQuery(
+      "requestedAtFrom",
+      "2026-08-01T00:00:00.000Z",
+    );
+    expect(query.has("requestedAtTo")).toBe(false);
+
+    await user.type(screen.getByLabelText("Requested to"), "2026-08-31");
+    expect(
+      await requests.waitForQuery("requestedAtTo", "2026-08-31T23:59:59.999Z"),
+    ).toBeDefined();
   });
 
   it("shows the id column with a copy button (issue #172)", async () => {
     server.use(
-      http.get("/api/analyses", () => HttpResponse.json({ analyses: [summary({ id: "a1" })] })),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([summary({ id: "a1" })], request),
+      ),
     );
 
     renderWithProviders(<AnalysesDashboardPage />);
@@ -727,7 +713,9 @@ describe("AnalysesDashboardPage", () => {
 
   it("shows an empty state when there are no analyses", async () => {
     server.use(
-      http.get("/api/analyses", () => HttpResponse.json({ analyses: [] })),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([], request),
+      ),
     );
 
     renderWithProviders(<AnalysesDashboardPage />);
@@ -739,39 +727,37 @@ describe("AnalysesDashboardPage", () => {
 
   it("renders every analysis as its own row, even when several share a SITE_SEARCH ingestionJobId (no batch grouping)", async () => {
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            summary({
-              id: "b1",
-              matchScore: 71,
-              ingestionJobId: "job-1",
-              ingestionJob: { mode: "SITE_SEARCH", siteConfigId: "site-ft" },
-              jobOffer: {
-                id: "job2",
-                title: "Offer One",
-                company: "Acme",
-                sourceSite: "FRANCE_TRAVAIL",
-                postedAt: "2026-07-01T00:00:00.000Z",
-                sourceUrl: "https://example.com/jobs/job2",
-              },
-            }),
-            summary({
-              id: "b2",
-              matchScore: 88,
-              ingestionJobId: "job-1",
-              ingestionJob: { mode: "SITE_SEARCH", siteConfigId: "site-ft" },
-              jobOffer: {
-                id: "job3",
-                title: "Offer Two",
-                company: "Acme",
-                sourceSite: "FRANCE_TRAVAIL",
-                postedAt: "2026-07-02T00:00:00.000Z",
-                sourceUrl: "https://example.com/jobs/job3",
-              },
-            }),
-          ],
-        }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([
+          summary({
+            id: "b1",
+            matchScore: 71,
+            ingestionJobId: "job-1",
+            ingestionJob: { mode: "SITE_SEARCH", siteConfigId: "site-ft" },
+            jobOffer: {
+              id: "job2",
+              title: "Offer One",
+              company: "Acme",
+              sourceSite: "FRANCE_TRAVAIL",
+              postedAt: "2026-07-01T00:00:00.000Z",
+              sourceUrl: "https://example.com/jobs/job2",
+            },
+          }),
+          summary({
+            id: "b2",
+            matchScore: 88,
+            ingestionJobId: "job-1",
+            ingestionJob: { mode: "SITE_SEARCH", siteConfigId: "site-ft" },
+            jobOffer: {
+              id: "job3",
+              title: "Offer Two",
+              company: "Acme",
+              sourceSite: "FRANCE_TRAVAIL",
+              postedAt: "2026-07-02T00:00:00.000Z",
+              sourceUrl: "https://example.com/jobs/job3",
+            },
+          }),
+        ], request),
       ),
     );
 
@@ -785,245 +771,115 @@ describe("AnalysesDashboardPage", () => {
     expect(screen.getAllByRole("row")).toHaveLength(3);
   });
 
-  it("narrows the list with the search box and restores it when cleared", async () => {
+  it("asks for a search term once typing pauses, and drops it again when cleared", async () => {
+    const requests = recordAnalysesRequests([
+      summary({ id: "s1", jobOffer: { ...summary().jobOffer, title: "Backend Engineer" } }),
+    ]);
+
     const user = userEvent.setup();
-    server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            summary({
-              id: "s1",
-              jobOffer: {
-                id: "j1",
-                title: "Backend Engineer",
-                company: "Acme Inc",
-                sourceSite: "FRANCE_TRAVAIL",
-                postedAt: "2026-07-01T00:00:00.000Z",
-                sourceUrl: "https://example.com/jobs/j1",
-              },
-            }),
-            summary({
-              id: "s2",
-              jobOffer: {
-                id: "j2",
-                title: "Frontend Developer",
-                company: "Globex",
-                sourceSite: "LINKEDIN",
-                postedAt: "2026-07-02T00:00:00.000Z",
-                sourceUrl: "https://example.com/jobs/j2",
-              },
-            }),
-          ],
-        }),
-      ),
-    );
-
     renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Backend Engineer");
 
-    expect(await screen.findByText("Backend Engineer")).toBeInTheDocument();
+    const box = screen.getByLabelText("Search");
+    await user.type(box, "backend");
 
-    await user.type(screen.getByLabelText("Search"), "globex");
-    expect(screen.queryByText("Backend Engineer")).not.toBeInTheDocument();
-    expect(screen.getByText("Frontend Developer")).toBeInTheDocument();
+    // One request for the term, not one per keystroke: the field commits on a
+    // pause (see `useDebouncedField`), which is what stopped every letter
+    // being its own round trip once filtering moved server-side.
+    const query = await requests.waitForQuery("q", "backend");
+    expect(query.get("q")).toBe("backend");
+    expect(requests.queries.filter((q) => (q.get("q") ?? "").startsWith("back")).length)
+      .toBeLessThan("backend".length);
 
-    await user.clear(screen.getByLabelText("Search"));
-    expect(screen.getByText("Backend Engineer")).toBeInTheDocument();
-    expect(screen.getByText("Frontend Developer")).toBeInTheDocument();
+    await user.clear(box);
+    await waitFor(() => expect(requests.latest().has("q")).toBe(false));
   });
 
-  it("filters by status and by CV version, and shows a no-matches message when nothing is left", async () => {
-    const user = userEvent.setup();
+  it("asks for a CV label, and says 'no matches' rather than 'no analyses' when a filter empties the table", async () => {
+    // Told apart by whether a filter is set, not by the row count: an empty
+    // page looks the same either way now. Getting it wrong also hid the filter
+    // panel — and with it the only way back out of the filter (docs/adr/0033).
+    const queries: URLSearchParams[] = [];
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            summary({
-              id: "s1",
-              status: "COMPLETED",
-              jobOffer: {
-                id: "j1",
-                title: "Backend Engineer",
-                company: "Acme",
-                sourceSite: "FRANCE_TRAVAIL",
-                postedAt: "2026-07-01T00:00:00.000Z",
-                sourceUrl: "https://example.com/jobs/j1",
-              },
-              cvVersion: { label: "Grad CV" },
-            }),
-            summary({
-              id: "s2",
-              status: "COMPLETED",
-              applicationStatus: "REJECTED",
-              matchScore: 55,
-              jobOffer: {
-                id: "j2",
-                title: "Frontend Developer",
-                company: "Globex",
-                sourceSite: "LINKEDIN",
-                postedAt: "2026-07-02T00:00:00.000Z",
-                sourceUrl: "https://example.com/jobs/j2",
-              },
-              cvVersion: { label: "Senior CV" },
-            }),
-          ],
-        }),
+      http.get("/api/analyses", ({ request }) => {
+        const params = new URL(request.url).searchParams;
+        queries.push(params);
+        // The server's answer, not a filter re-implemented here: this CV
+        // matches nothing.
+        return analysesPage(params.has("cv") ? [] : [summary()], request);
+      }),
+      http.get("/api/analyses/cv-labels", () =>
+        HttpResponse.json({ labels: ["Grad CV", "Senior CV"] }),
       ),
     );
 
-    renderWithProviders(<AnalysesDashboardPage />);
-
-    expect(await screen.findByText("Backend Engineer")).toBeInTheDocument();
-
-    await tickFilterValues(user, "Status", "Rejected");
-    expect(screen.queryByText("Backend Engineer")).not.toBeInTheDocument();
-    expect(screen.getByText("Frontend Developer")).toBeInTheDocument();
-
-    await openMoreFilters(user);
-    await user.selectOptions(screen.getByLabelText("CV version"), "Grad CV");
-    expect(screen.queryByText("Frontend Developer")).not.toBeInTheDocument();
-    expect(screen.getByText("No analyses match your filters.")).toBeInTheDocument();
-  });
-
-  it("filters by platform and by location, combining with each other and the existing filters (issue #125)", async () => {
     const user = userEvent.setup();
-    server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            summary({
-              id: "s1",
-              jobOffer: {
-                id: "j1",
-                title: "Backend Engineer",
-                company: "Acme",
-                location: "Paris",
-                sourceSite: "FRANCE_TRAVAIL",
-                postedAt: "2026-07-01T00:00:00.000Z",
-                sourceUrl: "https://example.com/jobs/j1",
-              },
-              cvVersion: { label: "Grad CV" },
-            }),
-            summary({
-              id: "s2",
-              jobOffer: {
-                id: "j2",
-                title: "Frontend Developer",
-                company: "Globex",
-                location: "Lyon",
-                sourceSite: "LINKEDIN",
-                postedAt: "2026-07-02T00:00:00.000Z",
-                sourceUrl: "https://example.com/jobs/j2",
-              },
-              cvVersion: { label: "Grad CV" },
-            }),
-            summary({
-              id: "s3",
-              jobOffer: {
-                id: "j3",
-                title: "Platform Engineer",
-                company: "Initech",
-                location: "Paris",
-                sourceSite: "HELLOWORK",
-                postedAt: "2026-07-03T00:00:00.000Z",
-                sourceUrl: "https://example.com/jobs/j3",
-              },
-              cvVersion: { label: "Grad CV" },
-            }),
-          ],
-        }),
-      ),
-    );
-
     renderWithProviders(<AnalysesDashboardPage />);
-    expect(await screen.findByText("Backend Engineer")).toBeInTheDocument();
+    await screen.findByText("Backend Engineer");
 
     await openMoreFilters(user);
+    await user.selectOptions(screen.getByLabelText("CV version"), "Senior CV");
 
-    // Platform options include a correctly-translated HelloWork label, not a
-    // raw enum value.
-    // The menu lists a correctly-translated HelloWork label, not a raw enum
-    // value.
-    await user.click(filterTrigger("Platform"));
+    await waitFor(() =>
+      expect(queries.some((q) => q.get("cv") === "Senior CV")).toBe(true),
+    );
     expect(
-      await screen.findByRole("menuitemcheckbox", { name: "HelloWork" }),
+      await screen.findByText("No analyses match your filters."),
     ).toBeInTheDocument();
-    await user.keyboard("{Escape}");
-
-    await tickFilterValues(user, "Platform", "HelloWork");
-    expect(screen.queryByText("Backend Engineer")).not.toBeInTheDocument();
-    expect(screen.queryByText("Frontend Developer")).not.toBeInTheDocument();
-    expect(screen.getByText("Platform Engineer")).toBeInTheDocument();
-
-    await clearFilter(user, "Platform");
-    await user.type(screen.getByLabelText("Location"), "par");
-    expect(screen.getByText("Backend Engineer")).toBeInTheDocument();
-    expect(screen.getByText("Platform Engineer")).toBeInTheDocument();
-    expect(screen.queryByText("Frontend Developer")).not.toBeInTheDocument();
-
-    await tickFilterValues(user, "Platform", "France Travail");
-    expect(screen.getByText("Backend Engineer")).toBeInTheDocument();
-    expect(screen.queryByText("Platform Engineer")).not.toBeInTheDocument();
-
-    await user.clear(screen.getByLabelText("Location"));
-    expect(screen.getByText("Backend Engineer")).toBeInTheDocument();
-    expect(screen.queryByText("Frontend Developer")).not.toBeInTheDocument();
+    expect(screen.queryByText("No analyses requested yet.")).not.toBeInTheDocument();
+    // The way out of a filter that matches nothing stays on screen.
+    expect(
+      screen.getByRole("button", { name: "Clear filters" }),
+    ).toBeInTheDocument();
   });
 
-  it("restores the platform filter and location search from the URL, and writes them back on change (issue #125)", async () => {
+  it("sends the platform, location and search filters together, AND-ed (issue #125)", async () => {
+    const requests = recordAnalysesRequests([summary()]);
+
     const user = userEvent.setup();
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Backend Engineer");
+
+    await user.type(screen.getByLabelText("Search"), "engineer");
+    await openMoreFilters(user);
+    await tickFilterValues(user, "Platform", "LinkedIn");
+    await user.type(screen.getByLabelText("Location"), "lyon");
+
+    // Every filter in one request: values inside one are OR-ed by the
+    // endpoint, the filters themselves AND-ed.
+    await waitFor(() => {
+      const query = requests.latest();
+      expect(query.get("q")).toBe("engineer");
+      expect(query.get("platform")).toBe("LINKEDIN");
+      expect(query.get("location")).toBe("lyon");
+    });
+  });
+
+  it("restores the platform filter and location search from the URL, and asks for both (issue #125)", async () => {
     __setUrl("/analyses?platform=LINKEDIN&location=lyon");
-    server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            summary({
-              id: "s1",
-              jobOffer: {
-                id: "j1",
-                title: "Backend Engineer",
-                company: "Acme",
-                location: "Paris",
-                sourceSite: "FRANCE_TRAVAIL",
-                postedAt: "2026-07-01T00:00:00.000Z",
-                sourceUrl: "https://example.com/jobs/j1",
-              },
-            }),
-            summary({
-              id: "s2",
-              jobOffer: {
-                id: "j2",
-                title: "Frontend Developer",
-                company: "Globex",
-                location: "Lyon",
-                sourceSite: "LINKEDIN",
-                postedAt: "2026-07-02T00:00:00.000Z",
-                sourceUrl: "https://example.com/jobs/j2",
-              },
-            }),
-          ],
-        }),
-      ),
-    );
+    const requests = recordAnalysesRequests([summary()]);
 
     renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Backend Engineer");
 
-    expect(await screen.findByText("Frontend Developer")).toBeInTheDocument();
-    expect(screen.queryByText("Backend Engineer")).not.toBeInTheDocument();
-    expect(filterTrigger("Platform")).toHaveAccessibleName("Platform LinkedIn");
+    // A shared or refreshed link narrows the first request, not a later one.
+    expect(requests.queries[0]!.get("platform")).toBe("LINKEDIN");
+    expect(requests.queries[0]!.get("location")).toBe("lyon");
+
+    // And the panel opens showing what is narrowing the table, rather than
+    // hiding it behind a closed fold.
+    expect(
+      screen.getByRole("button", { name: "More filters (2)" }),
+    ).toBeInTheDocument();
     expect(screen.getByLabelText("Location")).toHaveValue("lyon");
-
-    await clearFilter(user, "Platform");
-    await waitFor(() => {
-      const url = new URL(__getUrl(), "http://localhost");
-      expect(url.searchParams.has("platform")).toBe(false);
-    });
+    expect(filterTrigger("Platform")).toHaveAccessibleName("Platform LinkedIn");
   });
 
   it("keeps Search and Status above the table and folds the other filters behind a toggle", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({ analyses: [summary()] }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([summary()], request),
       ),
     );
 
@@ -1064,8 +920,8 @@ describe("AnalysesDashboardPage", () => {
   it("opens the folded filters, and counts them on the toggle, when the URL already carries some", async () => {
     __setUrl("/analyses?platform=LINKEDIN&location=lyon");
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({ analyses: [summary()] }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([summary()], request),
       ),
     );
 
@@ -1082,19 +938,17 @@ describe("AnalysesDashboardPage", () => {
     const user = userEvent.setup();
     __setUrl("/analyses?q=backend&platform=LINKEDIN");
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            summary({
-              id: "s1",
-              jobOffer: { ...summary().jobOffer, id: "j1", title: "Backend Engineer" },
-            }),
-            summary({
-              id: "s2",
-              jobOffer: { ...summary().jobOffer, id: "j2", title: "Frontend Developer" },
-            }),
-          ],
-        }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([
+          summary({
+            id: "s1",
+            jobOffer: { ...summary().jobOffer, id: "j1", title: "Backend Engineer" },
+          }),
+          summary({
+            id: "s2",
+            jobOffer: { ...summary().jobOffer, id: "j2", title: "Frontend Developer" },
+          }),
+        ], request),
       ),
     );
 
@@ -1116,57 +970,29 @@ describe("AnalysesDashboardPage", () => {
     expect(url.searchParams.has("platform")).toBe(false);
   });
 
-  it("sorts by a column when its header is clicked, toggling direction on a repeat click", async () => {
+  it("asks for a sort when a header is clicked, toggling direction on a repeat click", async () => {
+    const requests = recordAnalysesRequests([
+      summary({ id: "s1", jobOffer: { ...summary().jobOffer, title: "Backend Engineer" } }),
+    ]);
+
     const user = userEvent.setup();
-    server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            summary({
-              id: "s1",
-              matchScore: 40,
-              jobOffer: {
-                id: "j1",
-                title: "Low Fit",
-                company: "Acme",
-                sourceSite: "FRANCE_TRAVAIL",
-                postedAt: "2026-07-01T00:00:00.000Z",
-                sourceUrl: "https://example.com/jobs/j1",
-              },
-            }),
-            summary({
-              id: "s2",
-              matchScore: 95,
-              jobOffer: {
-                id: "j2",
-                title: "High Fit",
-                company: "Globex",
-                sourceSite: "LINKEDIN",
-                postedAt: "2026-07-02T00:00:00.000Z",
-                sourceUrl: "https://example.com/jobs/j2",
-              },
-            }),
-          ],
-        }),
-      ),
-    );
-
     renderWithProviders(<AnalysesDashboardPage />);
-    await screen.findByText("Low Fit");
+    await screen.findByText("Backend Engineer");
+
+    // The table opens on publish date, newest first (#63).
+    expect(requests.queries[0]!.get("sort")).toBe("postedAt");
+    expect(requests.queries[0]!.get("dir")).toBe("desc");
 
     await user.click(screen.getByRole("button", { name: "Score" }));
-    expect(
-      screen
-        .getByText("Low Fit")
-        .compareDocumentPosition(screen.getByText("High Fit")),
-    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    let query = await requests.waitForQuery("sort", "matchScore");
+    expect(query.get("dir")).toBe("asc");
 
     await user.click(screen.getByRole("button", { name: "Score" }));
-    expect(
-      screen
-        .getByText("High Fit")
-        .compareDocumentPosition(screen.getByText("Low Fit")),
-    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    await waitFor(() => {
+      query = requests.latest();
+      expect(query.get("sort")).toBe("matchScore");
+      expect(query.get("dir")).toBe("desc");
+    });
   });
 
   it("paginates client-side, 25 per page by default, and lets the page size change", async () => {
@@ -1185,7 +1011,7 @@ describe("AnalysesDashboardPage", () => {
       }),
     );
     server.use(
-      http.get("/api/analyses", () => HttpResponse.json({ analyses })),
+      http.get("/api/analyses", ({ request }) => analysesPage(analyses, request)),
     );
 
     renderWithProviders(<AnalysesDashboardPage />);
@@ -1204,56 +1030,29 @@ describe("AnalysesDashboardPage", () => {
   });
 
   it("restores search, status and sort from the URL query string on load", async () => {
-    __setUrl(
-      "/analyses?q=front&status=REJECTED&sort=matchScore&dir=asc&page=1&pageSize=25",
-    );
-    server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            summary({
-              id: "s1",
-              status: "COMPLETED",
-              jobOffer: {
-                id: "j1",
-                title: "Backend Engineer",
-                company: "Acme",
-                sourceSite: "FRANCE_TRAVAIL",
-                postedAt: "2026-07-01T00:00:00.000Z",
-                sourceUrl: "https://example.com/jobs/j1",
-              },
-            }),
-            summary({
-              id: "s2",
-              status: "COMPLETED",
-              applicationStatus: "REJECTED",
-              jobOffer: {
-                id: "j2",
-                title: "Frontend Developer",
-                company: "Globex",
-                sourceSite: "LINKEDIN",
-                postedAt: "2026-07-02T00:00:00.000Z",
-                sourceUrl: "https://example.com/jobs/j2",
-              },
-            }),
-          ],
-        }),
-      ),
-    );
+    __setUrl("/analyses?q=backend&status=REJECTED&sort=matchScore&dir=asc");
+    const requests = recordAnalysesRequests([summary()]);
 
     renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Backend Engineer");
 
-    expect(await screen.findByText("Frontend Developer")).toBeInTheDocument();
-    expect(screen.queryByText("Backend Engineer")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Search")).toHaveValue("front");
+    // The controls show it...
+    expect(screen.getByLabelText("Search")).toHaveValue("backend");
     expect(filterTrigger("Status")).toHaveAccessibleName("Status Rejected");
+    // ...and the very first request carries it, so a shared link never shows
+    // an unfiltered table for a beat before narrowing it.
+    const first = requests.queries[0]!;
+    expect(first.get("q")).toBe("backend");
+    expect(first.get("status")).toBe("REJECTED");
+    expect(first.get("sort")).toBe("matchScore");
+    expect(first.get("dir")).toBe("asc");
   });
 
   it("writes filter changes back to the URL query string", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({ analyses: [summary()] }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([summary()], request),
       ),
     );
 
@@ -1286,7 +1085,7 @@ describe("AnalysesDashboardPage", () => {
         },
       }),
     );
-    server.use(http.get("/api/analyses", () => HttpResponse.json({ analyses })));
+    server.use(http.get("/api/analyses", ({ request }) => analysesPage(analyses, request)));
 
     renderWithProviders(<AnalysesDashboardPage />);
     await screen.findByText("Page 1 of 2");
@@ -1305,7 +1104,12 @@ describe("AnalysesDashboardPage", () => {
     ).not.toBeChecked();
   });
 
-  it("offers to extend the selection to every row matching the filters, across pages (issue #67)", async () => {
+  it("scopes the selection to the page, dropping it when the page changes (issue #67, docs/adr/0033)", async () => {
+    // The selection used to be extendable to every row matching the filters,
+    // across pages. Every bulk action needs the row itself — which is
+    // terminal, which is stuck, what the CSV export writes — and once the
+    // table held one page at a time, the rows behind an off-page id were no
+    // longer there to ask.
     const user = userEvent.setup();
     const analyses = Array.from({ length: 30 }, (_, i) =>
       summary({
@@ -1320,38 +1124,36 @@ describe("AnalysesDashboardPage", () => {
         },
       }),
     );
-    server.use(http.get("/api/analyses", () => HttpResponse.json({ analyses })));
+    server.use(http.get("/api/analyses", ({ request }) => analysesPage(analyses, request)));
 
     renderWithProviders(<AnalysesDashboardPage />);
     await screen.findByText("Page 1 of 2");
 
     await user.click(screen.getByLabelText("Select all on this page"));
+    expect(screen.getByText("25 selected")).toBeInTheDocument();
+    // No "select all 30 matching your filters" any more.
     expect(
-      screen.getByRole("button", { name: "Select all 30 matching your filters" }),
-    ).toBeInTheDocument();
-
-    await user.click(
-      screen.getByRole("button", { name: "Select all 30 matching your filters" }),
-    );
-    expect(screen.getByText("30 selected")).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Select all 30 matching your filters" }),
+      screen.queryByRole("button", { name: /Select all 30/ }),
     ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await screen.findByText("Page 2 of 2");
+    // The bar goes with the page it belonged to, rather than carrying 25 ids
+    // whose rows are no longer loaded.
+    expect(screen.queryByText("25 selected")).not.toBeInTheDocument();
   });
 
   it("shows the bulk-actions bar only while something is selected, offering Tracking status changes and CSV export (issue #67)", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            summary({ id: "s1" }),
-            summary({
-              id: "s2",
-              jobOffer: { ...summary().jobOffer, id: "job-s2", title: "Frontend Engineer" },
-            }),
-          ],
-        }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([
+          summary({ id: "s1" }),
+          summary({
+            id: "s2",
+            jobOffer: { ...summary().jobOffer, id: "job-s2", title: "Frontend Engineer" },
+          }),
+        ], request),
       ),
     );
 
@@ -1373,13 +1175,11 @@ describe("AnalysesDashboardPage", () => {
   it("bulk-changes the Tracking status for the selection, lazily creating Applications, and reports a partial failure (issue #67)", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            summary({ id: "s1", jobOffer: { ...summary().jobOffer, id: "j1", title: "Offer One" } }),
-            summary({ id: "s2", jobOffer: { ...summary().jobOffer, id: "j2", title: "Offer Two" } }),
-          ],
-        }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([
+          summary({ id: "s1", jobOffer: { ...summary().jobOffer, id: "j1", title: "Offer One" } }),
+          summary({ id: "s2", jobOffer: { ...summary().jobOffer, id: "j2", title: "Offer Two" } }),
+        ], request),
       ),
       http.post("/api/applications", async ({ request }) => {
         const body = (await request.json()) as { analysisId: string };
@@ -1447,8 +1247,8 @@ describe("AnalysesDashboardPage", () => {
   it("exports the selected rows to CSV without a network request (issue #67)", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({ analyses: [summary({ id: "s1" })] }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([summary({ id: "s1" })], request),
       ),
     );
 
@@ -1487,13 +1287,11 @@ describe("AnalysesDashboardPage", () => {
   it("disables the bulk generate confirm when the selection would exceed the remaining quota (issue #68)", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            summary({ id: "s1", jobOffer: { ...summary().jobOffer, id: "j1", title: "Offer One" } }),
-            summary({ id: "s2", jobOffer: { ...summary().jobOffer, id: "j2", title: "Offer Two" } }),
-          ],
-        }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([
+          summary({ id: "s1", jobOffer: { ...summary().jobOffer, id: "j1", title: "Offer One" } }),
+          summary({ id: "s2", jobOffer: { ...summary().jobOffer, id: "j2", title: "Offer Two" } }),
+        ], request),
       ),
       http.get("/api/quotas", () =>
         HttpResponse.json({
@@ -1548,13 +1346,11 @@ describe("AnalysesDashboardPage", () => {
         });
       });
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            summary({ id: "s1", jobOffer: { ...summary().jobOffer, id: "j1", title: "Offer One" } }),
-            summary({ id: "s2", jobOffer: { ...summary().jobOffer, id: "j2", title: "Offer Two" } }),
-          ],
-        }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([
+          summary({ id: "s1", jobOffer: { ...summary().jobOffer, id: "j1", title: "Offer One" } }),
+          summary({ id: "s2", jobOffer: { ...summary().jobOffer, id: "j2", title: "Offer Two" } }),
+        ], request),
       ),
       generationPost("s1", "gd1"),
       generationPost("s2", "gd2"),
@@ -1596,33 +1392,31 @@ describe("AnalysesDashboardPage", () => {
     const user = userEvent.setup();
     const posted: string[] = [];
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            // Needs both: completed, nothing generated yet.
-            summary({
-              id: "s1",
-              coverLetterStatus: null,
-              tailoredCvStatus: null,
-              jobOffer: { ...summary().jobOffer, id: "j1", title: "Offer One" },
-            }),
-            // Already has a cover letter — asking again would buy a duplicate
-            // the list hides. A FAILED tailored CV is still worth retrying.
-            summary({
-              id: "s2",
-              coverLetterStatus: "READY",
-              tailoredCvStatus: "FAILED",
-              jobOffer: { ...summary().jobOffer, id: "j2", title: "Offer Two" },
-            }),
-            // Still running: the endpoint would reject it with a 400.
-            summary({
-              id: "s3",
-              status: "RUNNING_CREW",
-              matchScore: null,
-              jobOffer: { ...summary().jobOffer, id: "j3", title: "Offer Three" },
-            }),
-          ],
-        }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([
+          // Needs both: completed, nothing generated yet.
+          summary({
+            id: "s1",
+            coverLetterStatus: null,
+            tailoredCvStatus: null,
+            jobOffer: { ...summary().jobOffer, id: "j1", title: "Offer One" },
+          }),
+          // Already has a cover letter — asking again would buy a duplicate
+          // the list hides. A FAILED tailored CV is still worth retrying.
+          summary({
+            id: "s2",
+            coverLetterStatus: "READY",
+            tailoredCvStatus: "FAILED",
+            jobOffer: { ...summary().jobOffer, id: "j2", title: "Offer Two" },
+          }),
+          // Still running: the endpoint would reject it with a 400.
+          summary({
+            id: "s3",
+            status: "RUNNING_CREW",
+            matchScore: null,
+            jobOffer: { ...summary().jobOffer, id: "j3", title: "Offer Three" },
+          }),
+        ], request),
       ),
       http.post("/api/analyses/:id/generated-documents", ({ params }) => {
         posted.push(params.id as string);
@@ -1656,16 +1450,14 @@ describe("AnalysesDashboardPage", () => {
   it("explains instead of generating when nothing selected still needs that document (docs/adr/0031)", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            summary({
-              id: "s1",
-              coverLetterStatus: "READY",
-              jobOffer: { ...summary().jobOffer, id: "j1", title: "Offer One" },
-            }),
-          ],
-        }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([
+          summary({
+            id: "s1",
+            coverLetterStatus: "READY",
+            jobOffer: { ...summary().jobOffer, id: "j1", title: "Offer One" },
+          }),
+        ], request),
       ),
     );
 
@@ -1685,13 +1477,11 @@ describe("AnalysesDashboardPage", () => {
   it("says why a bulk relaunch would do nothing rather than greying the button, and names the skipped count on a partial selection (issue #126)", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            summary({ id: "s1", status: "COMPLETED", jobOffer: { ...summary().jobOffer, id: "j1", title: "Offer One" } }),
-            summary({ id: "s2", status: "RUNNING_CREW", jobOffer: { ...summary().jobOffer, id: "j2", title: "Offer Two" } }),
-          ],
-        }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([
+          summary({ id: "s1", status: "COMPLETED", jobOffer: { ...summary().jobOffer, id: "j1", title: "Offer One" } }),
+          summary({ id: "s2", status: "RUNNING_CREW", jobOffer: { ...summary().jobOffer, id: "j2", title: "Offer Two" } }),
+        ], request),
       ),
     );
 
@@ -1721,13 +1511,11 @@ describe("AnalysesDashboardPage", () => {
   it("disables the bulk relaunch confirm when the eligible selection would exceed the remaining analysis quota (issue #126)", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            summary({ id: "s1", status: "COMPLETED", jobOffer: { ...summary().jobOffer, id: "j1", title: "Offer One" } }),
-            summary({ id: "s2", status: "FAILED", jobOffer: { ...summary().jobOffer, id: "j2", title: "Offer Two" } }),
-          ],
-        }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([
+          summary({ id: "s1", status: "COMPLETED", jobOffer: { ...summary().jobOffer, id: "j1", title: "Offer One" } }),
+          summary({ id: "s2", status: "FAILED", jobOffer: { ...summary().jobOffer, id: "j2", title: "Offer Two" } }),
+        ], request),
       ),
       http.get("/api/quotas", () =>
         HttpResponse.json({
@@ -1755,13 +1543,11 @@ describe("AnalysesDashboardPage", () => {
   it("bulk-relaunches the eligible selection via one POST /analyses per pair, refreshes the list, and reports a partial failure (issue #126)", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            summary({ id: "s1", status: "COMPLETED", jobOffer: { ...summary().jobOffer, id: "j1", title: "Offer One" } }),
-            summary({ id: "s2", status: "FAILED", jobOffer: { ...summary().jobOffer, id: "j2", title: "Offer Two" } }),
-          ],
-        }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([
+          summary({ id: "s1", status: "COMPLETED", jobOffer: { ...summary().jobOffer, id: "j1", title: "Offer One" } }),
+          summary({ id: "s2", status: "FAILED", jobOffer: { ...summary().jobOffer, id: "j2", title: "Offer Two" } }),
+        ], request),
       ),
       http.post("/api/analyses", async ({ request }) => {
         const body = (await request.json()) as { jobOfferId: string; cvVersionId: string };
@@ -1785,8 +1571,8 @@ describe("AnalysesDashboardPage", () => {
   it("clears the selection when the search term, Tracking status filter, or sort changes (issue #67)", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({ analyses: [summary({ id: "s1" })] }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([summary({ id: "s1" })], request),
       ),
     );
 
@@ -1796,8 +1582,12 @@ describe("AnalysesDashboardPage", () => {
     await user.click(screen.getByRole("checkbox", { name: "Select Backend Engineer" }));
     expect(screen.getByText("1 selected")).toBeInTheDocument();
 
+    // The search box commits on a pause now, so the selection goes with the
+    // request the term produces, not with the keystroke.
     await user.type(screen.getByLabelText("Search"), "x");
-    expect(screen.queryByText("1 selected")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByText("1 selected")).not.toBeInTheDocument(),
+    );
   });
 
   it("shows an error state when the request fails", async () => {
@@ -1817,30 +1607,28 @@ describe("AnalysesDashboardPage", () => {
   it("opens the Quick view when a row is clicked, showing the full result breakdown and status, plus links to the full analysis and the comparison (issue #65, widened in #70)", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            detail({
-              resultJSON: {
-                ...RESULT,
-                matched_skills: [
-                  { skill: "TypeScript", evidence: "5 years at Acme" },
-                ],
-                missing_skills: [
-                  { skill: "Kubernetes", importance: "required" },
-                  { skill: "Terraform", importance: "required" },
-                  { skill: "GraphQL", importance: "nice_to_have" },
-                  { skill: "Rust", importance: "nice_to_have" },
-                ],
-                strengths: ["Ships fast"],
-                weaknesses: ["Thin on infra"],
-                improvement_suggestions: [
-                  { area: "Infra", suggestion: "Add a k8s project", priority: "high" },
-                ],
-              },
-            }),
-          ],
-        }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([
+          detail({
+            resultJSON: {
+              ...RESULT,
+              matched_skills: [
+                { skill: "TypeScript", evidence: "5 years at Acme" },
+              ],
+              missing_skills: [
+                { skill: "Kubernetes", importance: "required" },
+                { skill: "Terraform", importance: "required" },
+                { skill: "GraphQL", importance: "nice_to_have" },
+                { skill: "Rust", importance: "nice_to_have" },
+              ],
+              strengths: ["Ships fast"],
+              weaknesses: ["Thin on infra"],
+              improvement_suggestions: [
+                { area: "Infra", suggestion: "Add a k8s project", priority: "high" },
+              ],
+            },
+          }),
+        ], request),
       ),
     );
 
@@ -1895,18 +1683,16 @@ describe("AnalysesDashboardPage", () => {
   it("shows the offer's location in the Quick view, falling back to a placeholder for company and location when missing (issue #116)", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            detail({
-              jobOffer: {
-                ...summary().jobOffer,
-                company: null,
-                location: null,
-              },
-            }),
-          ],
-        }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([
+          detail({
+            jobOffer: {
+              ...summary().jobOffer,
+              company: null,
+              location: null,
+            },
+          }),
+        ], request),
       ),
     );
 
@@ -1920,8 +1706,8 @@ describe("AnalysesDashboardPage", () => {
   it("does not open the Quick view when the Lien icon is clicked", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({ analyses: [detail()] }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([detail()], request),
       ),
     );
 
@@ -1936,8 +1722,8 @@ describe("AnalysesDashboardPage", () => {
   it("closes the Quick view on Escape and returns focus to the triggering row", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({ analyses: [detail()] }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([detail()], request),
       ),
     );
 
@@ -1959,7 +1745,9 @@ describe("AnalysesDashboardPage", () => {
   it("closes the Quick view from its own labelled Fermer button, the bare corner X being gone", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/analyses", () => HttpResponse.json({ analyses: [detail()] })),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([detail()], request),
+      ),
     );
 
     renderWithProviders(<AnalysesDashboardPage />);
@@ -1976,8 +1764,8 @@ describe("AnalysesDashboardPage", () => {
   it("walks the filtered, sorted list from inside the Quick view without closing it, and disables each arrow at its end", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({ analyses: [OFFER_A, OFFER_B, OFFER_C] }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([OFFER_A, OFFER_B, OFFER_C], request),
       ),
     );
 
@@ -2014,8 +1802,8 @@ describe("AnalysesDashboardPage", () => {
   it("walks the list with the left and right arrow keys", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({ analyses: [OFFER_A, OFFER_B, OFFER_C] }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([OFFER_A, OFFER_B, OFFER_C], request),
       ),
     );
 
@@ -2036,8 +1824,10 @@ describe("AnalysesDashboardPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("flips the table to the next page when the arrows cross a page boundary, and hands focus back to the row actually shown", async () => {
+  it("fetches the next page when the arrows cross a page boundary, and hands focus back to the row actually shown", async () => {
     const user = userEvent.setup();
+    // In the order the endpoint would return them — the ordering is its job
+    // now, so rank N is simply the Nth row served.
     const analyses = Array.from({ length: 30 }, (_, i) =>
       detail({
         id: `a${i}`,
@@ -2047,26 +1837,26 @@ describe("AnalysesDashboardPage", () => {
           company: "Acme",
           location: "Paris",
           sourceSite: "OTHER",
-          // Descending title order matches the default postedAt-desc sort, so
-          // "Offer 29" is rank 1 and "Offer 00" is rank 30.
           postedAt: `2026-07-${String(i + 1).padStart(2, "0")}T00:00:00.000Z`,
           sourceUrl: `https://example.com/jobs/${i}`,
         },
       }),
     );
-    server.use(http.get("/api/analyses", () => HttpResponse.json({ analyses })));
+    server.use(http.get("/api/analyses", ({ request }) => analysesPage(analyses, request)));
 
     renderWithProviders(<AnalysesDashboardPage />);
     await screen.findByText("Page 1 of 2");
 
-    // "Offer 05" is rank 25 — the last row of page 1.
-    await user.click(screen.getByText("Offer 05"));
+    // "Offer 24" is rank 25 — the last row of page 1.
+    await user.click(screen.getByText("Offer 24"));
     const quickView = within(await screen.findByRole("dialog"));
     expect(quickView.getByText("25 / 30")).toBeInTheDocument();
 
+    // Stepping past it asks for page 2 and opens the panel on its first row,
+    // rather than stopping at the edge of what happens to be loaded.
     await user.click(quickView.getByRole("button", { name: "Next" }));
     expect(
-      await quickView.findByRole("heading", { name: "Offer 04" }),
+      await quickView.findByRole("heading", { name: "Offer 25" }),
     ).toBeInTheDocument();
     expect(quickView.getByText("26 / 30")).toBeInTheDocument();
     expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
@@ -2077,7 +1867,7 @@ describe("AnalysesDashboardPage", () => {
     );
     // Not the row that opened the panel — that one is on page 1 and unmounted.
     expect(document.activeElement).toBe(
-      screen.getByText("Offer 04").closest("tr"),
+      screen.getByText("Offer 25").closest("tr"),
     );
   });
 
@@ -2102,9 +1892,16 @@ describe("AnalysesDashboardPage", () => {
       cvVersion: { label: "Grad CV" },
     };
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({ analyses: [detail({ applicationStatus }), OFFER_C] }),
-      ),
+      http.get("/api/analyses", ({ request }) => {
+        // The endpoint's answer for the "À postuler" filter this test runs
+        // under: once the Analysis is APPLIED it is no longer in that bucket,
+        // so the next fetch simply does not carry it.
+        const stillToApply = applicationStatus === null;
+        return analysesPage(
+          stillToApply ? [detail({ applicationStatus }), OFFER_C] : [OFFER_C],
+          request,
+        );
+      }),
       http.post("/api/applications", () => HttpResponse.json({ application })),
       http.post("/api/applications/app-1/status-events", () => {
         applicationStatus = "APPLIED";
@@ -2147,7 +1944,9 @@ describe("AnalysesDashboardPage", () => {
   it("opens the offer in a new tab from the Quick view's \"View job offer\" link (issue #66)", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/analyses", () => HttpResponse.json({ analyses: [detail()] })),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([detail()], request),
+      ),
     );
 
     renderWithProviders(<AnalysesDashboardPage />);
@@ -2162,7 +1961,9 @@ describe("AnalysesDashboardPage", () => {
   it("does not offer a \"To apply\" Tracking status transition from the Quick view (issue #66)", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/analyses", () => HttpResponse.json({ analyses: [detail()] })),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([detail()], request),
+      ),
     );
 
     renderWithProviders(<AnalysesDashboardPage />);
@@ -2179,8 +1980,8 @@ describe("AnalysesDashboardPage", () => {
     const user = userEvent.setup();
     let applicationStatus: string | null = null;
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({ analyses: [detail({ applicationStatus })] }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([detail({ applicationStatus })], request),
       ),
       http.post("/api/applications", () =>
         HttpResponse.json({
@@ -2248,7 +2049,9 @@ describe("AnalysesDashboardPage", () => {
   it("triggers document generation from the Quick view, reflecting pending status (issue #66)", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/analyses", () => HttpResponse.json({ analyses: [detail()] })),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([detail()], request),
+      ),
       pendingDocumentsPost(),
       http.get("/api/generated-documents/gd-cl", () =>
         HttpResponse.json({
@@ -2304,10 +2107,8 @@ describe("AnalysesDashboardPage", () => {
   it("does not show \"Relancer l'analyse\" for a non-terminal analysis in the Quick view (issue #124)", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [detail({ status: "RUNNING_CREW", resultJSON: null })],
-        }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([detail({ status: "RUNNING_CREW", resultJSON: null })], request),
       ),
     );
 
@@ -2326,7 +2127,7 @@ describe("AnalysesDashboardPage", () => {
     let analyses = [detail({ status: "COMPLETED" })];
     let createBody: unknown = null;
     server.use(
-      http.get("/api/analyses", () => HttpResponse.json({ analyses })),
+      http.get("/api/analyses", ({ request }) => analysesPage(analyses, request)),
       http.post("/api/analyses", async ({ request }) => {
         createBody = await request.json();
         analyses = [
@@ -2367,8 +2168,8 @@ describe("AnalysesDashboardPage", () => {
     const user = userEvent.setup();
     let createCalls = 0;
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({ analyses: [detail({ status: "COMPLETED" })] }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([detail({ status: "COMPLETED" })], request),
       ),
       http.post("/api/analyses", () => {
         createCalls += 1;
@@ -2393,12 +2194,10 @@ describe("AnalysesDashboardPage", () => {
   it("shows an inline error and stays on the original analysis when a Quick view relaunch fails, for a non-external Role (issue #124)", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            detail({ status: "FAILED", resultJSON: null, errorMessage: "LLM timed out" }),
-          ],
-        }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([
+          detail({ status: "FAILED", resultJSON: null, errorMessage: "LLM timed out" }),
+        ], request),
       ),
       http.post("/api/analyses", () =>
         HttpResponse.json({ error: "boom" }, { status: 500 }),
@@ -2425,8 +2224,8 @@ describe("AnalysesDashboardPage", () => {
   it("preselects the Analysis's own CVVersion in the relaunch CV picker for an external candidate when it is still CONVERTED (issue #181)", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({ analyses: [detail({ status: "COMPLETED", cvVersionId: "cv1" })] }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([detail({ status: "COMPLETED", cvVersionId: "cv1" })], request),
       ),
       http.get("/api/cv-versions", () =>
         HttpResponse.json({
@@ -2453,8 +2252,8 @@ describe("AnalysesDashboardPage", () => {
   it("falls back to the candidate's default CONVERTED CV in the relaunch picker when the Analysis's own CV was superseded (issue #181)", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({ analyses: [detail({ status: "COMPLETED", cvVersionId: "cv1" })] }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([detail({ status: "COMPLETED", cvVersionId: "cv1" })], request),
       ),
       http.get("/api/cv-versions", () =>
         HttpResponse.json({
@@ -2481,8 +2280,8 @@ describe("AnalysesDashboardPage", () => {
   it("disables the relaunch confirm and shows the manage-CVs link for an external candidate with no CONVERTED CV (issue #181)", async () => {
     const user = userEvent.setup();
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({ analyses: [detail({ status: "COMPLETED", cvVersionId: "cv1" })] }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([detail({ status: "COMPLETED", cvVersionId: "cv1" })], request),
       ),
       http.get("/api/cv-versions", () =>
         HttpResponse.json({
@@ -2510,8 +2309,8 @@ describe("AnalysesDashboardPage", () => {
     const user = userEvent.setup();
     let createBody: unknown = null;
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({ analyses: [detail({ status: "COMPLETED", cvVersionId: "cv1" })] }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([detail({ status: "COMPLETED", cvVersionId: "cv1" })], request),
       ),
       http.get("/api/cv-versions", () =>
         HttpResponse.json({
@@ -2550,38 +2349,31 @@ describe("AnalysesDashboardPage", () => {
     expect(picker.value).toBe("cv2");
   });
 
-  it("refetches the analyses list on demand, showing a busy state while in flight, without resetting search or filters (issue #121)", async () => {
+  it("refetches the current page on demand, showing a busy state while in flight, without dropping the search (issue #121)", async () => {
     const user = userEvent.setup();
     let callCount = 0;
-    let resolveSecondCall: () => void = () => {};
-    const secondCallGate = new Promise<void>((resolve) => {
-      resolveSecondCall = resolve;
+    let resolveRefresh: () => void = () => {};
+    const refreshGate = new Promise<void>((resolve) => {
+      resolveRefresh = resolve;
     });
+    const queries: URLSearchParams[] = [];
     server.use(
-      http.get("/api/analyses", async () => {
+      http.get("/api/analyses", async ({ request }) => {
+        const params = new URL(request.url).searchParams;
+        queries.push(params);
         callCount += 1;
-        const isRefresh = callCount === 2;
-        if (isRefresh) {
-          await secondCallGate;
+        // The refresh is the call that repeats a query string already asked
+        // for — the search commit in between has its own.
+        if (queries.filter((q) => q.get("q") === "developer").length === 2) {
+          await refreshGate;
         }
-        return HttpResponse.json({
-          analyses: [
-            summary({
-              id: "s1",
-              jobOffer: {
-                id: "j1",
-                title: "Backend Engineer",
-                company: "Acme Inc",
-                sourceSite: "FRANCE_TRAVAIL",
-                postedAt: "2026-07-01T00:00:00.000Z",
-                sourceUrl: "https://example.com/jobs/j1",
-              },
-            }),
+        return analysesPage(
+          [
             summary({
               id: "s2",
               jobOffer: {
                 id: "j2",
-                title: callCount >= 2 ? "Frontend Developer (updated)" : "Frontend Developer",
+                title: callCount >= 3 ? "Frontend Developer (updated)" : "Frontend Developer",
                 company: "Globex",
                 sourceSite: "LINKEDIN",
                 postedAt: "2026-07-02T00:00:00.000Z",
@@ -2589,7 +2381,8 @@ describe("AnalysesDashboardPage", () => {
               },
             }),
           ],
-        });
+          request,
+        );
       }),
     );
 
@@ -2597,19 +2390,22 @@ describe("AnalysesDashboardPage", () => {
     expect(await screen.findByText("Frontend Developer")).toBeInTheDocument();
 
     await user.type(screen.getByLabelText("Search"), "developer");
-    expect(screen.queryByText("Backend Engineer")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(queries.some((q) => q.get("q") === "developer")).toBe(true),
+    );
 
     const refreshButton = screen.getByRole("button", { name: "Refresh" });
     await user.click(refreshButton);
     expect(refreshButton).toBeDisabled();
 
-    resolveSecondCall();
+    resolveRefresh();
     await waitFor(() => expect(refreshButton).not.toBeDisabled());
 
-    expect(callCount).toBe(2);
-    expect(screen.getByText("Frontend Developer (updated)")).toBeInTheDocument();
+    // Refetching asks for the same page of the same filtered list, and the
+    // search box keeps what was typed into it.
+    expect(await screen.findByText("Frontend Developer (updated)")).toBeInTheDocument();
     expect(screen.getByLabelText("Search")).toHaveValue("developer");
-    expect(screen.queryByText("Backend Engineer")).not.toBeInTheDocument();
+    expect(queries[queries.length - 1]!.get("q")).toBe("developer");
   });
 });
 
@@ -3749,12 +3545,10 @@ describe("a stuck analysis", () => {
     const user = userEvent.setup();
     let requeued = 0;
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            stuckDetail({ jobOffer: { ...summary().jobOffer, title: "Stuck Offer" } }),
-          ],
-        }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([
+          stuckDetail({ jobOffer: { ...summary().jobOffer, title: "Stuck Offer" } }),
+        ], request),
       ),
       http.post("/api/analyses/a1/requeue", () => {
         requeued += 1;
@@ -3782,14 +3576,12 @@ describe("a stuck analysis", () => {
     const user = userEvent.setup();
     const requeued: string[] = [];
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            summary({ id: "s1", status: "PENDING", stuck: true, jobOffer: { ...summary().jobOffer, title: "Stranded One" } }),
-            summary({ id: "s2", status: "PENDING", stuck: true, jobOffer: { ...summary().jobOffer, title: "Stranded Two" } }),
-            summary({ id: "s3", status: "PENDING", stuck: false, jobOffer: { ...summary().jobOffer, title: "Still Queued" } }),
-          ],
-        }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([
+          summary({ id: "s1", status: "PENDING", stuck: true, jobOffer: { ...summary().jobOffer, title: "Stranded One" } }),
+          summary({ id: "s2", status: "PENDING", stuck: true, jobOffer: { ...summary().jobOffer, title: "Stranded Two" } }),
+          summary({ id: "s3", status: "PENDING", stuck: false, jobOffer: { ...summary().jobOffer, title: "Still Queued" } }),
+        ], request),
       ),
       http.post("/api/analyses/:id/requeue", ({ params }) => {
         requeued.push(params.id as string);
@@ -3814,10 +3606,8 @@ describe("a stuck analysis", () => {
     const user = userEvent.setup();
     let requeued = 0;
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [summary({ id: "s1", status: "COMPLETED", stuck: false })],
-        }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([summary({ id: "s1", status: "COMPLETED", stuck: false })], request),
       ),
       http.post("/api/analyses/:id/requeue", () => {
         requeued += 1;
@@ -3845,13 +3635,11 @@ describe("a stuck analysis", () => {
     // the server is the authority.
     const user = userEvent.setup();
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            summary({ id: "s1", status: "PENDING", stuck: true, jobOffer: { ...summary().jobOffer, title: "Stranded One" } }),
-            summary({ id: "s2", status: "PENDING", stuck: true, jobOffer: { ...summary().jobOffer, title: "Stranded Two" } }),
-          ],
-        }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([
+          summary({ id: "s1", status: "PENDING", stuck: true, jobOffer: { ...summary().jobOffer, title: "Stranded One" } }),
+          summary({ id: "s2", status: "PENDING", stuck: true, jobOffer: { ...summary().jobOffer, title: "Stranded Two" } }),
+        ], request),
       ),
       http.post("/api/analyses/:id/requeue", ({ params }) =>
         params.id === "s2"
@@ -3879,18 +3667,16 @@ describe("a stuck analysis", () => {
     // view offered a relaunch with no explanation of what went wrong.
     const user = userEvent.setup();
     server.use(
-      http.get("/api/analyses", () =>
-        HttpResponse.json({
-          analyses: [
-            detail({
-              status: "FAILED",
-              matchScore: null,
-              resultJSON: null,
-              errorMessage: "ExtractionError: the offer page had no description",
-              jobOffer: { ...summary().jobOffer, title: "Failed Offer" },
-            }),
-          ],
-        }),
+      http.get("/api/analyses", ({ request }) =>
+        analysesPage([
+          detail({
+            status: "FAILED",
+            matchScore: null,
+            resultJSON: null,
+            errorMessage: "ExtractionError: the offer page had no description",
+            jobOffer: { ...summary().jobOffer, title: "Failed Offer" },
+          }),
+        ], request),
       ),
     );
 

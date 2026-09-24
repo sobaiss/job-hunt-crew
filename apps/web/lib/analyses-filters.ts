@@ -1,17 +1,15 @@
-import type { AnalysisSummary } from "@/hooks/use-analyses";
 import {
   ANALYSES_STATUS_FILTERS,
-  isPipelineStatusFilter,
-  trackingStatusOf,
   type AnalysesStatusFilter,
 } from "@/lib/tracking-status";
 
-// Pure, framework-free helpers behind the Analyses table (#63). Search, status
-// filter and CVVersion filter all operate on the list already returned by
-// `/api/analyses` — no new query parameter, no server work. Sorting and
-// pagination are likewise applied client-side to that same list. The page
-// keeps this state in the URL query string (via `parseAnalysesTableState` /
-// `analysesTableStateToParams`) so it survives a refresh and is shareable.
+// Pure, framework-free helpers behind the Analyses table (#63) — now the
+// table's *state*, not its data. Search, the status/CVVersion/platform/location
+// filters, the sort and the pagination are all applied by `GET /v1/analyses`;
+// what lives here is the round trip between that state, the URL query string it
+// is kept in (so it survives a refresh and is shareable), and the query string
+// the endpoint is asked with. The narrowing itself used to happen here, over a
+// list of every Analysis the candidate had; see docs/adr/0033.
 
 /** Every `JobOfferSourceSite` enum value the platform filter (#125) offers. */
 export const JOB_OFFER_SOURCE_SITES = [
@@ -101,79 +99,6 @@ export function hasActiveFilters(state: AnalysesFilterState): boolean {
   );
 }
 
-/** Distinct CVVersion labels present in the list, in first-seen order. */
-export function cvLabelsOf(analyses: AnalysisSummary[]): string[] {
-  const seen = new Set<string>();
-  for (const analysis of analyses) seen.add(analysis.cvVersion.label);
-  return [...seen];
-}
-
-function matchesSearch(analysis: AnalysisSummary, term: string): boolean {
-  const needle = term.trim().toLowerCase();
-  if (!needle) return true;
-  const haystack = `${analysis.jobOffer.title ?? ""} ${
-    analysis.jobOffer.company ?? ""
-  }`.toLowerCase();
-  return haystack.includes(needle);
-}
-
-function matchesLocation(analysis: AnalysisSummary, term: string): boolean {
-  const needle = term.trim().toLowerCase();
-  if (!needle) return true;
-  return (analysis.jobOffer.location ?? "").toLowerCase().includes(needle);
-}
-
-/** `requestedAt` (a full ISO-8601 UTC timestamp) falls within `[from, to]`,
- *  each a bare `YYYY-MM-DD` date-input string widened to cover the whole
- *  named day — mirrors the Admin analyses table's own
- *  `adminAnalysesTableStateToQuery` widening, done server-side there. */
-function matchesRequestedAtRange(
-  analysis: AnalysisSummary,
-  from: string,
-  to: string,
-): boolean {
-  if (!from && !to) return true;
-  const requestedAt = new Date(analysis.requestedAt).getTime();
-  if (from && requestedAt < new Date(`${from}T00:00:00.000Z`).getTime()) return false;
-  if (to && requestedAt > new Date(`${to}T23:59:59.999Z`).getTime()) return false;
-  return true;
-}
-
-/** A status filter matches a pipeline bucket (`PENDING`/`FAILED`) directly
- *  against the Analysis's own pipeline status, or a Tracking status bucket
- *  against `trackingStatusOf` — mirrors `AdminAnalysesStatusFilter`'s split in
- *  `services/api`. */
-function matchesStatus(analysis: AnalysisSummary, status: AnalysesStatusFilter): boolean {
-  if (isPipelineStatusFilter(status)) return analysis.status === status;
-  return trackingStatusOf(analysis) === status;
-}
-
-/**
- * Narrow the analyses to those matching the search term, the status filter,
- * the CVVersion filter, the platform filter, the location search (#125) and
- * the `requestedAt` range (#172). Values inside one filter are OR-ed, the
- * filters themselves AND-ed. A specific Tracking status bucket only ever
- * matches a `COMPLETED` Analysis — a still-running one (but not `PENDING` or
- * `FAILED`, which have buckets of their own) has no bucket and is excluded by
- * any non-empty status filter.
- */
-export function filterAnalyses(
-  analyses: AnalysisSummary[],
-  { search, status, cvLabel, platform, location, requestedAtFrom, requestedAtTo }: AnalysesFilterState,
-): AnalysisSummary[] {
-  return analyses.filter(
-    (analysis) =>
-      matchesSearch(analysis, search) &&
-      (status.length === 0 ||
-        status.some((bucket) => matchesStatus(analysis, bucket))) &&
-      (cvLabel === "all" || analysis.cvVersion.label === cvLabel) &&
-      (platform.length === 0 ||
-        platform.includes(analysis.jobOffer.sourceSite as JobOfferSourceSite)) &&
-      matchesLocation(analysis, location) &&
-      matchesRequestedAtRange(analysis, requestedAtFrom, requestedAtTo),
-  );
-}
-
 // --- Sorting ---
 
 /** Every column the table can sort by, matching one field each. */
@@ -219,62 +144,6 @@ const SORT_COLUMNS: readonly AnalysesSortColumn[] = [
   "sourceUrl",
 ];
 
-function sortValue(
-  analysis: AnalysisSummary,
-  column: AnalysesSortColumn,
-): string | number | null {
-  switch (column) {
-    case "id":
-      return analysis.id;
-    case "title":
-      return analysis.jobOffer.title;
-    case "company":
-      return analysis.jobOffer.company;
-    case "location":
-      return analysis.jobOffer.location;
-    case "sourceSite":
-      return analysis.jobOffer.sourceSite;
-    case "postedAt":
-      return analysis.jobOffer.postedAt;
-    case "requestedAt":
-      return analysis.requestedAt;
-    case "cvLabel":
-      return analysis.cvVersion.label;
-    case "matchScore":
-      return analysis.matchScore;
-    case "tailoredCvStatus":
-      return analysis.tailoredCvStatus;
-    case "coverLetterStatus":
-      return analysis.coverLetterStatus;
-    case "sourceUrl":
-      return analysis.jobOffer.sourceUrl;
-  }
-}
-
-/**
- * Sorts by one column. A row with no value for that column (no score yet, no
- * postedAt) always sorts last regardless of direction, rather than landing at
- * the top of a descending sort. `requestedAt`-style ISO-8601 UTC timestamps
- * compare correctly as plain strings, so `postedAt` needs no Date parsing.
- */
-export function sortAnalyses(
-  analyses: AnalysisSummary[],
-  sort: AnalysesSortState,
-): AnalysisSummary[] {
-  const factor = sort.direction === "asc" ? 1 : -1;
-  return [...analyses].sort((a, b) => {
-    const va = sortValue(a, sort.column);
-    const vb = sortValue(b, sort.column);
-    if (va === null && vb === null) return 0;
-    if (va === null) return 1;
-    if (vb === null) return -1;
-    if (typeof va === "number" && typeof vb === "number") {
-      return (va - vb) * factor;
-    }
-    return String(va).localeCompare(String(vb)) * factor;
-  });
-}
-
 // --- Pagination ---
 
 export const ANALYSES_PAGE_SIZES = [25, 50] as const;
@@ -283,12 +152,6 @@ export const DEFAULT_ANALYSES_PAGE_SIZE: AnalysesPageSize = 25;
 
 export function pageCount(total: number, pageSize: number): number {
   return Math.max(1, Math.ceil(total / pageSize));
-}
-
-/** One page (1-indexed) of `items`, `pageSize` at a time. */
-export function paginate<T>(items: T[], page: number, pageSize: number): T[] {
-  const start = (page - 1) * pageSize;
-  return items.slice(start, start + pageSize);
 }
 
 // --- URL query-string state ---
@@ -373,6 +236,36 @@ export function analysesTableStateToParams(
   if (state.location) params.set("location", state.location);
   if (state.requestedAtFrom) params.set("requestedFrom", state.requestedAtFrom);
   if (state.requestedAtTo) params.set("requestedTo", state.requestedAtTo);
+  params.set("sort", state.sort.column);
+  params.set("dir", state.sort.direction);
+  params.set("page", String(state.page));
+  params.set("pageSize", String(state.pageSize));
+  return params;
+}
+
+/** The query string `GET /api/analyses` is asked with for this table state —
+ *  a mirror of `adminAnalysesTableStateToQuery`, down to widening
+ *  `requestedAtFrom`/`requestedAtTo` from the date input's bare `YYYY-MM-DD`
+ *  to the whole named day, since the endpoint takes full timestamps. Distinct
+ *  from {@link analysesTableStateToParams}, which writes the *browser's* URL:
+ *  that one keeps the short names a shared link carries (`q`, `cv`,
+ *  `requestedFrom`) and omits defaults; this one spells every parameter out
+ *  under the endpoint's own names, and is what the query key is built from. */
+export function analysesTableStateToQuery(
+  state: AnalysesTableState,
+): URLSearchParams {
+  const params = new URLSearchParams();
+  if (state.search.trim()) params.set("q", state.search.trim());
+  if (state.status.length > 0) params.set("status", state.status.join(","));
+  if (state.cvLabel !== "all") params.set("cv", state.cvLabel);
+  if (state.platform.length > 0) params.set("platform", state.platform.join(","));
+  if (state.location.trim()) params.set("location", state.location.trim());
+  if (state.requestedAtFrom) {
+    params.set("requestedAtFrom", `${state.requestedAtFrom}T00:00:00.000Z`);
+  }
+  if (state.requestedAtTo) {
+    params.set("requestedAtTo", `${state.requestedAtTo}T23:59:59.999Z`);
+  }
   params.set("sort", state.sort.column);
   params.set("dir", state.sort.direction);
   params.set("page", String(state.page));

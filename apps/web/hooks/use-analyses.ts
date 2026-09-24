@@ -1,8 +1,17 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 
 import { bff } from "@/lib/bff-client";
+import {
+  analysesTableStateToQuery,
+  type AnalysesTableState,
+} from "@/lib/analyses-filters";
 import type { ApplicationStatus } from "@/hooks/use-applications";
 import type { GeneratedDocumentStatus } from "@/hooks/use-generated-documents";
 
@@ -114,11 +123,22 @@ export type AnalysisDetail = Omit<AnalysisSummary, "jobOffer"> & {
   jobOffer: AnalysisSummary["jobOffer"];
 };
 
+/** The paginated envelope `GET /api/analyses` answers with. `page` is the page
+ *  actually served, which is not always the one asked for: the endpoint clamps
+ *  a request past the end to the last page rather than returning nothing. */
+export type AnalysesPage = {
+  analyses: AnalysisDetail[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
 /**
- * The analyses list. Pass `jobOfferId` to scope it to one JobOffer (used by the
- * Side-by-side comparison in ticket #10), or `ingestionJobId` to scope it to
- * one IngestionJob's Analysis batch (used by the "Analyse one offer" waiting
- * state and, later, the Batch result view).
+ * One scoped slice of the analyses list. Pass `jobOfferId` to scope it to one
+ * JobOffer (used by the Side-by-side comparison in ticket #10), or
+ * `ingestionJobId` to scope it to one IngestionJob's Analysis batch (used by
+ * the "Analyse one offer" waiting state and the Batch result view). Neither
+ * scope is paginated server-side — each is bounded by its own nature.
  *
  * When `ingestionJobId` is set the query polls every
  * {@link ANALYSIS_POLL_INTERVAL_MS} until at least one Analysis exists, then
@@ -132,8 +152,12 @@ export type AnalysisDetail = Omit<AnalysisSummary, "jobOffer"> & {
  *
  * The `/v1/analyses` list endpoint serialises each row with the same shape as
  * the detail endpoint (`resultJSON` and `errorMessage` included), so the list
- * items are `AnalysisDetail`. The Dashboard only reads the summary fields; the
- * comparison view reads `resultJSON` per column.
+ * items are `AnalysisDetail` — which is what lets the Analyses table's Quick
+ * view render a full result breakdown straight from the row it was opened on.
+ *
+ * The Analyses table itself uses {@link useAnalysesPage} instead: it needs the
+ * filters, the sort and the page, and it needs the envelope rather than just
+ * the rows.
  */
 export function useAnalyses(params?: {
   jobOfferId?: string;
@@ -151,7 +175,7 @@ export function useAnalyses(params?: {
 
   return useQuery({
     queryKey: ["analyses", jobOfferId ?? null, ingestionJobId ?? null],
-    queryFn: () => bff.get<{ analyses: AnalysisDetail[] }>(`/analyses${search}`),
+    queryFn: () => bff.get<AnalysesPage>(`/analyses${search}`),
     select: (data) => data.analyses,
     refetchInterval: (q) => {
       if (!ingestionJobId) return false;
@@ -164,6 +188,70 @@ export function useAnalyses(params?: {
         analyses.every((a) => TERMINAL_ANALYSIS_STATUSES.has(a.status));
       return batchRunning || !batchTerminal ? ANALYSIS_POLL_INTERVAL_MS : false;
     },
+  });
+}
+
+/**
+ * One page of the Analyses table, narrowed and ordered by the server
+ * (docs/adr/0033). The whole table state goes into the query string and into
+ * the query key, so every filter, sort and page is its own cache entry.
+ *
+ * `placeholderData: keepPreviousData` is what keeps the table on screen while
+ * the next page loads. Without it every keystroke, sort click and page step
+ * blanks the table back to its skeletons — which is what filtering in the
+ * browser never did, and what the Admin table does today.
+ */
+export function useAnalysesPage(state: AnalysesTableState) {
+  const qs = analysesTableStateToQuery(state).toString();
+  return useQuery({
+    queryKey: ["analyses", "page", qs],
+    queryFn: () => bff.get<AnalysesPage>(`/analyses?${qs}`),
+    placeholderData: keepPreviousData,
+  });
+}
+
+/** The Dashboard's "Recent analyses" card — the newest few, by `requestedAt`.
+ *  The sort is named rather than left to the endpoint's default (`postedAt`,
+ *  the Analyses table's own): "recent" here means recently *asked for*, which
+ *  is what the list's old server-side order happened to give for free. */
+export function useRecentAnalyses(limit: number) {
+  const qs = `pageSize=${limit}&sort=requestedAt&dir=desc`;
+  return useQuery({
+    queryKey: ["analyses", "recent", qs],
+    queryFn: () => bff.get<AnalysesPage>(`/analyses?${qs}`),
+    select: (data) => data.analyses,
+  });
+}
+
+export type AnalysesTrendPoint = { requestedAt: string; score: number };
+
+export type AnalysesStats = {
+  analysisCount: number;
+  averageScore: number | null;
+  bestScore: number | null;
+  bestScoreOffer: { title: string | null; company: string | null } | null;
+  analysesThisWeek: number;
+  hasComparison: boolean;
+  trend: AnalysesTrendPoint[];
+};
+
+/** The Dashboard's numbers over *every* Analysis the candidate has. It derived
+ *  them from the full list until that list became paginated, at which point the
+ *  Dashboard would have been the one screen still fetching every row. */
+export function useAnalysesStats() {
+  return useQuery({
+    queryKey: ["analyses-stats"],
+    queryFn: () => bff.get<AnalysesStats>("/analyses/stats"),
+  });
+}
+
+/** The CV filter's options — the CVVersion labels the candidate's analyses
+ *  actually use, which the table used to read off the full list. */
+export function useAnalysesCvLabels() {
+  return useQuery({
+    queryKey: ["analyses-cv-labels"],
+    queryFn: () => bff.get<{ labels: string[] }>("/analyses/cv-labels"),
+    select: (data) => data.labels,
   });
 }
 
