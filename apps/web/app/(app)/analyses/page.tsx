@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useQueryClient } from "@tanstack/react-query";
@@ -229,6 +229,70 @@ function AnalysesTable() {
     },
     [state, router, pathname],
   );
+
+  // --- Quick view navigation ---
+  // The arrows walk the whole filtered, sorted list, not the current page:
+  // stopping every 25 rows would reinstate the very "close the panel to see
+  // another one" friction they exist to remove. Crossing a page boundary
+  // flips the table behind the panel, so the list and the panel never
+  // disagree about where the candidate is.
+  const quickViewIndex = useMemo(
+    () =>
+      quickViewId === null ? -1 : sorted.findIndex((a) => a.id === quickViewId),
+    [sorted, quickViewId],
+  );
+
+  // The slot the panel occupied the last time its Analysis was still in the
+  // list. A status change made from the panel can drop it out of the active
+  // filter (marking a "À postuler" row "En cours" while that filter is on),
+  // and a relaunch switches to an Analysis that isn't in it yet — in both
+  // cases the panel deliberately keeps showing what the candidate just acted
+  // on, and the arrows resume from the slot it left. Only ever written by the
+  // two events that know the slot for certain — opening a row and stepping
+  // with the arrows — so no effect has to chase the list's own churn.
+  const [quickViewAnchor, setQuickViewAnchor] = useState(0);
+
+  const openQuickViewAt = useCallback(
+    (id: string, rowIndex: number, element: HTMLElement) => {
+      quickViewTriggerRef.current = element;
+      setQuickViewId(id);
+      setQuickViewAnchor((page - 1) * state.pageSize + rowIndex);
+    },
+    [page, state.pageSize],
+  );
+
+  // Dropping the panel's own Analysis shifts everything after it down one
+  // slot, so the anchor already points at what "suivant" should show.
+  const previousIndex =
+    quickViewIndex >= 0 ? quickViewIndex - 1 : quickViewAnchor - 1;
+  const nextIndex = quickViewIndex >= 0 ? quickViewIndex + 1 : quickViewAnchor;
+  const hasPreviousAnalysis = quickViewId !== null && previousIndex >= 0;
+  const hasNextAnalysis = quickViewId !== null && nextIndex < sorted.length;
+
+  const goToAnalysisAt = useCallback(
+    (index: number) => {
+      const target = sorted[index];
+      if (!target) return;
+      setQuickViewId(target.id);
+      setQuickViewAnchor(index);
+      const targetPage = Math.floor(index / state.pageSize) + 1;
+      if (targetPage !== page) updateState({ page: targetPage });
+    },
+    [sorted, state.pageSize, page, updateState],
+  );
+
+  // Radix hands focus back to whatever `quickViewTriggerRef` names when the
+  // panel closes. Keep it on the row actually *shown*: after a few "suivant"
+  // the row that opened the panel may be on another page and unmounted, and
+  // focus would land nowhere. Depends on `rows` too, so it finds the row once
+  // a page flip has rendered it.
+  useEffect(() => {
+    if (quickViewId === null) return;
+    const row = document.querySelector<HTMLElement>(
+      `[data-analysis-id="${quickViewId}"]`,
+    );
+    if (row) quickViewTriggerRef.current = row;
+  }, [quickViewId, rows]);
 
   const pageIds = useMemo(() => rows.map((a) => a.id), [rows]);
   const allPageSelected =
@@ -764,7 +828,7 @@ function AnalysesTable() {
         <>
           {isCardLayout ? (
             <div className="flex flex-col gap-3">
-              {rows.map((analysis) => (
+              {rows.map((analysis, rowIndex) => (
                 <AnalysisCard
                   key={analysis.id}
                   analysis={analysis}
@@ -781,10 +845,9 @@ function AnalysesTable() {
                     title: analysis.jobOffer.title ?? t("jobOfferFallback"),
                   })}
                   onToggleSelect={() => toggleRowSelection(analysis.id)}
-                  onOpenQuickView={(row) => {
-                    quickViewTriggerRef.current = row;
-                    setQuickViewId(analysis.id);
-                  }}
+                  onOpenQuickView={(row) =>
+                    openQuickViewAt(analysis.id, rowIndex, row)
+                  }
                 />
               ))}
             </div>
@@ -826,7 +889,7 @@ function AnalysesTable() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rows.map((analysis) => (
+                {rows.map((analysis, rowIndex) => (
                   <AnalysisTableRow
                     key={analysis.id}
                     analysis={analysis}
@@ -843,10 +906,9 @@ function AnalysesTable() {
                       title: analysis.jobOffer.title ?? t("jobOfferFallback"),
                     })}
                     onToggleSelect={() => toggleRowSelection(analysis.id)}
-                    onOpenQuickView={(row) => {
-                      quickViewTriggerRef.current = row;
-                      setQuickViewId(analysis.id);
-                    }}
+                    onOpenQuickView={(row) =>
+                      openQuickViewAt(analysis.id, rowIndex, row)
+                    }
                   />
                 ))}
               </TableBody>
@@ -921,6 +983,12 @@ function AnalysesTable() {
         trackingStatusLabel={trackingStatusLabel}
         returnFocusRef={quickViewTriggerRef}
         onRelaunched={(newId) => setQuickViewId(newId)}
+        position={quickViewIndex >= 0 ? quickViewIndex + 1 : null}
+        total={sorted.length}
+        hasPrevious={hasPreviousAnalysis}
+        hasNext={hasNextAnalysis}
+        onPrevious={() => goToAnalysisAt(previousIndex)}
+        onNext={() => goToAnalysisAt(nextIndex)}
       />
     </main>
   );
@@ -957,6 +1025,9 @@ function AnalysisTableRow({
 }) {
   return (
     <TableRow
+      // How the page finds this row again to hand focus back once the Quick
+      // view closes — the arrows can have walked to another page since.
+      data-analysis-id={analysis.id}
       tabIndex={0}
       onClick={(event) => onOpenQuickView(event.currentTarget)}
       onKeyDown={(event) => {
@@ -1102,6 +1173,7 @@ function AnalysisCard({
 }) {
   return (
     <div
+      data-analysis-id={analysis.id}
       tabIndex={0}
       onClick={(event) => onOpenQuickView(event.currentTarget)}
       onKeyDown={(event) => {

@@ -89,6 +89,28 @@ function detail(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/** Three distinct offers for the Quick view's navigation tests, dated so the
+ *  default `postedAt`-descending sort ranks them A, B, C — and all older than
+ *  `summary()`'s own offer, which therefore outranks them when mixed in. */
+function navigableOffer(letter: string, day: number) {
+  return detail({
+    id: `a-${letter}`,
+    jobOffer: {
+      id: `job-${letter}`,
+      title: `Offer ${letter}`,
+      company: "Acme Inc",
+      location: "Paris",
+      sourceSite: "OTHER",
+      postedAt: `2026-06-${String(day).padStart(2, "0")}T00:00:00.000Z`,
+      sourceUrl: `https://example.com/jobs/${letter}`,
+    },
+  });
+}
+
+const OFFER_A = navigableOffer("A", 5);
+const OFFER_B = navigableOffer("B", 4);
+const OFFER_C = navigableOffer("C", 3);
+
 /** Every filter but Search and Status is folded away behind "More filters",
  *  so a test that drives one of them opens the panel first. */
 async function openMoreFilters(user: ReturnType<typeof userEvent.setup>) {
@@ -1604,6 +1626,194 @@ describe("AnalysesDashboardPage", () => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
     );
     expect(document.activeElement).toBe(row);
+  });
+
+  it("closes the Quick view from its own labelled Fermer button, the bare corner X being gone", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () => HttpResponse.json({ analyses: [detail()] })),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await user.click(await screen.findByText("Backend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    await user.click(quickView.getByRole("button", { name: "Close" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("walks the filtered, sorted list from inside the Quick view without closing it, and disables each arrow at its end", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({ analyses: [OFFER_A, OFFER_B, OFFER_C] }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await user.click(await screen.findByText("Offer A"));
+
+    const dialog = await screen.findByRole("dialog");
+    const quickView = within(dialog);
+    expect(quickView.getByRole("heading", { name: "Offer A" })).toBeInTheDocument();
+    expect(quickView.getByText("1 / 3")).toBeInTheDocument();
+    expect(quickView.getByRole("button", { name: "Previous" })).toBeDisabled();
+
+    await user.click(quickView.getByRole("button", { name: "Next" }));
+    expect(
+      await quickView.findByRole("heading", { name: "Offer B" }),
+    ).toBeInTheDocument();
+    expect(quickView.getByText("2 / 3")).toBeInTheDocument();
+
+    await user.click(quickView.getByRole("button", { name: "Next" }));
+    expect(
+      await quickView.findByRole("heading", { name: "Offer C" }),
+    ).toBeInTheDocument();
+    expect(quickView.getByText("3 / 3")).toBeInTheDocument();
+    expect(quickView.getByRole("button", { name: "Next" })).toBeDisabled();
+
+    await user.click(quickView.getByRole("button", { name: "Previous" }));
+    expect(
+      await quickView.findByRole("heading", { name: "Offer B" }),
+    ).toBeInTheDocument();
+    // The whole point: never closed once between the two ends.
+    expect(screen.getByRole("dialog")).toBe(dialog);
+  });
+
+  it("walks the list with the left and right arrow keys", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({ analyses: [OFFER_A, OFFER_B, OFFER_C] }),
+      ),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await user.click(await screen.findByText("Offer A"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    await quickView.findByRole("heading", { name: "Offer A" });
+
+    await user.keyboard("{ArrowRight}");
+    expect(
+      await quickView.findByRole("heading", { name: "Offer B" }),
+    ).toBeInTheDocument();
+
+    await user.keyboard("{ArrowLeft}");
+    expect(
+      await quickView.findByRole("heading", { name: "Offer A" }),
+    ).toBeInTheDocument();
+  });
+
+  it("flips the table to the next page when the arrows cross a page boundary, and hands focus back to the row actually shown", async () => {
+    const user = userEvent.setup();
+    const analyses = Array.from({ length: 30 }, (_, i) =>
+      detail({
+        id: `a${i}`,
+        jobOffer: {
+          id: `job${i}`,
+          title: `Offer ${String(i).padStart(2, "0")}`,
+          company: "Acme",
+          location: "Paris",
+          sourceSite: "OTHER",
+          // Descending title order matches the default postedAt-desc sort, so
+          // "Offer 29" is rank 1 and "Offer 00" is rank 30.
+          postedAt: `2026-07-${String(i + 1).padStart(2, "0")}T00:00:00.000Z`,
+          sourceUrl: `https://example.com/jobs/${i}`,
+        },
+      }),
+    );
+    server.use(http.get("/api/analyses", () => HttpResponse.json({ analyses })));
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await screen.findByText("Page 1 of 2");
+
+    // "Offer 05" is rank 25 — the last row of page 1.
+    await user.click(screen.getByText("Offer 05"));
+    const quickView = within(await screen.findByRole("dialog"));
+    expect(quickView.getByText("25 / 30")).toBeInTheDocument();
+
+    await user.click(quickView.getByRole("button", { name: "Next" }));
+    expect(
+      await quickView.findByRole("heading", { name: "Offer 04" }),
+    ).toBeInTheDocument();
+    expect(quickView.getByText("26 / 30")).toBeInTheDocument();
+    expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    // Not the row that opened the panel — that one is on page 1 and unmounted.
+    expect(document.activeElement).toBe(
+      screen.getByText("Offer 04").closest("tr"),
+    );
+  });
+
+  it("keeps showing an Analysis that a status change has just dropped out of the active filter, with an unknown rank", async () => {
+    __setUrl("/analyses?status=TO_APPLY&sort=postedAt&dir=desc&page=1&pageSize=25");
+    const user = userEvent.setup();
+    let applicationStatus: string | null = null;
+    const application = {
+      id: "app-1",
+      userId: "user_1",
+      analysisId: "a1",
+      jobOfferId: "job1",
+      cvVersionId: "cv1",
+      scoutId: null,
+      coverLetterDocId: null,
+      tailoredCvDocId: null,
+      status: "DRAFT",
+      appliedAt: null,
+      createdAt: "2026-09-11T00:00:00.000Z",
+      updatedAt: "2026-09-11T00:00:00.000Z",
+      jobOffer: { id: "job1", title: "Backend Engineer", company: "Acme Inc" },
+      cvVersion: { label: "Grad CV" },
+    };
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({ analyses: [detail({ applicationStatus }), OFFER_C] }),
+      ),
+      http.post("/api/applications", () => HttpResponse.json({ application })),
+      http.post("/api/applications/app-1/status-events", () => {
+        applicationStatus = "APPLIED";
+        return HttpResponse.json({
+          application: { ...application, status: "APPLIED" },
+          statusEvent: {
+            id: "se-1",
+            applicationId: "app-1",
+            status: "APPLIED",
+            note: null,
+            effectiveDate: "2026-09-11T00:00:00.000Z",
+            createdAt: "2026-09-11T00:00:00.000Z",
+          },
+        });
+      }),
+    );
+
+    renderWithProviders(<AnalysesDashboardPage />);
+    await user.click(await screen.findByText("Backend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    expect(quickView.getByText("1 / 2")).toBeInTheDocument();
+
+    await user.click(quickView.getByRole("button", { name: "In progress" }));
+
+    // Still on screen, still the Analysis just acted on — only its rank is
+    // gone, the "To apply" filter no longer holding it.
+    await waitFor(() => expect(quickView.getByText("— / 1")).toBeInTheDocument());
+    expect(
+      quickView.getByRole("heading", { name: "Backend Engineer" }),
+    ).toBeInTheDocument();
+
+    // The slot it vacated now holds Offer C, which is what "next" reaches.
+    await user.click(quickView.getByRole("button", { name: "Next" }));
+    expect(
+      await quickView.findByRole("heading", { name: "Offer C" }),
+    ).toBeInTheDocument();
   });
 
   it("opens the offer in a new tab from the Quick view's \"View job offer\" link (issue #66)", async () => {

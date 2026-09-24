@@ -577,7 +577,12 @@
       "viewFullAnalysis": "Voir l'analyse complète",
       "viewOffer": "Voir l'offre",
       "statusError": "Impossible de mettre à jour le statut de suivi. Veuillez réessayer.",
-      "relaunchConfirm": "Cela utilisera l'un de vos quotas d'analyse quotidiens. Continuer ?"
+      "relaunchConfirm": "Cela utilisera l'un de vos quotas d'analyse quotidiens. Continuer ?",
+      "previous": "Précédent",
+      "next": "Suivant",
+      "close": "Fermer",
+      "position": "{position} / {total}",
+      "positionUnknown": "— / {total}"
     },
     "bulk": {
       "selectPageLabel": "Sélectionner tout sur cette page",

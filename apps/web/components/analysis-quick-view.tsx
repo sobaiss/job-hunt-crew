@@ -8,6 +8,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight,
   Check,
+  ChevronLeft,
+  ChevronRight,
   ExternalLink,
   GitCompare,
   LoaderCircle,
@@ -36,6 +38,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
+  SheetClose,
   SheetContent,
   SheetHeader,
   SheetTitle,
@@ -54,6 +57,12 @@ export function AnalysisQuickView({
   trackingStatusLabel,
   returnFocusRef,
   onRelaunched,
+  position,
+  total,
+  hasPrevious,
+  hasNext,
+  onPrevious,
+  onNext,
 }: {
   analysis: AnalysisDetail | null;
   open: boolean;
@@ -62,12 +71,25 @@ export function AnalysisQuickView({
   trackingStatusLabel: (value: string) => string;
   /** The row that opened this Quick view — focused again on close since
    *  Radix's own default only restores focus to a `SheetTrigger`, and this
-   *  Quick view is opened programmatically from a table row instead. */
+   *  Quick view is opened programmatically from a table row instead. The
+   *  page keeps it pointed at the Analysis currently *shown*, not the one
+   *  that opened the panel, so walking the list with the arrows below still
+   *  hands focus back to a row that exists. */
   returnFocusRef: RefObject<HTMLElement | null>;
   /** Called with the new Analysis's id after a successful "Relancer
    *  l'analyse" (#124) — the page switches the Quick view to it and
    *  invalidates the Analyses list so the new row appears there too. */
   onRelaunched: (newId: string) => void;
+  /** 1-based rank of this Analysis in the filtered, sorted list, or `null`
+   *  when it is no longer in it — a status change made from this panel can
+   *  drop it out of the active filter, and the panel deliberately keeps
+   *  showing what the candidate just acted on rather than skipping away. */
+  position: number | null;
+  total: number;
+  hasPrevious: boolean;
+  hasNext: boolean;
+  onPrevious: () => void;
+  onNext: () => void;
 }) {
   const t = useTranslations("analyses");
   const td = useTranslations("analyses.detail");
@@ -108,11 +130,76 @@ export function AnalysisQuickView({
     <Sheet open={open} onOpenChange={handleOpenChange}>
       <SheetContent
         className="w-full gap-6 overflow-y-auto sm:max-w-5xl"
+        // The bare X in the corner reads as an afterthought on a panel this
+        // wide; the sticky bar below carries a labelled "Fermer" instead.
+        showCloseButton={false}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           returnFocusRef.current?.focus();
         }}
+        onKeyDown={(event) => {
+          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+          // A relaunch's CvVersionPicker (and any future field) owns its own
+          // arrow keys — stealing them there would change the candidate's CV
+          // choice instead of moving through the list.
+          if ((event.target as HTMLElement).closest("input, select, textarea")) {
+            return;
+          }
+          if (event.key === "ArrowLeft" && hasPrevious) {
+            event.preventDefault();
+            onPrevious();
+          }
+          if (event.key === "ArrowRight" && hasNext) {
+            event.preventDefault();
+            onNext();
+          }
+        }}
       >
+        {/* Sticky, because the result breakdown below is long: the way out
+            and the way on stay reachable at any scroll depth. Pulled into
+            SheetContent's own padding so nothing scrolls through the gap
+            above it. */}
+        <div className="sticky top-0 z-10 -mx-6 -mt-6 flex items-center justify-between gap-3 border-b border-border bg-background px-6 py-3">
+          <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={!hasPrevious}
+              onClick={onPrevious}
+            >
+              <ChevronLeft aria-hidden="true" />
+              {t("quickView.previous")}
+            </Button>
+            {/* Drops out first when the panel is full-width on a phone — the
+                arrows are what the candidate came for, the rank is context. */}
+            <span
+              aria-live="polite"
+              className="hidden px-2 text-sm tabular-nums text-muted sm:inline"
+            >
+              {position === null
+                ? t("quickView.positionUnknown", { total })
+                : t("quickView.position", { position, total })}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={!hasNext}
+              onClick={onNext}
+            >
+              {t("quickView.next")}
+              <ChevronRight aria-hidden="true" />
+            </Button>
+          </div>
+          <SheetClose asChild>
+            <Button type="button" variant="ghost" size="sm">
+              <X aria-hidden="true" />
+              {t("quickView.close")}
+            </Button>
+          </SheetClose>
+        </div>
+
         {!analysis && open && (
           <p role="status" className="text-sm text-muted">
             {td("loading")}
