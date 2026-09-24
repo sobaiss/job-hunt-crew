@@ -102,12 +102,35 @@ export type { PostedWithin, Remote };
 
 const SCOUTS_KEY = ["scouts"] as const;
 
-/** Every Scout the signed-in Candidate owns, newest first. */
-export function useScouts() {
+/** How often the Scouts list re-reads Run state while a Scout is working —
+ *  slower than the run history's 3 s, this request being the heavier one. */
+export const SCOUTS_IN_FLIGHT_POLL_MS = 5000;
+
+/**
+ * Every Scout the signed-in Candidate owns, newest first.
+ *
+ * `pollWhileInFlight` is opt-in (issue #228): only the Scouts list renders the
+ * Execution column, so only it passes the flag. The Dashboard, Applications
+ * and CV versions read the same query and must not pay for a column they do
+ * not show. While set, the list refetches every SCOUTS_IN_FLIGHT_POLL_MS for
+ * as long as at least one Scout's Run state is IN_FLIGHT, and stops once none
+ * is.
+ */
+export function useScouts({
+  pollWhileInFlight = false,
+}: { pollWhileInFlight?: boolean } = {}) {
   return useQuery({
     queryKey: SCOUTS_KEY,
     queryFn: () => bff.get<{ scouts: Scout[] }>("/scouts"),
     select: (data) => data.scouts,
+    refetchInterval: pollWhileInFlight
+      ? (query) => {
+          const scouts = query.state.data?.scouts ?? [];
+          return scouts.some((scout) => scout.runState === "IN_FLIGHT")
+            ? SCOUTS_IN_FLIGHT_POLL_MS
+            : false;
+        }
+      : false,
   });
 }
 

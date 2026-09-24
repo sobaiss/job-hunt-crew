@@ -80,7 +80,7 @@ function ScoutsPageContent() {
     isError,
     isFetching,
     refetch,
-  } = useScouts();
+  } = useScouts({ pollWhileInFlight: true });
   const { data: cvVersions } = useCvVersions();
   const router = useRouter();
   const pathname = usePathname();

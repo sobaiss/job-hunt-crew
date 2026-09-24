@@ -920,6 +920,96 @@ describe("ScoutsPage — Execution column (issue #226)", () => {
   });
 });
 
+describe("ScoutsPage — keeping the Execution column current (issue #228)", () => {
+  function stubScouts(respond: (call: number) => Record<string, unknown>[]) {
+    let calls = 0;
+    server.use(
+      http.get("/api/scouts", () => {
+        calls += 1;
+        return HttpResponse.json({ scouts: respond(calls) });
+      }),
+      http.get("/api/cv-versions", () =>
+        HttpResponse.json({ cvVersions: [cv()] }),
+      ),
+    );
+    return () => calls;
+  }
+
+  it("updates a row whose run finishes without the Candidate pressing Refresh, then stops polling", async () => {
+    const calls = stubScouts((call) => [
+      call === 1
+        ? scout({
+            runState: "IN_FLIGHT",
+            runStateSince: new Date(Date.now() - 3 * 60_000).toISOString(),
+          })
+        : scout({ runState: "OK", lastRunAt: "2026-09-20T00:00:00.000Z" }),
+    ]);
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      renderWithProviders(<ScoutsPage />);
+      expect(await screen.findByText("In progress")).toBeInTheDocument();
+      expect(calls()).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(5000);
+      await vi.waitFor(() => expect(calls()).toBe(2));
+      expect(await screen.findByText("Up to date")).toBeInTheDocument();
+      expect(screen.queryByText("In progress")).not.toBeInTheDocument();
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(calls()).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("advances a working row's duration with each poll", async () => {
+    const start = Date.now();
+    stubScouts(() => [
+      scout({
+        runState: "IN_FLIGHT",
+        runStateSince: new Date(start - 4 * 60_000 - 58_000).toISOString(),
+      }),
+    ]);
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      renderWithProviders(<ScoutsPage />);
+      expect(await screen.findByText("4 min")).toBeInTheDocument();
+
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(await screen.findByText("5 min")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not poll when nothing is in flight", async () => {
+    const calls = stubScouts(() => [
+      scout({ runState: "OK", lastRunAt: "2026-09-20T00:00:00.000Z" }),
+      scout({
+        id: "scout-2",
+        label: "Stranded",
+        runState: "BLOCKED",
+        runStateSince: "2026-09-20T00:00:00.000Z",
+        blockedAnalysisIds: ["an-1"],
+      }),
+      scout({ id: "scout-3", label: "Fresh" }),
+    ]);
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      renderWithProviders(<ScoutsPage />);
+      expect(await screen.findByText("Stranded")).toBeInTheDocument();
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(calls()).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 function support(level: string) {
   return { level, reason: "Recorded reason." };
 }
