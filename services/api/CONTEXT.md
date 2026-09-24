@@ -64,6 +64,14 @@ _Avoid_: Ingestion request, scrape job, matching run — the run has no aggregat
 The data-driven adapter configuration for one supported job site — selectors or an API endpoint, plus risk and enablement flags — that a site-search `IngestionJob` reads to know how to query that site.
 _Avoid_: Site adapter — that's the Ingestion-context code that reads a SiteConfig, not the config row itself.
 
+**Search filter**:
+The canonical shape a site-search IngestionJob and a Scout both carry, expressed in this project's own vocabulary and never in any one site's: `keywords`, `location` (free text until a structured picker exists — see [Ingestion](../ingestion/CONTEXT.md)'s Location resolution), `postedWithin` (`24h` | `7d` | `14d` | `30d` | `any`), `contractType` (a list of `CDI` | `CDD` | `INTERIM` | `STAGE` | `ALTERNANCE` | `FREELANCE`), `remote` (`onsite` | `hybrid` | `remote`), and `experienceLevel`. A site's own query vocabulary is reached only by translation, and how faithfully each site can be reached is a FilterSupport — a filter is never quietly dropped on the way.
+_Avoid_: Criteria, query — a query is what a Site adapter builds *from* a Search filter; Search parameters — "parameter" is a site's word for its own query string, deliberately not ours.
+
+**FilterSupport**:
+How faithfully one site honours one Search filter key: `SUPPORTED` (the candidate gets what they asked for, whether the site filtered it or this pipeline did so afterwards), `APPROXIMATED` (the site shifts relevance or filters on a neighbouring concept, so results outside the filter still come back), or `UNSUPPORTED` (the filter cannot be expressed and is not applied). Declared per (site, filter) pair in `py-db`, beside the Site adapter that honours it, and carried to the candidate by `GET /site-configs` — shown in the Scout form and on the saved Scout, never only alongside the results (docs/adr/0030). Optional per-value derogations cover canonical values a site has no equivalent for, and a derogation always widens the filter rather than narrowing it.
+_Avoid_: Site capability — the thing is a pair, not a property of a site: a filter is unsupported "by HelloWork for postedWithin", not "by HelloWork". Ignored filter, `IGNORED` — that names what the site does with the parameter, where all three of these name what the candidate receives.
+
 **Analysis**:
 One requested comparison of a JobOffer against a CVVersion, tracked from request through its terminal completed/failed state. Created either by an IngestionJob, in which case it carries its `ingestionJobId`, or directly for an already-extracted JobOffer, in which case it carries none.
 _Avoid_: Comparison, report

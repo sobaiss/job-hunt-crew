@@ -1,6 +1,6 @@
 # Ingestion
 
-Turns a candidate's ingestion request into scraped, structured JobOffers, then starts one Analysis per offer — the scrape/listing/site-adapter pipeline behind an `IngestionJob`'s two modes (a single offer URL, or a preconfigured site plus filters). Reads and writes the same Postgres tables and S3 buckets as [API](../api/CONTEXT.md) directly, independent of API's HTTP surface. Entities referenced below (`JobOffer`, `IngestionJob`, `SiteConfig`) are defined in API's context; this glossary covers only the process vocabulary specific to this context.
+Turns a candidate's ingestion request into scraped, structured JobOffers, then starts one Analysis per offer — the scrape/listing/site-adapter pipeline behind an `IngestionJob`'s two modes (a single offer URL, or a preconfigured site plus filters). Reads and writes the same Postgres tables and S3 buckets as [API](../api/CONTEXT.md) directly, independent of API's HTTP surface. Entities referenced below (`JobOffer`, `IngestionJob`, `SiteConfig`, `Search filter`, `FilterSupport`) are defined in API's context; this glossary covers only the process vocabulary specific to this context.
 
 ## Language
 
@@ -31,8 +31,12 @@ Pulling individual offer URLs out of one or more listing pages — either via a 
 _Avoid_: Offer extraction — extraction (above) is a distinct, later stage: structuring the content of one already-scraped offer, not finding its URL.
 
 **Site adapter**:
-The code that reads one SiteConfig row's selectors or template to build a search URL, or to pull offer links out of that specific site's HTML shape.
-_Avoid_: SiteConfig — the config row itself, owned by the API context.
+The per-site code that translates a Search filter into one site's own query — a URL for an HTML site, a base plus parameters for an API source — and pulls offer links out of that site's HTML shape. It translates *values*, not only parameter names: a `postedWithin` of `7d` becomes France Travail's absolute `minCreationDate`/`maxCreationDate` pair, LinkedIn's `f_TPR=r604800`, and HelloWork's own freshness token. A site with no adapter falls back to substituting tokens in `SiteConfig.searchUrlTemplate`, which can express neither a value translation nor a filter needing two parameters (docs/adr/0029). Whatever an adapter cannot express, it declares as a FilterSupport rather than dropping.
+_Avoid_: SiteConfig — the config row itself, owned by the API context; `filterParamMapping` — for a site with an adapter that field carries only the offer-id parameter, and it stays the search mapping only on the fallback path.
+
+**Location resolution**:
+Turning a Search filter's free-text `location` into the code a site's query needs — France Travail's INSEE `region` or `departement`, HelloWork's companion region URL — against a static table of France's 18 regions and 101 departments, matched without accents or case. A value that resolves to nothing leaves `location` UNSUPPORTED for that one search instead of failing it: a typo costs the candidate a wider search, never every result. Communes are deliberately excluded — 35,000 of them carry homonyms that only a structured picker can disambiguate.
+_Avoid_: Geocoding — there are no coordinates, no distance and no external service here, only a label-to-code lookup over a fixed table.
 
 **Dedupe-and-cap**:
 Deduplicating discovered offer URLs and truncating the list to an IngestionJob's max-offers limit, before any of them are linked or scraped.
