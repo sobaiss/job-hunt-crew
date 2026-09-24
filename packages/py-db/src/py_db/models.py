@@ -609,6 +609,7 @@ class Analysis(Base):
     completedAt: Mapped[Optional[datetime.datetime]] = mapped_column(TIMESTAMP(precision=3))
     ingestionJobId: Mapped[Optional[str]] = mapped_column(Text)
     scoutId: Mapped[Optional[str]] = mapped_column(Text)
+    requeuedAt: Mapped[Optional[datetime.datetime]] = mapped_column(TIMESTAMP(precision=3))
 
     CVVersion_: Mapped['CVVersion'] = relationship('CVVersion', back_populates='Analysis')
     IngestionJob_: Mapped[Optional['IngestionJob']] = relationship('IngestionJob', back_populates='Analysis')
@@ -713,6 +714,7 @@ class PipelineEvent(Base):
         ForeignKeyConstraint(['ingestionJobId'], ['IngestionJob.id'], ondelete='CASCADE', onupdate='CASCADE', name='PipelineEvent_ingestionJobId_fkey'),
         PrimaryKeyConstraint('id', name='PipelineEvent_pkey'),
         Index('PipelineEvent_analysisId_idx', 'analysisId'),
+        Index('PipelineEvent_createdAt_idx', 'createdAt'),
         Index('PipelineEvent_ingestionJobId_idx', 'ingestionJobId')
     )
 

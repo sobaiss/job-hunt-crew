@@ -1069,8 +1069,15 @@ class AdminAnalysesListResponse(BaseModel):
 
 
 AdminAnalysesStatusFilter = Literal[
-    "TO_APPLY", "IN_PROGRESS", "REJECTED", "ACCEPTED", "WITHDRAWN", "FAILED"
+    "TO_APPLY", "IN_PROGRESS", "REJECTED", "ACCEPTED", "WITHDRAWN", "PENDING", "FAILED"
 ]
+
+# The buckets naming a raw pipeline status rather than a Tracking one --
+# `PIPELINE_ANALYSES_STATUS_FILTERS` in the frontend's `lib/tracking-status.ts`.
+_PIPELINE_STATUS_FILTERS: dict[str, Analysisstatus] = {
+    "PENDING": Analysisstatus.PENDING,
+    "FAILED": Analysisstatus.FAILED,
+}
 
 # Mirrors `APPLICATION_STATUS_TO_TRACKING` in the frontend's
 # `lib/tracking-status.ts` -- DRAFT/no-Application folds into TO_APPLY,
@@ -1099,9 +1106,11 @@ async def list_admin_analyses(
     `status`. `status` mirrors the candidate-facing page's Tracking status
     buckets (TO_APPLY/IN_PROGRESS/REJECTED/ACCEPTED/WITHDRAWN -- each implying
     Analysis.status == COMPLETED, folded from the linked Application's own
-    status the same way the frontend's `trackingStatusOf` does) plus FAILED,
-    added because the read-only Tracking-status badge already shows it as a
-    fallback for a non-COMPLETED Analysis but had no matching filter bucket.
+    status the same way the frontend's `trackingStatusOf` does) plus the two
+    raw pipeline ones, PENDING and FAILED, matched against `Analysis.status`
+    directly: the read-only Tracking-status badge already shows both as its
+    fallback for a non-COMPLETED Analysis, and PENDING is where a stuck
+    Analysis (docs/adr/0032) sits, which is what makes it worth singling out.
     There is still no status-*transition* endpoint here -- the candidate's
     own `/analyses` page owns that (docs/adr/0019); this filter only narrows
     which rows are listed.
@@ -1119,8 +1128,8 @@ async def list_admin_analyses(
         stmt = stmt.where(Analysis.requestedAt >= requested_at_from)
     if requested_at_to is not None:
         stmt = stmt.where(Analysis.requestedAt <= requested_at_to)
-    if status_filter == "FAILED":
-        stmt = stmt.where(Analysis.status == Analysisstatus.FAILED)
+    if status_filter in _PIPELINE_STATUS_FILTERS:
+        stmt = stmt.where(Analysis.status == _PIPELINE_STATUS_FILTERS[status_filter])
     elif status_filter == "TO_APPLY":
         stmt = stmt.outerjoin(Application, Application.analysisId == Analysis.id).where(
             Analysis.status == Analysisstatus.COMPLETED,

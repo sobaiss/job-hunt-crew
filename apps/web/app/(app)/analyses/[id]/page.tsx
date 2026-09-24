@@ -17,8 +17,10 @@ import {
 import {
   useAnalysis,
   useCreateAnalysis,
+  useRequeueAnalysis,
   TERMINAL_ANALYSIS_STATUSES,
 } from "@/hooks/use-analyses";
+import { BffError } from "@/lib/bff-client";
 import { useCvVersions } from "@/hooks/use-cv-versions";
 import { useEnumLabel } from "@/lib/enum-labels";
 import { analysisBadgeVariant } from "@/components/analysis-row";
@@ -36,6 +38,7 @@ export default function AnalysisDetailPage() {
   const statusLabel = useEnumLabel("analysisStatus");
   const { data: analysis, isPending, isError } = useAnalysis(params.id);
   const rerun = useCreateAnalysis();
+  const requeue = useRequeueAnalysis();
   const [relaunchConfirming, setRelaunchConfirming] = useState(false);
   const [relaunchCvVersionId, setRelaunchCvVersionId] = useState("");
 
@@ -221,7 +224,48 @@ export default function AnalysisDetailPage() {
         </div>
       )}
 
-      {!isTerminal && (
+      {/* A worker or queue restart can orphan a non-terminal Analysis with no
+          trace, leaving it "En attente" for good. The server derives `stuck`
+          (docs/adr/0032) and this offers the one repair: re-drive the same row,
+          no new Analysis, no quota. Rendered before the "still running" note
+          below so the page never says both at once. */}
+      {analysis.stuck && (
+        <div
+          role="alert"
+          className="flex flex-col items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive"
+        >
+          <p>{t("detail.stuck")}</p>
+          {requeue.isSuccess ? (
+            <p role="status">{t("detail.requeueStarted")}</p>
+          ) : (
+            <>
+              <p className="text-muted">{t("detail.requeueHint")}</p>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={requeue.isPending}
+                onClick={() => requeue.mutate(analysis.id)}
+              >
+                {requeue.isPending ? (
+                  <LoaderCircle className="animate-spin" aria-hidden="true" />
+                ) : (
+                  <RotateCw aria-hidden="true" />
+                )}
+                {t("detail.requeue")}
+              </Button>
+            </>
+          )}
+          {requeue.isError && (
+            <p>
+              {requeue.error instanceof BffError && requeue.error.status === 409
+                ? t("detail.requeueNotStuck")
+                : t("detail.requeueError")}
+            </p>
+          )}
+        </div>
+      )}
+
+      {!isTerminal && !analysis.stuck && (
         <p role="status" className="text-sm text-muted">
           {t("detail.running")}
         </p>

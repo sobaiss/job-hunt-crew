@@ -354,6 +354,42 @@ def test_list_analyses_filters_by_status_failed(admin_id, target_id):
     assert completed_id not in ids
 
 
+def test_list_analyses_filters_by_status_pending(admin_id, target_id):
+    """PENDING is the other raw-pipeline bucket -- where a stuck Analysis sits
+    (docs/adr/0032), so an Administrator can single those rows out to requeue."""
+    job_offer_id = asyncio.run(_create_job_offer())
+    cv_id = asyncio.run(_create_cv_version(target_id))
+    pending_id = asyncio.run(
+        _create_analysis(target_id, job_offer_id, cv_id, status=Analysisstatus.PENDING)
+    )
+    queued_id = asyncio.run(
+        _create_analysis(target_id, job_offer_id, cv_id, status=Analysisstatus.QUEUED)
+    )
+    completed_id = asyncio.run(_create_analysis(target_id, job_offer_id, cv_id))
+    with TestClient(app) as client:
+        response = client.get(
+            "/v1/admin/analyses",
+            headers=_admin_headers(admin_id),
+            params={"userId": target_id, "status": "PENDING", "pageSize": 100},
+        )
+    assert response.status_code == 200
+    ids = {row["id"] for row in response.json()["analyses"]}
+    assert pending_id in ids
+    # The neighbouring non-terminal statuses keep no bucket of their own.
+    assert queued_id not in ids
+    assert completed_id not in ids
+
+
+def test_list_analyses_rejects_a_pipeline_status_with_no_bucket(admin_id):
+    with TestClient(app) as client:
+        response = client.get(
+            "/v1/admin/analyses",
+            headers=_admin_headers(admin_id),
+            params={"status": "RUNNING_CREW"},
+        )
+    assert response.status_code == 422
+
+
 def test_list_analyses_filters_by_status_to_apply_with_no_application(admin_id, target_id):
     job_offer_id = asyncio.run(_create_job_offer())
     cv_id = asyncio.run(_create_cv_version(target_id))

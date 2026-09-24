@@ -39,6 +39,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .sqs_client import INGESTION_INTAKE_QUEUE_URL, make_sqs_client
+from .stale_runs import close_stale_running_runs
 
 logger = get_logger(__name__)
 
@@ -53,15 +54,6 @@ def _now() -> datetime:
 
 class ScoutRunError(Exception):
     pass
-
-
-async def _has_other_running_run(session: AsyncSession, scout_id: str, this_run_id: str) -> bool:
-    stmt = select(ScoutRun.id).where(
-        ScoutRun.scoutId == scout_id,
-        ScoutRun.status == Scoutrunstatus.RUNNING,
-        ScoutRun.id != this_run_id,
-    )
-    return (await session.scalars(stmt)).first() is not None
 
 
 async def dispatch_scout_run(
@@ -83,8 +75,11 @@ async def dispatch_scout_run(
         raise ScoutRunError(f"ScoutRun {scout_run_id} points at missing Scout {scout_run.scoutId}")
 
     # Skip-on-overlap: a run started while the previous one is still RUNNING is
-    # a no-op — leave this row untouched (PENDING) for the operator to see.
-    if await _has_other_running_run(session, scout.id, scout_run.id):
+    # a no-op — leave this row untouched (PENDING) for the operator to see. A
+    # previous run abandoned by a killed worker does not count as in flight; it
+    # is closed instead (docs/adr/0032), otherwise it would block this Scout for
+    # good.
+    if await close_stale_running_runs(session, scout.id, now=_now(), exclude_run_id=scout_run.id):
         logger.info(
             "scout_run.skipped_overlap",
             extra={"fields": {"scoutId": scout.id, "scoutRunId": scout_run.id}},

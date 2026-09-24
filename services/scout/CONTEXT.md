@@ -61,4 +61,21 @@ A Scout with a `RUNNING` `ScoutRun` is excluded from both the next
 scheduler tick's due-selection and from `dispatch_scout_run` itself (a
 second dispatch for the same Scout while one is `RUNNING` is a no-op,
 leaving the newer run row untouched for an operator to see) — runs for one
-Scout never pile up or run concurrently.
+Scout never pile up or run concurrently. An **abandoned** run does not
+count as in flight: both guards go through `stale_runs.close_stale_running_runs`,
+which marks any `RUNNING` run older than `SCOUT_RUN_STUCK_AFTER_MINUTES`
+as `FAILED` and steps over it. Without that, a worker killed mid-fan-out
+would silence its Scout's schedule permanently — the failure docs/adr/0004
+recorded as having no automatic recovery in v1. See Stale run below.
+
+**Stale run**:
+A `ScoutRun` left at `RUNNING` by a dead worker. Safe to judge on age alone,
+unlike an Analysis, because `RUNNING` only spans `dispatch_scout_run`'s
+fan-out — DB writes and SQS sends, no LLM call — so seconds of work, and
+`is_scout_run_stale` (`py_db/scout_schedule.py`) needs no liveness probe.
+Closed lazily, inside the Skip-on-overlap guards where the answer is needed,
+rather than by a background sweeper; closing it on the way past also keeps
+the run history from showing an eternal "in progress". A `PENDING` run is
+never stale: it was created but never dispatched, and holds no lock over the
+Scout. See docs/adr/0032.
+_Avoid_: Stuck run (fine in prose, but "stuck" is the [API](../../services/api/CONTEXT.md) context's term for an Analysis, which is a different predicate), Timed-out run, Zombie run

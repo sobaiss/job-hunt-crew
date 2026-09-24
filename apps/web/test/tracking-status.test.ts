@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ANALYSES_STATUS_FILTERS,
   TRACKING_STATUSES,
+  isPipelineStatusFilter,
   trackingStatusBadgeVariant,
   trackingStatusOf,
 } from "@/lib/tracking-status";
@@ -54,6 +56,28 @@ describe("trackingStatusOf", () => {
       "ACCEPTED",
       "WITHDRAWN",
     ]);
+  });
+});
+
+describe("ANALYSES_STATUS_FILTERS", () => {
+  it("is the 5 Tracking buckets then the two pipeline ones, in filter order", () => {
+    expect(ANALYSES_STATUS_FILTERS).toEqual([
+      "TO_APPLY",
+      "IN_PROGRESS",
+      "REJECTED",
+      "ACCEPTED",
+      "WITHDRAWN",
+      "PENDING",
+      "FAILED",
+    ]);
+  });
+
+  it("tells a pipeline bucket from a Tracking one, so each gets the right label", () => {
+    expect(isPipelineStatusFilter("PENDING")).toBe(true);
+    expect(isPipelineStatusFilter("FAILED")).toBe(true);
+    for (const status of TRACKING_STATUSES) {
+      expect(isPipelineStatusFilter(status)).toBe(false);
+    }
   });
 });
 

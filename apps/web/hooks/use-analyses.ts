@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { bff } from "@/lib/bff-client";
 import type { ApplicationStatus } from "@/hooks/use-applications";
@@ -61,6 +61,15 @@ export type AnalysisSummary = {
   status: AnalysisStatus;
   matchScore: number | null;
   requestedAt: string;
+  /** When this Analysis was last re-driven in place by
+   *  {@link useRequeueAnalysis}, or `null` if never (docs/adr/0032). */
+  requeuedAt: string | null;
+  /** Derived server-side, never stored: non-terminal but nothing has advanced
+   *  it for a while, so a worker/queue restart most likely orphaned it. The
+   *  rule lives in `py_db/stuck_analysis.py` and gates the requeue endpoint
+   *  too, so the client reads this flag rather than re-guessing from
+   *  timestamps. */
+  stuck: boolean;
   cvVersionId: string;
   /** The batch this Analysis belongs to, or `null` for one created directly
    *  via `POST /v1/analyses`. */
@@ -193,6 +202,31 @@ export function useCreateAnalysis() {
       cvVersionId: string;
     }) =>
       bff.post<{ analysisId: string }>("/analyses", { jobOfferId, cvVersionId }),
+  });
+}
+
+/**
+ * Re-drive a stuck Analysis in place (`POST /api/analyses/{id}/requeue`,
+ * docs/adr/0032) — the same row back to `PENDING`, no new Analysis and no quota
+ * charged. Offered when the server reports {@link AnalysisSummary.stuck}, i.e. a
+ * worker or queue restart orphaned the row.
+ *
+ * Distinct from {@link useCreateAnalysis}, which is the re-run of a *terminal*
+ * Analysis: a brand-new row, quota charged, possibly against another CV.
+ *
+ * The server re-checks staleness, so a row that turns out to be alive after all
+ * comes back as a {@link BffError} with `status === 409` — the screens map that
+ * to "still being processed" rather than a generic failure.
+ */
+export function useRequeueAnalysis() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (analysisId: string) =>
+      bff.post<{ status: AnalysisStatus }>(`/analyses/${analysisId}/requeue`, {}),
+    onSuccess: (_data, analysisId) => {
+      queryClient.invalidateQueries({ queryKey: ["analyses"] });
+      queryClient.invalidateQueries({ queryKey: ["analysis", analysisId] });
+    },
   });
 }
 
