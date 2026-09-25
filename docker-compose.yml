@@ -19,9 +19,16 @@ services:
   # S3-compatible object storage for local dev, standing in for AWS S3
   # (see PRD Section 4). Bucket layout/keys match the real S3 target 1:1.
   minio:
-    # minio/minio no longer accepts pulls from Docker Hub (MinIO moved
-    # publishing to Quay) — quay.io/minio/minio is the same image/tags.
-    image: quay.io/minio/minio:RELEASE.2025-04-08T15-41-24Z
+    # minio/minio stopped serving from Docker Hub, then quay.io/minio/minio
+    # stopped too (MinIO archived the OSS project and pulled its images,
+    # 2026-09) — every tag now 401s, even anonymously listing the quay.io
+    # repo requires auth. ghcr.io/sobaiss/job-hunt-crew/minio is a same-tag
+    # rebuild from MinIO's own GitHub Release binaries (sha256-verified
+    # against MinIO's published checksums, source in
+    # docs/infra/minio-mirror/), multi-arch (amd64+arm64) so it runs the
+    # same on CI's amd64 runners and Apple Silicon dev machines. Rebuild
+    # instructions/Dockerfile: docs/infra/minio-mirror/README.md.
+    image: ghcr.io/sobaiss/job-hunt-crew/minio:RELEASE.2025-04-08T15-41-24Z
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
@@ -39,7 +46,9 @@ services:
       retries: 10
 
   minio-createbucket:
-    image: quay.io/minio/mc:RELEASE.2025-04-08T15-39-49Z
+    # Same story as the minio image above — quay.io/minio/mc is also gone.
+    # See docs/infra/minio-mirror/README.md.
+    image: ghcr.io/sobaiss/job-hunt-crew/minio-mc:RELEASE.2025-04-08T15-39-49Z
     depends_on:
       minio:
         condition: service_healthy
