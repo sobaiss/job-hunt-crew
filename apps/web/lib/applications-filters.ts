@@ -1,4 +1,5 @@
 import type { Application } from "@/hooks/use-applications";
+import type { GeneratedDocumentStatus } from "@/hooks/use-generated-documents";
 import { JOB_OFFER_SOURCE_SITES, type JobOfferSourceSite } from "@/lib/analyses-filters";
 import {
   TRACKING_STATUSES,
@@ -16,12 +17,17 @@ import {
 
 /** One row of the Applications table. `location` and `sourceSite` are
  *  optional on the offer because the list endpoint does not send them yet —
- *  a row without them simply matches no location or platform filter. */
+ *  a row without them simply matches no location or platform filter. The
+ *  match score and generated-document statuses are optional for the same
+ *  reason; a row without them renders those cells empty (#235). */
 export type ApplicationSummary = Omit<Application, "jobOffer"> & {
   jobOffer: Application["jobOffer"] & {
     location?: string | null;
     sourceSite?: string | null;
   };
+  matchScore?: number | null;
+  tailoredCvStatus?: GeneratedDocumentStatus | null;
+  coverLetterStatus?: GeneratedDocumentStatus | null;
 };
 
 export type ApplicationsFilterState = {
