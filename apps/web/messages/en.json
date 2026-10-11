@@ -3,41 +3,43 @@
     "name": "Job Hunt Crew"
   },
   "landing": {
-    "tagline": "Match your CV against real job offers and see exactly where you stand.",
-    "description": "Job Hunt Crew reads a job posting and one of your CVs, then shows the matched skills, the gaps, and what to change before you apply.",
+    "tagline": "Your agents find the offers. You choose where to apply.",
+    "description": "Job Hunt Crew runs search agents on job sites every day, compares each offer with your CV and shows you the ones that match. For each one, a tailored cover letter and CV, then tracking of your application.",
     "signIn": "Sign in",
     "startFree": "Start for free",
-    "signInMethods": "Sign in with email, Google, or LinkedIn.",
     "nav": {
       "how": "How it works",
+      "agents": "Agents",
+      "plans": "Plans",
       "features": "Features",
       "faq": "FAQ"
     },
     "hero": {
-      "eyebrow": "CV-to-offer matching",
-      "preview": {
-        "title": "Dashboard",
-        "period": "Last 30 days",
-        "scoreAvg": "Average",
-        "best": "Best",
-        "analyses": "Analyses",
-        "cv": "CVs",
-        "row1Title": "Senior Data Engineer",
-        "row1Company": "Payflow",
-        "row2Title": "Backend Engineer (Go)",
-        "row2Company": "Kessel",
-        "row3Title": "Platform Data Lead",
-        "row3Company": "Novable"
+      "eyebrow": "AI-assisted job search",
+      "howLink": "How it works",
+      "note": "Free plan included when you sign up. Sign in with email, Google, or LinkedIn.",
+      "agentCard": {
+        "title": "Agent · Data Engineer — Paris",
+        "status": "Up to date",
+        "lastRun": "Ran this morning · {analysed} offers analysed · {relevant} relevant",
+        "threshold": "Relevance threshold: {threshold}",
+        "row1": "Senior Data Engineer · Payflow",
+        "row2": "Data Engineer Spark · Kessel",
+        "row3": "Analytics Engineer · Novable"
       }
     },
     "howItWorks": {
-      "heading": "How it works",
-      "step1Title": "Add a job offer",
-      "step1Body": "Paste the URL of a posting you care about. We fetch and read it for you.",
-      "step2Title": "Choose a CV",
-      "step2Body": "Pick which version of your CV to match against the offer.",
-      "step3Title": "Read the analysis",
-      "step3Body": "See your match score, the skills you already have, and the gaps to close before applying."
+      "heading": "From offer to application, all in one place",
+      "findTitle": "Find",
+      "findBody": "An agent explores the sites you target every day, with your filters. Or simply paste the URL of an offer.",
+      "analyseTitle": "Analyse",
+      "analyseBody": "Each offer is compared with your CV: match score, skills found, gaps to close.",
+      "tailorTitle": "Tailor",
+      "tailorBody": "For the offers you care about, generate a tailored cover letter and CV.",
+      "applyTitle": "Apply",
+      "applyBody": "You review, download and apply yourself, on the offer's own site.",
+      "trackTitle": "Track",
+      "trackBody": "Each application keeps its status and history until you hear back."
     },
     "features": {
       "heading": "More than a single number",
@@ -53,12 +55,6 @@
       "batchBody": "Point it at a job site with your filters and get every matching offer ranked by fit.",
       "trendTitle": "Track your progress",
       "trendBody": "Every analysis is kept, with a match-score trend so you can see your search improving."
-    },
-    "preview": {
-      "eyebrow": "Preview",
-      "heading": "A dashboard built around your search",
-      "body": "Your average and best match score, recent analyses, and a score trend — all in one place once you sign in.",
-      "caption": "Preview of the signed-in dashboard"
     },
     "privacy": {
       "heading": "Your data stays yours",
@@ -106,10 +102,11 @@
       "modelA": "A large language model reads the offer and your CV to produce the match. It does not rewrite your CV file for you."
     },
     "finalCta": {
-      "heading": "Ready to measure your fit?"
+      "heading": "Let your agents search for you.",
+      "note": "Free plan included. Sign in with email, Google, or LinkedIn."
     },
     "footer": {
-      "tagline": "Match your CV against real job offers.",
+      "tagline": "Agents that search, analyse and prepare your applications.",
       "productHeading": "Product",
       "resourcesHeading": "Resources",
       "legalHeading": "Legal",

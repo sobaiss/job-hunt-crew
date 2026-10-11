@@ -62,67 +62,6 @@ beforeEach(() => {
 });
 
 describe("LandingPage (marketing content)", () => {
-  it("leads with the product statement and a primary sign-in call to action", () => {
-    renderWithProviders(<LandingPage plans={null} />);
-
-    expect(
-      screen.getByRole("heading", {
-        level: 1,
-        name: /match your cv against real job offers/i,
-      }),
-    ).toBeInTheDocument();
-
-    const ctas = screen
-      .getAllByRole("link", { name: "Sign in" })
-      .filter((el) => el.getAttribute("href") === "/sign-in");
-    expect(ctas.length).toBeGreaterThanOrEqual(2);
-  });
-
-  it("shows the how-it-works walkthrough with all three steps", () => {
-    renderWithProviders(<LandingPage plans={null} />);
-
-    const section = screen
-      .getByRole("heading", { name: "How it works" })
-      .closest("section");
-    expect(section).not.toBeNull();
-    const region = within(section as HTMLElement);
-    expect(region.getByText("Add a job offer")).toBeInTheDocument();
-    expect(region.getByText("Choose a CV")).toBeInTheDocument();
-    expect(region.getByText("Read the analysis")).toBeInTheDocument();
-  });
-
-  it("shows a features section written around what you get beyond a score", () => {
-    renderWithProviders(<LandingPage plans={null} />);
-
-    expect(
-      screen.getByRole("heading", { name: "More than a single number" }),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Evidence for every match")).toBeInTheDocument();
-    expect(screen.getByText("Prioritised suggestions")).toBeInTheDocument();
-  });
-
-  it("shows a product preview of the dashboard", () => {
-    renderWithProviders(<LandingPage plans={null} />);
-
-    expect(
-      screen.getByRole("heading", {
-        name: "A dashboard built around your search",
-      }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText("Preview of the signed-in dashboard"),
-    ).toBeInTheDocument();
-
-    // A real Dashboard screenshot, not the old stylised in-page mock.
-    const preview = screen.getByRole("img", {
-      name: "Preview of the signed-in dashboard",
-    });
-    expect(preview).toHaveAttribute(
-      "src",
-      expect.stringContaining("dashboard-preview"),
-    );
-  });
-
   it("states that data is isolated per account", () => {
     renderWithProviders(<LandingPage plans={null} />);
 
@@ -205,6 +144,151 @@ function planCard(name: string) {
 function quotaValue(card: ReturnType<typeof planCard>, label: string) {
   return card.getByText(label).nextElementSibling?.textContent;
 }
+
+function heroSection() {
+  const section = screen.getByRole("heading", { level: 1 }).closest("section");
+  expect(section).not.toBeNull();
+  return within(section as HTMLElement);
+}
+
+function finalBanner() {
+  const section = screen
+    .getByRole("heading", { level: 2, name: "Let your agents search for you." })
+    .closest("section");
+  expect(section).not.toBeNull();
+  return within(section as HTMLElement);
+}
+
+describe("Landing route (hero, journey and Start for free, issue #246)", () => {
+  it("leads with the agents headline, in English and in French", async () => {
+    const { unmount } = await renderSignedOutRoute();
+    expect(
+      screen.getByRole("heading", {
+        level: 1,
+        name: "Your agents find the offers. You choose where to apply.",
+      }),
+    ).toBeInTheDocument();
+    unmount();
+
+    await renderSignedOutRoute("fr");
+    expect(
+      screen.getByRole("heading", {
+        level: 1,
+        name: "Vos agents cherchent les offres. Vous choisissez où postuler.",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      heroSection().getByText(
+        "Formule Free incluse à l'inscription. Connexion par e-mail, Google ou LinkedIn.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("points Start for free to /sign-in in the hero and in the final banner", async () => {
+    await renderSignedOutRoute();
+
+    expect(
+      heroSection().getByRole("link", { name: "Start for free" }),
+    ).toHaveAttribute("href", "/sign-in");
+    expect(
+      heroSection().getByRole("link", { name: "How it works" }),
+    ).toHaveAttribute("href", "#how");
+    expect(
+      finalBanner().getByRole("link", { name: "Start for free" }),
+    ).toHaveAttribute("href", "/sign-in");
+    expect(
+      finalBanner().getByText(
+        "Free plan included. Sign in with email, Google, or LinkedIn.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps Sign in only in the header", async () => {
+    await renderSignedOutRoute();
+
+    const signIn = screen.getAllByRole("link", { name: "Sign in" });
+    expect(signIn).toHaveLength(1);
+    expect(signIn[0]).toHaveAttribute("href", "/sign-in");
+    expect(within(screen.getByRole("banner")).getByRole("link", { name: "Sign in" })).toBe(signIn[0]);
+  });
+
+  it("walks through the five steps of the journey", async () => {
+    await renderSignedOutRoute();
+
+    const section = document.getElementById("how");
+    expect(section).not.toBeNull();
+    const region = within(section as HTMLElement);
+    expect(
+      region.getByRole("heading", {
+        level: 2,
+        name: "From offer to application, all in one place",
+      }),
+    ).toBeInTheDocument();
+    const steps = region.getAllByRole("listitem");
+    expect(steps).toHaveLength(5);
+    expect(
+      steps.map((step) => within(step).getByRole("heading", { level: 3 }).textContent),
+    ).toEqual(["Find", "Analyse", "Tailor", "Apply", "Track"]);
+    expect(
+      region.getByText(
+        "You review, download and apply yourself, on the offer's own site.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("shows an illustrative agent card hidden from assistive technology", async () => {
+    await renderSignedOutRoute("fr");
+
+    const title = heroSection().getByText("Agent · Data Engineer — Paris");
+    const card = title.closest("[aria-hidden='true']");
+    expect(card).not.toBeNull();
+    const region = within(card as HTMLElement);
+    expect(region.getByText("À jour")).toBeInTheDocument();
+    expect(
+      region.getByText("Exécuté ce matin · 31 offres analysées · 4 pertinentes"),
+    ).toBeInTheDocument();
+    expect(region.getByText("Seuil de pertinence : 70")).toBeInTheDocument();
+    expect(region.getByText("Senior Data Engineer · Payflow")).toBeInTheDocument();
+    expect(region.getByText("Data Engineer Spark · Kessel")).toBeInTheDocument();
+    expect(region.getByText("Analytics Engineer · Novable")).toBeInTheDocument();
+    expect(
+      ["91", "84", "76"].map((score) => region.getByText(score).textContent),
+    ).toEqual(["91", "84", "76"]);
+  });
+
+  it("no longer has the dashboard preview section", async () => {
+    await renderSignedOutRoute();
+
+    expect(
+      screen.queryByRole("heading", { name: "A dashboard built around your search" }),
+    ).not.toBeInTheDocument();
+    for (const img of screen.queryAllByRole("img")) {
+      expect(img.getAttribute("src") ?? "").not.toContain("dashboard-preview");
+    }
+  });
+
+  it("links the header and the footer to #how, #agents, #plans and #faq", async () => {
+    await renderSignedOutRoute();
+
+    const expected = [
+      ["How it works", "#how"],
+      ["Agents", "#agents"],
+      ["Plans", "#plans"],
+      ["FAQ", "#faq"],
+    ];
+    for (const landmark of [screen.getByRole("banner"), screen.getByRole("contentinfo")]) {
+      const region = within(landmark);
+      for (const [name, href] of expected) {
+        expect(region.getByRole("link", { name })).toHaveAttribute("href", href);
+      }
+    }
+    expect(
+      within(screen.getByRole("contentinfo")).getByText(
+        "Agents that search, analyse and prepare your applications.",
+      ),
+    ).toBeInTheDocument();
+  });
+});
 
 describe("Landing route (Plans section, issue #247)", () => {
   it("shows the three plans with the live quotas read from the API", async () => {
@@ -338,7 +422,7 @@ describe("Landing route (auth gate)", () => {
     expect(
       screen.getByRole("heading", {
         level: 1,
-        name: /match your cv against real job offers/i,
+        name: "Your agents find the offers. You choose where to apply.",
       }),
     ).toBeInTheDocument();
   });

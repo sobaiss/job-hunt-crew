@@ -1,7 +1,6 @@
 "use client";
 
 import type { ReactNode } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import {
@@ -11,7 +10,9 @@ import {
   FileText,
   GitCompare,
   Layers,
-  Link2,
+  ListChecks,
+  Search,
+  Send,
   ShieldCheck,
   Sparkles,
   Target,
@@ -19,9 +20,10 @@ import {
 
 import { cn } from "@/lib/utils";
 import type { PlanQuotaKind, PlanSummary } from "@/lib/internal-api";
-import { MatchScoreGauge } from "@/components/match-score-gauge";
+import { matchScoreBand, type MatchScoreBand } from "@/lib/match-score-band";
 import { LocaleSwitch } from "@/components/locale-switch";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
@@ -108,72 +110,77 @@ const FEATURE_ICONS = {
   trend: BarChart3,
 } as const;
 
-const STEP_ICONS = [Link2, FileText, Sparkles] as const;
+const STEPS = [
+  { key: "find", Icon: Search },
+  { key: "analyse", Icon: Target },
+  { key: "tailor", Icon: Sparkles },
+  { key: "apply", Icon: Send },
+  { key: "track", Icon: ListChecks },
+] as const;
+
+/** The anchor links shared by the header and the footer's Product column. */
+const NAV_LINKS = [
+  { key: "how", href: "#how" },
+  { key: "agents", href: "#agents" },
+  { key: "plans", href: "#plans" },
+  { key: "faq", href: "#faq" },
+] as const;
+
+// Same band colours as MatchScoreGauge's pill — never the coral accent.
+const SCORE_PILL_CLASS: Record<MatchScoreBand, string> = {
+  strong: "bg-success/15 text-success",
+  partial: "bg-warning/15 text-warning",
+  weak: "bg-danger/15 text-danger",
+};
 
 /**
- * The compact "Dashboard" widget in the hero, right of the headline —
- * illustrative sample data (matching design/Main.dc.html), not a live
- * screenshot: at hero width there's no room for the real preview image
- * used further down the page. Reuses the real {@link MatchScoreGauge} so its
- * band colour and label stay in lockstep with the actual scoring logic.
+ * The illustrative agent card in the hero, right of the headline (spec
+ * landing-v2 §2): sample data, not a live screenshot, so it is hidden from
+ * assistive technology. Each score pill takes its band from the real
+ * {@link matchScoreBand}, so it stays in lockstep with the scoring logic.
  */
-function HeroPreviewCard() {
-  const t = useTranslations("landing.hero.preview");
-  const stats = [
-    { label: t("scoreAvg"), value: 68 },
-    { label: t("best"), value: 91 },
-    { label: t("analyses"), value: 24 },
-    { label: t("cv"), value: 3 },
-  ];
+function HeroAgentCard() {
+  const t = useTranslations("landing.hero.agentCard");
   const rows = [
-    { title: t("row1Title"), company: t("row1Company"), score: 91 },
-    { title: t("row2Title"), company: t("row2Company"), score: 74 },
-    { title: t("row3Title"), company: t("row3Company"), score: 58 },
+    { label: t("row1"), score: 91 },
+    { label: t("row2"), score: 84 },
+    { label: t("row3"), score: 76 },
   ];
 
   return (
     <Card className="gap-0 overflow-hidden py-0 shadow-lg" aria-hidden="true">
-      <div className="flex items-center justify-between border-b border-border bg-panel px-4 py-3">
-        <span className="font-serif text-sm font-semibold">{t("title")}</span>
-        <span className="text-xs text-muted">{t("period")}</span>
+      <div className="flex items-center justify-between gap-3 border-b border-border bg-panel px-4 py-3">
+        <span className="truncate font-serif text-sm font-semibold">
+          {t("title")}
+        </span>
+        <Badge variant="success">{t("status")}</Badge>
       </div>
       <div className="flex flex-col gap-3.5 p-4">
-        <div className="grid grid-cols-4 gap-2.5">
-          {stats.map((stat) => (
-            <div
-              key={stat.label}
-              className="rounded-lg border border-border px-2.5 py-2"
-            >
-              <div className="truncate text-[11px] text-muted">
-                {stat.label}
-              </div>
-              <div className="font-serif text-xl font-semibold">
-                {stat.value}
-              </div>
-            </div>
-          ))}
+        <div className="flex flex-col gap-1 text-xs text-muted">
+          <span>{t("lastRun", { analysed: 31, relevant: 4 })}</span>
+          <span>{t("threshold", { threshold: 70 })}</span>
         </div>
-        <div className="flex items-center gap-4 rounded-xl border border-border p-3.5">
-          <MatchScoreGauge score={76} size="sm" />
-          <div className="flex min-w-0 flex-1 flex-col">
-            {rows.map((row, i) => (
-              <div
-                key={row.title}
+        <ul className="flex flex-col rounded-xl border border-border px-3.5 py-1.5">
+          {rows.map((row, i) => (
+            <li
+              key={row.label}
+              className={cn(
+                "flex items-center justify-between gap-3 py-2 text-sm",
+                i > 0 && "border-t border-border",
+              )}
+            >
+              <span className="truncate">{row.label}</span>
+              <span
                 className={cn(
-                  "flex items-center justify-between gap-3 py-1.5 text-xs",
-                  i > 0 && "border-t border-border",
+                  "flex-none rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums",
+                  SCORE_PILL_CLASS[matchScoreBand(row.score).band],
                 )}
               >
-                <span className="truncate">
-                  {row.title} · {row.company}
-                </span>
-                <span className="flex-none font-medium tabular-nums">
-                  {row.score}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
+                {row.score}
+              </span>
+            </li>
+          ))}
+        </ul>
       </div>
     </Card>
   );
@@ -260,20 +267,22 @@ function PlansSection({ plans }: { plans: PlanSummary[] | null }) {
 }
 
 /**
- * The public front door for a signed-out Visitor: a marketing page with a
- * single repeated primary action ("Sign in"). No pricing, no testimonials, no
- * client logos — a factual privacy section stands in for social proof. The
- * daily-analysis-cap number and the legal links are shown as visible
- * placeholders, not invented values. Lives outside the App shell.
+ * The public front door for a signed-out Visitor: a marketing page telling
+ * the find → analyse → tailor → apply → track journey, with "Start for free"
+ * as the repeated primary action and "Sign in" kept only in the header. No
+ * prices, no testimonials, no client logos — a factual privacy section stands
+ * in for social proof. Publicly a Scout is always an "agent". Facts not yet
+ * settled are shown as visible placeholders, not invented values. Lives
+ * outside the App shell.
  */
 export function LandingPage({ plans }: { plans: PlanSummary[] | null }) {
   const t = useTranslations("landing");
 
-  const steps = [
-    { title: t("howItWorks.step1Title"), body: t("howItWorks.step1Body") },
-    { title: t("howItWorks.step2Title"), body: t("howItWorks.step2Body") },
-    { title: t("howItWorks.step3Title"), body: t("howItWorks.step3Body") },
-  ];
+  const steps = STEPS.map(({ key, Icon }) => ({
+    Icon,
+    title: t(`howItWorks.${key}Title`),
+    body: t(`howItWorks.${key}Body`),
+  }));
 
   const features = (
     ["evidence", "gaps", "suggestions", "compare", "batch", "trend"] as const
@@ -299,24 +308,15 @@ export function LandingPage({ plans }: { plans: PlanSummary[] | null }) {
             <Brand />
           </Link>
           <nav className="flex items-center gap-7">
-            <a
-              href="#how"
-              className="hidden text-sm text-muted hover:text-foreground sm:inline"
-            >
-              {t("nav.how")}
-            </a>
-            <a
-              href="#features"
-              className="hidden text-sm text-muted hover:text-foreground sm:inline"
-            >
-              {t("nav.features")}
-            </a>
-            <a
-              href="#faq"
-              className="hidden text-sm text-muted hover:text-foreground sm:inline"
-            >
-              {t("nav.faq")}
-            </a>
+            {NAV_LINKS.map(({ key, href }) => (
+              <a
+                key={key}
+                href={href}
+                className="hidden text-sm text-muted hover:text-foreground sm:inline"
+              >
+                {t(`nav.${key}`)}
+              </a>
+            ))}
             <LocaleSwitch />
             <Button asChild size="sm">
               <Link href="/sign-in">
@@ -342,7 +342,7 @@ export function LandingPage({ plans }: { plans: PlanSummary[] | null }) {
             <div className="mt-1 flex flex-wrap items-center gap-5">
               <Button asChild size="lg">
                 <Link href="/sign-in">
-                  {t("signIn")}
+                  {t("startFree")}
                   <ArrowRight aria-hidden="true" />
                 </Link>
               </Button>
@@ -350,14 +350,14 @@ export function LandingPage({ plans }: { plans: PlanSummary[] | null }) {
                 href="#how"
                 className="inline-flex items-center gap-1.5 text-sm font-medium"
               >
-                {t("nav.how")}
+                {t("hero.howLink")}
                 <ChevronDown className="size-4" aria-hidden="true" />
               </a>
             </div>
-            <p className="text-xs text-muted">{t("signInMethods")}</p>
+            <p className="text-xs text-muted">{t("hero.note")}</p>
           </div>
 
-          <HeroPreviewCard />
+          <HeroAgentCard />
         </section>
 
         {/* How it works */}
@@ -365,26 +365,23 @@ export function LandingPage({ plans }: { plans: PlanSummary[] | null }) {
           <h2 className="font-serif text-3xl font-semibold tracking-tight">
             {t("howItWorks.heading")}
           </h2>
-          <ol className="grid gap-8 sm:grid-cols-3">
-            {steps.map((step, i) => {
-              const Icon = STEP_ICONS[i];
-              return (
-                <li key={step.title} className="flex flex-col gap-4">
-                  <div className="flex items-center gap-3">
-                    <span className="font-serif text-sm font-semibold text-accent">
-                      {String(i + 1).padStart(2, "0")}
-                    </span>
-                    <span className="flex size-10 flex-none items-center justify-center rounded-xl bg-accent/12 text-accent">
-                      <Icon className="size-5" aria-hidden="true" />
-                    </span>
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    <h3 className="text-lg font-medium">{step.title}</h3>
-                    <p className="text-sm text-muted">{step.body}</p>
-                  </div>
-                </li>
-              );
-            })}
+          <ol className="grid gap-8 sm:grid-cols-2 lg:grid-cols-5">
+            {steps.map(({ Icon, title, body }, i) => (
+              <li key={title} className="flex flex-col gap-4">
+                <div className="flex items-center gap-3">
+                  <span className="font-serif text-sm font-semibold text-accent">
+                    {String(i + 1).padStart(2, "0")}
+                  </span>
+                  <span className="flex size-10 flex-none items-center justify-center rounded-xl bg-accent/12 text-accent">
+                    <Icon className="size-5" aria-hidden="true" />
+                  </span>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <h3 className="text-lg font-medium">{title}</h3>
+                  <p className="text-sm text-muted">{body}</p>
+                </div>
+              </li>
+            ))}
           </ol>
         </section>
 
@@ -409,43 +406,6 @@ export function LandingPage({ plans }: { plans: PlanSummary[] | null }) {
               </Card>
             ))}
           </div>
-        </section>
-
-        {/* Product preview — real screenshots of the redesigned signed-in
-            Dashboard (spec #49). Regenerate with
-            `pnpm exec playwright test --config design/capture/playwright.capture.config.ts`.
-            The light / dark pair is swapped by the `dark` class next-themes
-            puts on <html>, so it follows the visitor's system preference. */}
-        <section className="flex flex-col gap-10 text-center">
-          <div className="flex flex-col items-center gap-3">
-            <Eyebrow>{t("preview.eyebrow")}</Eyebrow>
-            <h2 className="font-serif text-3xl font-semibold tracking-tight">
-              {t("preview.heading")}
-            </h2>
-            <p className="max-w-xl text-muted">{t("preview.body")}</p>
-          </div>
-          <figure className="mx-auto flex w-full max-w-3xl flex-col gap-2">
-            <div className="overflow-hidden rounded-xl border border-border bg-panel p-2 shadow-lg">
-              <Image
-                src="/dashboard-preview-light.png"
-                alt={t("preview.caption")}
-                width={1024}
-                height={1295}
-                className="w-full rounded-lg border border-border dark:hidden"
-              />
-              <Image
-                src="/dashboard-preview-dark.png"
-                alt=""
-                aria-hidden="true"
-                width={1024}
-                height={1295}
-                className="hidden w-full rounded-lg border border-border dark:block"
-              />
-            </div>
-            <figcaption className="text-center text-xs text-muted">
-              {t("preview.caption")}
-            </figcaption>
-          </figure>
         </section>
 
         {/* Privacy — the factual "data isolated per account" section that stands
@@ -514,11 +474,11 @@ export function LandingPage({ plans }: { plans: PlanSummary[] | null }) {
           </h2>
           <Button asChild size="lg">
             <Link href="/sign-in">
-              {t("signIn")}
+              {t("startFree")}
               <ArrowRight aria-hidden="true" />
             </Link>
           </Button>
-          <p className="text-xs text-muted">{t("signInMethods")}</p>
+          <p className="text-xs text-muted">{t("finalCta.note")}</p>
         </div>
       </section>
 
@@ -531,15 +491,15 @@ export function LandingPage({ plans }: { plans: PlanSummary[] | null }) {
           <div className="grid grid-cols-2 gap-8 sm:grid-cols-4">
             <div className="flex flex-col gap-2.5 text-sm">
               <span className="font-medium">{t("footer.productHeading")}</span>
-              <a href="#features" className="text-muted hover:text-foreground">
-                {t("nav.features")}
-              </a>
-              <a href="#how" className="text-muted hover:text-foreground">
-                {t("nav.how")}
-              </a>
-              <a href="#faq" className="text-muted hover:text-foreground">
-                {t("nav.faq")}
-              </a>
+              {NAV_LINKS.map(({ key, href }) => (
+                <a
+                  key={key}
+                  href={href}
+                  className="text-muted hover:text-foreground"
+                >
+                  {t(`nav.${key}`)}
+                </a>
+              ))}
             </div>
             <div className="flex flex-col gap-2.5 text-sm">
               <span className="font-medium">

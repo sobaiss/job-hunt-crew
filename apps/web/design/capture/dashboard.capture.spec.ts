@@ -4,9 +4,10 @@ import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { encode } from "next-auth/jwt";
 
-// Regenerates apps/web/public/dashboard-preview-{light,dark}.png — the real
-// Dashboard screenshots the Landing page embeds. Not run by `pnpm test:e2e`;
-// invoke explicitly (see playwright.capture.config.ts).
+// Regenerates apps/web/public/dashboard-preview-{light,dark}.png — real
+// Dashboard screenshots. The Landing page no longer embeds them (Landing v2,
+// #246); this scenario stays as the model for the Landing v2 captures.
+// Not run by `pnpm test:e2e`; invoke explicitly (see playwright.capture.config.ts).
 
 const WEB_ROOT = path.resolve(__dirname, "..", "..");
 const PUBLIC_DIR = path.join(WEB_ROOT, "public");

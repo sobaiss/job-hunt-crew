@@ -3,41 +3,43 @@
     "name": "Job Hunt Crew"
   },
   "landing": {
-    "tagline": "Comparez votre CV à de vraies offres d'emploi et sachez exactement où vous en êtes.",
-    "description": "Job Hunt Crew lit une offre d'emploi et l'un de vos CV, puis affiche les compétences qui correspondent, les manques et ce qu'il faut changer avant de postuler.",
+    "tagline": "Vos agents cherchent les offres. Vous choisissez où postuler.",
+    "description": "Job Hunt Crew lance chaque jour des agents de recherche sur les sites d'emploi, compare chaque offre à votre CV et vous montre celles qui correspondent. Pour chacune, une lettre de motivation et un CV adaptés, puis le suivi de votre candidature.",
     "signIn": "Se connecter",
     "startFree": "Commencer gratuitement",
-    "signInMethods": "Connexion par e-mail, Google ou LinkedIn.",
     "nav": {
-      "how": "Comment ça marche",
+      "how": "Fonctionnement",
+      "agents": "Agents",
+      "plans": "Formules",
       "features": "Fonctionnalités",
       "faq": "FAQ"
     },
     "hero": {
-      "eyebrow": "Correspondance CV / offre",
-      "preview": {
-        "title": "Dashboard",
-        "period": "30 derniers jours",
-        "scoreAvg": "Score moyen",
-        "best": "Meilleur",
-        "analyses": "Analyses",
-        "cv": "CV",
-        "row1Title": "Senior Data Engineer",
-        "row1Company": "Payflow",
-        "row2Title": "Backend Engineer (Go)",
-        "row2Company": "Kessel",
-        "row3Title": "Plateforme Data Lead",
-        "row3Company": "Novable"
+      "eyebrow": "Recherche d'emploi assistée par IA",
+      "howLink": "Comment ça marche",
+      "note": "Formule Free incluse à l'inscription. Connexion par e-mail, Google ou LinkedIn.",
+      "agentCard": {
+        "title": "Agent · Data Engineer — Paris",
+        "status": "À jour",
+        "lastRun": "Exécuté ce matin · {analysed} offres analysées · {relevant} pertinentes",
+        "threshold": "Seuil de pertinence : {threshold}",
+        "row1": "Senior Data Engineer · Payflow",
+        "row2": "Data Engineer Spark · Kessel",
+        "row3": "Analytics Engineer · Novable"
       }
     },
     "howItWorks": {
-      "heading": "Comment ça marche",
-      "step1Title": "Ajoutez une offre",
-      "step1Body": "Collez l'URL d'une annonce qui vous intéresse. Nous la récupérons et la lisons pour vous.",
-      "step2Title": "Choisissez un CV",
-      "step2Body": "Indiquez quelle version de votre CV comparer à l'offre.",
-      "step3Title": "Lisez l'analyse",
-      "step3Body": "Découvrez votre score de correspondance, les compétences que vous avez déjà et les manques à combler avant de postuler."
+      "heading": "De l'offre à la candidature, au même endroit",
+      "findTitle": "Trouver",
+      "findBody": "Un agent explore chaque jour les sites que vous ciblez, avec vos filtres. Ou collez simplement l'URL d'une offre.",
+      "analyseTitle": "Analyser",
+      "analyseBody": "Chaque offre est comparée à votre CV : score de correspondance, compétences retrouvées, manques à combler.",
+      "tailorTitle": "Adapter",
+      "tailorBody": "Pour les offres qui vous intéressent, générez une lettre de motivation et un CV adaptés.",
+      "applyTitle": "Postuler",
+      "applyBody": "Vous relisez, téléchargez et postulez vous-même, sur le site de l'offre.",
+      "trackTitle": "Suivre",
+      "trackBody": "Chaque candidature garde son statut et son historique jusqu'à la réponse."
     },
     "features": {
       "heading": "Bien plus qu'un simple score",
@@ -53,12 +55,6 @@
       "batchBody": "Ciblez un site d'emploi avec vos filtres et obtenez chaque offre correspondante classée par pertinence.",
       "trendTitle": "Suivez votre progression",
       "trendBody": "Chaque analyse est conservée, avec une courbe du score de correspondance pour voir vos candidatures s'améliorer."
-    },
-    "preview": {
-      "eyebrow": "Aperçu",
-      "heading": "Un tableau de bord pensé pour votre recherche",
-      "body": "Votre score de correspondance moyen et votre meilleur score, vos analyses récentes et une courbe de progression — le tout au même endroit une fois connecté.",
-      "caption": "Aperçu du tableau de bord après connexion"
     },
     "privacy": {
       "heading": "Vos données restent les vôtres",
@@ -106,10 +102,11 @@
       "modelA": "Un grand modèle de langage lit l'offre et votre CV pour produire la correspondance. Il ne réécrit pas votre fichier de CV à votre place."
     },
     "finalCta": {
-      "heading": "Prêt à mesurer votre fit ?"
+      "heading": "Laissez vos agents chercher pour vous.",
+      "note": "Formule Free incluse. Connexion par e-mail, Google ou LinkedIn."
     },
     "footer": {
-      "tagline": "Comparez votre CV à de vraies offres d'emploi.",
+      "tagline": "Des agents qui cherchent, analysent et préparent vos candidatures.",
       "productHeading": "Produit",
       "resourcesHeading": "Ressources",
       "legalHeading": "Légal",
