@@ -118,8 +118,13 @@ job-hunt-crew/
 
 ### `apps/web`
 
-Next.js App Router app. Pages under `app/` (`analyses`, `cv-versions`,
-`ingestion-jobs`) plus BFF routes under `app/api/*` that mirror the
+Next.js App Router app. Authenticated pages live under `app/(app)/`
+(`analyses`, `applications`, `cv-versions`, `ingestion-jobs`, `scouts`,
+`quotas`, `settings`, `admin`); `app/(public)/` holds sign-in and
+account-blocked. `applications` is a table (column visibility, filters,
+multi-select) whose rows open an in-page **quick view** with the full
+candidature, offer info, timeline and analysis recall — there is no
+standalone `/applications/[id]` page. Plus BFF routes under `app/api/*` that mirror the
 `services/api` surface 1:1. `auth.ts` configures NextAuth (Email magic-link,
 Google, LinkedIn OIDC) in JWT mode — no database adapter, no Prisma at
 runtime. `lib/internal-api.ts` is the one place that calls `services/api`.
@@ -417,6 +422,22 @@ Lambda shim, a Step Functions execution, and
 in `docker-compose.yml` (`stepfunctions-local` / `worker` services) and
 `services/analysis/src/analysis/lambda_shim.py`. Restrict the host worker to
 a subset with `WORKER_QUEUES=cv-conversion,analysis-intake`.
+
+## Maintenance targets
+
+Dev-database cleanup helpers in the `Makefile`. All of them only report what
+they would change unless run with `CONFIRM=1`:
+
+```bash
+make clean-analyses CONFIRM=1                  # delete every Analysis
+make clean-analyses-failed CONFIRM=1           # delete FAILED Analyses only
+make clean-analyses-scout SCOUT_ID=<id>        # delete one Scout's Analyses
+make archive-scouts CONFIRM=1                  # set every Scout to ARCHIVED
+make verify-sites [SITES=LINKEDIN]             # live check of the job sources
+```
+
+Deleting an `Analysis` cascades to its `PipelineEvent`, `GeneratedDocument`
+and `Application` rows; S3 objects are left behind.
 
 ## Testing
 
