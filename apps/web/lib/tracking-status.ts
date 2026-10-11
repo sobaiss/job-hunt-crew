@@ -85,6 +85,13 @@ export function trackingStatusOf(
   return APPLICATION_STATUS_TO_TRACKING[analysis.applicationStatus];
 }
 
+/** The Tracking status bucket for an Application's raw status — the
+ *  Applications table's view, where every row already has an Application and
+ *  so always has a bucket (#234). */
+export function trackingStatusOfApplication(status: ApplicationStatus): TrackingStatus {
+  return APPLICATION_STATUS_TO_TRACKING[status];
+}
+
 /** Mirrors `applicationBadgeVariant` (components/application-row.tsx) over
  *  the 5-bucket Tracking status instead of the raw 7-value enum. */
 export function trackingStatusBadgeVariant(
