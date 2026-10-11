@@ -40,6 +40,17 @@
       "trackTitle": "Track",
       "trackBody": "Each application keeps its status and history until you hear back."
     },
+    "agents": {
+      "eyebrow": "Autonomous agents",
+      "heading": "Autonomous agents that search and analyse for you",
+      "body": "Set up an agent once: it runs every day without you and is waiting for you with the offers worth reading.",
+      "point1": "A reference CV, the sites to query and your filters: keywords, location, posting date, contract type, remote work, experience level.",
+      "point2": "A relevance threshold (70 by default): only the offers that reach it are shown as relevant; the others remain available.",
+      "point3": "An automatic run every day, or on demand, at most once an hour.",
+      "point4": "Before the run, you see for each site which filters will be honoured, approximated or not supported.",
+      "point5": "A run history and a state you can read at a glance: running, up to date, failed.",
+      "imageAlt": "The Agent panel for the Data Engineer — Paris agent: its configuration, statistics, relevant offers and run history."
+    },
     "features": {
       "heading": "And also",
       "analysisTitle": "An analysis that shows its reasoning",

@@ -4,6 +4,7 @@ import { delay, http, HttpResponse } from "msw";
 
 import { renderWithProviders, screen, within } from "./test-utils";
 import { LandingPage } from "@/components/landing-page";
+import { TextVisualSection } from "@/components/text-visual-section";
 import { AppShell } from "@/components/app-shell";
 import LandingRoute from "@/app/(public)/page";
 import { server } from "./msw/server";
@@ -525,6 +526,127 @@ describe("Landing route (And also, privacy and FAQ, issue #249)", () => {
         expect(el.textContent).toMatch(/Sign in|Connexion/);
         expect(el.textContent).toMatch(/Google,? (?:or |ou )?LinkedIn/);
       }
+    },
+  );
+});
+
+const AGENTS_COPY = {
+  en: {
+    eyebrow: "Autonomous agents",
+    heading: "Autonomous agents that search and analyse for you",
+    body: "Set up an agent once: it runs every day without you and is waiting for you with the offers worth reading.",
+    points: [
+      "A reference CV, the sites to query and your filters: keywords, location, posting date, contract type, remote work, experience level.",
+      "A relevance threshold (70 by default): only the offers that reach it are shown as relevant; the others remain available.",
+      "An automatic run every day, or on demand, at most once an hour.",
+      "Before the run, you see for each site which filters will be honoured, approximated or not supported.",
+      "A run history and a state you can read at a glance: running, up to date, failed.",
+    ],
+    alt: "The Agent panel for the Data Engineer — Paris agent: its configuration, statistics, relevant offers and run history.",
+  },
+  fr: {
+    eyebrow: "Agents autonomes",
+    heading: "Des agents autonomes qui cherchent et analysent pour vous",
+    body: "Configurez un agent une fois : il tourne chaque jour sans vous et vous attend avec les offres qui valent d'être lues.",
+    points: [
+      "Un CV de référence, les sites à interroger et vos filtres : mots-clés, lieu, date de publication, type de contrat, télétravail, niveau d'expérience.",
+      "Un seuil de pertinence (70 par défaut) : seules les offres qui l'atteignent sont présentées comme pertinentes ; les autres restent consultables.",
+      "Une exécution automatique chaque jour, ou à la demande, au plus une fois par heure.",
+      "Avant le lancement, vous voyez pour chaque site quels filtres seront respectés, approximés ou non pris en charge.",
+      "Un historique des exécutions et un état lisible d'un coup d'œil : en cours, à jour, en échec.",
+    ],
+    alt: "Le panneau Agent de l'agent Data Engineer — Paris : sa configuration, ses statistiques, ses offres pertinentes et l'historique de ses exécutions.",
+  },
+} as const;
+
+describe("Landing route (Agents section, issue #248)", () => {
+  it.each(["en", "fr"] as const)(
+    "shows the #agents section with its heading, text and five points (%s)",
+    async (locale) => {
+      await renderSignedOutRoute(locale);
+      const copy = AGENTS_COPY[locale];
+
+      const section = within(sectionById("agents"));
+      expect(section.getByText(copy.eyebrow)).toBeInTheDocument();
+      expect(
+        section.getByRole("heading", { level: 2, name: copy.heading }),
+      ).toBeInTheDocument();
+      expect(section.getByText(copy.body)).toBeInTheDocument();
+      expect(
+        section.getAllByRole("listitem").map((li) => li.textContent),
+      ).toEqual(copy.points);
+      expect(sectionById("agents").textContent).not.toMatch(/scout/i);
+    },
+  );
+
+  it("sits right after the five-step journey", async () => {
+    await renderSignedOutRoute();
+
+    expect(sectionById("how").nextElementSibling).toBe(sectionById("agents"));
+  });
+
+  it("shows the Agent panel capture as a light/dark pair, with alt text, visual on the right", async () => {
+    await renderSignedOutRoute();
+    const section = sectionById("agents");
+
+    expect(section).toHaveAttribute("data-visual", "right");
+    const images = Array.from(section.querySelectorAll("img"));
+    expect(images.map((img) => img.getAttribute("src"))).toEqual([
+      expect.stringContaining("agent-panel-light.png"),
+      expect.stringContaining("agent-panel-dark.png"),
+    ]);
+    // Only one of the pair is displayed (the `dark` class on <html> swaps
+    // them); whichever it is, it carries the alt text.
+    expect(images[0]).toHaveClass("dark:hidden");
+    expect(images[1]).toHaveClass("hidden", "dark:block");
+    for (const img of images) {
+      expect(img).toHaveAttribute("alt", AGENTS_COPY.en.alt);
+    }
+  });
+
+  it("puts the Agent panel capture's alt text in French too", async () => {
+    await renderSignedOutRoute("fr");
+
+    for (const img of Array.from(sectionById("agents").querySelectorAll("img"))) {
+      expect(img).toHaveAttribute("alt", AGENTS_COPY.fr.alt);
+    }
+  });
+});
+
+describe("TextVisualSection", () => {
+  it.each(["left", "right"] as const)(
+    "renders its eyebrow, heading, body, points and capture with the visual on the %s",
+    (visual) => {
+      renderWithProviders(
+        <TextVisualSection
+          id="demo"
+          visual={visual}
+          eyebrow="Eyebrow"
+          heading="Heading"
+          body="Body"
+          points={["One", "Two"]}
+          image={{
+            lightSrc: "/a-light.png",
+            darkSrc: "/a-dark.png",
+            alt: "A capture",
+            width: 1200,
+            height: 900,
+          }}
+        />,
+      );
+
+      const section = document.getElementById("demo");
+      expect(section).toHaveAttribute("data-visual", visual);
+      const region = within(section as HTMLElement);
+      expect(region.getByText("Eyebrow")).toBeInTheDocument();
+      expect(
+        region.getByRole("heading", { level: 2, name: "Heading" }),
+      ).toBeInTheDocument();
+      expect(region.getByText("Body")).toBeInTheDocument();
+      expect(
+        region.getAllByRole("listitem").map((li) => li.textContent),
+      ).toEqual(["One", "Two"]);
+      expect(region.getAllByAltText("A capture")).toHaveLength(2);
     },
   );
 });

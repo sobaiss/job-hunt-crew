@@ -40,6 +40,17 @@
       "trackTitle": "Suivre",
       "trackBody": "Chaque candidature garde son statut et son historique jusqu'à la réponse."
     },
+    "agents": {
+      "eyebrow": "Agents autonomes",
+      "heading": "Des agents autonomes qui cherchent et analysent pour vous",
+      "body": "Configurez un agent une fois : il tourne chaque jour sans vous et vous attend avec les offres qui valent d'être lues.",
+      "point1": "Un CV de référence, les sites à interroger et vos filtres : mots-clés, lieu, date de publication, type de contrat, télétravail, niveau d'expérience.",
+      "point2": "Un seuil de pertinence (70 par défaut) : seules les offres qui l'atteignent sont présentées comme pertinentes ; les autres restent consultables.",
+      "point3": "Une exécution automatique chaque jour, ou à la demande, au plus une fois par heure.",
+      "point4": "Avant le lancement, vous voyez pour chaque site quels filtres seront respectés, approximés ou non pris en charge.",
+      "point5": "Un historique des exécutions et un état lisible d'un coup d'œil : en cours, à jour, en échec.",
+      "imageAlt": "Le panneau Agent de l'agent Data Engineer — Paris : sa configuration, ses statistiques, ses offres pertinentes et l'historique de ses exécutions."
+    },
     "features": {
       "heading": "Et aussi",
       "analysisTitle": "Une analyse qui se justifie",

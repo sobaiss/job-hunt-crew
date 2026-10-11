@@ -1,6 +1,5 @@
 "use client";
 
-import type { ReactNode } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import {
@@ -21,6 +20,7 @@ import type { PlanQuotaKind, PlanSummary } from "@/lib/internal-api";
 import { matchScoreBand, type MatchScoreBand } from "@/lib/match-score-band";
 import { LocaleSwitch } from "@/components/locale-switch";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { Eyebrow, TextVisualSection } from "@/components/text-visual-section";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -78,27 +78,6 @@ function Placeholder({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** The small uppercase, coral-accent label above a section heading — the
- *  reviewed mockups' `.eyebrow` (design/Main.dc.html). */
-function Eyebrow({
-  children,
-  className,
-}: {
-  children: ReactNode;
-  className?: string;
-}) {
-  return (
-    <p
-      className={cn(
-        "text-xs font-semibold tracking-[0.15em] text-accent uppercase",
-        className,
-      )}
-    >
-      {children}
-    </p>
-  );
-}
-
 /** The three "And also" cards (spec landing-v2 §7). */
 const FEATURES = [
   { key: "analysis", Icon: Target },
@@ -125,6 +104,13 @@ const STEPS = [
   { key: "apply", Icon: Send },
   { key: "track", Icon: ListChecks },
 ] as const;
+
+/** The Agents section's points (spec landing-v2 §4). */
+const AGENT_POINTS = ["point1", "point2", "point3", "point4", "point5"] as const;
+
+/** The intrinsic size of the agent-panel-{light,dark}.png pair, written by
+ *  design/capture/agent-panel.capture.spec.ts. */
+const AGENT_PANEL_SIZE = { width: 1152, height: 1400 };
 
 /** The anchor links shared by the header and the footer's Product column. */
 const NAV_LINKS = [
@@ -389,6 +375,21 @@ export function LandingPage({ plans }: { plans: PlanSummary[] | null }) {
             ))}
           </ol>
         </section>
+
+        <TextVisualSection
+          id="agents"
+          visual="right"
+          eyebrow={t("agents.eyebrow")}
+          heading={t("agents.heading")}
+          body={t("agents.body")}
+          points={AGENT_POINTS.map((p) => t(`agents.${p}`))}
+          image={{
+            lightSrc: "/agent-panel-light.png",
+            darkSrc: "/agent-panel-dark.png",
+            alt: t("agents.imageAlt"),
+            ...AGENT_PANEL_SIZE,
+          }}
+        />
 
         {/* Features */}
         <section id="features" className="flex flex-col gap-10">
