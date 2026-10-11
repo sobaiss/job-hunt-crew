@@ -5,11 +5,9 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 import {
   ArrowRight,
-  BarChart3,
   ChevronDown,
-  FileText,
   GitCompare,
-  Layers,
+  Link2,
   ListChecks,
   Search,
   Send,
@@ -101,14 +99,24 @@ function Eyebrow({
   );
 }
 
-const FEATURE_ICONS = {
-  evidence: FileText,
-  gaps: Target,
-  suggestions: ArrowRight,
-  compare: GitCompare,
-  batch: Layers,
-  trend: BarChart3,
-} as const;
+/** The three "And also" cards (spec landing-v2 §7). */
+const FEATURES = [
+  { key: "analysis", Icon: Target },
+  { key: "compare", Icon: GitCompare },
+  { key: "oneOff", Icon: Link2 },
+] as const;
+
+/** The FAQ, in display order (spec landing-v2 §10). */
+const FAQ_KEYS = [
+  "formats",
+  "sources",
+  "frequency",
+  "apply",
+  "invent",
+  "filters",
+  "privacy",
+  "upgrade",
+] as const;
 
 const STEPS = [
   { key: "find", Icon: Search },
@@ -271,9 +279,10 @@ function PlansSection({ plans }: { plans: PlanSummary[] | null }) {
  * the find → analyse → tailor → apply → track journey, with "Start for free"
  * as the repeated primary action and "Sign in" kept only in the header. No
  * prices, no testimonials, no client logos — a factual privacy section stands
- * in for social proof. Publicly a Scout is always an "agent". Facts not yet
- * settled are shown as visible placeholders, not invented values. Lives
- * outside the App shell.
+ * in for social proof. Publicly a Scout is always an "agent", and LinkedIn is
+ * only ever a sign-in method, never a job source. Facts not yet settled (the
+ * footer's resource and legal links) are shown as visible placeholders, not
+ * invented values. Lives outside the App shell.
  */
 export function LandingPage({ plans }: { plans: PlanSummary[] | null }) {
   const t = useTranslations("landing");
@@ -284,17 +293,13 @@ export function LandingPage({ plans }: { plans: PlanSummary[] | null }) {
     body: t(`howItWorks.${key}Body`),
   }));
 
-  const features = (
-    ["evidence", "gaps", "suggestions", "compare", "batch", "trend"] as const
-  ).map((key) => ({
-    Icon: FEATURE_ICONS[key],
+  const features = FEATURES.map(({ key, Icon }) => ({
+    Icon,
     title: t(`features.${key}Title`),
     body: t(`features.${key}Body`),
   }));
 
-  const faqs = (
-    ["formats", "sources", "limits", "privacy", "model"] as const
-  ).map((key) => ({
+  const faqs = FAQ_KEYS.map((key) => ({
     key,
     q: t(`faq.${key}Q`),
     a: t(`faq.${key}A`),
@@ -387,12 +392,9 @@ export function LandingPage({ plans }: { plans: PlanSummary[] | null }) {
 
         {/* Features */}
         <section id="features" className="flex flex-col gap-10">
-          <div className="flex flex-col gap-3">
-            <Eyebrow>{t("nav.features")}</Eyebrow>
-            <h2 className="font-serif text-3xl font-semibold tracking-tight">
-              {t("features.heading")}
-            </h2>
-          </div>
+          <h2 className="font-serif text-3xl font-semibold tracking-tight">
+            {t("features.heading")}
+          </h2>
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {features.map(({ Icon, title, body }) => (
               <Card key={title} className="gap-3 py-6">
@@ -409,7 +411,8 @@ export function LandingPage({ plans }: { plans: PlanSummary[] | null }) {
         </section>
 
         {/* Privacy — the factual "data isolated per account" section that stands
-            in for testimonials / logos, grounded in PRD §6. */}
+            in for testimonials / logos, grounded in PRD §6. CV redaction
+            (docs/adr/0022) leads. */}
         <section className="flex flex-col items-center gap-6 text-center">
           <span className="flex size-12 items-center justify-center rounded-xl bg-accent/12 text-accent">
             <ShieldCheck className="size-6" aria-hidden="true" />
@@ -422,9 +425,9 @@ export function LandingPage({ plans }: { plans: PlanSummary[] | null }) {
               {t("privacy.body")}
             </p>
           </div>
-          <ul className="flex flex-col gap-2 text-sm">
-            {["point1", "point2", "point3"].map((p) => (
-              <li key={p} className="flex items-center gap-2">
+          <ul className="flex max-w-2xl flex-col gap-2 text-left text-sm">
+            {["point1", "point2", "point3", "point4"].map((p) => (
+              <li key={p} className="flex items-start gap-2">
                 <span aria-hidden className="text-accent">
                   ✓
                 </span>
@@ -458,9 +461,6 @@ export function LandingPage({ plans }: { plans: PlanSummary[] | null }) {
               </details>
             ))}
           </div>
-          <p className="text-center text-xs text-muted">
-            <Placeholder>{t("placeholders.dailyCap")}</Placeholder>
-          </p>
         </section>
       </main>
 

@@ -11,7 +11,6 @@
       "how": "Fonctionnement",
       "agents": "Agents",
       "plans": "Formules",
-      "features": "Fonctionnalités",
       "faq": "FAQ"
     },
     "hero": {
@@ -42,26 +41,21 @@
       "trackBody": "Chaque candidature garde son statut et son historique jusqu'à la réponse."
     },
     "features": {
-      "heading": "Bien plus qu'un simple score",
-      "evidenceTitle": "Une preuve pour chaque correspondance",
-      "evidenceBody": "Chaque compétence reconnue est appuyée par la ligne de votre CV qui la justifie : le score reste fiable.",
-      "gapsTitle": "Des manques qui comptent vraiment",
-      "gapsBody": "Les compétences absentes sont marquées indispensables ou optionnelles, pour savoir quoi corriger en priorité.",
-      "suggestionsTitle": "Des suggestions priorisées",
-      "suggestionsBody": "Des changements concrets à faire avant de postuler, classés selon leur impact.",
-      "compareTitle": "Comparez vos CV",
-      "compareBody": "Analysez plusieurs versions de votre CV pour une même offre et comparez-les côte à côte.",
-      "batchTitle": "Analysez tout un site",
-      "batchBody": "Ciblez un site d'emploi avec vos filtres et obtenez chaque offre correspondante classée par pertinence.",
-      "trendTitle": "Suivez votre progression",
-      "trendBody": "Chaque analyse est conservée, avec une courbe du score de correspondance pour voir vos candidatures s'améliorer."
+      "heading": "Et aussi",
+      "analysisTitle": "Une analyse qui se justifie",
+      "analysisBody": "Chaque compétence retrouvée est appuyée par la ligne de votre CV qui la justifie. Les manques sont classés indispensables ou optionnels, les suggestions par priorité.",
+      "compareTitle": "Plusieurs CV, comparés côte à côte",
+      "compareBody": "Gérez plusieurs versions de votre CV, remplacez-les sans perdre l'historique et comparez-les sur une même offre.",
+      "oneOffTitle": "Une recherche ponctuelle",
+      "oneOffBody": "Pas besoin d'agent pour une seule offre : collez son URL, ou interrogez un site avec vos filtres et obtenez les offres classées par score."
     },
     "privacy": {
       "heading": "Vos données restent les vôtres",
-      "body": "Chaque CV que vous importez et chaque analyse que vous lancez sont rattachés à votre compte. Les requêtes sont filtrées par votre identifiant d'utilisateur : aucun autre utilisateur ne peut accéder à vos CV ni à vos résultats.",
-      "point1": "Les CV et les analyses sont privés à votre compte",
-      "point2": "Seules les annonces sont partagées, et uniquement comme données publiques dédupliquées",
-      "point3": "Connexion via Google, LinkedIn ou un lien e-mail — aucun mot de passe à compromettre"
+      "body": "Vos CV, vos analyses, vos documents et vos candidatures sont rattachés à votre compte, et à lui seul.",
+      "point1": "Votre nom, vos coordonnées, votre date de naissance et votre nationalité sont retirés de votre CV avant toute analyse par l'IA. Ils ne sont réintégrés que dans les documents générés pour vous.",
+      "point2": "CV, analyses, documents et candidatures sont privés à votre compte.",
+      "point3": "Seules les annonces sont partagées, comme données publiques dédupliquées.",
+      "point4": "Connexion via Google, LinkedIn ou un lien e-mail : aucun mot de passe à compromettre."
     },
     "plans": {
       "eyebrow": "Formules",
@@ -93,13 +87,19 @@
       "formatsQ": "Quels formats de CV puis-je importer ?",
       "formatsA": "PDF, DOCX, Markdown ou texte brut, jusqu'à 10 Mo par fichier.",
       "sourcesQ": "Quels sites d'emploi sont pris en charge ?",
-      "sourcesA": "Vous pouvez coller l'URL d'une offre depuis n'importe quel site, ou lancer une recherche sur les sites configurés (LinkedIn, Indeed, France Travail, Welcome to the Jungle, Glassdoor).",
-      "limitsQ": "Y a-t-il une limite au nombre d'analyses ?",
-      "limitsA": "Oui — le nombre d'analyses par compte est plafonné chaque jour.",
+      "sourcesA": "Vos agents peuvent interroger France Travail, Welcome to the Jungle, HelloWork et Remotive. Vous pouvez aussi coller l'URL d'une offre publiée sur n'importe quel site.",
+      "frequencyQ": "À quelle fréquence tournent les agents ?",
+      "frequencyA": "Une fois par jour, automatiquement, tant que l'agent est actif. Vous pouvez aussi le lancer à la demande, au plus une fois par heure.",
+      "applyQ": "Postulez-vous à ma place ?",
+      "applyA": "Non. Rien n'est généré ni envoyé automatiquement : vous choisissez les lettres et les CV à produire, vous les relisez et vous postulez vous-même.",
+      "inventQ": "L'IA invente-t-elle des expériences ?",
+      "inventA": "Non. Elle réordonne et reformule ce que contient votre CV, sans jamais ajouter d'employeur, de date, d'intitulé de poste ni de diplôme.",
+      "filtersQ": "Tous les filtres fonctionnent-ils sur tous les sites ?",
+      "filtersA": "Pas toujours. Lorsque vous configurez un agent, le formulaire indique pour chaque site si un filtre est respecté, approximé ou non pris en charge, avant le lancement.",
       "privacyQ": "Qui peut voir mes CV et mes analyses ?",
-      "privacyA": "Vous seul. Chaque requête est filtrée par votre compte, et les CV comme les résultats ne sont jamais montrés à d'autres utilisateurs.",
-      "modelQ": "Quel modèle d'IA réalise l'analyse ?",
-      "modelA": "Un grand modèle de langage lit l'offre et votre CV pour produire la correspondance. Il ne réécrit pas votre fichier de CV à votre place."
+      "privacyA": "Vous seul. Chaque requête est filtrée par votre compte, et vos informations d'identité sont retirées de votre CV avant toute analyse par l'IA.",
+      "upgradeQ": "Comment passer en Standard ou Premium ?",
+      "upgradeA": "Inscrivez-vous gratuitement, puis demandez le passage à la formule souhaitée. Les formules Standard et Premium sont attribuées sur demande, sans paiement en ligne pour l'instant."
     },
     "finalCta": {
       "heading": "Laissez vos agents chercher pour vous.",
@@ -114,7 +114,6 @@
       "copyright": "Job Hunt Crew"
     },
     "placeholders": {
-      "dailyCap": "limite d'analyses quotidienne : nombre à confirmer",
       "legalLinks": "Liens légaux (confidentialité, conditions) à ajouter",
       "resourceLinks": "Liens vers le guide et le statut à ajouter"
     }

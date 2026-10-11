@@ -11,7 +11,6 @@
       "how": "How it works",
       "agents": "Agents",
       "plans": "Plans",
-      "features": "Features",
       "faq": "FAQ"
     },
     "hero": {
@@ -42,26 +41,21 @@
       "trackBody": "Each application keeps its status and history until you hear back."
     },
     "features": {
-      "heading": "More than a single number",
-      "evidenceTitle": "Evidence for every match",
-      "evidenceBody": "Each matched skill is backed by the line in your CV that earned it, so you can trust the score.",
-      "gapsTitle": "Gaps that actually matter",
-      "gapsBody": "Missing skills are tagged required or nice-to-have, so you know what to fix first.",
-      "suggestionsTitle": "Prioritised suggestions",
-      "suggestionsBody": "Concrete changes to make before you apply, ordered by how much they move the needle.",
-      "compareTitle": "Compare your CVs",
-      "compareBody": "Run several CV versions against the same offer and see them side by side.",
-      "batchTitle": "Analyse a whole site",
-      "batchBody": "Point it at a job site with your filters and get every matching offer ranked by fit.",
-      "trendTitle": "Track your progress",
-      "trendBody": "Every analysis is kept, with a match-score trend so you can see your search improving."
+      "heading": "And also",
+      "analysisTitle": "An analysis that shows its reasoning",
+      "analysisBody": "Each skill found is backed by the line in your CV that supports it. Gaps are tagged required or nice-to-have, suggestions are ranked by priority.",
+      "compareTitle": "Several CVs, compared side by side",
+      "compareBody": "Manage several versions of your CV, replace them without losing their history and compare them on the same offer.",
+      "oneOffTitle": "A one-off search",
+      "oneOffBody": "No need for an agent for a single offer: paste its URL, or query a site with your filters and get the offers ranked by score."
     },
     "privacy": {
       "heading": "Your data stays yours",
-      "body": "Every CV you upload and every analysis you run is scoped to your account. Requests are filtered by your user id, so no other user can reach your CVs or your results.",
-      "point1": "CVs and analyses are private to your account",
-      "point2": "Job postings are the only shared data, and only as de-duplicated public records",
-      "point3": "Sign in with Google, LinkedIn, or an email link — no password to leak"
+      "body": "Your CVs, analyses, documents and applications are tied to your account, and to it alone.",
+      "point1": "Your name, contact details, date of birth and nationality are removed from your CV before any AI analysis. They are put back only in the documents generated for you.",
+      "point2": "CVs, analyses, documents and applications are private to your account.",
+      "point3": "Job postings are the only shared data, as de-duplicated public records.",
+      "point4": "Sign in with Google, LinkedIn or an email link: no password to leak."
     },
     "plans": {
       "eyebrow": "Plans",
@@ -93,13 +87,19 @@
       "formatsQ": "What CV formats can I upload?",
       "formatsA": "PDF, DOCX, Markdown, or plain text, up to 10 MB per file.",
       "sourcesQ": "Which job sites are supported?",
-      "sourcesA": "You can paste a single offer URL from any site, or run a search against the configured job sites (LinkedIn, Indeed, France Travail, Welcome to the Jungle, Glassdoor).",
-      "limitsQ": "Is there a limit on how many analyses I can run?",
-      "limitsA": "Yes — there is a daily cap on analyses per account.",
+      "sourcesA": "Your agents can search France Travail, Welcome to the Jungle, HelloWork and Remotive. You can also paste the URL of an offer published on any site.",
+      "frequencyQ": "How often do the agents run?",
+      "frequencyA": "Once a day, automatically, as long as the agent is active. You can also run it on demand, at most once an hour.",
+      "applyQ": "Do you apply on my behalf?",
+      "applyA": "No. Nothing is generated or sent automatically: you choose which cover letters and CVs to produce, you review them and you apply yourself.",
+      "inventQ": "Does the AI make up experience?",
+      "inventA": "No. It reorders and rewords what your CV contains, without ever adding an employer, a date, a job title or a degree.",
+      "filtersQ": "Do all filters work on every site?",
+      "filtersA": "Not always. When you set up an agent, the form shows for each site whether a filter is honoured, approximated or not supported, before the run.",
       "privacyQ": "Who can see my CVs and analyses?",
-      "privacyA": "Only you. Every query is filtered by your account, and CVs and results are never shown to other users.",
-      "modelQ": "What AI model does the analysis use?",
-      "modelA": "A large language model reads the offer and your CV to produce the match. It does not rewrite your CV file for you."
+      "privacyA": "Only you. Every query is filtered by your account, and your identity details are removed from your CV before any AI analysis.",
+      "upgradeQ": "How do I move to Standard or Premium?",
+      "upgradeA": "Sign up for free, then ask to move to the plan you want. Standard and Premium are granted on request, with no online payment for now."
     },
     "finalCta": {
       "heading": "Let your agents search for you.",
@@ -114,7 +114,6 @@
       "copyright": "Job Hunt Crew"
     },
     "placeholders": {
-      "dailyCap": "daily analysis limit: number to be confirmed",
       "legalLinks": "Legal links (privacy, terms) to be added",
       "resourceLinks": "Guide and status links to be added"
     }

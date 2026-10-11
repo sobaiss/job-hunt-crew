@@ -62,52 +62,6 @@ beforeEach(() => {
 });
 
 describe("LandingPage (marketing content)", () => {
-  it("states that data is isolated per account", () => {
-    renderWithProviders(<LandingPage plans={null} />);
-
-    expect(
-      screen.getByRole("heading", { name: "Your data stays yours" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/scoped to your account/i),
-    ).toBeInTheDocument();
-  });
-
-  it("shows an FAQ covering formats, sources, limits, privacy, and the AI model", () => {
-    renderWithProviders(<LandingPage plans={null} />);
-
-    const section = screen
-      .getByRole("heading", { name: "Frequently asked questions" })
-      .closest("section");
-    const region = within(section as HTMLElement);
-    expect(
-      region.getByText("What CV formats can I upload?"),
-    ).toBeInTheDocument();
-    expect(
-      region.getByText("Which job sites are supported?"),
-    ).toBeInTheDocument();
-    expect(
-      region.getByText("Is there a limit on how many analyses I can run?"),
-    ).toBeInTheDocument();
-    expect(
-      region.getByText("Who can see my CVs and analyses?"),
-    ).toBeInTheDocument();
-    expect(
-      region.getByText("What AI model does the analysis use?"),
-    ).toBeInTheDocument();
-  });
-
-  it("renders visible placeholder markers for the daily cap and legal links, not fabricated values", () => {
-    renderWithProviders(<LandingPage plans={null} />);
-
-    expect(
-      screen.getByText(/daily analysis limit: number to be confirmed/i),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/legal links \(privacy, terms\) to be added/i),
-    ).toBeInTheDocument();
-  });
-
   it("has a footer", () => {
     renderWithProviders(<LandingPage plans={null} />);
     expect(screen.getByRole("contentinfo")).toBeInTheDocument();
@@ -117,6 +71,17 @@ describe("LandingPage (marketing content)", () => {
     renderWithProviders(<LandingPage plans={null} />);
     expect(screen.queryByText(/pricing/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/testimonial/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps the placeholder markers for the footer's legal and resource links", () => {
+    renderWithProviders(<LandingPage plans={null} />);
+
+    expect(
+      screen.getByText(/legal links \(privacy, terms\) to be added/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/guide and status links to be added/i),
+    ).toBeInTheDocument();
   });
 });
 
@@ -397,6 +362,172 @@ function expectFallback() {
     expect(card.textContent).not.toMatch(/\d/);
   }
 }
+
+function sectionById(id: string) {
+  const section = document.getElementById(id);
+  expect(section).not.toBeNull();
+  return section as HTMLElement;
+}
+
+function privacySection(name: string) {
+  const section = screen
+    .getByRole("heading", { level: 2, name })
+    .closest("section");
+  expect(section).not.toBeNull();
+  return section as HTMLElement;
+}
+
+/** The FAQ questions in order, each with its answer. */
+function faqEntries() {
+  return Array.from(sectionById("faq").querySelectorAll("details")).map(
+    (details) => ({
+      q: details.querySelector("summary")?.textContent,
+      a: details.querySelector("p")?.textContent,
+    }),
+  );
+}
+
+describe("Landing route (And also, privacy and FAQ, issue #249)", () => {
+  it("shows exactly the three And also cards", async () => {
+    await renderSignedOutRoute();
+
+    const region = within(sectionById("features"));
+    expect(
+      region.getByRole("heading", { level: 2, name: "And also" }),
+    ).toBeInTheDocument();
+    expect(
+      region
+        .getAllByRole("heading", { level: 3 })
+        .map((h) => h.textContent),
+    ).toEqual([
+      "An analysis that shows its reasoning",
+      "Several CVs, compared side by side",
+      "A one-off search",
+    ]);
+  });
+
+  it("shows the three And also cards in French", async () => {
+    await renderSignedOutRoute("fr");
+
+    const region = within(sectionById("features"));
+    expect(
+      region.getByRole("heading", { level: 2, name: "Et aussi" }),
+    ).toBeInTheDocument();
+    expect(
+      region
+        .getAllByRole("heading", { level: 3 })
+        .map((h) => h.textContent),
+    ).toEqual([
+      "Une analyse qui se justifie",
+      "Plusieurs CV, comparés côte à côte",
+      "Une recherche ponctuelle",
+    ]);
+  });
+
+  it("leads the privacy section with the CV redaction point", async () => {
+    await renderSignedOutRoute();
+
+    const points = within(privacySection("Your data stays yours")).getAllByRole(
+      "listitem",
+    );
+    expect(points).toHaveLength(4);
+    expect(points[0]).toHaveTextContent(
+      "Your name, contact details, date of birth and nationality are removed from your CV before any AI analysis. They are put back only in the documents generated for you.",
+    );
+  });
+
+  it("leads the privacy section with the CV redaction point, in French", async () => {
+    await renderSignedOutRoute("fr");
+
+    const section = privacySection("Vos données restent les vôtres");
+    expect(section).toHaveTextContent(
+      "Vos CV, vos analyses, vos documents et vos candidatures sont rattachés à votre compte, et à lui seul.",
+    );
+    const points = within(section).getAllByRole("listitem");
+    expect(points).toHaveLength(4);
+    expect(points[0]).toHaveTextContent(
+      "Votre nom, vos coordonnées, votre date de naissance et votre nationalité sont retirés de votre CV avant toute analyse par l'IA. Ils ne sont réintégrés que dans les documents générés pour vous.",
+    );
+  });
+
+  it("asks the eight FAQ questions in order, with their answers", async () => {
+    await renderSignedOutRoute();
+
+    const entries = faqEntries();
+    expect(entries.map((e) => e.q)).toEqual([
+      "What CV formats can I upload?",
+      "Which job sites are supported?",
+      "How often do the agents run?",
+      "Do you apply on my behalf?",
+      "Does the AI make up experience?",
+      "Do all filters work on every site?",
+      "Who can see my CVs and analyses?",
+      "How do I move to Standard or Premium?",
+    ]);
+    for (const { a } of entries) expect(a).toBeTruthy();
+    expect(entries[1].a).toBe(
+      "Your agents can search France Travail, Welcome to the Jungle, HelloWork and Remotive. You can also paste the URL of an offer published on any site.",
+    );
+    expect(entries[3].a).toMatch(/^No\./);
+    expect(entries[4].a).toMatch(/^No\./);
+  });
+
+  it("asks the eight FAQ questions in order, in French", async () => {
+    await renderSignedOutRoute("fr");
+
+    const entries = faqEntries();
+    expect(entries.map((e) => e.q)).toEqual([
+      "Quels formats de CV puis-je importer ?",
+      "Quels sites d'emploi sont pris en charge ?",
+      "À quelle fréquence tournent les agents ?",
+      "Postulez-vous à ma place ?",
+      "L'IA invente-t-elle des expériences ?",
+      "Tous les filtres fonctionnent-ils sur tous les sites ?",
+      "Qui peut voir mes CV et mes analyses ?",
+      "Comment passer en Standard ou Premium ?",
+    ]);
+    expect(entries[7].a).toBe(
+      "Inscrivez-vous gratuitement, puis demandez le passage à la formule souhaitée. Les formules Standard et Premium sont attribuées sur demande, sans paiement en ligne pour l'instant.",
+    );
+  });
+
+  it("has no ⚠ placeholder left in the page body", async () => {
+    await renderSignedOutRoute();
+
+    expect(screen.getByRole("main").textContent).not.toContain("⚠");
+    expect(screen.getByRole("contentinfo").textContent).toContain("⚠");
+  });
+
+  it.each(["en", "fr"] as const)(
+    "never cites Scout, Indeed or Glassdoor, and LinkedIn only as a sign-in method (%s)",
+    async (locale) => {
+      await renderSignedOutRoute(locale);
+
+      // The page's visible text, without next-themes' inline <script>.
+      const body = document.body.cloneNode(true) as HTMLElement;
+      body.querySelectorAll("script").forEach((el) => el.remove());
+      const text = body.textContent ?? "";
+      expect(text).not.toMatch(/scout/i);
+      expect(text).not.toMatch(/indeed/i);
+      expect(text).not.toMatch(/glassdoor/i);
+      expect(text).toMatch(/LinkedIn/);
+
+      // Every text naming LinkedIn names it next to Google as a way to sign
+      // in — never as a job source.
+      const elements = Array.from(document.body.querySelectorAll("*")).filter(
+        (el) =>
+          Array.from(el.childNodes).some(
+            (n) => n.nodeType === Node.TEXT_NODE && /LinkedIn/.test(n.textContent ?? ""),
+          ),
+      );
+      expect(elements.length).toBeGreaterThan(0);
+      for (const el of elements) {
+        expect(el.textContent).toMatch(/Sign in|Connexion/);
+        expect(el.textContent).toMatch(/Google,? (?:or |ou )?LinkedIn/);
+      }
+    },
+  );
+});
 
 describe("Landing route (auth gate)", () => {
   it("serves the Dashboard inside the App shell to a signed-in visitor, not the marketing page", async () => {
