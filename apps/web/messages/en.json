@@ -1031,19 +1031,15 @@
       "analysisHeading": "Analysis"
     },
     "list": {
-      "jobOfferFallback": "Job offer",
-      "vsCv": "vs. {label}"
+      "jobOfferFallback": "Job offer"
     },
     "detail": {
       "loading": "Loading this application",
-      "loadError": "We couldn't load this application. Please try again.",
       "viewAnalysis": "View the analysis",
       "viewScout": "View the Scout",
-      "moveTo": "Move to…",
       "statusError": "We couldn't update the status. Please try again.",
       "timelineHeading": "Status history",
-      "timelineEmpty": "No status changes yet.",
-      "back": "Back to Applications"
+      "timelineEmpty": "No status changes yet."
     }
   },
   "stats": {

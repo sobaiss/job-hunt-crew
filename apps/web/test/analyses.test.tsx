@@ -3405,7 +3405,7 @@ describe("AnalysisDetailPage", () => {
     expect(await screen.findByText("Applied")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View in Applications" })).toHaveAttribute(
       "href",
-      "/applications/app-1",
+      "/applications",
     );
   });
 
