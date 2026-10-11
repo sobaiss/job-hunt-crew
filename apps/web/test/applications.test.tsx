@@ -6,13 +6,12 @@ import { renderWithProviders, screen, waitFor, within } from "./test-utils";
 import { server } from "./msw/server";
 import { __getUrl, __setUrl } from "./next-navigation-mock";
 import ApplicationsPage from "@/app/(app)/applications/page";
-import ApplicationDetailPage from "@/app/(app)/applications/[id]/page";
 
 vi.mock("next/navigation", async () => {
   const mock = await vi.importActual<typeof import("./next-navigation-mock")>(
     "./next-navigation-mock",
   );
-  return { ...mock, useParams: () => ({ id: "app-1" }) };
+  return mock;
 });
 
 function application(overrides: Record<string, unknown> = {}) {
@@ -494,9 +493,19 @@ function applicationDetails(
   });
 }
 
+/** GET /analyses/:id for the quick view's analysis recall (#242); unknown ids 404. */
+function analysisDetails(analyses: Record<string, Record<string, unknown>>) {
+  return http.get("/api/analyses/:id", ({ params }) => {
+    const found = analyses[params.id as string];
+    if (!found) return HttpResponse.json({ error: "not found" }, { status: 404 });
+    return HttpResponse.json({ analysis: { id: params.id, ...found } });
+  });
+}
+
 describe("ApplicationsPage — quick view (#237)", () => {
   beforeEach(() => {
     __setUrl("/applications");
+    server.use(analysisDetails({}));
   });
 
   afterEach(() => {
@@ -515,10 +524,6 @@ describe("ApplicationsPage — quick view (#237)", () => {
     expect(quickView.getByText("In progress")).toBeInTheDocument();
     expect(quickView.getByText("Globex · Lyon")).toBeInTheDocument();
     expect(await quickView.findByText("Moved app-2")).toBeInTheDocument();
-    expect(quickView.getByRole("link", { name: "View full history" })).toHaveAttribute(
-      "href",
-      "/applications/app-2",
-    );
     // No evaluation or pipeline actions on this panel.
     expect(quickView.queryByRole("button", { name: /relaunch|requeue|generate/i })).toBeNull();
   });
@@ -681,6 +686,218 @@ describe("ApplicationsPage — quick view (#237)", () => {
     await waitFor(() => expect(__getUrl()).toContain("page=2"));
   });
 
+  /** The value the panel shows next to a field label (a `<dt>` / `<dd>` pair). */
+  function panelField(quickView: ReturnType<typeof within>, label: string) {
+    return quickView.getByText(label, { selector: "dt" }).nextElementSibling?.textContent;
+  }
+
+  it("shows the date of application, CV used, platform, location, offer link and Scout (#241)", async () => {
+    const user = userEvent.setup();
+    server.use(listApplications([FRONTEND]), applicationDetails([FRONTEND]));
+
+    renderWithProviders(<ApplicationsPage />);
+    await user.click(await screen.findByText("Frontend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    expect(panelField(quickView, "Applied on")).toBe(
+      new Date("2026-09-20T10:00:00.000Z").toLocaleDateString(),
+    );
+    expect(panelField(quickView, "CV used")).toBe("Grad CV");
+    expect(panelField(quickView, "Platform")).toBe("LinkedIn");
+    expect(panelField(quickView, "Location")).toBe("Lyon");
+    expect(quickView.getByRole("link", { name: "View job offer" })).toHaveAttribute(
+      "href",
+      "https://example.com/jobs/job2",
+    );
+    expect(quickView.getByRole("link", { name: "View the Scout" })).toHaveAttribute(
+      "href",
+      "/scouts?open=scout-1",
+    );
+  });
+
+  it("fills the offer's platform, location and link from the Application when the list row lacks them (#241)", async () => {
+    const user = userEvent.setup();
+    const listRow = application({ appliedAt: "2026-09-20T10:00:00.000Z" });
+    server.use(
+      listApplications([listRow]),
+      applicationDetails([
+        {
+          ...listRow,
+          jobOffer: {
+            ...listRow.jobOffer,
+            location: "Paris",
+            sourceSite: "INDEED",
+            sourceUrl: "https://example.com/jobs/job1",
+          },
+        },
+      ]),
+    );
+
+    renderWithProviders(<ApplicationsPage />);
+    await user.click(await screen.findByText("Backend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    await waitFor(() => expect(panelField(quickView, "Platform")).toBe("Indeed"));
+    expect(panelField(quickView, "Location")).toBe("Paris");
+    expect(quickView.getByRole("link", { name: "View job offer" })).toHaveAttribute(
+      "href",
+      "https://example.com/jobs/job1",
+    );
+  });
+
+  it("shows '—' for each missing piece of information and no Scout link (#241)", async () => {
+    const user = userEvent.setup();
+    const bare = application({ jobOffer: { id: "job1", title: "Backend Engineer", company: null } });
+    server.use(
+      listApplications([bare]),
+      applicationDetails([{ ...bare, jobOffer: { ...bare.jobOffer, sourceSite: null } }]),
+    );
+
+    renderWithProviders(<ApplicationsPage />);
+    await user.click(await screen.findByText("Backend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    await quickView.findByText("Moved app-1");
+    expect(panelField(quickView, "Applied on")).toBe("—");
+    expect(panelField(quickView, "Platform")).toBe("—");
+    expect(panelField(quickView, "Location")).toBe("—");
+    expect(panelField(quickView, "Company")).toBe("—");
+    expect(quickView.queryByRole("link", { name: "View the Scout" })).not.toBeInTheDocument();
+  });
+
+  it("shows every StatusEvent, newest first, and no 'View full history' link (#241)", async () => {
+    const user = userEvent.setup();
+    const events = ["DRAFT", "APPLIED", "INTERVIEWING", "OFFER", "ACCEPTED"].map((status, i) => ({
+      id: `se-${i}`,
+      applicationId: "app-1",
+      status,
+      note: `Event ${i}`,
+      effectiveDate: `2026-09-1${i}T00:00:00.000Z`,
+      createdAt: `2026-09-1${i}T00:00:00.000Z`,
+    }));
+    server.use(
+      listApplications([BACKEND]),
+      http.get("/api/applications/:id", () =>
+        HttpResponse.json({
+          application: {
+            ...BACKEND,
+            jobOffer: { ...BACKEND.jobOffer, sourceUrl: "https://example.com/jobs/job1" },
+            statusEvents: events,
+          },
+        }),
+      ),
+    );
+
+    renderWithProviders(<ApplicationsPage />);
+    await user.click(await screen.findByText("Backend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    await quickView.findByText("Event 0");
+    const notes = quickView.getAllByText(/^Event \d$/).map((note) => note.textContent);
+    expect(notes).toEqual(["Event 4", "Event 3", "Event 2", "Event 1", "Event 0"]);
+    expect(quickView.queryByRole("link", { name: "View full history" })).not.toBeInTheDocument();
+  });
+
+  it("recalls the analysis summary and match score for a completed analysis (#242)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      listApplications([FRONTEND]),
+      applicationDetails([FRONTEND]),
+      analysisDetails({
+        a2: {
+          status: "COMPLETED",
+          matchScore: 82,
+          resultJSON: { match_score: 82, summary: "Strong React fit, light on Go." },
+        },
+      }),
+    );
+
+    renderWithProviders(<ApplicationsPage />);
+    await user.click(await screen.findByText("Frontend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    expect(await quickView.findByText("Strong React fit, light on Go.")).toBeInTheDocument();
+    expect(quickView.getByRole("img", { name: "Match score 82 out of 100" })).toBeInTheDocument();
+    expect(quickView.getByRole("heading", { name: "Analysis" })).toBeInTheDocument();
+    expect(quickView.getByRole("link", { name: "View the analysis" })).toHaveAttribute(
+      "href",
+      "/analyses/a2",
+    );
+  });
+
+  it.each([
+    ["not completed", { status: "RUNNING_CREW", matchScore: null, resultJSON: null }],
+    [
+      "completed without a summary",
+      { status: "COMPLETED", matchScore: 60, resultJSON: { match_score: 60, summary: "" } },
+    ],
+  ])("hides the analysis recall when the analysis is %s (#242)", async (_case, analysis) => {
+    const user = userEvent.setup();
+    let fetched = false;
+    server.use(
+      listApplications([BACKEND]),
+      applicationDetails([BACKEND]),
+      http.get("/api/analyses/:id", () => {
+        fetched = true;
+        return HttpResponse.json({ analysis: { id: "a1", ...analysis } });
+      }),
+    );
+
+    renderWithProviders(<ApplicationsPage />);
+    await user.click(await screen.findByText("Backend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    await quickView.findByText("Moved app-1");
+    await waitFor(() => expect(fetched).toBe(true));
+    expect(quickView.queryByRole("heading", { name: "Analysis" })).not.toBeInTheDocument();
+    expect(quickView.queryByRole("img", { name: /Match score/ })).not.toBeInTheDocument();
+  });
+
+  it("keeps the rest of the panel usable when the analysis fails to load (#242)", async () => {
+    const user = userEvent.setup();
+    let posted: string | null = null;
+    server.use(
+      listApplications([BACKEND]),
+      applicationDetails([BACKEND]),
+      http.get("/api/analyses/:id", () =>
+        HttpResponse.json({ error: "boom" }, { status: 500 }),
+      ),
+      http.post("/api/applications/:id/status-events", async ({ request }) => {
+        posted = ((await request.json()) as { status: string }).status;
+        return HttpResponse.json({ statusEvent: { id: "se-new" } }, { status: 201 });
+      }),
+    );
+
+    renderWithProviders(<ApplicationsPage />);
+    await user.click(await screen.findByText("Backend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    expect(await quickView.findByText("Moved app-1")).toBeInTheDocument();
+    expect(quickView.queryByRole("heading", { name: "Analysis" })).not.toBeInTheDocument();
+    await user.click(quickView.getByRole("button", { name: "Rejected" }));
+    await waitFor(() => expect(posted).toBe("REJECTED"));
+  });
+
+  it("only loads the analysis once the panel is opened, for that Application (#242)", async () => {
+    const user = userEvent.setup();
+    const requested: string[] = [];
+    server.use(
+      listApplications([BACKEND, FRONTEND]),
+      applicationDetails([BACKEND, FRONTEND]),
+      http.get("/api/analyses/:id", ({ params }) => {
+        requested.push(params.id as string);
+        return HttpResponse.json({ error: "not found" }, { status: 404 });
+      }),
+    );
+
+    renderWithProviders(<ApplicationsPage />);
+    await screen.findByText("Frontend Engineer");
+    expect(requested).toEqual([]);
+
+    await user.click(screen.getByText("Frontend Engineer"));
+    await waitFor(() => expect(requested).toEqual(["a2"]));
+  });
+
   it("closes with the Close button", async () => {
     const user = userEvent.setup();
     server.use(listApplications([BACKEND]), applicationDetails([BACKEND]));
@@ -785,115 +1002,5 @@ describe("ApplicationsPage — stats modal (#236)", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(__getUrl()).toBe("/applications?q=backend");
     expect(screen.queryByText("Frontend Engineer")).not.toBeInTheDocument();
-  });
-});
-
-describe("ApplicationDetailPage", () => {
-  it("renders the offer, current status, and status timeline with back-links", async () => {
-    server.use(
-      http.get("/api/applications/app-1", () =>
-        HttpResponse.json({
-          application: {
-            ...application({ status: "APPLIED", scoutId: "scout-1" }),
-            statusEvents: [
-              {
-                id: "se-1",
-                applicationId: "app-1",
-                status: "APPLIED",
-                note: "Applied via site",
-                effectiveDate: "2026-09-11T00:00:00.000Z",
-                createdAt: "2026-09-11T00:00:00.000Z",
-              },
-            ],
-          },
-        }),
-      ),
-    );
-
-    renderWithProviders(<ApplicationDetailPage />);
-
-    expect(await screen.findByText("Backend Engineer")).toBeInTheDocument();
-    expect(screen.getByText("Applied via site")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "View the analysis" })).toHaveAttribute(
-      "href",
-      "/analyses/a1",
-    );
-    expect(screen.getByRole("link", { name: "View the Scout" })).toHaveAttribute(
-      "href",
-      "/scouts?open=scout-1",
-    );
-  });
-
-  it("shows the '—' placeholder, not a blank line, when the offer has no company", async () => {
-    server.use(
-      http.get("/api/applications/app-1", () =>
-        HttpResponse.json({
-          application: {
-            ...application({ jobOffer: { id: "job1", title: "Backend Engineer", company: null } }),
-            statusEvents: [],
-          },
-        }),
-      ),
-    );
-
-    renderWithProviders(<ApplicationDetailPage />);
-
-    expect(await screen.findByText("Backend Engineer")).toBeInTheDocument();
-    expect(screen.getByText("—")).toBeInTheDocument();
-  });
-
-  it("shows the empty timeline state when no StatusEvents exist yet", async () => {
-    server.use(
-      http.get("/api/applications/app-1", () =>
-        HttpResponse.json({ application: { ...application(), statusEvents: [] } }),
-      ),
-    );
-
-    renderWithProviders(<ApplicationDetailPage />);
-
-    expect(await screen.findByText("No status changes yet.")).toBeInTheDocument();
-  });
-
-  it("advances the status by appending a StatusEvent via the move-to control", async () => {
-    const user = userEvent.setup();
-    server.use(
-      http.get("/api/applications/app-1", () =>
-        HttpResponse.json({ application: { ...application(), statusEvents: [] } }),
-      ),
-      http.post("/api/applications/app-1/status-events", () =>
-        HttpResponse.json({
-          application: application({ status: "APPLIED" }),
-          statusEvent: {
-            id: "se-1",
-            applicationId: "app-1",
-            status: "APPLIED",
-            note: null,
-            effectiveDate: "2026-09-11T00:00:00.000Z",
-            createdAt: "2026-09-11T00:00:00.000Z",
-          },
-        }),
-      ),
-    );
-
-    renderWithProviders(<ApplicationDetailPage />);
-    await screen.findByText("Backend Engineer");
-
-    await user.selectOptions(screen.getByLabelText("Move to…"), "APPLIED");
-
-    expect(await screen.findByText("Applied")).toBeInTheDocument();
-  });
-
-  it("surfaces a load error", async () => {
-    server.use(
-      http.get("/api/applications/app-1", () =>
-        HttpResponse.json({ error: "boom" }, { status: 404 }),
-      ),
-    );
-
-    renderWithProviders(<ApplicationDetailPage />);
-
-    expect(
-      await screen.findByText("We couldn't load this application. Please try again."),
-    ).toBeInTheDocument();
   });
 });

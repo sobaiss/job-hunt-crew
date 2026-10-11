@@ -20,8 +20,8 @@ import { Button } from "@/components/ui/button";
 // - "Mark as applied": records the Application at APPLIED without
 //   generating or downloading documents (e.g. the Candidate applied
 //   directly on the site). Always available.
-// Undo isn't a separate control here — the linked Application detail page's
-// status control can move the Application back to any prior status.
+// Undo isn't a separate control here — the Application quick view on
+// /applications can move the Application back to any prior status.
 export function ApplicationAction({
   analysisId,
   sourceUrl,
@@ -42,10 +42,7 @@ export function ApplicationAction({
     return (
       <div className="flex items-center gap-3 text-sm">
         <Badge variant="success">{t("applied")}</Badge>
-        <Link
-          href={`/applications/${markAsApplied.data.application.id}`}
-          className="text-accent hover:underline"
-        >
+        <Link href="/applications" className="text-accent hover:underline">
           {t("viewApplication")}
         </Link>
       </div>

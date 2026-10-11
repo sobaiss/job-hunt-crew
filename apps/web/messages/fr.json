@@ -1021,24 +1021,25 @@
       "position": "{position} / {total}",
       "positionUnknown": "— / {total}",
       "viewOffer": "Voir l'offre",
-      "viewFullHistory": "Voir l'historique complet",
+      "appliedAt": "Date de candidature",
+      "cvUsed": "CV utilisé",
+      "company": "Entreprise",
+      "location": "Lieu",
+      "platform": "Plateforme",
       "tailoredCv": "CV adapté",
-      "coverLetter": "Lettre de motivation"
+      "coverLetter": "Lettre de motivation",
+      "analysisHeading": "Analyse"
     },
     "list": {
-      "jobOfferFallback": "Offre d'emploi",
-      "vsCv": "vs. {label}"
+      "jobOfferFallback": "Offre d'emploi"
     },
     "detail": {
       "loading": "Chargement de cette candidature",
-      "loadError": "Impossible de charger cette candidature. Veuillez réessayer.",
       "viewAnalysis": "Voir l'analyse",
       "viewScout": "Voir l'agent",
-      "moveTo": "Déplacer vers…",
       "statusError": "Impossible de mettre à jour le statut. Veuillez réessayer.",
       "timelineHeading": "Historique des statuts",
-      "timelineEmpty": "Aucun changement de statut pour l'instant.",
-      "back": "Retour aux candidatures"
+      "timelineEmpty": "Aucun changement de statut pour l'instant."
     }
   },
   "stats": {

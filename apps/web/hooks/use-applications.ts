@@ -48,7 +48,14 @@ export type StatusEvent = {
 };
 
 export type ApplicationDetail = Application & {
-  jobOffer: { id: string; sourceUrl: string; title: string | null; company: string | null };
+  jobOffer: {
+    id: string;
+    sourceUrl: string;
+    sourceSite: string;
+    title: string | null;
+    company: string | null;
+    location: string | null;
+  };
   statusEvents: StatusEvent[];
 };
 
