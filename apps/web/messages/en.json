@@ -1027,7 +1027,8 @@
       "location": "Location",
       "platform": "Platform",
       "tailoredCv": "Tailored CV",
-      "coverLetter": "Cover letter"
+      "coverLetter": "Cover letter",
+      "analysisHeading": "Analysis"
     },
     "list": {
       "jobOfferFallback": "Job offer",

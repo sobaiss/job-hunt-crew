@@ -1027,7 +1027,8 @@
       "location": "Lieu",
       "platform": "Plateforme",
       "tailoredCv": "CV adapté",
-      "coverLetter": "Lettre de motivation"
+      "coverLetter": "Lettre de motivation",
+      "analysisHeading": "Analyse"
     },
     "list": {
       "jobOfferFallback": "Offre d'emploi",

@@ -169,13 +169,15 @@ export function useAnalyses(params?: {
 
 /**
  * One Analysis. Polls every {@link ANALYSIS_POLL_INTERVAL_MS} while the status is
- * non-terminal and stops once it is `COMPLETED` or `FAILED`.
+ * non-terminal and stops once it is `COMPLETED` or `FAILED`. A `null` id
+ * disables the query — the Application quick view passes one while closed.
  */
-export function useAnalysis(id: string) {
+export function useAnalysis(id: string | null) {
   return useQuery({
     queryKey: ["analysis", id],
     queryFn: () => bff.get<{ analysis: AnalysisDetail }>(`/analyses/${id}`),
     select: (data) => data.analysis,
+    enabled: id !== null,
     refetchInterval: (query) => {
       const status = query.state.data?.analysis.status;
       return status && TERMINAL_ANALYSIS_STATUSES.has(status)

@@ -494,9 +494,19 @@ function applicationDetails(
   });
 }
 
+/** GET /analyses/:id for the quick view's analysis recall (#242); unknown ids 404. */
+function analysisDetails(analyses: Record<string, Record<string, unknown>>) {
+  return http.get("/api/analyses/:id", ({ params }) => {
+    const found = analyses[params.id as string];
+    if (!found) return HttpResponse.json({ error: "not found" }, { status: 404 });
+    return HttpResponse.json({ analysis: { id: params.id, ...found } });
+  });
+}
+
 describe("ApplicationsPage — quick view (#237)", () => {
   beforeEach(() => {
     __setUrl("/applications");
+    server.use(analysisDetails({}));
   });
 
   afterEach(() => {
@@ -787,6 +797,106 @@ describe("ApplicationsPage — quick view (#237)", () => {
     const notes = quickView.getAllByText(/^Event \d$/).map((note) => note.textContent);
     expect(notes).toEqual(["Event 4", "Event 3", "Event 2", "Event 1", "Event 0"]);
     expect(quickView.queryByRole("link", { name: "View full history" })).not.toBeInTheDocument();
+  });
+
+  it("recalls the analysis summary and match score for a completed analysis (#242)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      listApplications([FRONTEND]),
+      applicationDetails([FRONTEND]),
+      analysisDetails({
+        a2: {
+          status: "COMPLETED",
+          matchScore: 82,
+          resultJSON: { match_score: 82, summary: "Strong React fit, light on Go." },
+        },
+      }),
+    );
+
+    renderWithProviders(<ApplicationsPage />);
+    await user.click(await screen.findByText("Frontend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    expect(await quickView.findByText("Strong React fit, light on Go.")).toBeInTheDocument();
+    expect(quickView.getByRole("img", { name: "Match score 82 out of 100" })).toBeInTheDocument();
+    expect(quickView.getByRole("heading", { name: "Analysis" })).toBeInTheDocument();
+    expect(quickView.getByRole("link", { name: "View the analysis" })).toHaveAttribute(
+      "href",
+      "/analyses/a2",
+    );
+  });
+
+  it.each([
+    ["not completed", { status: "RUNNING_CREW", matchScore: null, resultJSON: null }],
+    [
+      "completed without a summary",
+      { status: "COMPLETED", matchScore: 60, resultJSON: { match_score: 60, summary: "" } },
+    ],
+  ])("hides the analysis recall when the analysis is %s (#242)", async (_case, analysis) => {
+    const user = userEvent.setup();
+    let fetched = false;
+    server.use(
+      listApplications([BACKEND]),
+      applicationDetails([BACKEND]),
+      http.get("/api/analyses/:id", () => {
+        fetched = true;
+        return HttpResponse.json({ analysis: { id: "a1", ...analysis } });
+      }),
+    );
+
+    renderWithProviders(<ApplicationsPage />);
+    await user.click(await screen.findByText("Backend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    await quickView.findByText("Moved app-1");
+    await waitFor(() => expect(fetched).toBe(true));
+    expect(quickView.queryByRole("heading", { name: "Analysis" })).not.toBeInTheDocument();
+    expect(quickView.queryByRole("img", { name: /Match score/ })).not.toBeInTheDocument();
+  });
+
+  it("keeps the rest of the panel usable when the analysis fails to load (#242)", async () => {
+    const user = userEvent.setup();
+    let posted: string | null = null;
+    server.use(
+      listApplications([BACKEND]),
+      applicationDetails([BACKEND]),
+      http.get("/api/analyses/:id", () =>
+        HttpResponse.json({ error: "boom" }, { status: 500 }),
+      ),
+      http.post("/api/applications/:id/status-events", async ({ request }) => {
+        posted = ((await request.json()) as { status: string }).status;
+        return HttpResponse.json({ statusEvent: { id: "se-new" } }, { status: 201 });
+      }),
+    );
+
+    renderWithProviders(<ApplicationsPage />);
+    await user.click(await screen.findByText("Backend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    expect(await quickView.findByText("Moved app-1")).toBeInTheDocument();
+    expect(quickView.queryByRole("heading", { name: "Analysis" })).not.toBeInTheDocument();
+    await user.click(quickView.getByRole("button", { name: "Rejected" }));
+    await waitFor(() => expect(posted).toBe("REJECTED"));
+  });
+
+  it("only loads the analysis once the panel is opened, for that Application (#242)", async () => {
+    const user = userEvent.setup();
+    const requested: string[] = [];
+    server.use(
+      listApplications([BACKEND, FRONTEND]),
+      applicationDetails([BACKEND, FRONTEND]),
+      http.get("/api/analyses/:id", ({ params }) => {
+        requested.push(params.id as string);
+        return HttpResponse.json({ error: "not found" }, { status: 404 });
+      }),
+    );
+
+    renderWithProviders(<ApplicationsPage />);
+    await screen.findByText("Frontend Engineer");
+    expect(requested).toEqual([]);
+
+    await user.click(screen.getByText("Frontend Engineer"));
+    await waitFor(() => expect(requested).toEqual(["a2"]));
   });
 
   it("closes with the Close button", async () => {

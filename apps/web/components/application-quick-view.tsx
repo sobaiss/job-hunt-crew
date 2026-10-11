@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { ArrowRight, ChevronLeft, ChevronRight, ExternalLink, FileText, X } from "lucide-react";
 
+import { useAnalysis } from "@/hooks/use-analyses";
 import { useAddStatusEvent, useApplication } from "@/hooks/use-applications";
 import type { ApplicationSummary } from "@/lib/applications-filters";
 import { useEnumLabel } from "@/lib/enum-labels";
@@ -15,6 +16,7 @@ import {
   trackingStatusOfApplication,
 } from "@/lib/tracking-status";
 import { applicationBadgeVariant } from "@/components/application-row";
+import { MatchScoreGauge } from "@/components/match-score-gauge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -25,6 +27,8 @@ import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle } from "@/comp
 // Application's own fields come from the list row the page already has; the
 // full StatusEvent timeline from `GET /applications/:id`, which also fills the
 // offer's location, platform and `sourceUrl` the list row does not carry yet.
+// The linked Analysis is fetched too, only while the panel is open, to recall
+// its summary and Match score (#242); a failed load just leaves that out.
 
 export function ApplicationQuickView({
   application,
@@ -59,6 +63,9 @@ export function ApplicationQuickView({
   const sourceSiteLabel = useEnumLabel("sourceSite");
   const { data: detail } = useApplication(application?.id ?? null);
   const addStatusEvent = useAddStatusEvent(application?.id ?? "");
+  const { data: analysis } = useAnalysis(open && application ? application.analysisId : null);
+  const analysisResult =
+    analysis?.status === "COMPLETED" && analysis.resultJSON?.summary ? analysis.resultJSON : null;
 
   const tracking = application ? trackingStatusOfApplication(application.status) : null;
   const offer = detail?.jobOffer;
@@ -169,6 +176,18 @@ export function ApplicationQuickView({
                 </div>
               ))}
             </dl>
+
+            {analysisResult && (
+              <section className="flex items-start gap-4">
+                <MatchScoreGauge score={analysisResult.match_score} size="sm" />
+                <div className="flex min-w-0 flex-col gap-1">
+                  <h3 className="text-sm font-semibold text-muted">
+                    {t("quickView.analysisHeading")}
+                  </h3>
+                  <p className="text-sm">{analysisResult.summary}</p>
+                </div>
+              </section>
+            )}
 
             <div className="flex flex-wrap items-center gap-2 border-b border-border pb-4">
               <Button asChild size="sm">
