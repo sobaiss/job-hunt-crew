@@ -19,14 +19,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
-// How many StatusEvents the panel previews; the detail page has the rest.
-const TIMELINE_PREVIEW_SIZE = 3;
-
 // The slide-over opened from an Applications-table row (#237), modelled on
 // `AnalysisQuickView` but scoped to tracking: no score gauge, no document
-// generation, no relaunch or requeue — those belong to /analyses. The header
-// fields come from the list row the page already has; the StatusEvent
-// timeline and the offer's `sourceUrl` from `GET /applications/:id`.
+// generation, no relaunch or requeue — those belong to /analyses. The
+// Application's own fields come from the list row the page already has; the
+// full StatusEvent timeline from `GET /applications/:id`, which also fills the
+// offer's location, platform and `sourceUrl` the list row does not carry yet.
 
 export function ApplicationQuickView({
   application,
@@ -58,16 +56,32 @@ export function ApplicationQuickView({
   const t = useTranslations("applications");
   const trackingStatusLabel = useEnumLabel("trackingStatus");
   const statusLabel = useEnumLabel("applicationStatus");
+  const sourceSiteLabel = useEnumLabel("sourceSite");
   const { data: detail } = useApplication(application?.id ?? null);
   const addStatusEvent = useAddStatusEvent(application?.id ?? "");
 
   const tracking = application ? trackingStatusOfApplication(application.status) : null;
-  const sourceUrl = application?.jobOffer.sourceUrl ?? detail?.jobOffer.sourceUrl ?? null;
+  const offer = detail?.jobOffer;
+  const sourceUrl = application?.jobOffer.sourceUrl ?? offer?.sourceUrl ?? null;
+  const location = application?.jobOffer.location ?? offer?.location ?? null;
+  const sourceSite = application?.jobOffer.sourceSite ?? offer?.sourceSite ?? null;
+  const fields = application
+    ? [
+        {
+          label: t("quickView.appliedAt"),
+          value: application.appliedAt
+            ? new Date(application.appliedAt).toLocaleDateString()
+            : null,
+        },
+        { label: t("quickView.cvUsed"), value: application.cvVersion.label },
+        { label: t("quickView.company"), value: application.jobOffer.company },
+        { label: t("quickView.location"), value: location },
+        { label: t("quickView.platform"), value: sourceSite && sourceSiteLabel(sourceSite) },
+      ]
+    : [];
   // Newest first, whatever order the API returns them in.
-  const recentEvents = detail
-    ? [...detail.statusEvents]
-        .sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate))
-        .slice(0, TIMELINE_PREVIEW_SIZE)
+  const events = detail
+    ? [...detail.statusEvents].sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate))
     : null;
   const documents = application
     ? [
@@ -139,13 +153,22 @@ export function ApplicationQuickView({
               <SheetTitle>{application.jobOffer.title ?? t("list.jobOfferFallback")}</SheetTitle>
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm text-muted">
                 <p>
-                  {application.jobOffer.company ?? "—"} · {application.jobOffer.location ?? "—"}
+                  {application.jobOffer.company ?? "—"} · {location ?? "—"}
                 </p>
                 <Badge variant={trackingStatusBadgeVariant(tracking)}>
                   {trackingStatusLabel(tracking)}
                 </Badge>
               </div>
             </SheetHeader>
+
+            <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
+              {fields.map((field) => (
+                <div key={field.label} className="contents">
+                  <dt className="text-muted">{field.label}</dt>
+                  <dd className="min-w-0 break-words">{field.value || "—"}</dd>
+                </div>
+              ))}
+            </dl>
 
             <div className="flex flex-wrap items-center gap-2 border-b border-border pb-4">
               <Button asChild size="sm">
@@ -212,15 +235,15 @@ export function ApplicationQuickView({
 
             <section className="flex flex-col gap-3">
               <h3 className="text-sm font-semibold text-muted">{t("detail.timelineHeading")}</h3>
-              {recentEvents === null ? (
+              {events === null ? (
                 <p role="status" className="text-sm text-muted">
                   {t("detail.loading")}
                 </p>
-              ) : recentEvents.length === 0 ? (
+              ) : events.length === 0 ? (
                 <p className="text-sm text-muted">{t("detail.timelineEmpty")}</p>
               ) : (
                 <ul className="flex flex-col gap-2">
-                  {recentEvents.map((event) => (
+                  {events.map((event) => (
                     <li key={event.id} className="flex flex-col gap-1 text-sm">
                       <div className="flex items-center justify-between gap-4">
                         <Badge variant={applicationBadgeVariant(event.status)}>
@@ -235,12 +258,6 @@ export function ApplicationQuickView({
                   ))}
                 </ul>
               )}
-              <Link
-                href={`/applications/${application.id}`}
-                className="text-sm text-accent hover:underline"
-              >
-                {t("quickView.viewFullHistory")}
-              </Link>
             </section>
           </>
         )}

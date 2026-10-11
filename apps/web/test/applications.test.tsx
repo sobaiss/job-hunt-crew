@@ -515,10 +515,6 @@ describe("ApplicationsPage — quick view (#237)", () => {
     expect(quickView.getByText("In progress")).toBeInTheDocument();
     expect(quickView.getByText("Globex · Lyon")).toBeInTheDocument();
     expect(await quickView.findByText("Moved app-2")).toBeInTheDocument();
-    expect(quickView.getByRole("link", { name: "View full history" })).toHaveAttribute(
-      "href",
-      "/applications/app-2",
-    );
     // No evaluation or pipeline actions on this panel.
     expect(quickView.queryByRole("button", { name: /relaunch|requeue|generate/i })).toBeNull();
   });
@@ -679,6 +675,118 @@ describe("ApplicationsPage — quick view (#237)", () => {
 
     expect(await quickView.findByRole("heading", { name: "Role 25" })).toBeInTheDocument();
     await waitFor(() => expect(__getUrl()).toContain("page=2"));
+  });
+
+  /** The value the panel shows next to a field label (a `<dt>` / `<dd>` pair). */
+  function panelField(quickView: ReturnType<typeof within>, label: string) {
+    return quickView.getByText(label, { selector: "dt" }).nextElementSibling?.textContent;
+  }
+
+  it("shows the date of application, CV used, platform, location, offer link and Scout (#241)", async () => {
+    const user = userEvent.setup();
+    server.use(listApplications([FRONTEND]), applicationDetails([FRONTEND]));
+
+    renderWithProviders(<ApplicationsPage />);
+    await user.click(await screen.findByText("Frontend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    expect(panelField(quickView, "Applied on")).toBe(
+      new Date("2026-09-20T10:00:00.000Z").toLocaleDateString(),
+    );
+    expect(panelField(quickView, "CV used")).toBe("Grad CV");
+    expect(panelField(quickView, "Platform")).toBe("LinkedIn");
+    expect(panelField(quickView, "Location")).toBe("Lyon");
+    expect(quickView.getByRole("link", { name: "View job offer" })).toHaveAttribute(
+      "href",
+      "https://example.com/jobs/job2",
+    );
+    expect(quickView.getByRole("link", { name: "View the Scout" })).toHaveAttribute(
+      "href",
+      "/scouts?open=scout-1",
+    );
+  });
+
+  it("fills the offer's platform, location and link from the Application when the list row lacks them (#241)", async () => {
+    const user = userEvent.setup();
+    const listRow = application({ appliedAt: "2026-09-20T10:00:00.000Z" });
+    server.use(
+      listApplications([listRow]),
+      applicationDetails([
+        {
+          ...listRow,
+          jobOffer: {
+            ...listRow.jobOffer,
+            location: "Paris",
+            sourceSite: "INDEED",
+            sourceUrl: "https://example.com/jobs/job1",
+          },
+        },
+      ]),
+    );
+
+    renderWithProviders(<ApplicationsPage />);
+    await user.click(await screen.findByText("Backend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    await waitFor(() => expect(panelField(quickView, "Platform")).toBe("Indeed"));
+    expect(panelField(quickView, "Location")).toBe("Paris");
+    expect(quickView.getByRole("link", { name: "View job offer" })).toHaveAttribute(
+      "href",
+      "https://example.com/jobs/job1",
+    );
+  });
+
+  it("shows '—' for each missing piece of information and no Scout link (#241)", async () => {
+    const user = userEvent.setup();
+    const bare = application({ jobOffer: { id: "job1", title: "Backend Engineer", company: null } });
+    server.use(
+      listApplications([bare]),
+      applicationDetails([{ ...bare, jobOffer: { ...bare.jobOffer, sourceSite: null } }]),
+    );
+
+    renderWithProviders(<ApplicationsPage />);
+    await user.click(await screen.findByText("Backend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    await quickView.findByText("Moved app-1");
+    expect(panelField(quickView, "Applied on")).toBe("—");
+    expect(panelField(quickView, "Platform")).toBe("—");
+    expect(panelField(quickView, "Location")).toBe("—");
+    expect(panelField(quickView, "Company")).toBe("—");
+    expect(quickView.queryByRole("link", { name: "View the Scout" })).not.toBeInTheDocument();
+  });
+
+  it("shows every StatusEvent, newest first, and no 'View full history' link (#241)", async () => {
+    const user = userEvent.setup();
+    const events = ["DRAFT", "APPLIED", "INTERVIEWING", "OFFER", "ACCEPTED"].map((status, i) => ({
+      id: `se-${i}`,
+      applicationId: "app-1",
+      status,
+      note: `Event ${i}`,
+      effectiveDate: `2026-09-1${i}T00:00:00.000Z`,
+      createdAt: `2026-09-1${i}T00:00:00.000Z`,
+    }));
+    server.use(
+      listApplications([BACKEND]),
+      http.get("/api/applications/:id", () =>
+        HttpResponse.json({
+          application: {
+            ...BACKEND,
+            jobOffer: { ...BACKEND.jobOffer, sourceUrl: "https://example.com/jobs/job1" },
+            statusEvents: events,
+          },
+        }),
+      ),
+    );
+
+    renderWithProviders(<ApplicationsPage />);
+    await user.click(await screen.findByText("Backend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    await quickView.findByText("Event 0");
+    const notes = quickView.getAllByText(/^Event \d$/).map((note) => note.textContent);
+    expect(notes).toEqual(["Event 4", "Event 3", "Event 2", "Event 1", "Event 0"]);
+    expect(quickView.queryByRole("link", { name: "View full history" })).not.toBeInTheDocument();
   });
 
   it("closes with the Close button", async () => {

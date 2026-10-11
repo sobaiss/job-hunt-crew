@@ -1021,7 +1021,11 @@
       "position": "{position} / {total}",
       "positionUnknown": "— / {total}",
       "viewOffer": "View job offer",
-      "viewFullHistory": "View full history",
+      "appliedAt": "Applied on",
+      "cvUsed": "CV used",
+      "company": "Company",
+      "location": "Location",
+      "platform": "Platform",
       "tailoredCv": "Tailored CV",
       "coverLetter": "Cover letter"
     },
