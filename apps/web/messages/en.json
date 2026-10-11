@@ -959,20 +959,75 @@
     "loading": "Loading your applications",
     "loadError": "We couldn't load your applications. Please try again.",
     "empty": "No applications tracked yet.",
+    "refresh": "Refresh",
     "controls": {
+      "searchLabel": "Search",
+      "searchPlaceholder": "Title, company or location",
       "statusLabel": "Status",
       "statusAll": "All statuses",
+      "statusCount": "{count} statuses",
       "scoutLabel": "Scout",
       "scoutAll": "All Scouts",
-      "sortLabel": "Sort by",
-      "sortNewest": "Last updated",
-      "sortOldest": "Oldest updated"
+      "platformLabel": "Platform",
+      "platformAll": "All platforms",
+      "platformCount": "{count} platforms",
+      "locationLabel": "Location",
+      "locationPlaceholder": "City or region",
+      "appliedAtFromLabel": "Applied from",
+      "appliedAtToLabel": "Applied to",
+      "moreFilters": "More filters",
+      "moreFiltersActive": "More filters ({count})",
+      "clearFilters": "Clear filters",
+      "clearThisFilter": "Clear all",
+      "columnsLabel": "Columns",
+      "columnsReset": "Reset",
+      "stats": "Statistics"
+    },
+    "columns": {
+      "title": "Position",
+      "company": "Company",
+      "location": "Location",
+      "platform": "Platform",
+      "appliedAt": "Applied",
+      "score": "Score",
+      "tailoredCvStatus": "CV generated",
+      "coverLetterStatus": "Cover letter generated",
+      "status": "Status",
+      "link": "Link",
+      "linkLabel": "Open the job offer"
+    },
+    "pagination": {
+      "pageSizeLabel": "Rows per page",
+      "pageInfo": "Page {page} of {totalPages}",
+      "previous": "Previous",
+      "next": "Next"
+    },
+    "noMatches": "No applications match your filters.",
+    "statsTitle": "Statistics",
+    "bulk": {
+      "selectPageLabel": "Select all on this page",
+      "selectRowLabel": "Select {title}",
+      "selectedCount": "{count} selected",
+      "clearSelection": "Clear selection",
+      "extendAction": "Select all {total} matching your filters",
+      "exportCsv": "Export CSV",
+      "csvFilename": "applications.csv",
+      "statusPartialError": "{failed} of {total} updates failed. Please try again for those."
+    },
+    "quickView": {
+      "previous": "Previous",
+      "next": "Next",
+      "close": "Close",
+      "position": "{position} / {total}",
+      "positionUnknown": "— / {total}",
+      "viewOffer": "View job offer",
+      "viewFullHistory": "View full history",
+      "tailoredCv": "Tailored CV",
+      "coverLetter": "Cover letter"
     },
     "list": {
       "jobOfferFallback": "Job offer",
-      "vsCv": "vs. {label}",
-      "scoutTag": "Scout",
-      "updated": "Updated {date}"
+      "vsCv": "vs. {label}"
     },
     "detail": {
       "loading": "Loading this application",

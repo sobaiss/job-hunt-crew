@@ -959,20 +959,75 @@
     "loading": "Chargement de vos candidatures",
     "loadError": "Impossible de charger vos candidatures. Veuillez réessayer.",
     "empty": "Aucune candidature suivie pour l'instant.",
+    "refresh": "Actualiser",
     "controls": {
+      "searchLabel": "Rechercher",
+      "searchPlaceholder": "Titre, entreprise ou localisation",
       "statusLabel": "Statut",
       "statusAll": "Tous les statuts",
+      "statusCount": "{count} statuts",
       "scoutLabel": "Agent",
       "scoutAll": "Tous les agents",
-      "sortLabel": "Trier par",
-      "sortNewest": "Dernière mise à jour",
-      "sortOldest": "Mise à jour la plus ancienne"
+      "platformLabel": "Plateforme",
+      "platformAll": "Toutes les plateformes",
+      "platformCount": "{count} plateformes",
+      "locationLabel": "Localisation",
+      "locationPlaceholder": "Ville ou région",
+      "appliedAtFromLabel": "Candidature à partir du",
+      "appliedAtToLabel": "Candidature jusqu'au",
+      "moreFilters": "Plus de filtres",
+      "moreFiltersActive": "Plus de filtres ({count})",
+      "clearFilters": "Effacer les filtres",
+      "clearThisFilter": "Tout effacer",
+      "columnsLabel": "Colonnes",
+      "columnsReset": "Réinitialiser",
+      "stats": "Statistiques"
+    },
+    "columns": {
+      "title": "Poste",
+      "company": "Entreprise",
+      "location": "Localisation",
+      "platform": "Plateforme",
+      "appliedAt": "Date de candidature",
+      "score": "Score",
+      "tailoredCvStatus": "CV généré",
+      "coverLetterStatus": "Lettre générée",
+      "status": "Statut",
+      "link": "Lien",
+      "linkLabel": "Ouvrir l'offre d'emploi"
+    },
+    "pagination": {
+      "pageSizeLabel": "Lignes par page",
+      "pageInfo": "Page {page} sur {totalPages}",
+      "previous": "Précédent",
+      "next": "Suivant"
+    },
+    "noMatches": "Aucune candidature ne correspond à vos filtres.",
+    "statsTitle": "Statistiques",
+    "bulk": {
+      "selectPageLabel": "Sélectionner tout sur cette page",
+      "selectRowLabel": "Sélectionner {title}",
+      "selectedCount": "{count} sélectionnée(s)",
+      "clearSelection": "Effacer la sélection",
+      "extendAction": "Sélectionner les {total} correspondant à vos filtres",
+      "exportCsv": "Exporter en CSV",
+      "csvFilename": "candidatures.csv",
+      "statusPartialError": "{failed} mise(s) à jour sur {total} ont échoué. Veuillez réessayer pour celles-ci."
+    },
+    "quickView": {
+      "previous": "Précédent",
+      "next": "Suivant",
+      "close": "Fermer",
+      "position": "{position} / {total}",
+      "positionUnknown": "— / {total}",
+      "viewOffer": "Voir l'offre",
+      "viewFullHistory": "Voir l'historique complet",
+      "tailoredCv": "CV adapté",
+      "coverLetter": "Lettre de motivation"
     },
     "list": {
       "jobOfferFallback": "Offre d'emploi",
-      "vsCv": "vs. {label}",
-      "scoutTag": "Agent",
-      "updated": "Mise à jour le {date}"
+      "vsCv": "vs. {label}"
     },
     "detail": {
       "loading": "Chargement de cette candidature",

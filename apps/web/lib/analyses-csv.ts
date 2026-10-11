@@ -21,7 +21,7 @@ const CSV_HEADER = [
   "Link",
 ];
 
-function csvField(value: string): string {
+export function csvField(value: string): string {
   return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }
 

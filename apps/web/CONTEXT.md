@@ -152,13 +152,32 @@ view (that's the Analyses-list one — lighter, and still links out to its own
 full detail page, unlike this one)
 
 **Applications**:
-The sidebar entry and `/applications` area listing every Application
-(defined in [API](../../services/api/CONTEXT.md)'s context) with filter and
-sort by status, Scout, and date, a stats header (all-time / last-30-days),
-and a detail page showing one Application's StatusEvent timeline and
+The sidebar entry and `/applications` area — a sortable, filterable table
+of every Application (defined in [API](../../services/api/CONTEXT.md)'s
+context), modelled after Analyses in layout and interaction: the same
+Column visibility control, the same multi-select bulk actions (Tracking
+status change and CSV export), and the same Application quick view
+slide-over on row click. Stats (9 metrics, all-time / last-30-days toggle)
+are hidden by default and opened on demand via a "Statistiques" modal button
+in the toolbar, not inline on the page. Filters: always-visible search
+(title / company / location) and status (Tracking status); advanced
+collapsible panel carrying date-of-application range, Scout, platform, and
+location. Score column hidden by default; application date visible by
+default. A detail page shows one Application's StatusEvent timeline and
 back-links to its Analysis, Scout, and GeneratedDocuments.
 _Avoid_: Tracker (fine in prose; the nav label and route area is
-"Applications")
+"Applications"), Analyses (the layout is shared; the content and actions
+differ — no document generation, no Relancer l'analyse, no Requeue from
+this table)
+
+**Application quick view**:
+The right-hand slide-over opened by clicking an Applications-table row —
+the Application's tracking status and timeline, its back-links (Analysis,
+Scout, GeneratedDocuments), and status-change actions. Modelled after the
+Quick view but scoped to Application data; no score gauge, no document
+generation, no Relancer l'analyse.
+_Avoid_: Quick view (that is the Analyses-list slide-over), Application
+detail page (that is the full `/applications/[id]` route this links out to)
 
 **Import**:
 The single candidate-facing act of adding a CV: choosing a file **and** getting back a readable CV. It is deliberately not finished when the bytes are stored — an Import has only succeeded once that CVVersion's Markdown rendition exists (defined in [API](../../services/api/CONTEXT.md)'s context), which is why the candidate never has to ask for the Conversion separately and never sees a freshly imported CV sitting at "En attente". The Import screen is where the whole act plays out and where its outcome is shown; a Conversion that fails is an Import that failed at its second half, not a successful upload with a pending chore attached.
