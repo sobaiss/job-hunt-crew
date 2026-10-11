@@ -1004,6 +1004,16 @@
     },
     "noMatches": "Aucune candidature ne correspond à vos filtres.",
     "statsTitle": "Statistiques",
+    "bulk": {
+      "selectPageLabel": "Sélectionner tout sur cette page",
+      "selectRowLabel": "Sélectionner {title}",
+      "selectedCount": "{count} sélectionnée(s)",
+      "clearSelection": "Effacer la sélection",
+      "extendAction": "Sélectionner les {total} correspondant à vos filtres",
+      "exportCsv": "Exporter en CSV",
+      "csvFilename": "candidatures.csv",
+      "statusPartialError": "{failed} mise(s) à jour sur {total} ont échoué. Veuillez réessayer pour celles-ci."
+    },
     "list": {
       "jobOfferFallback": "Offre d'emploi",
       "vsCv": "vs. {label}"

@@ -10,12 +10,18 @@ import {
   ChevronLeft,
   ChevronRight,
   ExternalLink,
+  FileDown,
+  ListChecks,
   RefreshCw,
   SlidersHorizontal,
   X,
 } from "lucide-react";
 
-import { useApplications, useApplicationStats } from "@/hooks/use-applications";
+import {
+  useApplications,
+  useApplicationStats,
+  useBulkSetApplicationStatus,
+} from "@/hooks/use-applications";
 import { useScouts } from "@/hooks/use-scouts";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useColumnVisibility } from "@/hooks/use-column-visibility";
@@ -26,6 +32,8 @@ import { ApplicationStatsHeader } from "@/components/application-stats-header";
 import { GeneratedDocumentStatusBadge } from "@/components/generated-document-status-badge";
 import { TruncatedCell } from "@/components/truncated-cell";
 import type { ColumnConfig } from "@/lib/column-visibility";
+import { downloadCsv } from "@/lib/analyses-csv";
+import { applicationsToCsv } from "@/lib/applications-csv";
 import { JOB_OFFER_SOURCE_SITES } from "@/lib/analyses-filters";
 import {
   APPLICATIONS_PAGE_SIZES,
@@ -44,7 +52,9 @@ import {
 } from "@/lib/applications-filters";
 import {
   TRACKING_STATUSES,
+  TRACKING_STATUS_TRANSITIONS,
   trackingStatusBadgeVariant,
+  trackingStatusIcon,
   trackingStatusOfApplication,
 } from "@/lib/tracking-status";
 import { useEnumLabel } from "@/lib/enum-labels";
@@ -142,6 +152,13 @@ function ApplicationsTable() {
   const { data: applications, isPending, isError, isFetching, refetch } = useApplications();
   const { data: scouts } = useScouts();
   const [statsOpen, setStatsOpen] = useState(false);
+  const bulkSetApplicationStatus = useBulkSetApplicationStatus();
+
+  // Multi-select (#238), as on /analyses: Application ids selected across
+  // however many pages the user has visited, so a bulk action can span pages
+  // and "select all matching" can reach rows the current page doesn't show.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkError, setBulkError] = useState<string | null>(null);
 
   const state = useMemo(() => parseApplicationsTableState(searchParams), [searchParams]);
 
@@ -175,6 +192,78 @@ function ApplicationsTable() {
     },
     [state, router, pathname],
   );
+
+  const pageIds = useMemo(() => rows.map((a) => a.id), [rows]);
+  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
+  const somePageSelected = pageIds.some((id) => selectedIds.has(id));
+  const allFilteredSelected = filtered.length > 0 && filtered.every((a) => selectedIds.has(a.id));
+  // In table order, so the CSV reads like the screen.
+  const selectedApplications = useMemo(
+    () => sorted.filter((a) => selectedIds.has(a.id)),
+    [sorted, selectedIds],
+  );
+
+  const togglePageSelection = () => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (allPageSelected) {
+        for (const id of pageIds) next.delete(id);
+      } else {
+        for (const id of pageIds) next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const toggleRowSelection = (id: string) => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAllFiltered = () => {
+    setSelectedIds(new Set(filtered.map((a) => a.id)));
+  };
+
+  // The bulk hook speaks analysisIds (it get-or-creates the Application from
+  // its Analysis, for /analyses' sake); for a row that already is an
+  // Application that lookup just returns it, so the StatusEvent lands on the
+  // selected row.
+  const handleBulkStatusChange = (
+    applicationStatus: (typeof TRACKING_STATUS_TRANSITIONS)[number]["applicationStatus"],
+  ) => {
+    setBulkError(null);
+    const analysisIds = (applications ?? [])
+      .filter((a) => selectedIds.has(a.id))
+      .map((a) => a.analysisId);
+    bulkSetApplicationStatus.mutate(
+      { analysisIds, status: applicationStatus },
+      {
+        onSuccess: ({ failedAnalysisIds }) => {
+          if (failedAnalysisIds.length > 0) {
+            setBulkError(
+              t("bulk.statusPartialError", {
+                failed: failedAnalysisIds.length,
+                total: analysisIds.length,
+              }),
+            );
+          }
+        },
+      },
+    );
+  };
+
+  const handleExportCsv = () => {
+    const csv = applicationsToCsv(selectedApplications, {
+      sourceSiteLabel,
+      trackingStatusLabel,
+      documentStatusLabel: generatedDocumentStatusLabel,
+    });
+    downloadCsv(t("bulk.csvFilename"), csv);
+  };
 
   const toggleSort = () => {
     updateState({ sortDir: state.sortDir === "asc" ? "desc" : "asc" });
@@ -378,6 +467,59 @@ function ApplicationsTable() {
         <p className="text-sm text-muted">{t("noMatches")}</p>
       )}
 
+      {selectedIds.size > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-muted/40 p-3">
+          <span className="text-sm font-medium">
+            {t("bulk.selectedCount", { count: selectedIds.size })}
+          </span>
+          {!allFilteredSelected && (
+            <Button type="button" variant="link" size="sm" onClick={selectAllFiltered}>
+              <ListChecks aria-hidden="true" />
+              {t("bulk.extendAction", { total: filtered.length })}
+            </Button>
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setSelectedIds(new Set());
+              setBulkError(null);
+            }}
+          >
+            <X aria-hidden="true" />
+            {t("bulk.clearSelection")}
+          </Button>
+          <div className="ml-auto flex flex-wrap gap-2">
+            {TRACKING_STATUS_TRANSITIONS.map((transition) => {
+              const Icon = trackingStatusIcon(transition.trackingStatus);
+              return (
+                <Button
+                  key={transition.trackingStatus}
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={bulkSetApplicationStatus.isPending}
+                  onClick={() => handleBulkStatusChange(transition.applicationStatus)}
+                >
+                  <Icon aria-hidden="true" />
+                  {trackingStatusLabel(transition.trackingStatus)}
+                </Button>
+              );
+            })}
+            <Button type="button" variant="outline" size="sm" onClick={handleExportCsv}>
+              <FileDown aria-hidden="true" />
+              {t("bulk.exportCsv")}
+            </Button>
+          </div>
+          {bulkError && (
+            <p role="alert" className="w-full text-sm text-destructive">
+              {bulkError}
+            </p>
+          )}
+        </div>
+      )}
+
       {sorted.length > 0 && (
         <>
           {isCardLayout ? (
@@ -390,6 +532,11 @@ function ApplicationsTable() {
                   trackingStatusLabel={trackingStatusLabel}
                   linkLabel={linkLabel}
                   jobOfferFallback={jobOfferFallback}
+                  selected={selectedIds.has(application.id)}
+                  selectLabel={t("bulk.selectRowLabel", {
+                    title: application.jobOffer.title ?? jobOfferFallback,
+                  })}
+                  onToggleSelect={() => toggleRowSelection(application.id)}
                 />
               ))}
             </div>
@@ -397,6 +544,17 @@ function ApplicationsTable() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-0">
+                    <input
+                      type="checkbox"
+                      aria-label={t("bulk.selectPageLabel")}
+                      checked={allPageSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = somePageSelected && !allPageSelected;
+                      }}
+                      onChange={togglePageSelection}
+                    />
+                  </TableHead>
                   {COLUMNS.filter((column) => columnVisibility.isVisible(column.key)).map(
                     (column) =>
                       column.key === "appliedAt" ? (
@@ -428,6 +586,11 @@ function ApplicationsTable() {
                     generatedDocumentStatusLabel={generatedDocumentStatusLabel}
                     linkLabel={linkLabel}
                     jobOfferFallback={jobOfferFallback}
+                    selected={selectedIds.has(application.id)}
+                    selectLabel={t("bulk.selectRowLabel", {
+                      title: application.jobOffer.title ?? jobOfferFallback,
+                    })}
+                    onToggleSelect={() => toggleRowSelection(application.id)}
                   />
                 ))}
               </TableBody>
@@ -513,6 +676,9 @@ function ApplicationTableRow({
   generatedDocumentStatusLabel,
   linkLabel,
   jobOfferFallback,
+  selected,
+  selectLabel,
+  onToggleSelect,
 }: {
   application: ApplicationSummary;
   isColumnVisible: (column: ApplicationsColumn) => boolean;
@@ -521,10 +687,21 @@ function ApplicationTableRow({
   generatedDocumentStatusLabel: (value: string) => string;
   linkLabel: string;
   jobOfferFallback: string;
+  selected: boolean;
+  selectLabel: string;
+  onToggleSelect: () => void;
 }) {
   const { jobOffer } = application;
   return (
     <TableRow data-application-id={application.id}>
+      <TableCell>
+        <input
+          type="checkbox"
+          aria-label={selectLabel}
+          checked={selected}
+          onChange={onToggleSelect}
+        />
+      </TableCell>
       <TableCell className="font-medium">
         <Link href={`/applications/${application.id}`} className="hover:text-accent">
           <TruncatedCell text={jobOffer.title ?? jobOfferFallback} maxLength={TITLE_MAX_LENGTH} />
@@ -597,12 +774,18 @@ function ApplicationCard({
   trackingStatusLabel,
   linkLabel,
   jobOfferFallback,
+  selected,
+  selectLabel,
+  onToggleSelect,
 }: {
   application: ApplicationSummary;
   sourceSiteLabel: (value: string) => string;
   trackingStatusLabel: (value: string) => string;
   linkLabel: string;
   jobOfferFallback: string;
+  selected: boolean;
+  selectLabel: string;
+  onToggleSelect: () => void;
 }) {
   const { jobOffer } = application;
   return (
@@ -611,14 +794,26 @@ function ApplicationCard({
       className="flex flex-col gap-2 rounded-md border border-border bg-background p-3"
     >
       <div className="flex items-start justify-between gap-2">
-        <div>
-          <Link href={`/applications/${application.id}`} className="font-medium hover:text-accent">
-            {jobOffer.title ?? jobOfferFallback}
-          </Link>
-          <p className="text-sm text-muted">
-            {jobOffer.company ?? "—"} · {jobOffer.location ?? "—"}
-            {jobOffer.sourceSite ? ` · ${sourceSiteLabel(jobOffer.sourceSite)}` : ""}
-          </p>
+        <div className="flex items-start gap-2">
+          <input
+            type="checkbox"
+            aria-label={selectLabel}
+            checked={selected}
+            onChange={onToggleSelect}
+            className="mt-1"
+          />
+          <div>
+            <Link
+              href={`/applications/${application.id}`}
+              className="font-medium hover:text-accent"
+            >
+              {jobOffer.title ?? jobOfferFallback}
+            </Link>
+            <p className="text-sm text-muted">
+              {jobOffer.company ?? "—"} · {jobOffer.location ?? "—"}
+              {jobOffer.sourceSite ? ` · ${sourceSiteLabel(jobOffer.sourceSite)}` : ""}
+            </p>
+          </div>
         </div>
         <OfferLink
           href={jobOffer.sourceUrl}

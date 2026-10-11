@@ -331,6 +331,145 @@ describe("ApplicationsPage — table (#236)", () => {
   });
 });
 
+describe("ApplicationsPage — bulk actions (#238)", () => {
+  beforeEach(() => {
+    __setUrl("/applications");
+  });
+
+  afterEach(() => {
+    __setUrl("/applications");
+  });
+
+  it("shows the bulk-actions bar only while something is selected, offering Tracking status changes and CSV export", async () => {
+    const user = userEvent.setup();
+    server.use(listApplications([BACKEND, FRONTEND]));
+
+    renderWithProviders(<ApplicationsPage />);
+    await screen.findByText("Backend Engineer");
+
+    expect(screen.queryByRole("button", { name: "Export CSV" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("checkbox", { name: "Select Backend Engineer" }));
+
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+    for (const name of ["In progress", "Rejected", "Accepted", "Withdrawn"]) {
+      expect(screen.getByRole("button", { name })).toBeInTheDocument();
+    }
+    expect(screen.queryByRole("button", { name: "To apply" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Export CSV" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Clear selection" }));
+    expect(screen.queryByRole("button", { name: "Export CSV" })).not.toBeInTheDocument();
+  });
+
+  it("bulk-changes the Tracking status of the selected Applications and reports a partial failure", async () => {
+    const user = userEvent.setup();
+    const statusEvents: { applicationId: string; status: string }[] = [];
+    server.use(
+      listApplications([BACKEND, FRONTEND, DATA]),
+      http.post("/api/applications", async ({ request }) => {
+        const { analysisId } = (await request.json()) as { analysisId: string };
+        if (analysisId === "a3") {
+          return HttpResponse.json({ error: "boom" }, { status: 500 });
+        }
+        const existing = [BACKEND, FRONTEND].find((a) => a.analysisId === analysisId)!;
+        return HttpResponse.json({ application: existing });
+      }),
+      http.post("/api/applications/:id/status-events", async ({ params, request }) => {
+        const { status } = (await request.json()) as { status: string };
+        statusEvents.push({ applicationId: String(params.id), status });
+        return HttpResponse.json({ application: BACKEND, statusEvent: {} });
+      }),
+    );
+
+    renderWithProviders(<ApplicationsPage />);
+    await screen.findByText("Backend Engineer");
+
+    await user.click(screen.getByRole("checkbox", { name: "Select Backend Engineer" }));
+    await user.click(screen.getByRole("checkbox", { name: "Select Frontend Engineer" }));
+    await user.click(screen.getByRole("checkbox", { name: "Select Data Engineer" }));
+    await user.click(screen.getByRole("button", { name: "Rejected" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("1 of 3");
+    expect(statusEvents).toHaveLength(2);
+    expect(statusEvents.map((e) => e.applicationId).sort()).toEqual(["app-1", "app-2"]);
+    expect(statusEvents.every((e) => e.status === "REJECTED")).toBe(true);
+  });
+
+  it("extends the selection from the page to every Application matching the filters", async () => {
+    const user = userEvent.setup();
+    const many = Array.from({ length: 27 }, (_, i) =>
+      application({
+        id: `app-${i}`,
+        analysisId: `a-${i}`,
+        appliedAt: `2026-09-${String(i + 1).padStart(2, "0")}T10:00:00.000Z`,
+        status: "APPLIED",
+        jobOffer: { id: `job-${i}`, title: `Offer ${i}`, company: "Acme Inc" },
+      }),
+    );
+    // Drops out of the filtered result: never counted by "select all matching".
+    const rejected = application({
+      id: "app-rejected",
+      analysisId: "a-rejected",
+      status: "REJECTED",
+      jobOffer: { id: "job-r", title: "Rejected Offer", company: "Acme Inc" },
+    });
+    __setUrl("/applications?status=IN_PROGRESS");
+    server.use(listApplications([...many, rejected]));
+
+    renderWithProviders(<ApplicationsPage />);
+    await screen.findByText("Offer 26");
+
+    await user.click(screen.getByRole("checkbox", { name: "Select all on this page" }));
+    expect(screen.getByText("25 selected")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Select all 27 matching your filters" }));
+
+    expect(screen.getByText("27 selected")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Select all \d+ matching your filters/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("exports only the selected rows to CSV without a network request", async () => {
+    const user = userEvent.setup();
+    server.use(listApplications([BACKEND, FRONTEND]));
+
+    const blobUrl = "blob:mock-url";
+    const createObjectURL = vi.fn<(blob: Blob) => string>(() => blobUrl);
+    const revokeObjectURL = vi.fn();
+    // jsdom doesn't implement these at all, so there's nothing to spy on —
+    // assign them directly and restore by deleting afterwards.
+    URL.createObjectURL = createObjectURL;
+    URL.revokeObjectURL = revokeObjectURL;
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+
+    try {
+      renderWithProviders(<ApplicationsPage />);
+      await screen.findByText("Frontend Engineer");
+
+      await user.click(screen.getByRole("checkbox", { name: "Select Frontend Engineer" }));
+      await user.click(screen.getByRole("button", { name: "Export CSV" }));
+
+      expect(createObjectURL).toHaveBeenCalledTimes(1);
+      const text = await createObjectURL.mock.calls[0]![0].text();
+      expect(text).toContain("Frontend Engineer");
+      expect(text).toContain("Globex");
+      expect(text).not.toContain("Backend Engineer");
+      expect(clickSpy).toHaveBeenCalledTimes(1);
+      expect(revokeObjectURL).toHaveBeenCalledWith(blobUrl);
+    } finally {
+      clickSpy.mockRestore();
+      // @ts-expect-error -- jsdom has no implementation to restore to.
+      delete URL.createObjectURL;
+      // @ts-expect-error -- jsdom has no implementation to restore to.
+      delete URL.revokeObjectURL;
+    }
+  });
+});
+
 describe("ApplicationsPage — stats modal (#236)", () => {
   function statsWindow(overrides: Record<string, unknown> = {}) {
     return {

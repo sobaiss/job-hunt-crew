@@ -1004,6 +1004,16 @@
     },
     "noMatches": "No applications match your filters.",
     "statsTitle": "Statistics",
+    "bulk": {
+      "selectPageLabel": "Select all on this page",
+      "selectRowLabel": "Select {title}",
+      "selectedCount": "{count} selected",
+      "clearSelection": "Clear selection",
+      "extendAction": "Select all {total} matching your filters",
+      "exportCsv": "Export CSV",
+      "csvFilename": "applications.csv",
+      "statusPartialError": "{failed} of {total} updates failed. Please try again for those."
+    },
     "list": {
       "jobOfferFallback": "Job offer",
       "vsCv": "vs. {label}"
