@@ -1,4 +1,4 @@
-.PHONY: up down web-up web-down migrate seed clean-analyses clean-analyses-scout clean-analyses-failed worker worker-once verify-sites test test-db
+.PHONY: up down web-up web-down migrate seed clean-analyses clean-analyses-scout clean-analyses-failed archive-scouts worker worker-once verify-sites test test-db
 
 # Start local infrastructure (Postgres, MinIO, ElasticMQ, Step Functions
 # Local, api, worker). The `migrate` service applies pending Prisma
@@ -67,6 +67,17 @@ clean-analyses-scout:
 	count=$$($(PSQL) -tAc "SELECT count(*) FROM \"Analysis\" WHERE \"scoutId\" = '$(SCOUT_ID)';"); \
 	echo "Deleting $$count analyses for Scout \"$$label\" ($(SCOUT_ID))..."; \
 	$(PSQL) -c "DELETE FROM \"Analysis\" WHERE \"scoutId\" = '$(SCOUT_ID)';"
+
+# Set every Scout row to ARCHIVED status. Without CONFIRM=1 this only reports
+# how many scouts it would archive, it does not change them.
+archive-scouts:
+	@if [ "$(CONFIRM)" = "1" ]; then \
+		$(PSQL) -c "UPDATE \"Scout\" SET status = 'ARCHIVED' WHERE status != 'ARCHIVED';"; \
+	else \
+		count=$$($(PSQL) -tAc "SELECT count(*) FROM \"Scout\" WHERE status != 'ARCHIVED';"); \
+		echo "This would archive $$count scouts."; \
+		echo "Re-run as: make archive-scouts CONFIRM=1"; \
+	fi
 
 # Delete every FAILED Analysis row, across all users — a narrower sibling of
 # clean-analyses for routine cleanup of dead pipeline runs. Same cascade
