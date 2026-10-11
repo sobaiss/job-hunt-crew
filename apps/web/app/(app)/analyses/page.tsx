@@ -31,7 +31,6 @@ import { useBulkSetApplicationStatus } from "@/hooks/use-applications";
 import {
   useBulkCreateGeneratedDocuments,
   useGeneratedDocumentsStatuses,
-  type GeneratedDocumentStatus,
   type GeneratedDocumentType,
 } from "@/hooks/use-generated-documents";
 import { useQuotas } from "@/hooks/use-quotas";
@@ -73,6 +72,7 @@ import { analysisBadgeVariant } from "@/components/analysis-row";
 import { AnalysisQuickView } from "@/components/analysis-quick-view";
 import { TruncatedCell } from "@/components/truncated-cell";
 import { CopyIdButton } from "@/components/copy-id-button";
+import { GeneratedDocumentStatusBadge } from "@/components/generated-document-status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1414,32 +1414,6 @@ function TrackingBadge({
   ) : (
     <Badge variant={analysisBadgeVariant(analysis.status)}>
       {pipelineStatusLabel(analysis.status)}
-    </Badge>
-  );
-}
-
-function generatedDocumentStatusBadgeVariant(
-  status: GeneratedDocumentStatus,
-): "secondary" | "warning" | "success" | "destructive" {
-  if (status === "READY") return "success";
-  if (status === "FAILED") return "destructive";
-  if (status === "GENERATING") return "warning";
-  return "secondary";
-}
-
-/** Renders a status Badge for a Tailored CV/Cover letter GeneratedDocument, or
- *  a plain "—" when generation was never triggered for that Analysis. */
-function GeneratedDocumentStatusBadge({
-  status,
-  label,
-}: {
-  status: GeneratedDocumentStatus | null;
-  label: (value: string) => string;
-}) {
-  if (status === null) return <span className="text-muted">—</span>;
-  return (
-    <Badge variant={generatedDocumentStatusBadgeVariant(status)}>
-      {label(status)}
     </Badge>
   );
 }

@@ -15,15 +15,17 @@ import {
 // shareable. Unlike the Analyses table, a default value writes no param at
 // all, so an untouched table has a bare `/applications` URL.
 
-/** One row of the Applications table. `location` and `sourceSite` are
- *  optional on the offer because the list endpoint does not send them yet —
- *  a row without them simply matches no location or platform filter. The
+/** One row of the Applications table. `location`, `sourceSite` and
+ *  `sourceUrl` are optional on the offer because the list endpoint does not
+ *  send them yet — a row without them simply matches no location or platform
+ *  filter, and renders no external link (#236). The
  *  match score and generated-document statuses are optional for the same
  *  reason; a row without them renders those cells empty (#235). */
 export type ApplicationSummary = Omit<Application, "jobOffer"> & {
   jobOffer: Application["jobOffer"] & {
     location?: string | null;
     sourceSite?: string | null;
+    sourceUrl?: string | null;
   };
   matchScore?: number | null;
   tailoredCvStatus?: GeneratedDocumentStatus | null;
