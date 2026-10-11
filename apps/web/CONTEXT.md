@@ -163,21 +163,25 @@ in the toolbar, not inline on the page. Filters: always-visible search
 (title / company / location) and status (Tracking status); advanced
 collapsible panel carrying date-of-application range, Scout, platform, and
 location. Score column hidden by default; application date visible by
-default. A detail page shows one Application's StatusEvent timeline and
-back-links to its Analysis, Scout, and GeneratedDocuments.
+default. There is no per-Application detail page: the Application quick
+view is the only view of one Application.
 _Avoid_: Tracker (fine in prose; the nav label and route area is
 "Applications"), Analyses (the layout is shared; the content and actions
 differ — no document generation, no Relancer l'analyse, no Requeue from
 this table)
 
 **Application quick view**:
-The right-hand slide-over opened by clicking an Applications-table row —
-the Application's tracking status and timeline, its back-links (Analysis,
-Scout, GeneratedDocuments), and status-change actions. Modelled after the
-Quick view but scoped to Application data; no score gauge, no document
-generation, no Relancer l'analyse.
+The right-hand slide-over opened by clicking an Applications-table row, and
+the only view of a single Application. It shows everything about the
+candidature and its offer: tracking status and status-change actions, date of
+application, CV used (the CVVersion label), originating Scout, the offer's
+title / company / location / platform / link, a recall of the Analysis (its
+summary and match score, shown only for a `COMPLETED` Analysis that has a
+summary), the generated cover letter and tailored CV, and the full StatusEvent
+timeline. Modelled after the Quick view but scoped to Application data; no
+score gauge, no document generation, no Relancer l'analyse.
 _Avoid_: Quick view (that is the Analyses-list slide-over), Application
-detail page (that is the full `/applications/[id]` route this links out to)
+detail page (removed: it duplicated this panel)
 
 **Import**:
 The single candidate-facing act of adding a CV: choosing a file **and** getting back a readable CV. It is deliberately not finished when the bytes are stored — an Import has only succeeded once that CVVersion's Markdown rendition exists (defined in [API](../../services/api/CONTEXT.md)'s context), which is why the candidate never has to ask for the Conversion separately and never sees a freshly imported CV sitting at "En attente". The Import screen is where the whole act plays out and where its outcome is shown; a Conversion that fails is an Import that failed at its second half, not a successful upload with a pending chore attached.

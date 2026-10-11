@@ -96,7 +96,6 @@ Le click sur une ligne ouvre le panel (même mécanique slide-over que
 
 ## Ce qui ne change pas
 
-- La page de détail `/applications/[id]` reste inchangée.
 - Les hooks `useApplications`, `useApplicationStats`, `useBulkSetApplicationStatus`
   restent tels quels — on n'ajoute que ce qui manque.
 - Le composant `ApplicationStatsHeader` reste tel quel — seul son point
@@ -118,6 +117,21 @@ Le click sur une ligne ouvre le panel (même mécanique slide-over que
 
 ## Hors périmètre
 
-- Filtre par CV utilisé (liaison Application ↔ CVVersion pas encore implémentée)
+- Filtre par CV utilisé
 - Génération de documents depuis `/applications`
 - Modification du backend / API
+
+---
+
+## Addendum — suppression de `/applications/[id]`
+
+- La page `/applications/[id]` est supprimée ; l'Application quick view devient
+  l'unique vue d'une candidature. La route BFF `/api/applications/[id]` et le
+  hook `useApplication` restent (ils alimentent la Quick view).
+- Le lien « Voir l'historique complet » et les clés i18n `detail.*` orphelines
+  disparaissent ; la timeline affiche tous les StatusEvents (plus de limite à 3).
+- La Quick view affiche : statut + actions, date de candidature, CV utilisé
+  (`cvVersion.label`), Scout, titre / entreprise / lieu / plateforme / lien de
+  l'offre, résumé + score de l'Analysis (via `analysisId`, chargée à l'ouverture,
+  section masquée si non `COMPLETED` ou sans résumé), documents générés, timeline.
+- Aucune modification d'API.
