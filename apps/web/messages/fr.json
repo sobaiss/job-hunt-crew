@@ -1014,6 +1014,17 @@
       "csvFilename": "candidatures.csv",
       "statusPartialError": "{failed} mise(s) à jour sur {total} ont échoué. Veuillez réessayer pour celles-ci."
     },
+    "quickView": {
+      "previous": "Précédent",
+      "next": "Suivant",
+      "close": "Fermer",
+      "position": "{position} / {total}",
+      "positionUnknown": "— / {total}",
+      "viewOffer": "Voir l'offre",
+      "viewFullHistory": "Voir l'historique complet",
+      "tailoredCv": "CV adapté",
+      "coverLetter": "Lettre de motivation"
+    },
     "list": {
       "jobOfferFallback": "Offre d'emploi",
       "vsCv": "vs. {label}"

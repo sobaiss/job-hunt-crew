@@ -111,15 +111,13 @@ describe("ApplicationsPage — table (#236)", () => {
     expect(within(rows[1]!).getByText("To apply")).toBeInTheDocument();
   });
 
-  it("links the title to the Application's detail page and the offer out to its source", async () => {
+  it("links the offer out to its source, leaving the title to open the quick view", async () => {
     server.use(listApplications([FRONTEND]));
 
     renderWithProviders(<ApplicationsPage />);
 
-    expect(await screen.findByRole("link", { name: "Frontend Engineer" })).toHaveAttribute(
-      "href",
-      "/applications/app-2",
-    );
+    await screen.findByText("Frontend Engineer");
+    expect(screen.queryByRole("link", { name: "Frontend Engineer" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open the job offer" })).toHaveAttribute(
       "href",
       "https://example.com/jobs/job2",
@@ -467,6 +465,233 @@ describe("ApplicationsPage — bulk actions (#238)", () => {
       // @ts-expect-error -- jsdom has no implementation to restore to.
       delete URL.revokeObjectURL;
     }
+  });
+});
+
+/** GET /applications/:id for the quick view: the list row plus a timeline. */
+function applicationDetails(
+  applications: { id: string; status: string; jobOffer: Record<string, unknown> }[],
+) {
+  return http.get("/api/applications/:id", ({ params }) => {
+    const found = applications.find((a) => a.id === params.id);
+    if (!found) return HttpResponse.json({ error: "not found" }, { status: 404 });
+    return HttpResponse.json({
+      application: {
+        ...found,
+        jobOffer: { sourceUrl: "https://example.com/jobs/x", ...found.jobOffer },
+        statusEvents: [
+          {
+            id: `se-${found.id}`,
+            applicationId: found.id,
+            status: found.status,
+            note: `Moved ${found.id}`,
+            effectiveDate: "2026-09-20T00:00:00.000Z",
+            createdAt: "2026-09-20T00:00:00.000Z",
+          },
+        ],
+      },
+    });
+  });
+}
+
+describe("ApplicationsPage — quick view (#237)", () => {
+  beforeEach(() => {
+    __setUrl("/applications");
+  });
+
+  afterEach(() => {
+    __setUrl("/applications");
+  });
+
+  it("opens the Application quick view on a row click, showing its title, Tracking status and timeline", async () => {
+    const user = userEvent.setup();
+    server.use(listApplications([BACKEND, FRONTEND]), applicationDetails([BACKEND, FRONTEND]));
+
+    renderWithProviders(<ApplicationsPage />);
+    await user.click(await screen.findByText("Frontend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    expect(quickView.getByRole("heading", { name: "Frontend Engineer" })).toBeInTheDocument();
+    expect(quickView.getByText("In progress")).toBeInTheDocument();
+    expect(quickView.getByText("Globex · Lyon")).toBeInTheDocument();
+    expect(await quickView.findByText("Moved app-2")).toBeInTheDocument();
+    expect(quickView.getByRole("link", { name: "View full history" })).toHaveAttribute(
+      "href",
+      "/applications/app-2",
+    );
+    // No evaluation or pipeline actions on this panel.
+    expect(quickView.queryByRole("button", { name: /relaunch|requeue|generate/i })).toBeNull();
+  });
+
+  it("does not open the quick view when the row's checkbox is ticked", async () => {
+    const user = userEvent.setup();
+    server.use(listApplications([BACKEND]), applicationDetails([BACKEND]));
+
+    renderWithProviders(<ApplicationsPage />);
+    await screen.findByText("Backend Engineer");
+    await user.click(screen.getByRole("checkbox", { name: "Select Backend Engineer" }));
+
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("changes the Tracking status from the panel by appending a StatusEvent to that Application", async () => {
+    const user = userEvent.setup();
+    const statusEvents: { applicationId: string; status: string }[] = [];
+    let rejected = false;
+    server.use(
+      http.get("/api/applications", () =>
+        HttpResponse.json({
+          applications: [rejected ? { ...FRONTEND, status: "REJECTED" } : FRONTEND],
+        }),
+      ),
+      applicationDetails([FRONTEND]),
+      http.post("/api/applications/:id/status-events", async ({ params, request }) => {
+        const { status } = (await request.json()) as { status: string };
+        statusEvents.push({ applicationId: String(params.id), status });
+        rejected = true;
+        return HttpResponse.json({ application: { ...FRONTEND, status }, statusEvent: {} });
+      }),
+    );
+
+    renderWithProviders(<ApplicationsPage />);
+    await user.click(await screen.findByText("Frontend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    expect(quickView.queryByRole("button", { name: "In progress" })).not.toBeInTheDocument();
+    await user.click(quickView.getByRole("button", { name: "Rejected" }));
+
+    await waitFor(() =>
+      expect(statusEvents).toEqual([{ applicationId: "app-2", status: "REJECTED" }]),
+    );
+    // The table row follows without a reload (queried by attribute: the
+    // open Sheet hides the table from the accessibility tree).
+    await waitFor(() =>
+      expect(
+        within(
+          document.querySelector<HTMLElement>('tr[data-application-id="app-2"]')!,
+        ).getByText("Rejected"),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it("links back to the Analysis and the Scout, and to generated documents when they exist", async () => {
+    const user = userEvent.setup();
+    const withDocs = { ...FRONTEND, coverLetterDocId: "doc-cl", tailoredCvDocId: null };
+    server.use(listApplications([withDocs]), applicationDetails([withDocs]));
+
+    renderWithProviders(<ApplicationsPage />);
+    await user.click(await screen.findByText("Frontend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    expect(quickView.getByRole("link", { name: "View the analysis" })).toHaveAttribute(
+      "href",
+      "/analyses/a2",
+    );
+    expect(quickView.getByRole("link", { name: "View the Scout" })).toHaveAttribute(
+      "href",
+      "/scouts?open=scout-1",
+    );
+    expect(quickView.getByRole("link", { name: "Cover letter" })).toHaveAttribute(
+      "href",
+      "/api/generated-documents/doc-cl/download?format=pdf",
+    );
+    expect(quickView.queryByRole("link", { name: "Tailored CV" })).not.toBeInTheDocument();
+  });
+
+  it("hides 'View the Scout' when the Application has no Scout", async () => {
+    const user = userEvent.setup();
+    server.use(listApplications([BACKEND]), applicationDetails([BACKEND]));
+
+    renderWithProviders(<ApplicationsPage />);
+    await user.click(await screen.findByText("Backend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    expect(quickView.getByRole("link", { name: "View the analysis" })).toBeInTheDocument();
+    expect(quickView.queryByRole("link", { name: "View the Scout" })).not.toBeInTheDocument();
+  });
+
+  it("steps through the filtered, sorted list with Previous / Next, disabled at each end", async () => {
+    const user = userEvent.setup();
+    server.use(
+      listApplications([BACKEND, FRONTEND, DATA]),
+      applicationDetails([BACKEND, FRONTEND, DATA]),
+    );
+
+    renderWithProviders(<ApplicationsPage />);
+    // Sorted newest application first: Frontend, Data, then never-applied Backend.
+    await user.click(await screen.findByText("Frontend Engineer"));
+
+    const dialog = await screen.findByRole("dialog");
+    const quickView = within(dialog);
+    expect(quickView.getByText("1 / 3")).toBeInTheDocument();
+    expect(quickView.getByRole("button", { name: "Previous" })).toBeDisabled();
+
+    await user.click(quickView.getByRole("button", { name: "Next" }));
+    expect(await quickView.findByRole("heading", { name: "Data Engineer" })).toBeInTheDocument();
+    expect(quickView.getByText("2 / 3")).toBeInTheDocument();
+
+    await user.click(quickView.getByRole("button", { name: "Next" }));
+    expect(await quickView.findByRole("heading", { name: "Backend Engineer" })).toBeInTheDocument();
+    expect(quickView.getByRole("button", { name: "Next" })).toBeDisabled();
+
+    await user.click(quickView.getByRole("button", { name: "Previous" }));
+    expect(await quickView.findByRole("heading", { name: "Data Engineer" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toBe(dialog);
+  });
+
+  it("steps with the left and right arrow keys", async () => {
+    const user = userEvent.setup();
+    server.use(
+      listApplications([BACKEND, FRONTEND, DATA]),
+      applicationDetails([BACKEND, FRONTEND, DATA]),
+    );
+
+    renderWithProviders(<ApplicationsPage />);
+    await user.click(await screen.findByText("Frontend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    await quickView.findByRole("heading", { name: "Frontend Engineer" });
+
+    await user.keyboard("{ArrowRight}");
+    expect(await quickView.findByRole("heading", { name: "Data Engineer" })).toBeInTheDocument();
+    await user.keyboard("{ArrowLeft}");
+    expect(await quickView.findByRole("heading", { name: "Frontend Engineer" })).toBeInTheDocument();
+  });
+
+  it("flips the table page when Next crosses a page boundary", async () => {
+    const user = userEvent.setup();
+    const many = Array.from({ length: 26 }, (_, i) =>
+      application({
+        id: `app-p${i}`,
+        analysisId: `ap${i}`,
+        appliedAt: new Date(Date.UTC(2026, 8, 1) + (26 - i) * 86_400_000).toISOString(),
+        jobOffer: { id: `jp${i}`, title: `Role ${i}`, company: "Acme" },
+      }),
+    );
+    server.use(listApplications(many), applicationDetails(many));
+
+    renderWithProviders(<ApplicationsPage />);
+    await user.click(await screen.findByText("Role 24"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    await user.click(quickView.getByRole("button", { name: "Next" }));
+
+    expect(await quickView.findByRole("heading", { name: "Role 25" })).toBeInTheDocument();
+    await waitFor(() => expect(__getUrl()).toContain("page=2"));
+  });
+
+  it("closes with the Close button", async () => {
+    const user = userEvent.setup();
+    server.use(listApplications([BACKEND]), applicationDetails([BACKEND]));
+
+    renderWithProviders(<ApplicationsPage />);
+    await user.click(await screen.findByText("Backend Engineer"));
+
+    const quickView = within(await screen.findByRole("dialog"));
+    await user.click(quickView.getByRole("button", { name: "Close" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 });
 

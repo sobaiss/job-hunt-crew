@@ -1,7 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useMemo, useState } from "react";
-import Link from "next/link";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import {
@@ -28,6 +27,7 @@ import { useColumnVisibility } from "@/hooks/use-column-visibility";
 import { SortableHead } from "@/components/sortable-head";
 import { ColumnVisibilityMenu } from "@/components/column-visibility-menu";
 import { CheckboxFilterMenu } from "@/components/checkbox-filter-menu";
+import { ApplicationQuickView } from "@/components/application-quick-view";
 import { ApplicationStatsHeader } from "@/components/application-stats-header";
 import { GeneratedDocumentStatusBadge } from "@/components/generated-document-status-badge";
 import { TruncatedCell } from "@/components/truncated-cell";
@@ -160,6 +160,15 @@ function ApplicationsTable() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkError, setBulkError] = useState<string | null>(null);
 
+  // Which Application's quick view (#237) is open, looked up by id so it
+  // always reflects the latest fetch (a status change refetches the list).
+  const [quickViewId, setQuickViewId] = useState<string | null>(null);
+  const quickViewTriggerRef = useRef<HTMLElement | null>(null);
+  const quickViewApplication = useMemo(
+    () => applications?.find((a) => a.id === quickViewId) ?? null,
+    [applications, quickViewId],
+  );
+
   const state = useMemo(() => parseApplicationsTableState(searchParams), [searchParams]);
 
   const columnVisibility = useColumnVisibility(COLUMN_VISIBILITY_STORAGE_KEY, COLUMNS);
@@ -192,6 +201,51 @@ function ApplicationsTable() {
     },
     [state, router, pathname],
   );
+
+  // Quick view navigation, as on /analyses: Précédent / Suivant step through
+  // the whole filtered, sorted list, flipping the table page behind the panel
+  // when they cross a boundary. `quickViewAnchor` is the slot the panel last
+  // held, so the arrows still resume from there when a status change made
+  // from the panel drops its Application out of the active filter.
+  const quickViewIndex = useMemo(
+    () => (quickViewId === null ? -1 : sorted.findIndex((a) => a.id === quickViewId)),
+    [sorted, quickViewId],
+  );
+  const [quickViewAnchor, setQuickViewAnchor] = useState(0);
+
+  const openQuickViewAt = useCallback(
+    (id: string, rowIndex: number, element: HTMLElement) => {
+      quickViewTriggerRef.current = element;
+      setQuickViewId(id);
+      setQuickViewAnchor((page - 1) * state.pageSize + rowIndex);
+    },
+    [page, state.pageSize],
+  );
+
+  const previousIndex = quickViewIndex >= 0 ? quickViewIndex - 1 : quickViewAnchor - 1;
+  const nextIndex = quickViewIndex >= 0 ? quickViewIndex + 1 : quickViewAnchor;
+  const hasPreviousApplication = quickViewId !== null && previousIndex >= 0;
+  const hasNextApplication = quickViewId !== null && nextIndex < sorted.length;
+
+  const goToApplicationAt = useCallback(
+    (index: number) => {
+      const target = sorted[index];
+      if (!target) return;
+      setQuickViewId(target.id);
+      setQuickViewAnchor(index);
+      const targetPage = Math.floor(index / state.pageSize) + 1;
+      if (targetPage !== page) updateState({ page: targetPage });
+    },
+    [sorted, state.pageSize, page, updateState],
+  );
+
+  // Keep focus-on-close pointed at the row actually shown: after a few
+  // "Suivant" the row that opened the panel may be on another page.
+  useEffect(() => {
+    if (quickViewId === null) return;
+    const row = document.querySelector<HTMLElement>(`[data-application-id="${quickViewId}"]`);
+    if (row) quickViewTriggerRef.current = row;
+  }, [quickViewId, rows]);
 
   const pageIds = useMemo(() => rows.map((a) => a.id), [rows]);
   const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
@@ -524,7 +578,7 @@ function ApplicationsTable() {
         <>
           {isCardLayout ? (
             <div className="flex flex-col gap-3">
-              {rows.map((application) => (
+              {rows.map((application, rowIndex) => (
                 <ApplicationCard
                   key={application.id}
                   application={application}
@@ -537,6 +591,7 @@ function ApplicationsTable() {
                     title: application.jobOffer.title ?? jobOfferFallback,
                   })}
                   onToggleSelect={() => toggleRowSelection(application.id)}
+                  onOpenQuickView={(card) => openQuickViewAt(application.id, rowIndex, card)}
                 />
               ))}
             </div>
@@ -576,7 +631,7 @@ function ApplicationsTable() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rows.map((application) => (
+                {rows.map((application, rowIndex) => (
                   <ApplicationTableRow
                     key={application.id}
                     application={application}
@@ -591,6 +646,7 @@ function ApplicationsTable() {
                       title: application.jobOffer.title ?? jobOfferFallback,
                     })}
                     onToggleSelect={() => toggleRowSelection(application.id)}
+                    onOpenQuickView={(row) => openQuickViewAt(application.id, rowIndex, row)}
                   />
                 ))}
               </TableBody>
@@ -655,6 +711,21 @@ function ApplicationsTable() {
           {statsOpen && <ApplicationStatsModalBody />}
         </DialogContent>
       </Dialog>
+
+      <ApplicationQuickView
+        application={quickViewApplication}
+        open={quickViewId !== null}
+        onOpenChange={(open) => {
+          if (!open) setQuickViewId(null);
+        }}
+        returnFocusRef={quickViewTriggerRef}
+        position={quickViewIndex >= 0 ? quickViewIndex + 1 : null}
+        total={sorted.length}
+        hasPrevious={hasPreviousApplication}
+        hasNext={hasNextApplication}
+        onPrevious={() => goToApplicationAt(previousIndex)}
+        onNext={() => goToApplicationAt(nextIndex)}
+      />
     </main>
   );
 }
@@ -679,6 +750,7 @@ function ApplicationTableRow({
   selected,
   selectLabel,
   onToggleSelect,
+  onOpenQuickView,
 }: {
   application: ApplicationSummary;
   isColumnVisible: (column: ApplicationsColumn) => boolean;
@@ -690,11 +762,25 @@ function ApplicationTableRow({
   selected: boolean;
   selectLabel: string;
   onToggleSelect: () => void;
+  onOpenQuickView: (row: HTMLTableRowElement) => void;
 }) {
   const { jobOffer } = application;
   return (
-    <TableRow data-application-id={application.id}>
-      <TableCell>
+    <TableRow
+      // How the page finds this row again to hand focus back once the quick
+      // view closes — the arrows can have walked to another page since.
+      data-application-id={application.id}
+      tabIndex={0}
+      onClick={(event) => onOpenQuickView(event.currentTarget)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpenQuickView(event.currentTarget);
+        }
+      }}
+      className="cursor-pointer"
+    >
+      <TableCell onClick={(event) => event.stopPropagation()}>
         <input
           type="checkbox"
           aria-label={selectLabel}
@@ -703,9 +789,7 @@ function ApplicationTableRow({
         />
       </TableCell>
       <TableCell className="font-medium">
-        <Link href={`/applications/${application.id}`} className="hover:text-accent">
-          <TruncatedCell text={jobOffer.title ?? jobOfferFallback} maxLength={TITLE_MAX_LENGTH} />
-        </Link>
+        <TruncatedCell text={jobOffer.title ?? jobOfferFallback} maxLength={TITLE_MAX_LENGTH} />
       </TableCell>
       {isColumnVisible("company") && (
         <TableCell>
@@ -777,6 +861,7 @@ function ApplicationCard({
   selected,
   selectLabel,
   onToggleSelect,
+  onOpenQuickView,
 }: {
   application: ApplicationSummary;
   sourceSiteLabel: (value: string) => string;
@@ -786,12 +871,21 @@ function ApplicationCard({
   selected: boolean;
   selectLabel: string;
   onToggleSelect: () => void;
+  onOpenQuickView: (card: HTMLDivElement) => void;
 }) {
   const { jobOffer } = application;
   return (
     <div
       data-application-id={application.id}
-      className="flex flex-col gap-2 rounded-md border border-border bg-background p-3"
+      tabIndex={0}
+      onClick={(event) => onOpenQuickView(event.currentTarget)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpenQuickView(event.currentTarget);
+        }
+      }}
+      className="flex cursor-pointer flex-col gap-2 rounded-md border border-border bg-background p-3"
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-start gap-2">
@@ -800,15 +894,11 @@ function ApplicationCard({
             aria-label={selectLabel}
             checked={selected}
             onChange={onToggleSelect}
+            onClick={(event) => event.stopPropagation()}
             className="mt-1"
           />
           <div>
-            <Link
-              href={`/applications/${application.id}`}
-              className="font-medium hover:text-accent"
-            >
-              {jobOffer.title ?? jobOfferFallback}
-            </Link>
+            <p className="font-medium">{jobOffer.title ?? jobOfferFallback}</p>
             <p className="text-sm text-muted">
               {jobOffer.company ?? "—"} · {jobOffer.location ?? "—"}
               {jobOffer.sourceSite ? ` · ${sourceSiteLabel(jobOffer.sourceSite)}` : ""}
@@ -864,6 +954,7 @@ function OfferLink({
       target="_blank"
       rel="noopener noreferrer"
       aria-label={linkLabel}
+      onClick={(event) => event.stopPropagation()}
       className={className}
     >
       <ExternalLink className="size-4" />
