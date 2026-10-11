@@ -24,6 +24,8 @@ from py_db.models import (
     Ingestionjobstatus,
     Ingestionmode,
     JobOffer,
+    Plan,
+    PlanQuotaDefault,
     QuotaAlert,
     Quotakind,
     Scout,
@@ -1305,6 +1307,43 @@ async def list_analyses(
     rows = (await session.scalars(stmt)).all()
     now = _now()
     return AnalysisListResponse(analyses=[_analysis_response(row, now=now) for row in rows])
+
+
+class PlanSummaryResponse(BaseModel):
+    plan: str
+    quotas: dict[str, int | None]
+
+
+class PlansResponse(BaseModel):
+    plans: list[PlanSummaryResponse]
+
+
+PUBLIC_PLAN_ORDER = (Plan.FREE, Plan.STANDARD, Plan.PREMIUM)
+
+
+@router.get("/plans", response_model=PlansResponse)
+async def list_plans(session: AsyncSession = Depends(get_session)) -> PlansResponse:
+    """The three Plans and their PlanQuotaDefault caps, for the Landing
+    page's Formules section (issue #247). Needs no `X-User-Id` (the visitor
+    has no account) and deliberately ignores QuotaOverrides: it describes the
+    Plans, not a User. Read live so an Administrator's edit on the Plan
+    defaults page shows up without a redeploy (docs/adr/0014). `None` means
+    unlimited.
+    """
+    rows = (await session.scalars(select(PlanQuotaDefault))).all()
+    quotas_by_plan: dict[Plan, dict[str, int | None]] = {plan: {} for plan in PUBLIC_PLAN_ORDER}
+    for row in rows:
+        if row.plan in quotas_by_plan:
+            quotas_by_plan[row.plan][row.quotaKind.value] = row.limit
+    return PlansResponse(
+        plans=[
+            PlanSummaryResponse(
+                plan=plan.value.lower(),
+                quotas={kind.value: quotas_by_plan[plan].get(kind.value) for kind in Quotakind},
+            )
+            for plan in PUBLIC_PLAN_ORDER
+        ]
+    )
 
 
 class QuotaUsage(BaseModel):

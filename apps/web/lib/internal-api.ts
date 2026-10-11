@@ -108,3 +108,44 @@ export async function verifyCredentials(params: {
   }
   return (await res.json()) as { userId: string; role: Role };
 }
+
+export type PlanKey = "free" | "standard" | "premium";
+export type PlanQuotaKind =
+  | "ACTIVE_SCOUTS"
+  | "ANALYSES_DAILY"
+  | "ANALYSES_MONTHLY"
+  | "DOCUMENTS_DAILY";
+
+/** One Plan's PlanQuotaDefault caps, as `GET /v1/plans` returns them;
+ *  `null` means unlimited. */
+export type PlanSummary = {
+  plan: PlanKey;
+  quotas: Record<PlanQuotaKind, number | null>;
+};
+
+const PLANS_TIMEOUT_MS = 2000;
+
+// Backs the Landing page's Formules section (issue #247): a signed-out
+// visitor has no session, so this calls services/api directly instead of
+// going through a BFF route. Never throws — an error status, a network
+// failure, or no answer within 2 s all yield `null`, and the section falls
+// back to cards without figures rather than failing the page.
+export async function fetchPlans(): Promise<PlanSummary[] | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PLANS_TIMEOUT_MS);
+  try {
+    const res = await internalApiFetch("/v1/plans", {
+      signal: controller.signal,
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      return null;
+    }
+    const data = (await res.json()) as { plans?: PlanSummary[] };
+    return Array.isArray(data.plans) ? data.plans : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}

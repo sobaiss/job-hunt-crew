@@ -6,6 +6,7 @@
     "tagline": "Comparez votre CV à de vraies offres d'emploi et sachez exactement où vous en êtes.",
     "description": "Job Hunt Crew lit une offre d'emploi et l'un de vos CV, puis affiche les compétences qui correspondent, les manques et ce qu'il faut changer avant de postuler.",
     "signIn": "Se connecter",
+    "startFree": "Commencer gratuitement",
     "signInMethods": "Connexion par e-mail, Google ou LinkedIn.",
     "nav": {
       "how": "Comment ça marche",
@@ -65,6 +66,31 @@
       "point1": "Les CV et les analyses sont privés à votre compte",
       "point2": "Seules les annonces sont partagées, et uniquement comme données publiques dédupliquées",
       "point3": "Connexion via Google, LinkedIn ou un lien e-mail — aucun mot de passe à compromettre"
+    },
+    "plans": {
+      "eyebrow": "Formules",
+      "heading": "Commencez gratuitement, montez en volume si besoin",
+      "body": "Toutes les fonctionnalités sont incluses dans chaque formule. Seuls les volumes changent.",
+      "free": {
+        "name": "Free",
+        "subtitle": "Pour découvrir"
+      },
+      "standard": {
+        "name": "Standard",
+        "subtitle": "Pour une recherche active"
+      },
+      "premium": {
+        "name": "Premium",
+        "subtitle": "Pour une recherche intensive"
+      },
+      "quotas": {
+        "activeScouts": "Agents actifs",
+        "analysesDaily": "Analyses par jour",
+        "analysesMonthly": "Analyses par mois",
+        "documentsDaily": "Documents générés par jour"
+      },
+      "unlimited": "Illimité",
+      "note": "Standard et Premium sont attribuées sur demande une fois inscrit. Pas de paiement en ligne pour l'instant."
     },
     "faq": {
       "heading": "Questions fréquentes",

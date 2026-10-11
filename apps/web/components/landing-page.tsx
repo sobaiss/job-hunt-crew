@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import type { PlanQuotaKind, PlanSummary } from "@/lib/internal-api";
 import { MatchScoreGauge } from "@/components/match-score-gauge";
 import { LocaleSwitch } from "@/components/locale-switch";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -178,6 +179,86 @@ function HeroPreviewCard() {
   );
 }
 
+const PLAN_KEYS = ["free", "standard", "premium"] as const;
+
+const PLAN_QUOTA_ROWS: ReadonlyArray<{
+  kind: PlanQuotaKind;
+  labelKey: "activeScouts" | "analysesDaily" | "analysesMonthly" | "documentsDaily";
+}> = [
+  { kind: "ACTIVE_SCOUTS", labelKey: "activeScouts" },
+  { kind: "ANALYSES_DAILY", labelKey: "analysesDaily" },
+  { kind: "ANALYSES_MONTHLY", labelKey: "analysesMonthly" },
+  { kind: "DOCUMENTS_DAILY", labelKey: "documentsDaily" },
+];
+
+/**
+ * The Formules section (issue #247): the three Plans side by side by their
+ * live PlanQuotaDefault caps, never a price. With `plans` null (the API
+ * errored or timed out) each card keeps only its name and subtitle — no
+ * figure is ever hard-coded here.
+ */
+function PlansSection({ plans }: { plans: PlanSummary[] | null }) {
+  const t = useTranslations("landing.plans");
+  const tLanding = useTranslations("landing");
+
+  return (
+    <section id="plans" className="flex flex-col gap-10">
+      <div className="flex flex-col items-center gap-3 text-center">
+        <Eyebrow>{t("eyebrow")}</Eyebrow>
+        <h2 className="font-serif text-3xl font-semibold tracking-tight">
+          {t("heading")}
+        </h2>
+        <p className="max-w-xl text-muted">{t("body")}</p>
+      </div>
+      <ul className="grid gap-5 md:grid-cols-3">
+        {PLAN_KEYS.map((key) => {
+          const quotas = plans?.find((p) => p.plan === key)?.quotas;
+          return (
+            <li key={key} className="flex">
+              <Card className="flex-1 gap-5 py-6">
+                <div className="flex flex-1 flex-col gap-5 px-6">
+                  <div className="flex flex-col gap-1">
+                    <h3 className="font-serif text-xl font-semibold">
+                      {t(`${key}.name`)}
+                    </h3>
+                    <p className="text-sm text-muted">{t(`${key}.subtitle`)}</p>
+                  </div>
+                  {quotas && (
+                    <dl className="flex flex-col divide-y divide-border text-sm">
+                      {PLAN_QUOTA_ROWS.map(({ kind, labelKey }) => {
+                        const limit = quotas[kind];
+                        return (
+                          <div
+                            key={kind}
+                            className="flex items-baseline justify-between gap-4 py-2"
+                          >
+                            <dt className="text-muted">{t(`quotas.${labelKey}`)}</dt>
+                            <dd className="font-medium tabular-nums">
+                              {limit == null ? t("unlimited") : limit}
+                            </dd>
+                          </div>
+                        );
+                      })}
+                    </dl>
+                  )}
+                  <Button
+                    asChild
+                    variant={key === "free" ? "default" : "secondary"}
+                    className="mt-auto"
+                  >
+                    <Link href="/sign-in">{tLanding("startFree")}</Link>
+                  </Button>
+                </div>
+              </Card>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="text-center text-sm text-muted">{t("note")}</p>
+    </section>
+  );
+}
+
 /**
  * The public front door for a signed-out Visitor: a marketing page with a
  * single repeated primary action ("Sign in"). No pricing, no testimonials, no
@@ -185,7 +266,7 @@ function HeroPreviewCard() {
  * daily-analysis-cap number and the legal links are shown as visible
  * placeholders, not invented values. Lives outside the App shell.
  */
-export function LandingPage() {
+export function LandingPage({ plans }: { plans: PlanSummary[] | null }) {
   const t = useTranslations("landing");
 
   const steps = [
@@ -392,6 +473,8 @@ export function LandingPage() {
             ))}
           </ul>
         </section>
+
+        <PlansSection plans={plans} />
 
         {/* FAQ */}
         <section id="faq" className="flex flex-col gap-8">

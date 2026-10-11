@@ -6,6 +6,7 @@
     "tagline": "Match your CV against real job offers and see exactly where you stand.",
     "description": "Job Hunt Crew reads a job posting and one of your CVs, then shows the matched skills, the gaps, and what to change before you apply.",
     "signIn": "Sign in",
+    "startFree": "Start for free",
     "signInMethods": "Sign in with email, Google, or LinkedIn.",
     "nav": {
       "how": "How it works",
@@ -65,6 +66,31 @@
       "point1": "CVs and analyses are private to your account",
       "point2": "Job postings are the only shared data, and only as de-duplicated public records",
       "point3": "Sign in with Google, LinkedIn, or an email link — no password to leak"
+    },
+    "plans": {
+      "eyebrow": "Plans",
+      "heading": "Start for free, scale up when you need to",
+      "body": "Every feature is included in every plan. Only the volumes change.",
+      "free": {
+        "name": "Free",
+        "subtitle": "To get started"
+      },
+      "standard": {
+        "name": "Standard",
+        "subtitle": "For an active search"
+      },
+      "premium": {
+        "name": "Premium",
+        "subtitle": "For an intensive search"
+      },
+      "quotas": {
+        "activeScouts": "Active agents",
+        "analysesDaily": "Analyses per day",
+        "analysesMonthly": "Analyses per month",
+        "documentsDaily": "Documents generated per day"
+      },
+      "unlimited": "Unlimited",
+      "note": "Standard and Premium are granted on request once you've signed up. No online payment for now."
     },
     "faq": {
       "heading": "Frequently asked questions",

@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { AppShell } from "@/components/app-shell";
 import { Dashboard } from "@/components/dashboard";
 import { LandingPage } from "@/components/landing-page";
+import { fetchPlans } from "@/lib/internal-api";
 
 // The public front door. A signed-out Visitor sees the marketing page; a
 // signed-in Candidate gets the Dashboard (spec #43) inside the App shell — the
@@ -10,7 +11,9 @@ import { LandingPage } from "@/components/landing-page";
 // inheriting app/(app)/layout.tsx. An Administrator has no Analyses, Scouts,
 // or CV Versions to summarize, so this Dashboard is meaningless for that role
 // (the nav row is already hidden, see app-sidebar.tsx's ADMIN_HIDDEN_NAV_KEYS)
-// — it's redirected to the Admin dashboard instead.
+// — it's redirected to the Admin dashboard instead. Only the Visitor path
+// reads the live Plan quotas (issue #247); `null` puts the Formules section in
+// its figure-less fallback.
 export default async function LandingRoute() {
   const session = await auth();
   if (session?.user) {
@@ -25,5 +28,5 @@ export default async function LandingRoute() {
     );
   }
 
-  return <LandingPage />;
+  return <LandingPage plans={await fetchPlans()} />;
 }
