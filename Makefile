@@ -1,18 +1,33 @@
-.PHONY: up down web-up web-down migrate seed clean-analyses clean-analyses-scout clean-analyses-failed archive-scouts worker worker-once verify-sites test test-db
+.PHONY: up down reset web-up web-down migrate seed clean-analyses clean-analyses-scout clean-analyses-failed archive-scouts worker worker-once verify-sites test test-db
 
 # The repo's single env file (#255, documented by .env.example). Host-side
 # commands below source it first; a missing file is fine (CI sets its env
 # directly). Values in it override the shell's.
 LOAD_ENV = set -a; [ -f .env ] && . ./.env; set +a;
 
-# Start local infrastructure (Postgres, MinIO, ElasticMQ, Step Functions
-# Local, api, worker). The `migrate` service applies pending Prisma
-# migrations before `api` starts — see docker-compose.yml.
+# Start local infrastructure (Postgres, MinIO, ElasticMQ, api, worker).
+# Step Functions Local is behind the `stepfunctions` profile and isn't
+# started here: `docker compose --profile stepfunctions up -d` does.
 up:
 	docker compose up -d
 
 down:
 	docker compose down
+
+# Start over: stop the stack and delete its data volumes (Postgres, MinIO).
+# .env is left untouched, so its secrets and settings survive. Without
+# CONFIRM=1 this only reports what it would delete, like clean-analyses.
+# `--profile stepfunctions` so a running stepfunctions-local stops too.
+reset:
+	@if [ "$(CONFIRM)" = "1" ]; then \
+		docker compose --profile stepfunctions down -v; \
+	else \
+		project=$$(docker compose config --format json | sed -n 's/^ *"name": "\([^"]*\)".*/\1/p' | head -1); \
+		echo "This would stop the stack and delete its data volumes:"; \
+		docker compose config --volumes | sed "s/^/  $${project}_/"; \
+		echo "(every Postgres row and MinIO object). .env is kept."; \
+		echo "Re-run as: make reset CONFIRM=1"; \
+	fi
 
 # Run apps/web itself in Docker — the alternative to `pnpm dev` (see
 # apps/web/docker-compose.yml and docs/adr/0026). Foreground, not `-d`:
@@ -161,8 +176,11 @@ TEST_DB_NAME = jhc_test
 TEST_DATABASE_URL = postgresql://postgres:postgres@localhost:5432/$(TEST_DB_NAME)?schema=public
 
 # Drop, recreate, migrate and seed the throwaway database. Seeding matters:
-# some API tests assert on the seeded SiteConfig rows.
+# some API tests assert on the seeded SiteConfig rows. Also starts
+# stepfunctions-local (off by default, `stepfunctions` profile): the analysis
+# suite's workflow e2e test runs against it.
 test-db:
+	docker compose --profile stepfunctions up -d --wait stepfunctions-local
 	docker compose exec -T postgres psql -U postgres -c "drop database if exists $(TEST_DB_NAME);"
 	docker compose exec -T postgres psql -U postgres -c "create database $(TEST_DB_NAME);"
 	DATABASE_URL="$(TEST_DATABASE_URL)" pnpm --filter @job-hunt-crew/prisma exec prisma migrate deploy

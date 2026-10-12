@@ -206,7 +206,7 @@ against them (and CVVersion) must filter by the authenticated `userId`.
 
 - Node.js ≥ 22.13, [pnpm](https://pnpm.io/) (pinned via Corepack — `packageManager: pnpm@11.23.0`)
 - Python ≥ 3.11, [uv](https://docs.astral.sh/uv/)
-- Docker (for Postgres, MinIO, ElasticMQ, Step Functions Local)
+- Docker (for Postgres, MinIO, ElasticMQ, and optionally Step Functions Local)
 
 ### 1. Install dependencies
 
@@ -224,7 +224,7 @@ docker compose up -d
 ```
 
 This starts Postgres, MinIO (S3-compatible, auto-creates the `job-hunt-crew`
-bucket), ElasticMQ (SQS-compatible), Step Functions Local, `migrate` (applies
+bucket), ElasticMQ (SQS-compatible), `migrate` (applies
 pending Prisma migrations against Postgres, then exits — see
 `packages/prisma/Dockerfile`), the `api` container (FastAPI, built from the
 repo root so `uv` can resolve the workspace), and `worker` (the local
@@ -235,6 +235,19 @@ all work out of the box — see
 `services/ingestion/src/ingestion/local_worker.py`). `api` waits for
 `migrate` to finish successfully before starting, so a fresh Postgres volume
 never leaves `api` running against a missing schema.
+
+Postgres (5432), MinIO (9000, console 9001) and ElasticMQ (9324) publish
+their ports on `127.0.0.1` only: reachable from this machine, not from your
+network, since they run with default credentials. Step Functions Local is
+behind the `stepfunctions` profile and isn't started by default:
+
+```bash
+docker compose --profile stepfunctions up -d
+```
+
+To start over, `make reset CONFIRM=1` stops the stack and deletes the
+Postgres and MinIO volumes, keeping `.env` (without `CONFIRM=1` it only
+reports what it would delete).
 
 ### 3. Configure environment variables
 
@@ -423,7 +436,8 @@ make worker              # long-running; Ctrl-C to stop
 # or one-shot: make worker-once   (drains what is queued, then exits)
 ```
 
-`WORKER_ANALYSIS_MODE=stepfunctions make worker` additionally needs the
+`WORKER_ANALYSIS_MODE=stepfunctions make worker` additionally needs
+`stepfunctions-local` (`docker compose --profile stepfunctions up -d`), the
 Lambda shim, a Step Functions execution, and
 `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` in the environment — see the comments
 in `docker-compose.yml` (`stepfunctions-local` / `worker` services) and
@@ -440,6 +454,7 @@ make clean-analyses CONFIRM=1                  # delete every Analysis
 make clean-analyses-failed CONFIRM=1           # delete FAILED Analyses only
 make clean-analyses-scout SCOUT_ID=<id>        # delete one Scout's Analyses
 make archive-scouts CONFIRM=1                  # set every Scout to ARCHIVED
+make reset CONFIRM=1                           # wipe Postgres + MinIO volumes, keep .env
 make verify-sites [SITES=LINKEDIN]             # live check of the job sources
 ```
 

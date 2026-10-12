@@ -7,7 +7,11 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: job_hunt_crew
     ports:
-      - "5432:5432"
+      # Published on 127.0.0.1 only (#256): reachable from this machine
+      # (`make migrate`, `make test`, host-side tools), never from the LAN,
+      # since the credentials above are the published defaults. Same for
+      # MinIO and ElasticMQ below; containers use the compose network.
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -35,8 +39,10 @@ services:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      # 9000 must stay reachable from the browser on this machine: the `api`
+      # presigns upload URLs against http://localhost:9000.
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     volumes:
       - minio-data:/data
     healthcheck:
@@ -66,7 +72,7 @@ services:
     image: softwaremill/elasticmq:1.6.7
     restart: unless-stopped
     ports:
-      - "9324:9324"
+      - "127.0.0.1:9324:9324"
     volumes:
       - ./elasticmq.conf:/opt/elasticmq.conf:ro
 
@@ -76,11 +82,17 @@ services:
   # for the 3 real AnalysisWorkflow Lambda functions (M5-T2) — run it via
   # `uv run --package analysis python -m analysis.lambda_shim` before
   # starting an execution.
+  #
+  # Behind the `stepfunctions` profile (#256): `make up` doesn't start it, as
+  # the default `worker` runs the AnalysisWorkflow in-process
+  # (WORKER_ANALYSIS_MODE=local). Start it with
+  #   docker compose --profile stepfunctions up -d
   stepfunctions-local:
     image: amazon/aws-stepfunctions-local:2.0.0
+    profiles: [stepfunctions]
     restart: unless-stopped
     ports:
-      - "8083:8083"
+      - "127.0.0.1:8083:8083"
     environment:
       LAMBDA_ENDPOINT: http://host.docker.internal:9099
     extra_hosts:
@@ -213,7 +225,8 @@ services:
   #     runs the CoverLetterWriterAgent / CVTailoringAgent in-process, the
   #     same simplification analysis-intake's local mode uses.
   # Set WORKER_ANALYSIS_MODE=stepfunctions + run `make worker` on the host to
-  # exercise the real Step Functions state machine instead.
+  # exercise the real Step Functions state machine instead (with the
+  # `stepfunctions` profile enabled, see `stepfunctions-local` above).
   worker:
     build:
       context: .
