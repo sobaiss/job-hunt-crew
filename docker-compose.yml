@@ -110,6 +110,12 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
+    # Every tuning knob in the root .env (#255, see .env.example's "Advanced"
+    # section) reaches this service. `environment:` below wins over it, so the
+    # container wiring (DATABASE_URL, S3_*, SQS_*) stays the compose network's.
+    env_file:
+      - path: .env
+        required: false
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/job_hunt_crew
       INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-dev-internal-api-secret}
@@ -169,9 +175,6 @@ services:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       HF_TOKEN: ${HF_TOKEN:-}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
-      # POST /v1/analyses enforces this per-user daily cap (default 50);
-      # override locally to raise it for repeated testing.
-      DAILY_ANALYSIS_CAP: ${DAILY_ANALYSIS_CAP:-50}
     depends_on:
       postgres:
         condition: service_healthy
@@ -216,6 +219,10 @@ services:
       context: .
       dockerfile: services/ingestion/Dockerfile
     restart: unless-stopped
+    # Same as `api` above: the root .env's knobs, under the wiring below.
+    env_file:
+      - path: .env
+        required: false
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/job_hunt_crew
       WORKER_QUEUES: cv-conversion,ingestion-intake,analysis-intake,scout-intake,generation-intake
@@ -288,10 +295,6 @@ services:
       # Set to 0 to switch the browser tier off entirely (WTTJ then reports
       # its AWS WAF challenge as a block instead of rendering through it).
       BROWSER_FETCH_ENABLED: ${BROWSER_FETCH_ENABLED:-1}
-      # Same per-user daily Analysis cap create_analyses_for_ready_offers
-      # enforces during a Scout/ingestion fan-out — kept equal to api's above
-      # so the two never drift (py_db/quota.py is their shared source of truth).
-      DAILY_ANALYSIS_CAP: ${DAILY_ANALYSIS_CAP:-50}
     depends_on:
       postgres:
         condition: service_healthy

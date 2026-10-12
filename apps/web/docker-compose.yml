@@ -19,10 +19,12 @@ services:
       dockerfile: apps/web/Dockerfile
     ports:
       - "3000:3000"
+    # The repo's single root .env (#255), the same file `pnpm dev` reads.
     env_file:
-      - ./.env
+      - ../../.env
     environment:
-      # Overrides apps/web/.env's `API_BASE_URL=http://localhost:8000`:
+      # Overrides the root .env's `API_BASE_URL` (http://localhost:8000 when
+      # unset):
       # `localhost` inside this container is the container itself, not the
       # host machine where the `api` container actually publishes its port.
       API_BASE_URL: http://host.docker.internal:8000

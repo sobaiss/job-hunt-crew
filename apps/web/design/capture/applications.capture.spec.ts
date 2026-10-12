@@ -21,9 +21,9 @@ const ORIGIN = "http://localhost:3000";
 
 function authSecret(): string {
   if (process.env.AUTH_SECRET) return process.env.AUTH_SECRET;
-  const env = fs.readFileSync(path.join(WEB_ROOT, ".env"), "utf8");
+  const env = fs.readFileSync(path.join(WEB_ROOT, "..", "..", ".env"), "utf8");
   const match = env.match(/^\s*AUTH_SECRET\s*=\s*"?([^"\n]+?)"?\s*$/m);
-  if (!match) throw new Error("AUTH_SECRET not found in apps/web/.env");
+  if (!match) throw new Error("AUTH_SECRET not found in the root .env");
   return match[1];
 }
 

@@ -1,5 +1,10 @@
 .PHONY: up down web-up web-down migrate seed clean-analyses clean-analyses-scout clean-analyses-failed archive-scouts worker worker-once verify-sites test test-db
 
+# The repo's single env file (#255, documented by .env.example). Host-side
+# commands below source it first; a missing file is fine (CI sets its env
+# directly). Values in it override the shell's.
+LOAD_ENV = set -a; [ -f .env ] && . ./.env; set +a;
+
 # Start local infrastructure (Postgres, MinIO, ElasticMQ, Step Functions
 # Local, api, worker). The `migrate` service applies pending Prisma
 # migrations before `api` starts — see docker-compose.yml.
@@ -22,12 +27,13 @@ web-down:
 	docker compose -f apps/web/docker-compose.yml down
 
 # Re-run migrations against the running compose Postgres without a full
-# `docker compose up` (e.g. after pulling new migrations).
+# `docker compose up` (e.g. after pulling new migrations). DATABASE_URL comes
+# from the root .env.
 migrate:
-	pnpm --filter @job-hunt-crew/prisma exec prisma migrate deploy
+	@$(LOAD_ENV) pnpm --filter @job-hunt-crew/prisma exec prisma migrate deploy
 
 seed:
-	pnpm --filter @job-hunt-crew/prisma exec prisma db seed
+	@$(LOAD_ENV) pnpm --filter @job-hunt-crew/prisma exec prisma db seed
 
 # Talks to the compose Postgres container directly — no host psql required,
 # matching how `up`/`down` don't assume anything beyond Docker. Requires
@@ -101,10 +107,9 @@ clean-analyses-failed:
 # values as the compose `worker` service, but on localhost instead of the
 # docker-network hostnames. Without SQS_ENDPOINT set, boto3 falls back to real
 # AWS and `make worker` dies with `InvalidAddress ... sqs.us-east-1.amazonaws.com`.
-# Inline `VAR=val` overrides only these; WORKER_QUEUES / WORKER_ANALYSIS_MODE /
-# LLM_PROVIDER / ANTHROPIC_API_KEY / OLLAMA_BASE_URL still come from your shell.
+# These win over the root .env, which supplies everything else (DATABASE_URL,
+# WORKER_QUEUES / WORKER_ANALYSIS_MODE, LLM_PROVIDER and its key, ...).
 WORKER_LOCAL_ENV = \
-	DATABASE_URL=postgresql://postgres:postgres@localhost:5432/job_hunt_crew \
 	SQS_ENDPOINT=http://localhost:9324 SQS_REGION=us-east-1 \
 	SQS_ACCESS_KEY_ID=x SQS_SECRET_ACCESS_KEY=x \
 	S3_ENDPOINT=http://localhost:9000 S3_REGION=us-east-1 S3_BUCKET=job-hunt-crew \
@@ -123,11 +128,11 @@ WORKER_LOCAL_ENV = \
 # additionally needs the Lambda shim running + a registered state machine +
 # ANALYSIS_WORKFLOW_STATE_MACHINE_ARN — see README section 5).
 worker:
-	$(WORKER_LOCAL_ENV) uv run --package ingestion python -m ingestion.local_worker
+	@$(LOAD_ENV) $(WORKER_LOCAL_ENV) uv run --package ingestion python -m ingestion.local_worker
 
 # Drain whatever is currently queued, then exit.
 worker-once:
-	$(WORKER_LOCAL_ENV) WORKER_RUN_ONCE=1 uv run --package ingestion python -m ingestion.local_worker
+	@$(LOAD_ENV) $(WORKER_LOCAL_ENV) WORKER_RUN_ONCE=1 uv run --package ingestion python -m ingestion.local_worker
 
 # Ask the live sites, per site and per filter, whether each Search filter is
 # actually honoured — by rejection on an API source, by differential result
@@ -137,8 +142,7 @@ worker-once:
 # that contains no fault. Its output is for a developer to read.
 # SITES=LINKEDIN (space-separated site keys) narrows it to some sites.
 verify-sites:
-	@set -a; [ -f .env ] && . ./.env; set +a; \
-	uv run --package ingestion python -m ingestion.site_verification $(SITES)
+	@$(LOAD_ENV) uv run --package ingestion python -m ingestion.site_verification $(SITES)
 
 # --- Tests -----------------------------------------------------------------
 #

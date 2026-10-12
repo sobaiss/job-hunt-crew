@@ -5,3 +5,6 @@ apps/web/.next
 **/__pycache__
 **/.pytest_cache
 **/*.pyc
+# Env files hold secrets and are never baked into an image: compose passes
+# the root .env in at run time (`env_file`, interpolation).
+**/.env
