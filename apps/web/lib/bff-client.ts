@@ -37,6 +37,22 @@ function isBlockedResponse(data: unknown): boolean {
   return isRecord(data) && isRecord(data.detail) && data.detail.code === "USER_BLOCKED";
 }
 
+// A Session is a 30-minute JWT (auth.ts) and proxy.ts only checks the cookie
+// is present, so an expired Session reaches the page and every BFF route
+// answers 401 (issue #253). The first 401 signs the Candidate out with their
+// current page (path + query, no hash) as callbackUrl; with the cookie gone,
+// proxy.ts bounces that page to /sign-in?callbackUrl=<same>, which
+// SignInForm reads back. Never reset: the page is leaving.
+let isRedirectingToLogin = false;
+
+function redirectToSignIn(): void {
+  if (isRedirectingToLogin) return;
+  isRedirectingToLogin = true;
+  void signOut({
+    callbackUrl: window.location.pathname + window.location.search,
+  });
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
@@ -61,6 +77,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     if (isBlockedResponse(data)) {
       void signOut({ callbackUrl: "/account-blocked" });
+    } else if (response.status === 401) {
+      redirectToSignIn();
+      // Never settles: the caller stays in its loading state until the
+      // redirect lands, instead of rendering an error or undefined data.
+      return new Promise<T>(() => {});
     }
     const message =
       isRecord(data) && typeof data.error === "string"

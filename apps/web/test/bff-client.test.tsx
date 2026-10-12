@@ -96,3 +96,93 @@ describe("bff client", () => {
     expect(signOut).not.toHaveBeenCalled();
   });
 });
+
+// issue #253: an expired Session makes every BFF route answer 401. The client
+// signs the Candidate out once and sends them to /sign-in with their current
+// page as callbackUrl, instead of surfacing a BffError to the page.
+describe("bff client on an expired session (401)", () => {
+  // The one-redirect guard lives for the page's lifetime, so each test loads
+  // a fresh copy of the module.
+  async function loadClient() {
+    vi.resetModules();
+    return import("@/lib/bff-client");
+  }
+
+  // Settles to "pending" if the request neither resolved nor rejected.
+  async function outcomeOf(promise: Promise<unknown>) {
+    return Promise.race([
+      promise.then(
+        () => "resolved",
+        (err: unknown) => err,
+      ),
+      new Promise((resolve) => setTimeout(() => resolve("pending"), 50)),
+    ]);
+  }
+
+  beforeEach(() => {
+    window.history.pushState({}, "", "/analyses?status=READY&sort=score#top");
+  });
+
+  it("signs out with the current path and query as callbackUrl, without throwing", async () => {
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({ error: "Unauthorized" }, { status: 401 }),
+      ),
+    );
+    const client = await loadClient();
+
+    expect(await outcomeOf(client.bff.get("/analyses"))).toBe("pending");
+    expect(signOut).toHaveBeenCalledTimes(1);
+    expect(signOut).toHaveBeenCalledWith({
+      callbackUrl: "/analyses?status=READY&sort=score",
+    });
+  });
+
+  it("signs out only once when parallel requests all get a 401", async () => {
+    server.use(
+      http.get("/api/*", () =>
+        HttpResponse.json({ error: "Unauthorized" }, { status: 401 }),
+      ),
+    );
+    const client = await loadClient();
+
+    const outcomes = await Promise.all([
+      outcomeOf(client.bff.get("/analyses")),
+      outcomeOf(client.bff.get("/scouts")),
+      outcomeOf(client.bff.get("/applications")),
+    ]);
+
+    expect(outcomes).toEqual(["pending", "pending", "pending"]);
+    expect(signOut).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes a USER_BLOCKED 401 to /account-blocked, not to /sign-in", async () => {
+    server.use(
+      http.get("/api/scouts", () =>
+        HttpResponse.json(
+          { detail: { code: "USER_BLOCKED", message: "This account is blocked" } },
+          { status: 401 },
+        ),
+      ),
+    );
+    const client = await loadClient();
+
+    await expect(client.bff.get("/scouts")).rejects.toBeInstanceOf(client.BffError);
+    expect(signOut).toHaveBeenCalledTimes(1);
+    expect(signOut).toHaveBeenCalledWith({ callbackUrl: "/account-blocked" });
+  });
+
+  it.each([429, 500])("still throws a BffError on a %i and does not sign out", async (status) => {
+    server.use(
+      http.get("/api/analyses", () =>
+        HttpResponse.json({ error: "Nope" }, { status }),
+      ),
+    );
+    const client = await loadClient();
+
+    const err = (await client.bff.get("/analyses").catch((e) => e)) as BffError;
+    expect(err).toBeInstanceOf(client.BffError);
+    expect(err.status).toBe(status);
+    expect(signOut).not.toHaveBeenCalled();
+  });
+});
