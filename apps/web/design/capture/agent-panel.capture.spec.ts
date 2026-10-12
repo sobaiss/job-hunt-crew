@@ -6,7 +6,7 @@ import { encode } from "next-auth/jwt";
 
 // Regenerates apps/web/public/agent-panel-{light,dark}.png — the real Agent
 // panel the Landing page's #agents section shows (Landing v2, #248). Same
-// recipe as dashboard.capture.spec.ts: a locally-minted session and every
+// recipe as the other capture scenarios: a locally-minted session and every
 // `/api/*` call faked with demo data. The demo agent is the hero card's
 // ("Data Engineer — Paris": Payflow 91, Kessel 84, Novable 76, a run this
 // morning with 31 offers analysed and 4 relevant).

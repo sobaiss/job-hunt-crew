@@ -6,7 +6,7 @@ import { defineConfig, devices } from "@playwright/test";
 // #agents section shows (agent-panel.capture.spec.ts), an Analysis's generated
 // documents for its #documents section (tailored-cv.capture.spec.ts), the
 // Application quick view for its #applications section
-// (applications.capture.spec.ts), and the Dashboard (dashboard.capture.spec.ts).
+// (applications.capture.spec.ts).
 //
 // Run it by hand when one of those screens changes (append a file name to run
 // a single scenario):
