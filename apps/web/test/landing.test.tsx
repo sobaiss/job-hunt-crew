@@ -693,6 +693,84 @@ describe("Landing route (Documents section, issue #250)", () => {
   });
 });
 
+const APPLICATIONS_COPY = {
+  en: {
+    eyebrow: "Application tracking",
+    heading: "All your applications, from sending to reply",
+    body: "As soon as you generate a document or mark an offer as applied, it joins your tracker.",
+    points: [
+      "Clear statuses: to apply, in progress, rejected, accepted, withdrawn.",
+      "A dated history of every change, with your notes.",
+      "In one place: the CV you used, the agent that found the offer, the generated letter and CV.",
+      "Statistics over 30 days or since the start, and a CSV export.",
+    ],
+    alt: "The Senior Data Engineer application at Payflow, opened from the tracker: its status, the CV used, the generated documents and the dated history.",
+  },
+  fr: {
+    eyebrow: "Suivi des candidatures",
+    heading: "Toutes vos candidatures, de l'envoi à la réponse",
+    body: "Dès que vous générez un document ou marquez une offre comme postulée, elle rejoint votre suivi.",
+    points: [
+      "Des statuts clairs : à postuler, en cours, refusé, accepté, retiré.",
+      "Un historique daté de chaque changement, avec vos notes.",
+      "Au même endroit : le CV utilisé, l'agent qui a trouvé l'offre, la lettre et le CV générés.",
+      "Des statistiques sur 30 jours ou depuis le début, et un export CSV.",
+    ],
+    alt: "La candidature Senior Data Engineer chez Payflow, ouverte depuis le suivi : son statut, le CV utilisé, les documents générés et l'historique daté.",
+  },
+} as const;
+
+describe("Landing route (Applications section, issue #251)", () => {
+  it.each(["en", "fr"] as const)(
+    "shows the #applications section with its heading, text and four points (%s)",
+    async (locale) => {
+      await renderSignedOutRoute(locale);
+      const copy = APPLICATIONS_COPY[locale];
+
+      const section = within(sectionById("applications"));
+      expect(section.getByText(copy.eyebrow)).toBeInTheDocument();
+      expect(
+        section.getByRole("heading", { level: 2, name: copy.heading }),
+      ).toBeInTheDocument();
+      expect(section.getByText(copy.body)).toBeInTheDocument();
+      expect(
+        section.getAllByRole("listitem").map((li) => li.textContent),
+      ).toEqual(copy.points);
+    },
+  );
+
+  it("sits right after the Documents section", async () => {
+    await renderSignedOutRoute();
+
+    expect(sectionById("documents").nextElementSibling).toBe(sectionById("applications"));
+  });
+
+  it("shows the applications capture as a light/dark pair, with alt text, visual on the right", async () => {
+    await renderSignedOutRoute();
+    const section = sectionById("applications");
+
+    expect(section).toHaveAttribute("data-visual", "right");
+    const images = Array.from(section.querySelectorAll("img"));
+    expect(images.map((img) => img.getAttribute("src"))).toEqual([
+      expect.stringContaining("applications-light.png"),
+      expect.stringContaining("applications-dark.png"),
+    ]);
+    expect(images[0]).toHaveClass("dark:hidden");
+    expect(images[1]).toHaveClass("hidden", "dark:block");
+    for (const img of images) {
+      expect(img).toHaveAttribute("alt", APPLICATIONS_COPY.en.alt);
+    }
+  });
+
+  it("puts the applications capture's alt text in French too", async () => {
+    await renderSignedOutRoute("fr");
+
+    for (const img of Array.from(sectionById("applications").querySelectorAll("img"))) {
+      expect(img).toHaveAttribute("alt", APPLICATIONS_COPY.fr.alt);
+    }
+  });
+});
+
 describe("TextVisualSection", () => {
   it.each(["left", "right"] as const)(
     "renders its eyebrow, heading, body, points and capture with the visual on the %s",

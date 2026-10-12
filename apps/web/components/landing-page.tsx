@@ -119,6 +119,13 @@ const DOCUMENT_POINTS = ["point1", "point2", "point3", "point4", "point5"] as co
  *  design/capture/tailored-cv.capture.spec.ts. */
 const TAILORED_CV_SIZE = { width: 975, height: 578 };
 
+/** The Applications section's points (spec landing-v2 §6). */
+const APPLICATION_POINTS = ["point1", "point2", "point3", "point4"] as const;
+
+/** The intrinsic size of the applications-{light,dark}.png pair, written by
+ *  design/capture/applications.capture.spec.ts. */
+const APPLICATIONS_SIZE = { width: 672, height: 760 };
+
 /** The anchor links shared by the header and the footer's Product column. */
 const NAV_LINKS = [
   { key: "how", href: "#how" },
@@ -410,6 +417,21 @@ export function LandingPage({ plans }: { plans: PlanSummary[] | null }) {
             darkSrc: "/tailored-cv-dark.png",
             alt: t("documents.imageAlt"),
             ...TAILORED_CV_SIZE,
+          }}
+        />
+
+        <TextVisualSection
+          id="applications"
+          visual="right"
+          eyebrow={t("applications.eyebrow")}
+          heading={t("applications.heading")}
+          body={t("applications.body")}
+          points={APPLICATION_POINTS.map((p) => t(`applications.${p}`))}
+          image={{
+            lightSrc: "/applications-light.png",
+            darkSrc: "/applications-dark.png",
+            alt: t("applications.imageAlt"),
+            ...APPLICATIONS_SIZE,
           }}
         />
 

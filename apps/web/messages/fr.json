@@ -62,6 +62,16 @@
       "point5": "Produits uniquement à votre demande, document par document. Votre CV d'origine n'est jamais modifié.",
       "imageAlt": "Les documents générés pour l'offre Senior Data Engineer chez Payflow : la lettre de motivation et le CV adapté, prêts à télécharger."
     },
+    "applications": {
+      "eyebrow": "Suivi des candidatures",
+      "heading": "Toutes vos candidatures, de l'envoi à la réponse",
+      "body": "Dès que vous générez un document ou marquez une offre comme postulée, elle rejoint votre suivi.",
+      "point1": "Des statuts clairs : à postuler, en cours, refusé, accepté, retiré.",
+      "point2": "Un historique daté de chaque changement, avec vos notes.",
+      "point3": "Au même endroit : le CV utilisé, l'agent qui a trouvé l'offre, la lettre et le CV générés.",
+      "point4": "Des statistiques sur 30 jours ou depuis le début, et un export CSV.",
+      "imageAlt": "La candidature Senior Data Engineer chez Payflow, ouverte depuis le suivi : son statut, le CV utilisé, les documents générés et l'historique daté."
+    },
     "features": {
       "heading": "Et aussi",
       "analysisTitle": "Une analyse qui se justifie",

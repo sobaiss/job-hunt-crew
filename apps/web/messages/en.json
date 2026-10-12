@@ -62,6 +62,16 @@
       "point5": "Produced only when you ask, one document at a time. Your original CV is never modified.",
       "imageAlt": "The generated documents for the Senior Data Engineer offer at Payflow: the cover letter and the tailored CV, both ready to download."
     },
+    "applications": {
+      "eyebrow": "Application tracking",
+      "heading": "All your applications, from sending to reply",
+      "body": "As soon as you generate a document or mark an offer as applied, it joins your tracker.",
+      "point1": "Clear statuses: to apply, in progress, rejected, accepted, withdrawn.",
+      "point2": "A dated history of every change, with your notes.",
+      "point3": "In one place: the CV you used, the agent that found the offer, the generated letter and CV.",
+      "point4": "Statistics over 30 days or since the start, and a CSV export.",
+      "imageAlt": "The Senior Data Engineer application at Payflow, opened from the tracker: its status, the CV used, the generated documents and the dated history."
+    },
     "features": {
       "heading": "And also",
       "analysisTitle": "An analysis that shows its reasoning",
