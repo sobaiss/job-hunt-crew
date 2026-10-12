@@ -1,15 +1,22 @@
-.PHONY: up down reset web-up web-down migrate seed clean-analyses clean-analyses-scout clean-analyses-failed archive-scouts worker worker-once verify-sites test test-db test-setup
+.PHONY: up up-no-web down reset web-up web-down migrate seed clean-analyses clean-analyses-scout clean-analyses-failed archive-scouts worker worker-once verify-sites test test-db test-setup
 
 # The repo's single env file (#255, documented by .env.example). Host-side
 # commands below source it first; a missing file is fine (CI sets its env
 # directly). Values in it override the shell's.
 LOAD_ENV = set -a; [ -f .env ] && . ./.env; set +a;
 
-# Start local infrastructure (Postgres, MinIO, ElasticMQ, api, worker).
-# Step Functions Local is behind the `stepfunctions` profile and isn't
-# started here: `docker compose --profile stepfunctions up -d` does.
+# Start the stack: Postgres, MinIO, ElasticMQ, api, worker and the production
+# web on http://localhost:3000 (docs/adr/0034). Step Functions Local is behind
+# the `stepfunctions` profile and isn't started here:
+# `docker compose --profile stepfunctions up -d` does.
 up:
 	docker compose up -d
+
+# The same stack without the production web, which binds port 3000 like
+# `pnpm dev` and `make web-up`: the contributor's starting point. Stops the
+# stack's web if it's running.
+up-no-web:
+	docker compose up -d --scale web=0
 
 down:
 	docker compose down
@@ -32,9 +39,9 @@ reset:
 # Run apps/web itself in Docker — the alternative to `pnpm dev` (see
 # apps/web/docker-compose.yml and docs/adr/0026). Foreground, not `-d`:
 # unlike `up` above, this is meant to feel like `pnpm dev` — logs stream
-# here, Ctrl-C stops it. Requires `make up` (or `pnpm dev`'s own
-# prerequisite, the infra stack) already running. Mutually exclusive with
-# `pnpm dev` — both bind host port 3000.
+# here, Ctrl-C stops it. Requires the stack running without its own web
+# (`make up-no-web`): this, `pnpm dev` and the stack's web all bind host
+# port 3000.
 web-up:
 	docker compose -f apps/web/docker-compose.yml up
 

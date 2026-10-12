@@ -197,6 +197,42 @@ services:
       elasticmq:
         condition: service_started
 
+  # apps/web, production build (docs/adr/0034, amending docs/adr/0026): the
+  # app a self-hoster opens at http://localhost:3000. Unlike the dev-mode web
+  # (`make web-up`, apps/web/docker-compose.yml) it's on this stack's network
+  # and reaches `api` by service name.
+  #
+  # Binds host port 3000, like `pnpm dev` and `make web-up`: for the dev loop,
+  # start the stack without it, `make up-no-web`.
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile.production
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    # The root .env (AUTH_SECRET, OAuth, EMAIL_*, ...), as for `pnpm dev`.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      API_BASE_URL: http://api:8000
+      # Same value as the `api` service's, which checks it on every call.
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-dev-internal-api-secret}
+      # The app's public URL, for Auth.js's redirects and callback URLs. Unset,
+      # it would take them from the request URL, which the standalone server
+      # builds from its bind address (http://0.0.0.0:3000). Setting it also
+      # makes Auth.js trust the host in production (no UntrustedHost).
+      AUTH_URL: ${AUTH_URL:-http://localhost:3000}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    depends_on:
+      api:
+        condition: service_started
+
   # Local stand-in for the AWS SQS -> Lambda event-source mappings that drain
   # the pipeline's queues in production (out of scope per PRD Section 4/15, so
   # nothing drains them locally otherwise). Polls ElasticMQ and runs the real

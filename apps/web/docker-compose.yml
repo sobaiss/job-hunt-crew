@@ -1,8 +1,9 @@
 # Standalone alternative to `pnpm dev` for apps/web — deliberately NOT a
 # service in the root docker-compose.yml (see
-# docs/adr/0026-web-docker-dev-mode-standalone.md). Assumes the existing
-# infra stack is already running (`docker compose up` / `make up` at the
-# repo root — postgres, minio, elasticmq, api, worker); this only runs `web`
+# docs/adr/0026-web-docker-dev-mode-standalone.md; the root compose's `web` is
+# the production build, docs/adr/0034). Assumes the stack is already running
+# without its own web (`make up-no-web` at the repo root — postgres, minio,
+# elasticmq, api, worker); this only runs `web`
 # itself, reaching `api` the same way `pnpm dev` does — its host-published
 # port — via `host.docker.internal` since this container isn't on that
 # stack's network.
@@ -11,7 +12,8 @@
 #   docker compose -f apps/web/docker-compose.yml up
 #   docker compose -f apps/web/docker-compose.yml down
 #
-# Mutually exclusive with `pnpm dev` — both bind host port 3000.
+# Mutually exclusive with `pnpm dev` and the root compose's `web` — all three
+# bind host port 3000.
 services:
   web:
     build:

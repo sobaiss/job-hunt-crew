@@ -97,6 +97,18 @@ jobs:
       - name: Run bats
         run: make test-setup
 
+  web-image:
+    name: Production web image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # The `web` service of the root compose (docs/adr/0034): `next build`
+      # inside the image, so a build break fails here.
+      - name: Build
+        run: docker compose build web
+
   python-tests:
     name: Python Tests (services/api, ingestion, analysis)
     runs-on: ubuntu-latest

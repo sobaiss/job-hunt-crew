@@ -1,0 +1,46 @@
+# Production image for apps/web: `next build`, then the standalone server it
+# emits (docs/adr/0034). The `web` service of the root docker-compose.yml runs
+# it; the dev loop's image is apps/web/Dockerfile (`next dev`, docs/adr/0026).
+#
+# Built with the repo root as context, like apps/web/Dockerfile, so pnpm
+# resolves against the workspace's root lockfile.
+
+FROM node:22-slim AS build
+
+WORKDIR /app
+
+RUN corepack enable
+
+ENV NEXT_TELEMETRY_DISABLED=1
+
+COPY . .
+
+# Same filter as the dev image: `web` has no workspace-package dependencies.
+RUN pnpm install --frozen-lockfile --filter web...
+
+# No .env in the build context (.dockerignore): nothing secret is baked in.
+# Every server-side variable is read at run time, from compose.
+RUN pnpm --filter web build
+
+# Only the standalone tree (server.js + the node_modules it traced), the static
+# assets and public/: no source, no dev dependencies, no pnpm.
+FROM node:22-slim
+
+WORKDIR /app
+
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    HOSTNAME=0.0.0.0 \
+    PORT=3000
+
+COPY --from=build --chown=node:node /app/apps/web/.next/standalone ./
+COPY --from=build --chown=node:node /app/apps/web/.next/static ./apps/web/.next/static
+COPY --from=build --chown=node:node /app/apps/web/public ./apps/web/public
+
+USER node
+
+EXPOSE 3000
+
+# server.js is what `next start` amounts to for standalone output (which
+# `next start` itself refuses to serve).
+CMD ["node", "apps/web/server.js"]

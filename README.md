@@ -236,6 +236,18 @@ all work out of the box — see
 `migrate` to finish successfully before starting, so a fresh Postgres volume
 never leaves `api` running against a missing schema.
 
+It also builds and starts `web`, a production build of `apps/web`
+(`apps/web/Dockerfile.production`: `next build`, standalone server, no
+source mounted) on `http://localhost:3000`, reaching `api` over the stack's
+network (see
+[`docs/adr/0034`](docs/adr/0034-production-web-joins-root-compose-for-self-hosting.md)).
+For the dev loop (section 5), start the stack without it, since `pnpm dev`
+and `make web-up` need port 3000:
+
+```bash
+make up-no-web   # docker compose up -d --scale web=0; stops a running web too
+```
+
 Postgres (5432), MinIO (9000, console 9001) and ElasticMQ (9324) publish
 their ports on `127.0.0.1` only: reachable from this machine, not from your
 network, since they run with default credentials. Step Functions Local is
@@ -348,8 +360,10 @@ make migrate   # prisma migrate deploy, with DATABASE_URL from the root .env
 
 ### 5. Run the app
 
-Two interchangeable ways to run `apps/web` — pick one, not both (both bind
-`http://localhost:3000`):
+Two interchangeable ways to run `apps/web` in dev mode — pick one, not both
+(both bind `http://localhost:3000`, as does the stack's production `web`:
+start the stack with `make up-no-web`, or stop that `web` with
+`docker compose stop web`):
 
 ```bash
 pnpm dev              # apps/web on http://localhost:3000 (via Turborepo)
