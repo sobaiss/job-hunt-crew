@@ -112,6 +112,13 @@ const AGENT_POINTS = ["point1", "point2", "point3", "point4", "point5"] as const
  *  design/capture/agent-panel.capture.spec.ts. */
 const AGENT_PANEL_SIZE = { width: 1152, height: 1400 };
 
+/** The Documents section's points (spec landing-v2 §5). */
+const DOCUMENT_POINTS = ["point1", "point2", "point3", "point4", "point5"] as const;
+
+/** The intrinsic size of the tailored-cv-{light,dark}.png pair, written by
+ *  design/capture/tailored-cv.capture.spec.ts. */
+const TAILORED_CV_SIZE = { width: 975, height: 578 };
+
 /** The anchor links shared by the header and the footer's Product column. */
 const NAV_LINKS = [
   { key: "how", href: "#how" },
@@ -388,6 +395,21 @@ export function LandingPage({ plans }: { plans: PlanSummary[] | null }) {
             darkSrc: "/agent-panel-dark.png",
             alt: t("agents.imageAlt"),
             ...AGENT_PANEL_SIZE,
+          }}
+        />
+
+        <TextVisualSection
+          id="documents"
+          visual="left"
+          eyebrow={t("documents.eyebrow")}
+          heading={t("documents.heading")}
+          body={t("documents.body")}
+          points={DOCUMENT_POINTS.map((p) => t(`documents.${p}`))}
+          image={{
+            lightSrc: "/tailored-cv-light.png",
+            darkSrc: "/tailored-cv-dark.png",
+            alt: t("documents.imageAlt"),
+            ...TAILORED_CV_SIZE,
           }}
         />
 

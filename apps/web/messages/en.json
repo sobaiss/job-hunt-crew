@@ -51,6 +51,17 @@
       "point5": "A run history and a state you can read at a glance: running, up to date, failed.",
       "imageAlt": "The Agent panel for the Data Engineer — Paris agent: its configuration, statistics, relevant offers and run history."
     },
+    "documents": {
+      "eyebrow": "Tailored letter and CV",
+      "heading": "A cover letter and a CV tailored to each offer",
+      "body": "Starting from the analysis, Job Hunt Crew writes a cover letter and a version of your CV that brings forward what the offer asks for.",
+      "point1": "True to your background: the AI reorders and rewords what your CV contains, without ever inventing an employer, a date or a degree.",
+      "point2": "In your style: the tailored CV keeps as much as possible of the fonts, colours and layout of your original CV (PDF or Word).",
+      "point3": "Written in the language of the offer.",
+      "point4": "Downloadable as PDF, Word, Markdown or plain text.",
+      "point5": "Produced only when you ask, one document at a time. Your original CV is never modified.",
+      "imageAlt": "The generated documents for the Senior Data Engineer offer at Payflow: the cover letter and the tailored CV, both ready to download."
+    },
     "features": {
       "heading": "And also",
       "analysisTitle": "An analysis that shows its reasoning",

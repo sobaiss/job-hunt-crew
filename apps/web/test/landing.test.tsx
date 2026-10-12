@@ -613,6 +613,86 @@ describe("Landing route (Agents section, issue #248)", () => {
   });
 });
 
+const DOCUMENTS_COPY = {
+  en: {
+    eyebrow: "Tailored letter and CV",
+    heading: "A cover letter and a CV tailored to each offer",
+    body: "Starting from the analysis, Job Hunt Crew writes a cover letter and a version of your CV that brings forward what the offer asks for.",
+    points: [
+      "True to your background: the AI reorders and rewords what your CV contains, without ever inventing an employer, a date or a degree.",
+      "In your style: the tailored CV keeps as much as possible of the fonts, colours and layout of your original CV (PDF or Word).",
+      "Written in the language of the offer.",
+      "Downloadable as PDF, Word, Markdown or plain text.",
+      "Produced only when you ask, one document at a time. Your original CV is never modified.",
+    ],
+    alt: "The generated documents for the Senior Data Engineer offer at Payflow: the cover letter and the tailored CV, both ready to download.",
+  },
+  fr: {
+    eyebrow: "Lettre et CV adaptés",
+    heading: "Une lettre de motivation et un CV taillés pour chaque offre",
+    body: "À partir de l'analyse, Job Hunt Crew rédige une lettre de motivation et une version de votre CV qui met en avant ce que l'offre demande.",
+    points: [
+      "Fidèle à votre parcours : l'IA réordonne et reformule ce que contient votre CV, sans jamais inventer d'employeur, de date ou de diplôme.",
+      "Dans votre style : le CV adapté reprend autant que possible les polices, les couleurs et la mise en page de votre CV d'origine (PDF ou Word).",
+      "Rédigés dans la langue de l'offre.",
+      "Téléchargeables en PDF, Word, Markdown ou texte brut.",
+      "Produits uniquement à votre demande, document par document. Votre CV d'origine n'est jamais modifié.",
+    ],
+    alt: "Les documents générés pour l'offre Senior Data Engineer chez Payflow : la lettre de motivation et le CV adapté, prêts à télécharger.",
+  },
+} as const;
+
+describe("Landing route (Documents section, issue #250)", () => {
+  it.each(["en", "fr"] as const)(
+    "shows the #documents section with its heading, text and five points (%s)",
+    async (locale) => {
+      await renderSignedOutRoute(locale);
+      const copy = DOCUMENTS_COPY[locale];
+
+      const section = within(sectionById("documents"));
+      expect(section.getByText(copy.eyebrow)).toBeInTheDocument();
+      expect(
+        section.getByRole("heading", { level: 2, name: copy.heading }),
+      ).toBeInTheDocument();
+      expect(section.getByText(copy.body)).toBeInTheDocument();
+      expect(
+        section.getAllByRole("listitem").map((li) => li.textContent),
+      ).toEqual(copy.points);
+    },
+  );
+
+  it("sits right after the Agents section", async () => {
+    await renderSignedOutRoute();
+
+    expect(sectionById("agents").nextElementSibling).toBe(sectionById("documents"));
+  });
+
+  it("shows the tailored CV capture as a light/dark pair, with alt text, visual on the left", async () => {
+    await renderSignedOutRoute();
+    const section = sectionById("documents");
+
+    expect(section).toHaveAttribute("data-visual", "left");
+    const images = Array.from(section.querySelectorAll("img"));
+    expect(images.map((img) => img.getAttribute("src"))).toEqual([
+      expect.stringContaining("tailored-cv-light.png"),
+      expect.stringContaining("tailored-cv-dark.png"),
+    ]);
+    expect(images[0]).toHaveClass("dark:hidden");
+    expect(images[1]).toHaveClass("hidden", "dark:block");
+    for (const img of images) {
+      expect(img).toHaveAttribute("alt", DOCUMENTS_COPY.en.alt);
+    }
+  });
+
+  it("puts the tailored CV capture's alt text in French too", async () => {
+    await renderSignedOutRoute("fr");
+
+    for (const img of Array.from(sectionById("documents").querySelectorAll("img"))) {
+      expect(img).toHaveAttribute("alt", DOCUMENTS_COPY.fr.alt);
+    }
+  });
+});
+
 describe("TextVisualSection", () => {
   it.each(["left", "right"] as const)(
     "renders its eyebrow, heading, body, points and capture with the visual on the %s",

@@ -3,8 +3,9 @@ import { defineConfig, devices } from "@playwright/test";
 // A standalone Playwright config, *not* part of `pnpm test:e2e` (which only
 // scans ./e2e). Each scenario drives a real signed-in screen and writes a
 // light / dark screenshot pair to public/: the Agent panel the Landing page's
-// #agents section shows (agent-panel.capture.spec.ts), and the Dashboard
-// (dashboard.capture.spec.ts).
+// #agents section shows (agent-panel.capture.spec.ts), an Analysis's generated
+// documents for its #documents section (tailored-cv.capture.spec.ts), and the
+// Dashboard (dashboard.capture.spec.ts).
 //
 // Run it by hand when one of those screens changes (append a file name to run
 // a single scenario):

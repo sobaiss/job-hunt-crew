@@ -29,8 +29,8 @@ The active UI language, `en` or `fr`. Resolved per request in `i18n/request.ts` 
 _Avoid_: Language (fine in prose, but the resolved value is the Locale), i18n (that's the mechanism)
 
 **Landing page**:
-The public `/` view a signed-out Visitor sees — a marketing page: hero with a "Sign in" call to action, a "how it works" walkthrough, a features grid, a product preview, an FAQ, and a footer. A signed-in Candidate hitting `/` is redirected to the Dashboard instead. Lives in `app/(public)`.
-_Avoid_: Home (ambiguous with the Dashboard), marketing site (it's one in-app page, not a separate site)
+The public `/` view a signed-out Visitor sees — a marketing page telling the whole journey (find → analyse → tailor → apply → track), with autonomous Scouts as the lead differentiator, the Analysis as the engine behind every step, and a Plans section showing `free`/`standard`/`premium` by their quotas, without prices: there is no billing and no self-service plan change, so a paid Plan is reached by contacting the team, not by buying it. Its primary call to action is "Commencer gratuitement" (signing in *is* signing up, and every new User gets a `free` Subscription); "Se connecter" is kept only in the header. Publicly a Scout is always an **agent** — the same word the App shell's "Agents" nav shows once signed in — never "Scout". A signed-in Candidate hitting `/` is redirected to the Dashboard instead. Lives in `app/(public)`.
+_Avoid_: Home (ambiguous with the Dashboard), marketing site (it's one in-app page, not a separate site), Pricing section (there are no prices — it is the Plans section)
 
 **Dashboard**:
 The signed-in overview at `/` — stat tiles (average and best Match score, analysis count, CV-version count), recent analyses, a Match-score trend, and quick actions. While the Candidate has no Analysis yet it shows a three-step onboarding checklist in place of the tiles. Where `/` sends a Candidate once they have a Session.
