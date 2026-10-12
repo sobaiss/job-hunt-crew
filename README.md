@@ -125,9 +125,12 @@ account-blocked. `applications` is a table (column visibility, filters,
 multi-select) whose rows open an in-page **quick view** with the full
 candidature, offer info, timeline and analysis recall — there is no
 standalone `/applications/[id]` page. Plus BFF routes under `app/api/*` that mirror the
-`services/api` surface 1:1. `auth.ts` configures NextAuth (Email magic-link,
-Google, LinkedIn OIDC) in JWT mode — no database adapter, no Prisma at
-runtime. `lib/internal-api.ts` is the one place that calls `services/api`.
+`services/api` surface 1:1. `auth.ts` configures NextAuth (email + password,
+Email magic-link, Google, LinkedIn OIDC) in JWT mode — no database adapter, no
+Prisma at runtime. Only the configured methods are offered, on the sign-in
+page and in the provider list (`lib/sign-in-methods.ts`): Google / LinkedIn
+when their id and secret are set, the magic link when `EMAIL_SERVER` is set
+(or always under `next dev`, which logs the link to the console). `lib/internal-api.ts` is the one place that calls `services/api`.
 
 ### `services/api`
 
@@ -227,7 +230,8 @@ asks for the first Administrator's email, name
 and password, builds and starts the stack, applies the migrations and the seed,
 creates the Administrator and waits until the app answers. The password is
 never written to disk. The summary gives the URL, the Administrator, the LLM
-provider, the available sign-in methods and which job sources are active
+provider, the available sign-in methods (the sign-in page shows only those)
+and which job sources are active
 (Remotive, LinkedIn and HelloWork need no credentials). With "later",
 Analyses fail until a provider is set in Admin → LLM providers.
 Without a terminal, or with `SETUP_NONINTERACTIVE=1`, it reads the

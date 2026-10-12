@@ -17,10 +17,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import type { SignInMethods } from "@/lib/sign-in-methods";
 
 /**
- * Sign-in options: Google, LinkedIn, an email+password Credentials sign-in,
- * and an email Magic link — all four go through next-auth `signIn`.
+ * Sign-in options: an email+password Credentials sign-in, always, plus
+ * whichever of Google, LinkedIn and an email Magic link `methods` says this
+ * installation has configured (#258; the page reads them on the server) —
+ * all go through next-auth `signIn`.
  * `callbackUrl` (set by `middleware.ts` when it bounces an unauthenticated
  * request) is carried through so the user returns to the page they
  * originally asked for; it defaults to the Dashboard.
@@ -31,7 +34,7 @@ import { Separator } from "@/components/ui/separator";
  * redirecting. An `?error=` left on the URL by the auth callback, a failed
  * Magic link request, or invalid credentials each surface their own message.
  */
-export function SignInForm() {
+export function SignInForm({ methods }: { methods: SignInMethods }) {
   const t = useTranslations("signIn");
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl") ?? "/analyses";
@@ -110,28 +113,36 @@ export function SignInForm() {
         {/* One icon per mechanism rather than per provider — lucide carries no
             brand marks, so the key stands for "sign in with an account you
             already have", against LogIn (password) and Mail (magic link). */}
-        <div className="flex flex-col gap-2">
-          <Button
-            variant="outline"
-            onClick={() => signIn("google", { callbackUrl })}
-          >
-            <KeyRound aria-hidden="true" />
-            {t("google")}
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => signIn("linkedin", { callbackUrl })}
-          >
-            <KeyRound aria-hidden="true" />
-            {t("linkedin")}
-          </Button>
-        </div>
+        {(methods.google || methods.linkedin) && (
+          <>
+            <div className="flex flex-col gap-2">
+              {methods.google && (
+                <Button
+                  variant="outline"
+                  onClick={() => signIn("google", { callbackUrl })}
+                >
+                  <KeyRound aria-hidden="true" />
+                  {t("google")}
+                </Button>
+              )}
+              {methods.linkedin && (
+                <Button
+                  variant="outline"
+                  onClick={() => signIn("linkedin", { callbackUrl })}
+                >
+                  <KeyRound aria-hidden="true" />
+                  {t("linkedin")}
+                </Button>
+              )}
+            </div>
 
-        <div className="flex items-center gap-3 text-xs text-muted">
-          <Separator className="flex-1" />
-          {t("divider")}
-          <Separator className="flex-1" />
-        </div>
+            <div className="flex items-center gap-3 text-xs text-muted">
+              <Separator className="flex-1" />
+              {t("divider")}
+              <Separator className="flex-1" />
+            </div>
+          </>
+        )}
 
         <div className="flex flex-col gap-2">
           <Label htmlFor="email">{t("emailLabel")}</Label>
@@ -172,21 +183,23 @@ export function SignInForm() {
           </Button>
         </form>
 
-        <form onSubmit={onSubmit}>
-          <Button
-            type="submit"
-            variant="outline"
-            className="w-full"
-            disabled={status === "sending"}
-          >
-            {status === "sending" ? (
-              <LoaderCircle className="animate-spin" aria-hidden="true" />
-            ) : (
-              <Mail aria-hidden="true" />
-            )}
-            {status === "sending" ? t("sending") : t("magicLink")}
-          </Button>
-        </form>
+        {methods.magicLink && (
+          <form onSubmit={onSubmit}>
+            <Button
+              type="submit"
+              variant="outline"
+              className="w-full"
+              disabled={status === "sending"}
+            >
+              {status === "sending" ? (
+                <LoaderCircle className="animate-spin" aria-hidden="true" />
+              ) : (
+                <Mail aria-hidden="true" />
+              )}
+              {status === "sending" ? t("sending") : t("magicLink")}
+            </Button>
+          </form>
+        )}
       </CardContent>
     </Card>
   );

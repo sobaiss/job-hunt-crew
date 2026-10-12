@@ -1,17 +1,8 @@
 import NextAuth from "next-auth";
 import type { Adapter } from "next-auth/adapters";
-import Credentials from "next-auth/providers/credentials";
-import Google from "next-auth/providers/google";
-import LinkedIn from "next-auth/providers/linkedin";
-import Nodemailer from "next-auth/providers/nodemailer";
-import { createTransport } from "nodemailer";
-import { internalApiFetch, upsertUser, verifyCredentials } from "@/lib/internal-api";
-
-// Falls back to nodemailer's `jsonTransport` (no real SMTP connection) when
-// EMAIL_SERVER isn't configured, so the magic-link flow is exercisable in
-// local dev/CI without a mail server. The link is also logged to the server
-// console outside production so it can be followed manually or by a script.
-const emailServer = process.env.EMAIL_SERVER || { jsonTransport: true as const };
+import { authProviders } from "@/lib/auth-providers";
+import { internalApiFetch, upsertUser } from "@/lib/internal-api";
+import { signInMethods } from "@/lib/sign-in-methods";
 
 // Auth.js requires *some* Adapter whenever an Email provider is configured
 // (validated at startup) and, once one is configured, its OAuth account-
@@ -86,46 +77,5 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return session;
     },
   },
-  providers: [
-    Google,
-    LinkedIn,
-    Credentials({
-      // Email is the login, per the sign-in page's password option. The one
-      // /internal/auth/verify-credentials call covers "unknown email", "no
-      // password set" (an OAuth/magic-link-only User), and "wrong password"
-      // identically, so `authorize` never needs to (and can't) tell them
-      // apart itself. On success it returns just `{ id, email }` — the `jwt`
-      // callback below re-derives userId/role the same way every other
-      // provider does, via `upsertUser`, rather than special-casing this one.
-      credentials: {
-        email: { label: "Email", type: "email" },
-        password: { label: "Password", type: "password" },
-      },
-      async authorize(credentials) {
-        const email = typeof credentials?.email === "string" ? credentials.email : null;
-        const password = typeof credentials?.password === "string" ? credentials.password : null;
-        if (!email || !password) return null;
-        const verified = await verifyCredentials({ email, password });
-        if (!verified) return null;
-        return { id: verified.userId, email };
-      },
-    }),
-    Nodemailer({
-      server: emailServer,
-      from: process.env.EMAIL_FROM || "Job Hunt Crew <no-reply@job-hunt-crew.local>",
-      async sendVerificationRequest({ identifier, url, provider }) {
-        if (process.env.NODE_ENV !== "production") {
-          console.log(`[auth] magic link for ${identifier}: ${url}`);
-        }
-        const transport = createTransport(provider.server);
-        await transport.sendMail({
-          to: identifier,
-          from: provider.from,
-          subject: "Sign in to job-hunt-crew",
-          text: `Sign in to job-hunt-crew: ${url}`,
-          html: `<p><a href="${url}">Sign in to job-hunt-crew</a></p>`,
-        });
-      },
-    }),
-  ],
+  providers: authProviders(signInMethods()),
 });

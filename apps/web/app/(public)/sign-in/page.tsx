@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import Link from "next/link";
+import { connection } from "next/server";
 import { ArrowLeft } from "lucide-react";
 import { getTranslations } from "next-intl/server";
+
+import { signInMethods } from "@/lib/sign-in-methods";
 
 import { SignInForm } from "./sign-in-form";
 
@@ -14,7 +17,13 @@ export async function generateMetadata(): Promise<Metadata> {
 // The form reads `?callbackUrl` / `?error` with `useSearchParams()`, which Next
 // requires to sit under a Suspense boundary. Restyled to the new system: the
 // brand mark and a back link frame the card, the behaviour is unchanged.
+// The sign-in methods come from the server's env at request time
+// (`connection()` keeps the page out of build-time prerendering), so a
+// production image follows the .env it runs with, not the one it was built
+// with (#258).
 export default async function SignInPage() {
+  await connection();
+  const methods = signInMethods();
   const t = await getTranslations("signIn");
   const tApp = await getTranslations("app");
 
@@ -54,7 +63,7 @@ export default async function SignInPage() {
       </Link>
 
       <Suspense>
-        <SignInForm />
+        <SignInForm methods={methods} />
       </Suspense>
 
       <Link
