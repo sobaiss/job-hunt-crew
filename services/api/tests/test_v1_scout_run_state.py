@@ -35,11 +35,12 @@ INTERNAL_SECRET_HEADERS = {"X-Internal-Api-Secret": "test-secret"}
 @pytest.fixture(autouse=True)
 def _env(monkeypatch):
     monkeypatch.setenv("INTERNAL_API_SECRET", "test-secret")
-    # Pin the three thresholds the rule reads, so the ages below mean what
+    # Pin the four thresholds the rule reads, so the ages below mean what
     # they say whatever the developer's shell exports.
     monkeypatch.setenv("ANALYSIS_STUCK_AFTER_MINUTES", "15")
     monkeypatch.setenv("SCOUT_QUEUED_BLOCKED_AFTER_MINUTES", "120")
     monkeypatch.setenv("SCOUT_RUN_STUCK_AFTER_MINUTES", "20")
+    monkeypatch.setenv("INGESTION_JOB_STUCK_AFTER_MINUTES", "120")
 
 
 def _headers(user_id: str) -> dict[str, str]:
@@ -505,6 +506,42 @@ def test_a_run_left_running_past_the_stale_threshold_reads_failed(user_id):
         assert scout["runState"] == "FAILED"
         assert scout["runStateSince"] is None
         assert scout["blockedAnalysisIds"] == []
+
+
+def test_an_ingestion_job_left_open_past_the_stuck_threshold_reads_failed(user_id):
+    """A worker that died mid-job leaves the row RUNNING forever; it must not
+    hold the Scout IN_FLIGHT (and its "Run now" button disabled) for good."""
+    with TestClient(app) as client:
+        cv = _make_cv_version(client, user_id)
+        scout_id = _make_scout(client, user_id, cv)
+        run_id = _seed_run(
+            scout_id, Scoutrunstatus.COMPLETED, created_at=_ago(130), started_at=_ago(130)
+        )
+        _seed_ingestion_job(user_id, run_id, Ingestionjobstatus.RUNNING, created_at=_ago(125))
+
+        scout = _scout(client, user_id, scout_id)
+        assert scout["runState"] == "FAILED"
+        assert scout["runStateSince"] is None
+        assert scout["blockedAnalysisIds"] == []
+
+
+def test_a_fresh_ingestion_job_reads_in_flight_beside_an_abandoned_one(user_id):
+    with TestClient(app) as client:
+        cv = _make_cv_version(client, user_id)
+        scout_id = _make_scout(client, user_id, cv)
+        old_run_id = _seed_run(
+            scout_id, Scoutrunstatus.COMPLETED, created_at=_ago(130), started_at=_ago(130)
+        )
+        _seed_ingestion_job(user_id, old_run_id, Ingestionjobstatus.RUNNING, created_at=_ago(125))
+        run_id = _seed_run(
+            scout_id, Scoutrunstatus.COMPLETED, created_at=_ago(5), started_at=_ago(5)
+        )
+        job_created_at = _ago(4)
+        _seed_ingestion_job(user_id, run_id, Ingestionjobstatus.RUNNING, created_at=job_created_at)
+
+        scout = _scout(client, user_id, scout_id)
+        assert scout["runState"] == "IN_FLIGHT"
+        assert _since(scout) == job_created_at
 
 
 def test_a_failed_run_reads_failed(user_id):

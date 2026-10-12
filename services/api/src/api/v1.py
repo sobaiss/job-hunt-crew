@@ -1835,22 +1835,20 @@ async def _run_states_by_scout(
         ).all()
     }
 
-    oldest_open_jobs = {
-        scout_id: oldest
-        for scout_id, oldest in (
-            await session.execute(
-                select(ScoutRun.scoutId, func.min(IngestionJob.createdAt))
-                .select_from(IngestionJob)
-                .join(ScoutRun, ScoutRun.id == IngestionJob.scoutRunId)
-                .where(
-                    ScoutRun.scoutId.in_(scout_ids),
-                    IngestionJob.userId == user_id,
-                    IngestionJob.status.in_(OPEN_INGESTION_JOB_STATUSES),
-                )
-                .group_by(ScoutRun.scoutId)
+    open_jobs_at: dict[str, list[datetime]] = {}
+    for scout_id, created_at in (
+        await session.execute(
+            select(ScoutRun.scoutId, IngestionJob.createdAt)
+            .select_from(IngestionJob)
+            .join(ScoutRun, ScoutRun.id == IngestionJob.scoutRunId)
+            .where(
+                ScoutRun.scoutId.in_(scout_ids),
+                IngestionJob.userId == user_id,
+                IngestionJob.status.in_(OPEN_INGESTION_JOB_STATUSES),
             )
-        ).all()
-    }
+        )
+    ).all():
+        open_jobs_at.setdefault(scout_id, []).append(created_at)
 
     open_analyses: dict[str, list[OpenAnalysis]] = {}
     for row in (
@@ -1878,7 +1876,7 @@ async def _run_states_by_scout(
         scout.id: derive_scout_run_state(
             last_run_at=scout.lastRunAt,
             latest_run=latest_runs.get(scout.id),
-            oldest_open_ingestion_job_at=oldest_open_jobs.get(scout.id),
+            open_ingestion_jobs_at=open_jobs_at.get(scout.id, []),
             open_analyses=open_analyses.get(scout.id, []),
             now=now,
         )

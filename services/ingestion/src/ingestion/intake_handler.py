@@ -100,12 +100,41 @@ async def dispatch_ingestion_job(
     return await session.get(IngestionJob, ingestion_job_id)
 
 
+async def _fail_open_job(
+    session: AsyncSession, ingestion_job_id: str | None, exc: Exception
+) -> None:
+    """Marks `ingestion_job_id` `FAILED` with `exc` as its errorMessage if it
+    is still `PENDING`/`RUNNING`. Never raises: it runs inside the handler's
+    swallow-and-continue path."""
+    if not ingestion_job_id:
+        return
+    try:
+        await session.rollback()
+        ingestion_job = await session.get(IngestionJob, ingestion_job_id)
+        if ingestion_job is None or ingestion_job.status not in (
+            Ingestionjobstatus.PENDING,
+            Ingestionjobstatus.RUNNING,
+        ):
+            return
+        ingestion_job.status = Ingestionjobstatus.FAILED
+        ingestion_job.errorMessage = f"{type(exc).__name__}: {exc}"
+        ingestion_job.updatedAt = _now()
+        await session.commit()
+    except Exception:
+        logger.exception(
+            "ingestion_intake_fail_open_job_failed for ingestion_job_id=%s",
+            ingestion_job_id,
+        )
+
+
 def handle_ingestion_intake(event: dict, context=None) -> None:
     """SQS event-source-mapping Lambda entrypoint: `event["Records"]` is a
     batch of `ingestion-intake` messages, each with a JSON body
     `{"ingestionJobId": "..."}`. A per-record failure is logged and
-    swallowed (the pipeline already persists `FAILED` on the row) so one bad
-    message doesn't block the batch or redeliver forever.
+    swallowed so one bad message doesn't block the batch or redeliver
+    forever. The pipeline persists `FAILED` for the errors it expects; for
+    any other (an unreachable LLM provider, ...) `_fail_open_job` does, so
+    the row never stays `RUNNING` and holds its Scout working.
     """
 
     async def _run() -> None:
@@ -117,11 +146,12 @@ def handle_ingestion_intake(event: dict, context=None) -> None:
                     body = json.loads(record["body"])
                     try:
                         await dispatch_ingestion_job(session, body["ingestionJobId"])
-                    except Exception:
+                    except Exception as exc:
                         logger.exception(
                             "ingestion_intake_failed for ingestion_job_id=%s",
                             body.get("ingestionJobId"),
                         )
+                        await _fail_open_job(session, body.get("ingestionJobId"), exc)
         finally:
             await engine.dispose()
 

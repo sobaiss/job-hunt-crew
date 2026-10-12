@@ -1,3 +1,4 @@
+import asyncio
 import json
 import uuid
 from datetime import UTC, datetime
@@ -384,3 +385,56 @@ def test_handle_ingestion_intake_swallows_a_per_record_failure(monkeypatch):
     intake_handler.handle_ingestion_intake(event)
 
     assert seen == ["job-ok"]
+
+
+def test_handle_ingestion_intake_marks_the_job_failed_on_an_unexpected_error(
+    monkeypatch,
+):
+    """An error no pipeline stage catches (here, the LLM provider unreachable)
+    must still leave the row terminal: a job left RUNNING holds its Scout
+    IN_FLIGHT and blocks "Run now"."""
+
+    def _with_session_factory(fn):
+        # The handler runs its own event loop, so each step gets a fresh
+        # engine bound to the loop `asyncio.run` creates for it.
+        async def _run():
+            engine = make_engine()
+            try:
+                return await fn(make_session_factory(engine))
+            finally:
+                await engine.dispose()
+
+        return asyncio.run(_run())
+
+    user_id, ingestion_job_id = _with_session_factory(
+        lambda session_factory: _seed_job(
+            session_factory, mode=Ingestionmode.SITE_SEARCH
+        )
+    )
+
+    async def _crash(session, ingestion_job_id, **kwargs):
+        job = await session.get(IngestionJob, ingestion_job_id)
+        job.status = Ingestionjobstatus.RUNNING
+        await session.commit()
+        raise ConnectionError("Network is unreachable")
+
+    monkeypatch.setattr(intake_handler, "dispatch_ingestion_job", _crash)
+
+    async def _reload(session_factory):
+        async with session_factory() as session:
+            return await session.get(IngestionJob, ingestion_job_id)
+
+    try:
+        intake_handler.handle_ingestion_intake(
+            {"Records": [{"body": json.dumps({"ingestionJobId": ingestion_job_id})}]}
+        )
+
+        job = _with_session_factory(_reload)
+        assert job.status == Ingestionjobstatus.FAILED
+        assert "Network is unreachable" in job.errorMessage
+    finally:
+        _with_session_factory(
+            lambda session_factory: _cleanup(
+                session_factory, user_id=user_id, ingestion_job_id=ingestion_job_id
+            )
+        )

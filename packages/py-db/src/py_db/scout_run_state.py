@@ -16,12 +16,28 @@ in the API so the Admin scouts table can later read the same answer.
 
 import enum
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import NamedTuple
 
 from .blocked_analysis import is_analysis_blocked
 from .models import Analysisstatus, ScoutRun, Scoutrunstatus
 from .scout_schedule import is_scout_run_stale
+from .stuck_analysis import _minutes_from_env
+
+# An IngestionJob stays open for its whole scrape-then-extract fan-out: up to
+# 25 offers per site, each extraction an LLM call. Past this, the worker that
+# held it died, or crashed out without writing a terminal status.
+DEFAULT_INGESTION_JOB_STUCK_AFTER_MINUTES = 120
+
+
+def ingestion_job_stuck_after() -> timedelta:
+    """`INGESTION_JOB_STUCK_AFTER_MINUTES` from the environment."""
+    return timedelta(
+        minutes=_minutes_from_env(
+            "INGESTION_JOB_STUCK_AFTER_MINUTES",
+            DEFAULT_INGESTION_JOB_STUCK_AFTER_MINUTES,
+        )
+    )
 
 
 class RunState(str, enum.Enum):
@@ -64,15 +80,18 @@ def derive_scout_run_state(
     *,
     last_run_at: datetime | None,
     latest_run: ScoutRun | None,
-    oldest_open_ingestion_job_at: datetime | None,
+    open_ingestion_jobs_at: list[datetime],
     open_analyses: list[OpenAnalysis],
     now: datetime,
 ) -> ScoutRunState:
     """One Scout's Run state. Pure.
 
     - `latest_run`: the Scout's most recently created ScoutRun, if any.
-    - `oldest_open_ingestion_job_at`: `min(createdAt)` over the non-terminal
-      IngestionJobs on any of the Scout's runs, or None.
+    - `open_ingestion_jobs_at`: `createdAt` of every non-terminal
+      IngestionJob on any of the Scout's runs. One open past
+      `ingestion_job_stuck_after()` is abandoned: it reads FAILED, not
+      IN_FLIGHT, or it would hold the Scout working (and "Run now" disabled)
+      forever.
     - `open_analyses`: every non-terminal Analysis carrying the Scout's id.
     """
     blocked: list[OpenAnalysis] = []
@@ -94,8 +113,11 @@ def derive_scout_run_state(
         )
     ):
         in_flight_clocks.append(latest_run.startedAt or latest_run.createdAt)
-    if oldest_open_ingestion_job_at is not None:
-        in_flight_clocks.append(oldest_open_ingestion_job_at)
+    stuck_after = ingestion_job_stuck_after()
+    abandoned_jobs = [at for at in open_ingestion_jobs_at if now - at > stuck_after]
+    in_flight_clocks.extend(
+        at for at in open_ingestion_jobs_at if now - at <= stuck_after
+    )
     in_flight_clocks.extend(row.requestedAt for row in unblocked)
     if in_flight_clocks:
         return ScoutRunState(RunState.IN_FLIGHT, since=min(in_flight_clocks))
@@ -106,6 +128,9 @@ def derive_scout_run_state(
             since=min(_blocked_clock(row) for row in blocked),
             blocked_analysis_ids=[row.id for row in blocked],
         )
+
+    if abandoned_jobs:
+        return ScoutRunState(RunState.FAILED)
 
     if latest_run is not None:
         # A RUNNING run left here is stale: anticipate, by one guard, the
