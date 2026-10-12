@@ -470,6 +470,9 @@ pnpm typecheck
 
 # Python — all four suites against a throwaway database (recommended)
 make test
+
+# Setup scripts (scripts/setup, bats) — in a container, only Docker needed
+make test-setup
 ```
 
 `make test` drops, recreates, migrates and seeds a `jhc_test` database

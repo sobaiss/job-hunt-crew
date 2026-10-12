@@ -1,4 +1,4 @@
-.PHONY: up down reset web-up web-down migrate seed clean-analyses clean-analyses-scout clean-analyses-failed archive-scouts worker worker-once verify-sites test test-db
+.PHONY: up down reset web-up web-down migrate seed clean-analyses clean-analyses-scout clean-analyses-failed archive-scouts worker worker-once verify-sites test test-db test-setup
 
 # The repo's single env file (#255, documented by .env.example). Host-side
 # commands below source it first; a missing file is fine (CI sets its env
@@ -202,6 +202,13 @@ test: test-db
 	-DATABASE_URL="$(TEST_DATABASE_URL)" uv run --package analysis pytest services/analysis/tests -q
 	-DATABASE_URL="$(TEST_DATABASE_URL)" uv run --package api pytest services/api/tests -q
 	docker compose start worker
+
+# The bats tests of the setup scripts (scripts/setup), in a container: bats
+# and openssl come from the image, nothing from the host but Docker.
+SETUP_TEST_IMAGE = job-hunt-crew-setup-tests
+test-setup:
+	docker build -q -t $(SETUP_TEST_IMAGE) scripts/setup/test >/dev/null
+	docker run --rm -v "$(CURDIR)/scripts/setup:/code/scripts/setup:ro" -w /code $(SETUP_TEST_IMAGE) scripts/setup/test
 
 update-secrets:
 	sbx secret set github --sandbox claude-job-hunt-crew -t "$(gh auth token)" -f
