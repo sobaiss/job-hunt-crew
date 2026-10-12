@@ -97,9 +97,45 @@ jobs:
       - name: Run bats
         run: make test-setup
 
+  install-smoke:
+    name: Install smoke test (make setup)
+    runs-on: ubuntu-latest
+    # A clean runner, only Docker and make: the self-hoster's path (#261).
+    env:
+      SETUP_NONINTERACTIVE: "1"
+      ADMIN_EMAIL: ci-admin@example.org
+      ADMIN_NAME: CI Administrator
+      ADMIN_PASSWORD: ci-admin-password
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: make setup
+        run: make setup
+
+      - name: API health, web 200, Administrator sign-in
+        run: scripts/setup/smoke-check.sh
+
+      # The upgrade path: nothing in .env changes, the Administrator is kept.
+      - name: make setup again
+        run: |
+          sha1sum .env > /tmp/env.sha1
+          make setup
+          sha1sum -c /tmp/env.sha1
+          scripts/setup/smoke-check.sh
+
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --tail 200
+
   web-image:
     name: Production web image
     runs-on: ubuntu-latest
+    # docker-compose requires these secrets (#261); a build reads none of them.
+    env:
+      AUTH_SECRET: ci-dummy
+      INTERNAL_API_SECRET: ci-dummy
+      SETTINGS_ENCRYPTION_KEY: ci-dummy
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -118,11 +154,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      # docker-compose requires the three secrets (#261), though the infra
+      # services started here read none of them. Step-scoped, so the test
+      # suites below never see these dummies.
       - name: Start Postgres/MinIO/ElasticMQ/StepFunctions
-        run: docker compose --profile stepfunctions up -d postgres minio elasticmq stepfunctions-local --wait
-
-      - name: Create MinIO bucket
-        run: docker compose up minio-createbucket
+        env:
+          AUTH_SECRET: ci-dummy
+          INTERNAL_API_SECRET: ci-dummy
+          SETTINGS_ENCRYPTION_KEY: ci-dummy
+        run: |
+          docker compose --profile stepfunctions up -d postgres minio elasticmq stepfunctions-local --wait
+          docker compose up minio-createbucket
 
       - name: Enable Corepack
         run: corepack enable

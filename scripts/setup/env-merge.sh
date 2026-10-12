@@ -41,9 +41,10 @@ set -euo pipefail
 LEGACY_FILES="apps/web/.env packages/prisma/.env"
 SECRET_KEYS="AUTH_SECRET INTERNAL_API_SECRET SETTINGS_ENCRYPTION_KEY"
 # Published secret values, never kept: the old apps/web/.env.example's
-# AUTH_SECRET and the old docker-compose defaults. .env.example's own values
+# AUTH_SECRET, the old root .env.example's placeholders and the old
+# docker-compose defaults. .env.example's own values
 # for the secret keys are added to these by the merge itself.
-PUBLISHED_SECRETS="changeme dev-internal-api-secret SbSkCyNxmIyTmRKah7LjMRn8Lsjf3f8OVkNH7iZoYaw="
+PUBLISHED_SECRETS="changeme dev-auth-secret-change-me dev-internal-api-secret SbSkCyNxmIyTmRKah7LjMRn8Lsjf3f8OVkNH7iZoYaw="
 
 die() {
   echo "env-merge: $1" >&2

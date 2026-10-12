@@ -98,19 +98,22 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
-  # Applies pending Prisma migrations to Postgres, then exits. Runs on every
-  # `docker compose up` (idempotent — no-ops once the schema is current), so
-  # a fresh Postgres volume never starts `api` against a missing schema.
-  # `api` waits on this completing (see its `depends_on` below).
-  # migrate:
-  #   build:
-  #     context: .
-  #     dockerfile: packages/prisma/Dockerfile
-  #   environment:
-  #     DATABASE_URL: postgresql://postgres:postgres@postgres:5432/job_hunt_crew
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
+  # Prisma's migrations and seed, run by `make setup` (#261) as one-off
+  # containers, so the host needs no Node:
+  #   docker compose run --rm migrate                        (migrate deploy)
+  #   docker compose run --rm migrate pnpm exec prisma db seed
+  # Behind the `tools` profile: `make up` doesn't start it.
+  migrate:
+    build:
+      context: .
+      dockerfile: packages/prisma/Dockerfile
+    profiles: [tools]
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/job_hunt_crew
+      PRISMA_HIDE_UPDATE_MESSAGE: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   # services/api (FastAPI): sole owner of Postgres/S3/SQS per PRD Section 7,
   # called only by apps/web's BFF proxy (M7). Built from the repo root so uv
@@ -130,7 +133,8 @@ services:
         required: false
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/job_hunt_crew
-      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-dev-internal-api-secret}
+      # Required, no default (#261): `make setup` generates it into .env.
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?run make setup}
       # Enables browser access to /docs, /redoc, /openapi.json without the
       # internal secret header — see enforce_internal_api_secret in main.py.
       ENVIRONMENT: development
@@ -171,9 +175,9 @@ services:
       # docs/adr/0024). Every process that writes or reads them -- this API and
       # every Analysis and Ingestion process (the worker) -- needs the SAME key,
       # or stored keys are ignored and the environment's are used instead.
-      # DEV-ONLY default, like INTERNAL_API_SECRET: generate your own with
-      #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:-SbSkCyNxmIyTmRKah7LjMRn8Lsjf3f8OVkNH7iZoYaw=}
+      # Required, no default (#261): `make setup` generates it into .env and
+      # never regenerates it.
+      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?run make setup}
       # The Admin "LLM providers" screen (issue #174, docs/adr/0024) evaluates
       # the environment itself -- to name the provider it resolves to, to show
       # which parameters are inherited, and to validate activation -- so the
@@ -190,8 +194,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      # migrate:
-      #   condition: service_completed_successfully
       minio:
         condition: service_healthy
       elasticmq:
@@ -218,7 +220,10 @@ services:
     environment:
       API_BASE_URL: http://api:8000
       # Same value as the `api` service's, which checks it on every call.
-      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-dev-internal-api-secret}
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?run make setup}
+      # Signs the session cookie. Also in .env (env_file), but named here so
+      # the stack refuses to start without it (#261).
+      AUTH_SECRET: ${AUTH_SECRET:?run make setup}
       # The app's public URL, for Auth.js's redirects and callback URLs. Unset,
       # it would take them from the request URL, which the standalone server
       # builds from its bind address (http://0.0.0.0:3000). Setting it also
@@ -301,7 +306,7 @@ services:
       SQS_SECRET_ACCESS_KEY: x
       # Same key as the api service above, so the API-encrypted LLM provider
       # keys can be decrypted here (issue #178).
-      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:-SbSkCyNxmIyTmRKah7LjMRn8Lsjf3f8OVkNH7iZoYaw=}
+      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?run make setup}
       # The crew run (analysis-intake) and any PDF/DOCX Conversion call an LLM
       # through this provider; the MD/TXT Conversion path needs none. Passed
       # through from the host env, defaulting to a local Ollama (no API key).
@@ -347,8 +352,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      # migrate:
-      #   condition: service_completed_successfully
       minio:
         condition: service_healthy
       elasticmq:

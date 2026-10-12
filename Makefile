@@ -1,9 +1,18 @@
-.PHONY: up up-no-web down reset web-up web-down migrate seed clean-analyses clean-analyses-scout clean-analyses-failed archive-scouts worker worker-once verify-sites test test-db test-setup
+.PHONY: setup up up-no-web down reset web-up web-down migrate seed clean-analyses clean-analyses-scout clean-analyses-failed archive-scouts worker worker-once verify-sites test test-db test-setup
 
 # The repo's single env file (#255, documented by .env.example). Host-side
 # commands below source it first; a missing file is fine (CI sets its env
 # directly). Values in it override the shell's.
 LOAD_ENV = set -a; [ -f .env ] && . ./.env; set +a;
+
+# Install, or upgrade after a `git pull`: checks the prerequisites, writes
+# .env (secrets generated once), builds and starts the stack, migrates and
+# seeds the database, creates the first Administrator and waits for the app
+# (#261, scripts/setup/setup.sh). Needs only Docker and make. Asks its
+# questions on a terminal; SETUP_NONINTERACTIVE=1 (or no terminal) reads the
+# Administrator from ADMIN_EMAIL / ADMIN_NAME / ADMIN_PASSWORD instead.
+setup:
+	@scripts/setup/setup.sh
 
 # Start the stack: Postgres, MinIO, ElasticMQ, api, worker and the production
 # web on http://localhost:3000 (docs/adr/0034). Step Functions Local is behind

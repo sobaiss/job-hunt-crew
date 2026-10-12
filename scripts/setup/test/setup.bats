@@ -1,0 +1,223 @@
+#!/usr/bin/env bats
+# Tests for scripts/setup/setup.sh, the `make setup` orchestrator (#261).
+# Docker and make are stubs (test/stubs/docker logs every call), so these
+# check what the orchestrator asks Docker to do and in which order, and what
+# it tells the user; the real stack is exercised by CI's install smoke job.
+# Run with `make test-setup`.
+
+SETUP="$BATS_TEST_DIRNAME/../setup.sh"
+
+setup() {
+  ROOT="$BATS_TEST_TMPDIR/repo"
+  mkdir -p "$ROOT/scripts/setup"
+  cp "$BATS_TEST_DIRNAME/../env-merge.sh" "$ROOT/scripts/setup/"
+  cat >"$ROOT/.env.example" <<'EOF'
+AUTH_SECRET=""
+INTERNAL_API_SECRET=""
+SETTINGS_ENCRYPTION_KEY=""
+EOF
+  BIN="$BATS_TEST_TMPDIR/bin"
+  mkdir -p "$BIN"
+  cp "$BATS_TEST_DIRNAME/stubs/docker" "$BIN/docker"
+  printf '#!/bin/sh\n' >"$BIN/make"
+  chmod +x "$BIN/docker" "$BIN/make"
+  export PATH="$BIN:$PATH"
+  export DOCKER_LOG="$BATS_TEST_TMPDIR/docker.log"
+  : >"$DOCKER_LOG"
+  export SETUP_NONINTERACTIVE=1
+  export ADMIN_EMAIL="admin@example.org" ADMIN_NAME="Ada Admin" ADMIN_PASSWORD="s3cret-Passw0rd"
+  export SETUP_HEALTH_TIMEOUT=2 SETUP_HEALTH_INTERVAL=0
+}
+
+teardown() {
+  [ -z "${LISTENER:-}" ] || kill "$LISTENER" 2>/dev/null || true
+}
+
+run_setup() {
+  run "$SETUP" --root "$ROOT" "$@"
+}
+
+# The line number of the first docker call matching a pattern (0 if none).
+call_line() {
+  grep -n -- "$1" "$DOCKER_LOG" | head -1 | cut -d: -f1 || true
+}
+
+assert_nothing_started() {
+  ! grep -Eq 'compose.* (up|build|run)( |$)' "$DOCKER_LOG"
+}
+
+# --- Prerequisites -----------------------------------------------------------
+
+@test "no docker: fails naming Docker, starts nothing" {
+  rm "$BIN/docker"
+  PATH="$BIN:/usr/bin:/bin" run_setup
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Docker is not installed"* ]]
+  [ ! -f "$ROOT/.env" ]
+}
+
+@test "docker daemon not running: fails saying so" {
+  STUB_INFO_EXIT=1 run_setup
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Docker daemon"* ]]
+  assert_nothing_started
+}
+
+@test "no Docker Compose v2: fails naming it" {
+  STUB_COMPOSE_VERSION_EXIT=1 run_setup
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Docker Compose v2"* ]]
+  assert_nothing_started
+}
+
+@test "no make: fails naming it" {
+  rm "$BIN/make"
+  # make isn't in the test image, so dropping the stub removes it.
+  ! command -v make || skip "make is installed in this image"
+  run_setup
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"make"* ]]
+  assert_nothing_started
+}
+
+@test "a port held by another program: fails naming the port, starts nothing" {
+  nc -lk -p 9324 >/dev/null 2>&1 &
+  LISTENER=$!
+  sleep 0.3
+  run_setup
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"9324"* ]]
+  [[ "$output" == *"elasticmq"* ]]
+  assert_nothing_started
+  [ ! -f "$ROOT/.env" ]
+}
+
+@test "a port held by this stack is not a conflict (re-run)" {
+  nc -lk -p 9324 >/dev/null 2>&1 &
+  LISTENER=$!
+  sleep 0.3
+  STUB_PS_OUT=abc123 run_setup
+  [ "$status" -eq 0 ]
+  grep -q "label=com.docker.compose.project.working_dir=$ROOT" "$DOCKER_LOG"
+}
+
+# --- Administrator inputs ------------------------------------------------------
+
+@test "non-interactive fresh install without ADMIN_*: fails naming them, starts nothing" {
+  unset ADMIN_NAME ADMIN_PASSWORD
+  run_setup
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ADMIN_NAME"* ]]
+  [[ "$output" == *"ADMIN_PASSWORD"* ]]
+  [[ "$output" != *"ADMIN_EMAIL,"* ]]
+  assert_nothing_started
+}
+
+@test "non-interactive: a password under 8 characters is refused before anything starts" {
+  ADMIN_PASSWORD=short run_setup
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"at least 8"* ]]
+  assert_nothing_started
+}
+
+@test "the Administrator's inputs never reach .env, a command line or the output" {
+  run_setup
+  [ "$status" -eq 0 ]
+  ! grep -q "s3cret-Passw0rd" "$ROOT/.env"
+  ! grep -q "s3cret-Passw0rd" "$DOCKER_LOG"
+  [[ "$output" != *"s3cret-Passw0rd"* ]]
+  # ...but they reach the container through the environment (-e NAME).
+  grep -q "create_admin.py env=admin@example.org/Ada Admin/set" "$DOCKER_LOG"
+}
+
+# --- Fresh install -------------------------------------------------------------
+
+@test "fresh install: merge, build, migrate, seed, up, Administrator, health, in that order" {
+  run_setup
+  [ "$status" -eq 0 ]
+  [ -f "$ROOT/.env" ]
+  build=$(call_line "compose --profile tools build")
+  postgres=$(call_line "compose up -d --wait postgres")
+  migrate=$(call_line "compose run --rm migrate$")
+  seed=$(call_line "compose run --rm migrate pnpm exec prisma db seed")
+  up=$(call_line "compose up -d$")
+  admin=$(call_line "create_admin.py$")
+  health=$(call_line "compose exec -T web")
+  [ "$build" -gt 0 ] && [ "$build" -lt "$postgres" ] && [ "$postgres" -lt "$migrate" ]
+  [ "$migrate" -lt "$seed" ] && [ "$seed" -lt "$up" ] && [ "$up" -lt "$admin" ] && [ "$admin" -lt "$health" ]
+  # Fresh install: no point asking the database whether an Administrator exists.
+  ! grep -q -- "--check" "$DOCKER_LOG"
+  [[ "$output" == *"http://localhost:3000"* ]]
+  [[ "$output" == *"admin@example.org"* ]]
+}
+
+@test "fresh install: secrets are generated, nothing warns about stored LLM keys" {
+  run_setup
+  [ "$status" -eq 0 ]
+  grep -q '^SETTINGS_ENCRYPTION_KEY=".\+"' "$ROOT/.env"
+  [[ "$output" != *"re-enter"* ]]
+}
+
+@test "legacy per-package .env files: says they are no longer read" {
+  mkdir -p "$ROOT/apps/web"
+  echo 'AUTH_SECRET="legacy-auth-secret"' >"$ROOT/apps/web/.env"
+  run_setup
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"apps/web/.env"*"no longer read"* ]]
+}
+
+# --- Re-run / upgrade ------------------------------------------------------------
+
+@test "re-run with an Administrator: skips its creation, keeps .env byte for byte" {
+  run_setup
+  [ "$status" -eq 0 ]
+  cp "$ROOT/.env" "$BATS_TEST_TMPDIR/first.env"
+  : >"$DOCKER_LOG"
+  STUB_VOLUMES=proj_postgres-data STUB_ADMIN_CHECK_EXIT=0 run_setup
+  [ "$status" -eq 0 ]
+  cmp "$ROOT/.env" "$BATS_TEST_TMPDIR/first.env"
+  grep -q -- "create_admin.py --check" "$DOCKER_LOG"
+  ! grep -q "create_admin.py$" "$DOCKER_LOG"
+  [[ "$output" == *"already exists"* ]]
+  # Still the upgrade path: images rebuilt, migrations and seed re-applied.
+  grep -q "compose --profile tools build" "$DOCKER_LOG"
+  grep -q "compose run --rm migrate$" "$DOCKER_LOG"
+  grep -q "prisma db seed" "$DOCKER_LOG"
+}
+
+@test "existing database without an Administrator: creates one after migrating" {
+  STUB_VOLUMES=proj_postgres-data STUB_ADMIN_CHECK_EXIT=3 run_setup
+  [ "$status" -eq 0 ]
+  check=$(call_line "create_admin.py --check")
+  migrate=$(call_line "compose run --rm migrate$")
+  admin=$(call_line "create_admin.py$")
+  [ "$migrate" -lt "$check" ] && [ "$check" -lt "$admin" ]
+}
+
+@test "existing database, Administrator check errors: fails rather than guessing" {
+  STUB_VOLUMES=proj_postgres-data STUB_ADMIN_CHECK_EXIT=1 run_setup
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"Administrator"* ]]
+}
+
+@test "new SETTINGS_ENCRYPTION_KEY on an existing database: warns to re-enter LLM keys" {
+  STUB_VOLUMES=proj_postgres-data STUB_ADMIN_CHECK_EXIT=0 run_setup
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"SETTINGS_ENCRYPTION_KEY"*"re-enter"* ]]
+}
+
+# --- Health wait -------------------------------------------------------------------
+
+@test "the app never answers: fails after the timeout, naming what didn't answer" {
+  STUB_HEALTH_EXIT=1 SETUP_HEALTH_TIMEOUT=1 run_setup
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"did not answer"* ]]
+  [[ "$output" == *"docker compose logs"* ]]
+}
+
+# --- Arguments -----------------------------------------------------------------------
+
+@test "unknown argument: exit 2" {
+  run "$SETUP" --bogus
+  [ "$status" -eq 2 ]
+}

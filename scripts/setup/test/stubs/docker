@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# A stand-in for docker in setup.bats: logs each call to $DOCKER_LOG and
+# answers the few calls whose output setup.sh reads. STUB_* variables steer it.
+echo "$*" >>"$DOCKER_LOG"
+case "$*" in
+  info*) exit "${STUB_INFO_EXIT:-0}" ;;
+  "compose version"*) exit "${STUB_COMPOSE_VERSION_EXIT:-0}" ;;
+  ps\ *) [ -z "${STUB_PS_OUT:-}" ] || echo "$STUB_PS_OUT" ;;
+  "compose config --format json"*) printf '{\n  "name": "proj",\n' ;;
+  "volume ls"*) [ -z "${STUB_VOLUMES:-}" ] || echo "$STUB_VOLUMES" ;;
+  *"create_admin.py --check") exit "${STUB_ADMIN_CHECK_EXIT:-3}" ;;
+  *"create_admin.py")
+    # The inputs come through the environment, never the command line.
+    pw="unset"; [ -z "${ADMIN_PASSWORD:-}" ] || pw="set"
+    echo "create_admin.py env=${ADMIN_EMAIL:-}/${ADMIN_NAME:-}/$pw" >>"$DOCKER_LOG"
+    ;;
+  "compose exec"*) exit "${STUB_HEALTH_EXIT:-0}" ;;
+esac
+exit 0
