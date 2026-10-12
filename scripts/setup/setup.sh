@@ -9,16 +9,19 @@
 #   1. prerequisites: docker (daemon running), Docker Compose v2, make, and
 #      ports 3000, 5432, 8000, 9000, 9324 free (or held by this stack);
 #   2. the root .env, through env-merge.sh (secrets generated once);
-#   3. the first Administrator's email, name and password: asked (password
+#   3. the LLM provider and its key (or ollama's URL), asked or, non-
+#      interactively, read from LLM_PROVIDER and the provider's variable;
+#      skippable ("later"), not asked again once .env names a provider;
+#   4. the first Administrator's email, name and password: asked (password
 #      masked and confirmed) or, non-interactively, read from ADMIN_EMAIL /
 #      ADMIN_NAME / ADMIN_PASSWORD. Never written to a file or a command line.
 #      On an existing database this waits until after the migrations, then
 #      offers to skip when an Administrator exists;
-#   4. build, Postgres up, `prisma migrate deploy`, seed, the stack up, all in
+#   5. build, Postgres up, `prisma migrate deploy`, seed, the stack up, all in
 #      containers;
-#   5. the Administrator, created in the `api` container (create_admin.py);
-#   6. wait for the API's /healthz and the web's 200;
-#   7. a summary.
+#   6. the Administrator, created in the `api` container (create_admin.py);
+#   7. wait for the API's /healthz and the web's 200;
+#   8. a summary.
 #
 # Non-interactive when SETUP_NONINTERACTIVE=1 or stdin isn't a terminal.
 # SETUP_HEALTH_TIMEOUT (seconds, default 300) bounds the health wait.
@@ -125,6 +128,124 @@ EOF
   note ".env is ready (existing values kept)."
 }
 
+# A value from .env, as env-merge.sh writes it (double- or single-quoted,
+# never escaped); empty when unset or commented out.
+env_value() {
+  local value
+  value="$(grep "^$1=" .env | tail -1)" || true
+  value="${value#*=}"
+  case "$value" in
+    \"*\") value="${value#\"}"; value="${value%\"}" ;;
+    \'*\') value="${value#\'}"; value="${value%\'}" ;;
+  esac
+  printf '%s' "$value"
+}
+
+# --- 3. LLM provider ---------------------------------------------------------
+
+# The values docker-compose passes to the api and worker (huggingface isn't
+# offered interactively, but an environment may name it).
+LLM_PROVIDER_CHOICES="anthropic openai openrouter huggingface ollama"
+# A host Ollama, as the containers reach it.
+OLLAMA_FROM_CONTAINERS="http://host.docker.internal:11434/v1"
+
+# The .env variable a provider needs: its API key, or ollama's server URL.
+llm_parameter() {
+  case "$1" in
+    anthropic) echo ANTHROPIC_API_KEY ;;
+    openai) echo OPENAI_API_KEY ;;
+    openrouter) echo OPENROUTER_API_KEY ;;
+    huggingface) echo HF_TOKEN ;;
+    ollama) echo OLLAMA_BASE_URL ;;
+  esac
+}
+
+# Set by configure_llm: the provider in .env, empty when none ("later").
+llm_provider=""
+llm_value=""
+
+# Sets llm_provider (empty: later) and, unless .env already has it, llm_value.
+ask_llm() {
+  local answer parameter
+  printf '\nThe LLM provider Analyses run on (Admin -> LLM providers can change it later):\n'
+  echo "  1) anthropic   2) openai   3) openrouter   4) ollama (a local server)   5) later"
+  while :; do
+    read -r -p "  Choice [5]: " answer
+    case "$answer" in
+      1 | anthropic) llm_provider=anthropic ;;
+      2 | openai) llm_provider=openai ;;
+      3 | openrouter) llm_provider=openrouter ;;
+      4 | ollama) llm_provider=ollama ;;
+      "" | 5 | later) llm_provider=""; return ;;
+      *) echo "  Pick 1 to 5."; continue ;;
+    esac
+    break
+  done
+  parameter="$(llm_parameter "$llm_provider")"
+  if [ -n "$(env_value "$parameter")" ]; then
+    note "Using the $parameter already in .env."
+  elif [ "$llm_provider" = "ollama" ]; then
+    read -r -p "  Ollama URL [$OLLAMA_FROM_CONTAINERS]: " llm_value
+    llm_value="${llm_value:-$OLLAMA_FROM_CONTAINERS}"
+  else
+    read -r -s -p "  $parameter (Enter to decide later): " llm_value
+    echo
+    [ -n "$llm_value" ] || llm_provider=""
+  fi
+}
+
+# LLM_PROVIDER and its key in .env, through env-merge.sh: asked, or read from
+# the environment (LLM_PROVIDER plus the provider's variable). Not asked again
+# once .env names a provider. No provider is a valid answer: Analyses then
+# fail naming the missing parameter until an Administrator sets one.
+configure_llm() {
+  step "LLM provider"
+  llm_provider="$(env_value LLM_PROVIDER)"
+  if [ -n "$llm_provider" ]; then
+    note "LLM_PROVIDER is already set in .env ($llm_provider): kept."
+    return
+  fi
+
+  local parameter
+  if [ "$interactive" = "1" ]; then
+    ask_llm
+  else
+    llm_provider="$(printf '%s' "${LLM_PROVIDER:-}" | tr '[:upper:]' '[:lower:]')"
+    if [ -n "$llm_provider" ]; then
+      case " $LLM_PROVIDER_CHOICES " in
+        *" $llm_provider "*) ;;
+        *) fail "unknown LLM_PROVIDER \"$llm_provider\": use one of $LLM_PROVIDER_CHOICES, or leave it unset to configure it later." ;;
+      esac
+      parameter="$(llm_parameter "$llm_provider")"
+      llm_value="${!parameter:-}"
+      if [ -z "$llm_value" ] && [ -z "$(env_value "$parameter")" ]; then
+        [ "$llm_provider" = "ollama" ] ||
+          fail "LLM_PROVIDER=$llm_provider needs $parameter: set it too, or unset LLM_PROVIDER to configure it later."
+        llm_value="$OLLAMA_FROM_CONTAINERS"
+      fi
+    fi
+  fi
+
+  if [ -z "$llm_provider" ]; then
+    note "No LLM provider for now."
+    return
+  fi
+  parameter="$(llm_parameter "$llm_provider")"
+  # Answers go through a private file: the key never shows on a command line.
+  local answers
+  answers="$(umask 077 && mktemp)"
+  {
+    echo "LLM_PROVIDER=$llm_provider"
+    [ -z "$llm_value" ] || echo "$parameter=$llm_value"
+  } >"$answers"
+  scripts/setup/env-merge.sh --root "$root" --answers "$answers" >/dev/null || {
+    rm -f "$answers"
+    fail "writing the LLM provider to .env failed (see above)."
+  }
+  rm -f "$answers"
+  note "LLM_PROVIDER=$llm_provider written to .env."
+}
+
 # Does this stack already have a Postgres volume, i.e. a database?
 database_exists() {
   local project
@@ -132,7 +253,7 @@ database_exists() {
   [ -n "$(docker volume ls -q --filter "label=com.docker.compose.project=$project" --filter "label=com.docker.compose.volume=postgres-data")" ]
 }
 
-# --- 3. Administrator inputs -------------------------------------------------
+# --- 4. Administrator inputs -------------------------------------------------
 
 check_password() {
   [ "${#1}" -ge 8 ] || fail "the Administrator's password must be at least 8 characters."
@@ -213,7 +334,7 @@ decide_admin_on_existing_database() {
   note "An Administrator already exists: skipped. (More later: see create_admin in the README.)"
 }
 
-# --- 4.-6. The stack ---------------------------------------------------------
+# --- 5.-7. The stack ---------------------------------------------------------
 
 start_stack() {
   step "Building the images (the first time takes several minutes)"
@@ -269,6 +390,7 @@ wait_for_health() {
 
 check_prerequisites
 merge_env
+configure_llm
 
 create_admin=0
 existing_database=0
@@ -296,6 +418,12 @@ if [ "$create_admin" = "1" ]; then
   note "Sign in as the Administrator: $ADMIN_EMAIL"
 else
   note "Sign in with your existing Administrator account."
+fi
+if [ -n "$llm_provider" ]; then
+  note "LLM provider: $llm_provider (from .env; Admin -> LLM providers can override it)."
+else
+  note "No LLM provider configured: Analyses fail until you set one in"
+  note "Admin -> LLM providers (or re-run make setup)."
 fi
 if [ "$existing_database" = "1" ] && [ "$new_encryption_key" = "1" ]; then
   echo

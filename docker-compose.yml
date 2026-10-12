@@ -184,7 +184,7 @@ services:
       # API gets the same LLM variables as the worker below, or it would
       # report a different provider than the one actually running. Keep the
       # two blocks in step.
-      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
       LLM_MODEL: ${LLM_MODEL:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -254,7 +254,7 @@ services:
   #   - analysis-intake  -> analysis.local_pipeline (WORKER_ANALYSIS_MODE=local):
   #     the whole AnalysisWorkflow in-process, no host-only `lambda_shim` /
   #     Step Functions execution needed, just an LLM the crew can reach
-  #     (LLM_PROVIDER below, ollama by default).
+  #     (LLM_PROVIDER below, set by `make setup`).
   #   - scout-intake     -> scout.intake_handler.handle_scout_intake, fed by a
   #     manual "Run now" (services/api) and, since issue #57, this worker's own
   #     scout-schedule tick — its local stand-in for the production EventBridge
@@ -309,8 +309,11 @@ services:
       SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?run make setup}
       # The crew run (analysis-intake) and any PDF/DOCX Conversion call an LLM
       # through this provider; the MD/TXT Conversion path needs none. Passed
-      # through from the host env, defaulting to a local Ollama (no API key).
-      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      # through from .env (`make setup` asks for it, #262). Unset, it is
+      # anthropic, like on the host (py_db's DEFAULT_ENVIRONMENT_PROVIDER):
+      # with no key either, an Analysis fails naming the missing parameter
+      # rather than as a connection error to an Ollama nobody installed.
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
       LLM_MODEL: ${LLM_MODEL:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -321,7 +324,7 @@ services:
       HF_TOKEN: ${HF_TOKEN:-}
       # Only for LLM_PROVIDER=ollama (dev-local only, not a supported production
       # backend). From this container Ollama on the host is reachable at
-      # http://host.docker.internal:11434/v1 — set that in your host env.
+      # http://host.docker.internal:11434/v1 (`make setup`'s default for it).
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
       # SITE_SEARCH ("Analyse several offers") against France Travail — the one
       # seeded OFFICIAL_API site — calls the France Travail API, which needs an

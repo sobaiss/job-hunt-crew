@@ -15,6 +15,11 @@ setup() {
 AUTH_SECRET=""
 INTERNAL_API_SECRET=""
 SETTINGS_ENCRYPTION_KEY=""
+# LLM_PROVIDER=anthropic
+ANTHROPIC_API_KEY=""
+OPENAI_API_KEY=""
+OPENROUTER_API_KEY=""
+OLLAMA_BASE_URL=""
 EOF
   BIN="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$BIN"
@@ -27,6 +32,7 @@ EOF
   export SETUP_NONINTERACTIVE=1
   export ADMIN_EMAIL="admin@example.org" ADMIN_NAME="Ada Admin" ADMIN_PASSWORD="s3cret-Passw0rd"
   export SETUP_HEALTH_TIMEOUT=2 SETUP_HEALTH_INTERVAL=0
+  unset LLM_PROVIDER ANTHROPIC_API_KEY OPENAI_API_KEY OPENROUTER_API_KEY OLLAMA_BASE_URL
 }
 
 teardown() {
@@ -204,6 +210,64 @@ assert_nothing_started() {
   STUB_VOLUMES=proj_postgres-data STUB_ADMIN_CHECK_EXIT=0 run_setup
   [ "$status" -eq 0 ]
   [[ "$output" == *"SETTINGS_ENCRYPTION_KEY"*"re-enter"* ]]
+}
+
+# --- LLM provider ----------------------------------------------------------------
+
+@test "non-interactive provider and key: both land in .env, the key nowhere else" {
+  LLM_PROVIDER=anthropic ANTHROPIC_API_KEY=sk-ant-test-key run_setup
+  [ "$status" -eq 0 ]
+  grep -qx 'LLM_PROVIDER="anthropic"' "$ROOT/.env"
+  grep -qx 'ANTHROPIC_API_KEY="sk-ant-test-key"' "$ROOT/.env"
+  ! grep -q "sk-ant-test-key" "$DOCKER_LOG"
+  [[ "$output" != *"sk-ant-test-key"* ]]
+  [[ "$output" == *"LLM provider: anthropic"* ]]
+}
+
+@test "no provider (later): completes, nothing in .env, the summary points to the Admin screen" {
+  run_setup
+  [ "$status" -eq 0 ]
+  ! grep -q '^LLM_PROVIDER=' "$ROOT/.env"
+  [[ "$output" == *"Admin -> LLM providers"* ]]
+}
+
+@test "a provider without its key: fails naming the variable, starts nothing" {
+  LLM_PROVIDER=openai run_setup
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"OPENAI_API_KEY"* ]]
+  assert_nothing_started
+}
+
+@test "an unknown provider: fails naming the choices, starts nothing" {
+  LLM_PROVIDER=gpt run_setup
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"anthropic"*"ollama"* ]]
+  assert_nothing_started
+}
+
+@test "ollama without a base URL: the host's Ollama, as seen from the containers" {
+  LLM_PROVIDER=ollama run_setup
+  [ "$status" -eq 0 ]
+  grep -qx 'LLM_PROVIDER="ollama"' "$ROOT/.env"
+  grep -qx 'OLLAMA_BASE_URL="http://host.docker.internal:11434/v1"' "$ROOT/.env"
+}
+
+@test "re-run with a provider already in .env: kept, the key already there is enough" {
+  LLM_PROVIDER=openrouter OPENROUTER_API_KEY=sk-or-key run_setup
+  [ "$status" -eq 0 ]
+  cp "$ROOT/.env" "$BATS_TEST_TMPDIR/first.env"
+  STUB_VOLUMES=proj_postgres-data STUB_ADMIN_CHECK_EXIT=0 LLM_PROVIDER=anthropic run_setup
+  [ "$status" -eq 0 ]
+  cmp "$ROOT/.env" "$BATS_TEST_TMPDIR/first.env"
+  [[ "$output" == *"LLM provider: openrouter"* ]]
+}
+
+@test "a key already in .env serves a provider chosen now" {
+  echo 'ANTHROPIC_API_KEY="sk-ant-from-env-file"' >"$ROOT/.env"
+  LLM_PROVIDER=anthropic run_setup
+  [ "$status" -eq 0 ]
+  grep -qx 'LLM_PROVIDER="anthropic"' "$ROOT/.env"
+  grep -qx 'ANTHROPIC_API_KEY="sk-ant-from-env-file"' "$ROOT/.env"
 }
 
 # --- Health wait -------------------------------------------------------------------

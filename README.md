@@ -214,16 +214,23 @@ make setup
 
 `make setup` checks the prerequisites and that ports 3000, 5432, 8000, 9000
 and 9324 are free, writes the root `.env` (generating `AUTH_SECRET`,
-`INTERNAL_API_SECRET` and `SETTINGS_ENCRYPTION_KEY` once), asks for the first
-Administrator's email, name and password, builds and starts the stack, applies
-the migrations and the seed, creates the Administrator and waits until the app
-answers on http://localhost:3000. The password is never written to disk.
+`INTERNAL_API_SECRET` and `SETTINGS_ENCRYPTION_KEY` once), asks for the LLM
+provider (`anthropic`, `openai`, `openrouter`, `ollama`, or "later") and its
+API key (for `ollama`, its URL), then the first Administrator's email, name
+and password, builds and starts the stack, applies the migrations and the seed,
+creates the Administrator and waits until the app answers on
+http://localhost:3000. The password is never written to disk. With "later",
+Analyses fail until a provider is set in Admin → LLM providers.
 Without a terminal, or with `SETUP_NONINTERACTIVE=1`, it reads the
-Administrator from `ADMIN_EMAIL`, `ADMIN_NAME` and `ADMIN_PASSWORD` instead.
+Administrator from `ADMIN_EMAIL`, `ADMIN_NAME` and `ADMIN_PASSWORD`, and the
+LLM from `LLM_PROVIDER` plus that provider's variable (`ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `HF_TOKEN` or `OLLAMA_BASE_URL`),
+instead.
 
 Re-running it is safe and is how you upgrade after a `git pull`: it keeps
-every `.env` value, regenerates no secret, rebuilds the images, applies new
-migrations and offers to skip the Administrator when one exists.
+every `.env` value, regenerates no secret, doesn't ask again for an LLM
+provider already in `.env`, rebuilds the images, applies new migrations and
+offers to skip the Administrator when one exists.
 
 The sections below are the contributor path (host tooling, hot reload).
 
@@ -308,8 +315,8 @@ queue URLs) lives in `docker-compose.yml`, not in `.env`. The former
 their values into the root `.env`.
 
 The LLM settings: `LLM_PROVIDER`
-(`anthropic|openai|openrouter|huggingface|ollama`, defaults to `anthropic` on
-the host and `ollama` in docker-compose), `LLM_MODEL`, and the corresponding
+(`anthropic|openai|openrouter|huggingface|ollama`, defaults to `anthropic`,
+on the host and in docker-compose alike; `make setup` asks for it), `LLM_MODEL`, and the corresponding
 API key, read by the crew or a Lambda handler: `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` for
 the production-supported providers, or `OPENROUTER_API_KEY`/`HF_TOKEN` for
 `openrouter`/`huggingface` — also hosted, paid backends (routed through their
@@ -463,8 +470,8 @@ off. The test suite sets the last two so no test launches a browser or paces.
   AnalysisWorkflow (EnsureCVConverted → EnsureOfferExtracted → the
   comparison crew → persist) in-process via `analysis.local_pipeline`, the
   same shape `cv-conversion` uses — no `stepfunctions-local` / `lambda_shim`
-  / registered state machine, just an LLM the crew can reach (`LLM_PROVIDER`,
-  `ollama` by default). So a `POST /v1/analyses` ("Analyse one offer" on a
+  / registered state machine, just an LLM the crew can reach (`LLM_PROVIDER`
+  and its key in `.env`, or Admin → LLM providers). So a `POST /v1/analyses` ("Analyse one offer" on a
   known offer, or a re-run) also completes on its own.
 
 To run `analysis-intake` through the real Step Functions state machine
