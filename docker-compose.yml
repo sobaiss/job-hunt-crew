@@ -224,11 +224,12 @@ services:
       # Signs the session cookie. Also in .env (env_file), but named here so
       # the stack refuses to start without it (#261).
       AUTH_SECRET: ${AUTH_SECRET:?run make setup}
-      # The app's public URL, for Auth.js's redirects and callback URLs. Unset,
-      # it would take them from the request URL, which the standalone server
-      # builds from its bind address (http://0.0.0.0:3000). Setting it also
-      # makes Auth.js trust the host in production (no UntrustedHost).
-      AUTH_URL: ${AUTH_URL:-http://localhost:3000}
+      # The app's public URL (.env's APP_URL, which `make setup` asks for), for
+      # Auth.js's redirects and callback URLs. Unset, it would take them from
+      # the request URL, which the standalone server builds from its bind
+      # address (http://0.0.0.0:3000). Setting it also makes Auth.js trust the
+      # host in production (no UntrustedHost).
+      AUTH_URL: ${APP_URL:-http://localhost:3000}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3000/').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
       interval: 5s

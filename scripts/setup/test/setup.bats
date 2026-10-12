@@ -20,6 +20,17 @@ ANTHROPIC_API_KEY=""
 OPENAI_API_KEY=""
 OPENROUTER_API_KEY=""
 OLLAMA_BASE_URL=""
+# APP_URL="http://localhost:3000"
+EMAIL_SERVER=""
+# EMAIL_FROM="Job Hunt Crew <no-reply@job-hunt-crew.local>"
+AUTH_GOOGLE_ID=""
+AUTH_GOOGLE_SECRET=""
+AUTH_LINKEDIN_ID=""
+AUTH_LINKEDIN_SECRET=""
+FRANCE_TRAVAIL_CLIENT_ID=""
+FRANCE_TRAVAIL_CLIENT_SECRET=""
+ADZUNA_APP_ID=""
+ADZUNA_APP_KEY=""
 EOF
   BIN="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$BIN"
@@ -33,6 +44,20 @@ EOF
   export ADMIN_EMAIL="admin@example.org" ADMIN_NAME="Ada Admin" ADMIN_PASSWORD="s3cret-Passw0rd"
   export SETUP_HEALTH_TIMEOUT=2 SETUP_HEALTH_INTERVAL=0
   unset LLM_PROVIDER ANTHROPIC_API_KEY OPENAI_API_KEY OPENROUTER_API_KEY OLLAMA_BASE_URL
+  unset APP_URL EMAIL_SERVER EMAIL_FROM AUTH_GOOGLE_ID AUTH_GOOGLE_SECRET \
+    AUTH_LINKEDIN_ID AUTH_LINKEDIN_SECRET FRANCE_TRAVAIL_CLIENT_ID \
+    FRANCE_TRAVAIL_CLIENT_SECRET ADZUNA_APP_ID ADZUNA_APP_KEY
+}
+
+# Sets every optional integration in the environment (non-interactive input).
+export_all_integrations() {
+  export APP_URL="https://jobs.example.org"
+  export EMAIL_SERVER="smtp://mailer:smtp-pass-123@smtp.example.org:587"
+  export EMAIL_FROM="Jobs <jobs@example.org>"
+  export AUTH_GOOGLE_ID="google-id" AUTH_GOOGLE_SECRET="google-secret-123"
+  export AUTH_LINKEDIN_ID="linkedin-id" AUTH_LINKEDIN_SECRET="linkedin-secret-123"
+  export FRANCE_TRAVAIL_CLIENT_ID="ft-id" FRANCE_TRAVAIL_CLIENT_SECRET="ft-secret-123"
+  export ADZUNA_APP_ID="adzuna-id" ADZUNA_APP_KEY="adzuna-key-123"
 }
 
 teardown() {
@@ -268,6 +293,79 @@ assert_nothing_started() {
   [ "$status" -eq 0 ]
   grep -qx 'LLM_PROVIDER="anthropic"' "$ROOT/.env"
   grep -qx 'ANTHROPIC_API_KEY="sk-ant-from-env-file"' "$ROOT/.env"
+}
+
+# --- Optional integrations ----------------------------------------------------------
+
+@test "integrations all skipped: completes, APP_URL defaults, the summary says what is off" {
+  run_setup
+  [ "$status" -eq 0 ]
+  grep -qx 'APP_URL="http://localhost:3000"' "$ROOT/.env"
+  grep -qx 'EMAIL_SERVER=""' "$ROOT/.env"
+  grep -qx 'AUTH_GOOGLE_ID=""' "$ROOT/.env"
+  [[ "$output" == *"Open http://localhost:3000"* ]]
+  [[ "$output" == *"Sign-in methods: email + password"* ]]
+  [[ "$output" != *"Sign-in methods: email + password, "* ]]
+  [[ "$output" == *"France Travail: inactive"*"FRANCE_TRAVAIL_CLIENT_ID"* ]]
+  [[ "$output" == *"Adzuna: inactive"*"developer.adzuna.com"* ]]
+  [[ "$output" == *"Remotive, LinkedIn and HelloWork"*"no credentials"* ]]
+}
+
+@test "integrations from the environment: all land in .env, no secret elsewhere" {
+  export_all_integrations
+  run_setup
+  [ "$status" -eq 0 ]
+  grep -qx 'APP_URL="https://jobs.example.org"' "$ROOT/.env"
+  grep -qx 'EMAIL_SERVER="smtp://mailer:smtp-pass-123@smtp.example.org:587"' "$ROOT/.env"
+  grep -qx 'EMAIL_FROM="Jobs <jobs@example.org>"' "$ROOT/.env"
+  grep -qx 'AUTH_GOOGLE_ID="google-id"' "$ROOT/.env"
+  grep -qx 'AUTH_GOOGLE_SECRET="google-secret-123"' "$ROOT/.env"
+  grep -qx 'AUTH_LINKEDIN_SECRET="linkedin-secret-123"' "$ROOT/.env"
+  grep -qx 'FRANCE_TRAVAIL_CLIENT_SECRET="ft-secret-123"' "$ROOT/.env"
+  grep -qx 'ADZUNA_APP_KEY="adzuna-key-123"' "$ROOT/.env"
+  local secret
+  for secret in smtp-pass-123 google-secret-123 linkedin-secret-123 ft-secret-123 adzuna-key-123; do
+    ! grep -q "$secret" "$DOCKER_LOG"
+    [[ "$output" != *"$secret"* ]]
+  done
+}
+
+@test "integrations configured: the summary lists them as active and the URL as APP_URL" {
+  export_all_integrations
+  run_setup
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Open https://jobs.example.org"* ]]
+  [[ "$output" == *"Sign-in methods: email + password, magic link (email), Google, LinkedIn"* ]]
+  [[ "$output" == *"France Travail: active"* ]]
+  [[ "$output" == *"Adzuna: active"* ]]
+}
+
+@test "half an integration's credentials: fails naming the missing variable, starts nothing" {
+  AUTH_GOOGLE_ID=google-id run_setup
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"AUTH_GOOGLE_SECRET"* ]]
+  assert_nothing_started
+}
+
+@test "a credential already in .env completes one given now" {
+  echo 'ADZUNA_APP_ID="adzuna-from-env-file"' >"$ROOT/.env"
+  ADZUNA_APP_KEY=adzuna-key run_setup
+  [ "$status" -eq 0 ]
+  grep -qx 'ADZUNA_APP_ID="adzuna-from-env-file"' "$ROOT/.env"
+  grep -qx 'ADZUNA_APP_KEY="adzuna-key"' "$ROOT/.env"
+  [[ "$output" == *"Adzuna: active"* ]]
+}
+
+@test "re-run: integrations already in .env are kept, even when the environment differs" {
+  export_all_integrations
+  run_setup
+  [ "$status" -eq 0 ]
+  cp "$ROOT/.env" "$BATS_TEST_TMPDIR/first.env"
+  STUB_VOLUMES=proj_postgres-data STUB_ADMIN_CHECK_EXIT=0 APP_URL=http://other:3000 \
+    AUTH_GOOGLE_ID=other-id AUTH_GOOGLE_SECRET=other-secret run_setup
+  [ "$status" -eq 0 ]
+  cmp "$ROOT/.env" "$BATS_TEST_TMPDIR/first.env"
+  [[ "$output" == *"Open https://jobs.example.org"* ]]
 }
 
 # --- Health wait -------------------------------------------------------------------

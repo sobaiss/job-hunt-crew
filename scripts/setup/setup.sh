@@ -12,6 +12,9 @@
 #   3. the LLM provider and its key (or ollama's URL), asked or, non-
 #      interactively, read from LLM_PROVIDER and the provider's variable;
 #      skippable ("later"), not asked again once .env names a provider;
+#      then the optional integrations, each skippable: APP_URL, SMTP, Google
+#      and LinkedIn OAuth, France Travail and Adzuna credentials (non-
+#      interactively: the same variables from the environment);
 #   4. the first Administrator's email, name and password: asked (password
 #      masked and confirmed) or, non-interactively, read from ADMIN_EMAIL /
 #      ADMIN_NAME / ADMIN_PASSWORD. Never written to a file or a command line.
@@ -21,7 +24,7 @@
 #      containers;
 #   6. the Administrator, created in the `api` container (create_admin.py);
 #   7. wait for the API's /healthz and the web's 200;
-#   8. a summary.
+#   8. a summary: URL, Administrator, LLM, sign-in methods, job sources.
 #
 # Non-interactive when SETUP_NONINTERACTIVE=1 or stdin isn't a terminal.
 # SETUP_HEALTH_TIMEOUT (seconds, default 300) bounds the health wait.
@@ -231,19 +234,159 @@ configure_llm() {
     return
   fi
   parameter="$(llm_parameter "$llm_provider")"
-  # Answers go through a private file: the key never shows on a command line.
-  local answers
-  answers="$(umask 077 && mktemp)"
   {
     echo "LLM_PROVIDER=$llm_provider"
     [ -z "$llm_value" ] || echo "$parameter=$llm_value"
-  } >"$answers"
+  } | write_answers "the LLM provider"
+  note "LLM_PROVIDER=$llm_provider written to .env."
+}
+
+# KEY=value lines on stdin into .env, through env-merge.sh and a private file:
+# a key never shows on a command line. A non-empty .env value still wins.
+write_answers() {
+  local answers
+  answers="$(umask 077 && mktemp)"
+  cat >"$answers"
   scripts/setup/env-merge.sh --root "$root" --answers "$answers" >/dev/null || {
     rm -f "$answers"
-    fail "writing the LLM provider to .env failed (see above)."
+    fail "writing $1 to .env failed (see above)."
   }
   rm -f "$answers"
-  note "LLM_PROVIDER=$llm_provider written to .env."
+}
+
+# --- 3b. Optional integrations -----------------------------------------------
+
+DEFAULT_APP_URL="http://localhost:3000"
+DEFAULT_EMAIL_FROM="Job Hunt Crew <no-reply@job-hunt-crew.local>"
+# Every variable this step writes, read from the environment when non-
+# interactive.
+INTEGRATION_VARIABLES="APP_URL EMAIL_SERVER EMAIL_FROM AUTH_GOOGLE_ID AUTH_GOOGLE_SECRET
+AUTH_LINKEDIN_ID AUTH_LINKEDIN_SECRET FRANCE_TRAVAIL_CLIENT_ID FRANCE_TRAVAIL_CLIENT_SECRET
+ADZUNA_APP_ID ADZUNA_APP_KEY"
+# Label:id:secret, for the credentials that only work as a pair.
+CREDENTIAL_PAIRS="Google:AUTH_GOOGLE_ID:AUTH_GOOGLE_SECRET
+LinkedIn:AUTH_LINKEDIN_ID:AUTH_LINKEDIN_SECRET
+France-Travail:FRANCE_TRAVAIL_CLIENT_ID:FRANCE_TRAVAIL_CLIENT_SECRET
+Adzuna:ADZUNA_APP_ID:ADZUNA_APP_KEY"
+
+# Collected by configure_integrations: KEY=value lines for env-merge.sh.
+integration_answers=""
+
+# A variable's value as this run will write it: .env's, else this run's answer.
+effective_value() {
+  local value line
+  value="$(env_value "$1")"
+  if [ -z "$value" ]; then
+    while IFS= read -r line; do
+      case "$line" in "$1="*) value="${line#*=}" ;; esac
+    done <<EOF
+$integration_answers
+EOF
+  fi
+  printf '%s' "$value"
+}
+
+add_answer() {
+  integration_answers="$integration_answers$1=$2
+"
+}
+
+# Asks for $1 unless .env has it. $2: the prompt; $3: a default (shown and
+# used on Enter), or "secret" for a masked input. Empty answer: skipped.
+ask_integration() {
+  local value
+  if [ -n "$(env_value "$1")" ]; then
+    note "$1 is already set in .env: kept."
+    return
+  fi
+  if [ "${3:-}" = "secret" ]; then
+    read -r -s -p "  $2: " value
+    echo
+  elif [ -n "${3:-}" ]; then
+    read -r -p "  $2 [$3]: " value
+    value="${value:-$3}"
+  else
+    read -r -p "  $2: " value
+  fi
+  [ -z "$value" ] || add_answer "$1" "$value"
+}
+
+# An id/secret pair: the secret is asked only once the id is known; skipping
+# the secret drops an id entered just now.
+ask_pair() {
+  local before="$integration_answers"
+  ask_integration "$2" "$4 (Enter to skip)"
+  [ -n "$(effective_value "$2")" ] || return 0
+  ask_integration "$3" "$3 (Enter to skip)" secret
+  if [ -z "$(effective_value "$3")" ]; then
+    integration_answers="$before"
+    note "$1 skipped."
+  fi
+}
+
+ask_integrations() {
+  printf '\nOptional integrations: press Enter to skip any of them.\n'
+  printf '\nThe URL you open the app on (sign-in redirects and links use it):\n'
+  ask_integration APP_URL "App URL" "$DEFAULT_APP_URL"
+  printf '\nEmail (SMTP), so magic-link sign-in sends its email:\n'
+  ask_integration EMAIL_SERVER "SMTP URL, e.g. smtp://user:password@smtp.example.org:587 (hidden; Enter to skip)" secret
+  if [ -n "$(effective_value EMAIL_SERVER)" ]; then
+    ask_integration EMAIL_FROM "Sender" "$DEFAULT_EMAIL_FROM"
+  fi
+  printf '\nGoogle sign-in (an OAuth client from https://console.cloud.google.com/apis/credentials):\n'
+  ask_pair Google AUTH_GOOGLE_ID AUTH_GOOGLE_SECRET "Google client id"
+  printf '\nLinkedIn sign-in (an app from https://www.linkedin.com/developers/apps):\n'
+  ask_pair LinkedIn AUTH_LINKEDIN_ID AUTH_LINKEDIN_SECRET "LinkedIn client id"
+  printf '\nFrance Travail job source (an app from https://francetravail.io):\n'
+  ask_pair "France Travail" FRANCE_TRAVAIL_CLIENT_ID FRANCE_TRAVAIL_CLIENT_SECRET "France Travail client id"
+  printf '\nAdzuna job source (a free key pair from https://developer.adzuna.com):\n'
+  ask_pair Adzuna ADZUNA_APP_ID ADZUNA_APP_KEY "Adzuna app id"
+}
+
+# Non-interactive: every integration variable the environment sets and .env
+# doesn't; APP_URL defaults. Half a credential pair fails.
+read_integrations() {
+  local var pair label id secret
+  for var in $INTEGRATION_VARIABLES; do
+    [ -n "$(env_value "$var")" ] || [ -z "${!var:-}" ] || add_answer "$var" "${!var}"
+  done
+  [ -n "$(effective_value APP_URL)" ] || add_answer APP_URL "$DEFAULT_APP_URL"
+  for pair in $CREDENTIAL_PAIRS; do
+    label="${pair%%:*}"
+    id="${pair#*:}"; id="${id%%:*}"
+    secret="${pair##*:}"
+    if [ -n "$(effective_value "$id")" ] && [ -z "$(effective_value "$secret")" ]; then
+      fail "$id is set but not $secret: set both for ${label//-/ }, or neither."
+    fi
+    if [ -z "$(effective_value "$id")" ] && [ -n "$(effective_value "$secret")" ]; then
+      fail "$secret is set but not $id: set both for ${label//-/ }, or neither."
+    fi
+  done
+}
+
+# APP_URL, SMTP, OAuth and job-source credentials in .env, each skippable.
+# Not asked again once .env has a value.
+configure_integrations() {
+  step "Optional integrations"
+  integration_answers=""
+  if [ "$interactive" = "1" ]; then
+    ask_integrations
+  else
+    read_integrations
+  fi
+  if [ -n "$integration_answers" ]; then
+    printf '%s' "$integration_answers" | write_answers "the integrations"
+  fi
+  note "Integrations written to .env (values already there kept)."
+}
+
+# "active" when both variables are in .env.
+credentials_state() {
+  if [ -n "$(env_value "$1")" ] && [ -n "$(env_value "$2")" ]; then
+    echo active
+  else
+    echo inactive
+  fi
 }
 
 # Does this stack already have a Postgres volume, i.e. a database?
@@ -391,6 +534,7 @@ wait_for_health() {
 check_prerequisites
 merge_env
 configure_llm
+configure_integrations
 
 create_admin=0
 existing_database=0
@@ -411,7 +555,8 @@ fi
 
 wait_for_health
 
-app_url="${AUTH_URL:-http://localhost:3000}"
+app_url="$(env_value APP_URL)"
+app_url="${app_url:-$DEFAULT_APP_URL}"
 step "Done"
 note "Open $app_url"
 if [ "$create_admin" = "1" ]; then
@@ -424,6 +569,22 @@ if [ -n "$llm_provider" ]; then
 else
   note "No LLM provider configured: Analyses fail until you set one in"
   note "Admin -> LLM providers (or re-run make setup)."
+fi
+sign_in="email + password"
+[ -z "$(env_value EMAIL_SERVER)" ] || sign_in="$sign_in, magic link (email)"
+[ "$(credentials_state AUTH_GOOGLE_ID AUTH_GOOGLE_SECRET)" = "inactive" ] || sign_in="$sign_in, Google"
+[ "$(credentials_state AUTH_LINKEDIN_ID AUTH_LINKEDIN_SECRET)" = "inactive" ] || sign_in="$sign_in, LinkedIn"
+note "Sign-in methods: $sign_in."
+note "Job sources: Remotive, LinkedIn and HelloWork need no credentials."
+if [ "$(credentials_state FRANCE_TRAVAIL_CLIENT_ID FRANCE_TRAVAIL_CLIENT_SECRET)" = "active" ]; then
+  note "  France Travail: active."
+else
+  note "  France Travail: inactive (set FRANCE_TRAVAIL_CLIENT_ID and _SECRET in .env)."
+fi
+if [ "$(credentials_state ADZUNA_APP_ID ADZUNA_APP_KEY)" = "active" ]; then
+  note "  Adzuna: active."
+else
+  note "  Adzuna: inactive (set ADZUNA_APP_ID and ADZUNA_APP_KEY in .env; free keys at https://developer.adzuna.com)."
 fi
 if [ "$existing_database" = "1" ] && [ "$new_encryption_key" = "1" ]; then
   echo

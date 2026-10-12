@@ -216,21 +216,31 @@ make setup
 and 9324 are free, writes the root `.env` (generating `AUTH_SECRET`,
 `INTERNAL_API_SECRET` and `SETTINGS_ENCRYPTION_KEY` once), asks for the LLM
 provider (`anthropic`, `openai`, `openrouter`, `ollama`, or "later") and its
-API key (for `ollama`, its URL), then the first Administrator's email, name
+API key (for `ollama`, its URL), then the optional integrations, each
+skippable with Enter: the app URL (`APP_URL`, default `http://localhost:3000`,
+what Auth.js builds its redirects from), SMTP for magic-link emails
+(`EMAIL_SERVER`, `EMAIL_FROM`), Google and LinkedIn sign-in
+(`AUTH_GOOGLE_ID`/`_SECRET`, `AUTH_LINKEDIN_ID`/`_SECRET`) and the France
+Travail and Adzuna job sources (`FRANCE_TRAVAIL_CLIENT_ID`/`_SECRET`,
+`ADZUNA_APP_ID`/`_KEY`, free keys at https://developer.adzuna.com). Then it
+asks for the first Administrator's email, name
 and password, builds and starts the stack, applies the migrations and the seed,
-creates the Administrator and waits until the app answers on
-http://localhost:3000. The password is never written to disk. With "later",
+creates the Administrator and waits until the app answers. The password is
+never written to disk. The summary gives the URL, the Administrator, the LLM
+provider, the available sign-in methods and which job sources are active
+(Remotive, LinkedIn and HelloWork need no credentials). With "later",
 Analyses fail until a provider is set in Admin → LLM providers.
 Without a terminal, or with `SETUP_NONINTERACTIVE=1`, it reads the
-Administrator from `ADMIN_EMAIL`, `ADMIN_NAME` and `ADMIN_PASSWORD`, and the
+Administrator from `ADMIN_EMAIL`, `ADMIN_NAME` and `ADMIN_PASSWORD`, the
 LLM from `LLM_PROVIDER` plus that provider's variable (`ANTHROPIC_API_KEY`,
 `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `HF_TOKEN` or `OLLAMA_BASE_URL`),
-instead.
+and the integrations from the variables above, instead. Half a credential
+pair (an id without its secret) fails before anything starts.
 
 Re-running it is safe and is how you upgrade after a `git pull`: it keeps
 every `.env` value, regenerates no secret, doesn't ask again for an LLM
-provider already in `.env`, rebuilds the images, applies new migrations and
-offers to skip the Administrator when one exists.
+provider or an integration already in `.env`, rebuilds the images, applies
+new migrations and offers to skip the Administrator when one exists.
 
 The sections below are the contributor path (host tooling, hot reload).
 
