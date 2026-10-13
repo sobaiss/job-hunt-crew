@@ -116,6 +116,15 @@ archive-scouts:
 		echo "Re-run as: make archive-scouts CONFIRM=1"; \
 	fi
 
+unarchive-scouts:
+	@if [ "$(CONFIRM)" = "1" ]; then \
+		$(PSQL) -c "UPDATE \"Scout\" SET status = 'PAUSED' WHERE status = 'ARCHIVED';"; \
+	else \
+		count=$$($(PSQL) -tAc "SELECT count(*) FROM \"Scout\" WHERE status = 'ARCHIVED';"); \
+		echo "This would unarchive $$count scouts."; \
+		echo "Re-run as: make unarchive-scouts CONFIRM=1"; \
+	fi
+
 # Delete every FAILED Analysis row, across all users — a narrower sibling of
 # clean-analyses for routine cleanup of dead pipeline runs. Same cascade
 # behaviour (PipelineEvent, GeneratedDocument, and Application rows cascade

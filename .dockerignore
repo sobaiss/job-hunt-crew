@@ -5,6 +5,12 @@ apps/web/.next
 **/__pycache__
 **/.pytest_cache
 **/*.pyc
+# Local caches: a host pnpm store alone is >1GB and every image installs its
+# own dependencies anyway.
+.pnpm-store
+**/.turbo
+**/.ruff_cache
+apps/web/test-results
 # Env files hold secrets and are never baked into an image: compose passes
 # the root .env in at run time (`env_file`, interpolation).
 **/.env
